@@ -1,0 +1,50 @@
+name: Release gate
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  require-protected-signed-release-input:
+    name: Require protected tag and signed release input
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: stable-release
+    steps:
+      - name: Check out package contract
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Reject unprotected tags
+        if: ${{ !github.ref_protected }}
+        shell: bash
+        run: |
+          echo "Stable release tags must be protected by repository rules." >&2
+          exit 1
+      - name: Recognize the unsigned candidate contract
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+
+          tree = ast.parse(Path("scripts/package.py").read_text(encoding="utf-8"))
+          source = Path("scripts/package.py").read_text(encoding="utf-8")
+          assert "SHA256SUMS.txt" in source
+          assert '"signed": False' in source
+          assert '"publicReleaseEligible": False' in source
+          assert tree.body
+          print("Recognized the unsigned candidate package contract.")
+          PY
+      - name: Reject unsigned candidates for stable publication
+        shell: bash
+        run: |
+          echo "scripts/package.py produces candidates with signed=false and publicReleaseEligible=false." >&2
+          echo "Stable publishing remains blocked until signing and notarization verification are implemented." >&2
+          exit 1
