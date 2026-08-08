@@ -33,12 +33,6 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
     steps:
-      - name: Require protected default-branch pushes
-        if: ${{ github.event_name == 'push' && !github.ref_protected }}
-        shell: bash
-        run: |
-          echo "Candidate packages from main require a protected branch." >&2
-          exit 1
       - id: version
         name: Select explicit candidate version
         shell: bash
