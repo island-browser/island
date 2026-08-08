@@ -1,0 +1,9 @@
+/build/
+/build-*/
+/third_party/cef/
+/assets/fonts/
+.DS_Store
+*.o
+*.obj
+compile_commands.json
+.cache/
