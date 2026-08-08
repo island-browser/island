@@ -1,7 +1,12 @@
 #include "browser_window.h"
 
+#include <algorithm>
+#include <filesystem>
+#include <optional>
 #include <utility>
 
+#include "cef_address_parser.h"
+#include "design_tokens.h"
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_frame.h"
@@ -16,8 +21,11 @@ namespace {
 constexpr int kVirtualKeyLeft = 0x25;
 constexpr int kVirtualKeyRight = 0x27;
 constexpr int kVirtualKeyF5 = 0x74;
-constexpr int kWindowWidth = 1024;
-constexpr int kWindowHeight = 768;
+constexpr int kChromeWindowWidth = 1440;
+constexpr int kChromeWindowHeight = 900;
+constexpr int kMinimumWindowWidth = 800;
+constexpr int kMinimumWindowHeight = 560;
+constexpr std::string_view kIconResourceRoot = "resources/island/icons";
 
 }  // namespace
 
@@ -29,12 +37,25 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
     return browser_window;
 }
 
-BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(initial_url)) {}
+BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(initial_url)) {
+    chrome_snapshot_.rail_bounds = {
+        .x = 0,
+        .y = 0,
+        .width = ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip,
+        .height = kChromeWindowHeight};
+    chrome_snapshot_.content_bounds = {
+        .x = chrome_snapshot_.rail_bounds.width,
+        .y = 0,
+        .width = kChromeWindowWidth - chrome_snapshot_.rail_bounds.width,
+        .height = kChromeWindowHeight,
+    };
+    navigation_state_.SetObserver(this);
+}
 
 void BrowserWindow::ExecuteCommand(BrowserCommand command) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (browser_ == nullptr) {
+    if (closing_ || browser_ == nullptr) {
         return;
     }
 
@@ -53,11 +74,30 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
 
 void BrowserWindow::SetNavigationObserver(NavigationObserver* observer) {
     CEF_REQUIRE_UI_THREAD();
-    navigation_state_.SetObserver(observer);
+
+    navigation_observer_ = observer == this ? nullptr : observer;
+    if (navigation_observer_ != nullptr && !closing_) {
+        navigation_observer_->OnNavigationChanged(navigation_state_.snapshot());
+    }
+}
+
+void BrowserWindow::SetChromeObserver(ChromeObserver* observer) {
+    CEF_REQUIRE_UI_THREAD();
+
+    chrome_observer_ = observer;
+    if (chrome_observer_ != nullptr && !closing_) {
+        chrome_observer_->OnChromeChanged(chrome_snapshot_);
+    }
 }
 
 const NavigationSnapshot& BrowserWindow::navigation_snapshot() const noexcept {
     return navigation_state_.snapshot();
+}
+
+const ChromeSnapshot& BrowserWindow::chrome_snapshot() const noexcept { return chrome_snapshot_; }
+
+ChromeViewTreeNode BrowserWindow::chrome_view_tree_snapshot() const {
+    return chrome_ == nullptr ? ChromeViewTreeNode{} : chrome_->view_tree_snapshot();
 }
 
 void BrowserWindow::RequestClose() {
@@ -65,6 +105,83 @@ void BrowserWindow::RequestClose() {
 
     if (window_ != nullptr) {
         window_->Close();
+    }
+}
+
+void BrowserWindow::ExecuteBrowserCommand(BrowserCommand command) { ExecuteCommand(command); }
+
+void BrowserWindow::BeginAddressEditing() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    address_bar_model_.Focus();
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
+    chrome_snapshot_.focus_target = FocusTarget::kAddress;
+    PublishChromeSnapshot();
+}
+
+void BrowserWindow::CancelAddressEditing() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    address_bar_model_.Escape();
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
+}
+
+void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    address_bar_model_.SetEditText(std::string(draft));
+    const std::optional<std::string> url = address_bar_model_.Submit(ParseAndValidate(draft));
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
+    if (!url.has_value() || browser_ == nullptr) {
+        return;
+    }
+
+    CefRefPtr<CefFrame> main_frame = browser_->GetMainFrame();
+    if (main_frame != nullptr) {
+        main_frame->LoadURL(*url);
+    }
+}
+
+void BrowserWindow::FocusBrowserView() {
+    CEF_REQUIRE_UI_THREAD();
+    if (!closing_ && browser_view_ != nullptr) {
+        browser_view_->RequestFocus();
+    }
+}
+
+void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    address_bar_model_.UpdateCommittedUrl(snapshot.url);
+    if (chrome_ != nullptr) {
+        chrome_->OnNavigationChanged(snapshot);
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
+    chrome_snapshot_.back_enabled = snapshot.can_go_back;
+    chrome_snapshot_.forward_enabled = snapshot.can_go_forward;
+    chrome_snapshot_.active_page_title =
+        snapshot.page_title.empty() ? "Island" : snapshot.page_title;
+    PublishChromeSnapshot();
+    if (navigation_observer_ != nullptr) {
+        navigation_observer_->OnNavigationChanged(snapshot);
     }
 }
 
@@ -78,7 +195,7 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
                                     const CefString& url) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (!IsMainBrowser(browser) || !frame->IsMain()) {
+    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain()) {
         return;
     }
 
@@ -88,7 +205,7 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
 void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (!IsMainBrowser(browser)) {
+    if (closing_ || !IsMainBrowser(browser)) {
         return;
     }
 
@@ -106,6 +223,9 @@ bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, in
 
 void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
     browser_was_created_ = true;
     browser_ = browser;
 }
@@ -118,6 +238,8 @@ bool BrowserWindow::DoClose(CefRefPtr<CefBrowser>) {
 void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser>) {
     CEF_REQUIRE_UI_THREAD();
 
+    closing_ = true;
+    DetachChromeAndObservers();
     browser_ = nullptr;
     CloseNavigationAndQuitMessageLoop();
 }
@@ -126,7 +248,7 @@ void BrowserWindow::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool, bo
                                          bool can_go_forward) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (!IsMainBrowser(browser)) {
+    if (closing_ || !IsMainBrowser(browser)) {
         return;
     }
 
@@ -137,7 +259,7 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
                                 TransitionType) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (!IsMainBrowser(browser) || !frame->IsMain()) {
+    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain()) {
         return;
     }
 
@@ -148,7 +270,7 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
                               int http_status_code) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (!IsMainBrowser(browser) || !frame->IsMain()) {
+    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain()) {
         return;
     }
 
@@ -159,7 +281,7 @@ void BrowserWindow::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
                                 ErrorCode error_code, const CefString&, const CefString&) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (!IsMainBrowser(browser) || !frame->IsMain() || error_code == ERR_ABORTED) {
+    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain() || error_code == ERR_ABORTED) {
         return;
     }
 
@@ -173,9 +295,14 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     browser_view_ = CefBrowserView::CreateBrowserView(this, CefString(initial_url_),
                                                       CefBrowserSettings(), nullptr, nullptr, this);
     window_->SetToFillLayout();
-    window_->AddChildView(browser_view_);
+    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view_,
+                                              ChromeTokens::ForTheme(ChromeTheme::kLight),
+                                              std::filesystem::path(kIconResourceRoot));
+    chrome_->OnNavigationChanged(navigation_state_.snapshot());
+    chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    window_->AddChildView(chrome_->root());
     window_->SetTitle(CefString("Island"));
-    window_->CenterWindow(CefSize(kWindowWidth, kWindowHeight));
+    window_->CenterWindow(CefSize(kChromeWindowWidth, kChromeWindowHeight));
     window_->Show();
     window_->Activate();
     browser_view_->RequestFocus();
@@ -184,17 +311,46 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     window_->SetAccelerator(kForwardAccelerator, kVirtualKeyRight, false, false, true, true);
     window_->SetAccelerator(kReloadAccelerator, kVirtualKeyF5, false, false, false, true);
     window_->SetAccelerator(kReloadWithControlAccelerator, 'R', false, true, false, true);
+    window_->SetAccelerator(kFocusAddressAccelerator, 'L', false, true, false, true);
 }
 
 void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     CEF_REQUIRE_UI_THREAD();
 
+    closing_ = true;
+    DetachChromeAndObservers();
     window_ = nullptr;
     browser_view_ = nullptr;
 
     if (!browser_was_created_) {
         CloseNavigationAndQuitMessageLoop();
     }
+}
+
+void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& new_bounds) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    chrome_snapshot_.rail_bounds = {
+        .x = 0,
+        .y = 0,
+        .width =
+            std::min(ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip, new_bounds.width),
+        .height = new_bounds.height,
+    };
+    chrome_snapshot_.content_bounds = {
+        .x = chrome_snapshot_.rail_bounds.width,
+        .y = 0,
+        .width = std::max(0, new_bounds.width - chrome_snapshot_.rail_bounds.width),
+        .height = new_bounds.height,
+    };
+    PublishChromeSnapshot();
+}
+
+CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView>) {
+    return CefSize(kMinimumWindowWidth, kMinimumWindowHeight);
 }
 
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
@@ -221,6 +377,13 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
         case kReloadWithControlAccelerator:
             ExecuteCommand(BrowserCommand::kReload);
             return true;
+        case kFocusAddressAccelerator:
+            if (chrome_ != nullptr) {
+                chrome_->BeginAddressEditing();
+            } else {
+                BeginAddressEditing();
+            }
+            return true;
         default:
             return false;
     }
@@ -228,6 +391,9 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
 
 void BrowserWindow::OnBrowserCreated(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
     browser_was_created_ = true;
     browser_ = browser;
 }
@@ -236,6 +402,7 @@ void BrowserWindow::OnBrowserDestroyed(CefRefPtr<CefBrowserView>, CefRefPtr<CefB
     CEF_REQUIRE_UI_THREAD();
 
     if (IsMainBrowser(browser)) {
+        DetachChromeAndObservers();
         browser_ = nullptr;
         browser_view_ = nullptr;
     }
@@ -247,6 +414,26 @@ BrowserWindow::ChromeToolbarType BrowserWindow::GetChromeToolbarType(CefRefPtr<C
 
 bool BrowserWindow::IsMainBrowser(CefRefPtr<CefBrowser> browser) const {
     return browser_ != nullptr && browser_->IsSame(browser);
+}
+
+void BrowserWindow::PublishChromeSnapshot() {
+    if (chrome_observer_ != nullptr && !closing_) {
+        chrome_observer_->OnChromeChanged(chrome_snapshot_);
+    }
+}
+
+void BrowserWindow::DetachChromeAndObservers() {
+    navigation_observer_ = nullptr;
+    chrome_observer_ = nullptr;
+    navigation_state_.SetObserver(nullptr);
+    if (chrome_ != nullptr) {
+        CefRefPtr<CefPanel> root = chrome_->root();
+        chrome_->Detach();
+        if (window_ != nullptr && root != nullptr) {
+            window_->RemoveChildView(root);
+        }
+        chrome_.reset();
+    }
 }
 
 void BrowserWindow::UpdateWindowTitle() {

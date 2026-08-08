@@ -1,9 +1,13 @@
 #ifndef ISLAND_BROWSER_WINDOW_H_
 #define ISLAND_BROWSER_WINDOW_H_
 
+#include <memory>
 #include <string>
+#include <string_view>
 
+#include "browser_chrome.h"
 #include "browser_command.h"
+#include "chrome_snapshot.h"
 #include "include/cef_client.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
@@ -21,14 +25,26 @@ class BrowserWindow : public CefClient,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
                       public CefWindowDelegate,
-                      public CefBrowserViewDelegate {
+                      public CefBrowserViewDelegate,
+                      public BrowserChromeHost,
+                      public NavigationObserver {
   public:
     static CefRefPtr<BrowserWindow> Create(std::string initial_url);
 
     void ExecuteCommand(BrowserCommand command);
     void SetNavigationObserver(NavigationObserver* observer);
+    void SetChromeObserver(ChromeObserver* observer);
     [[nodiscard]] const NavigationSnapshot& navigation_snapshot() const noexcept;
+    [[nodiscard]] const ChromeSnapshot& chrome_snapshot() const noexcept;
+    [[nodiscard]] ChromeViewTreeNode chrome_view_tree_snapshot() const;
     void RequestClose();
+
+    void ExecuteBrowserCommand(BrowserCommand command) override;
+    void BeginAddressEditing() override;
+    void CancelAddressEditing() override;
+    void SubmitAddressDraft(std::string_view draft) override;
+    void FocusBrowserView() override;
+    void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
@@ -60,6 +76,8 @@ class BrowserWindow : public CefClient,
 
     void OnWindowCreated(CefRefPtr<CefWindow> window) override;
     void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
+    void OnWindowBoundsChanged(CefRefPtr<CefWindow> window, const CefRect& new_bounds) override;
+    CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
     bool CanClose(CefRefPtr<CefWindow> window) override;
     bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override;
 
@@ -75,20 +93,29 @@ class BrowserWindow : public CefClient,
         kForwardAccelerator,
         kReloadAccelerator,
         kReloadWithControlAccelerator,
+        kFocusAddressAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url);
 
     [[nodiscard]] bool IsMainBrowser(CefRefPtr<CefBrowser> browser) const;
+    void PublishChromeSnapshot();
+    void DetachChromeAndObservers();
     void UpdateWindowTitle();
     void CloseNavigationAndQuitMessageLoop();
 
     std::string initial_url_;
     NavigationState navigation_state_;
+    AddressBarModel address_bar_model_;
+    std::unique_ptr<BrowserChrome> chrome_;
+    NavigationObserver* navigation_observer_ = nullptr;
+    ChromeObserver* chrome_observer_ = nullptr;
+    ChromeSnapshot chrome_snapshot_;
     CefRefPtr<CefWindow> window_;
     CefRefPtr<CefBrowserView> browser_view_;
     CefRefPtr<CefBrowser> browser_;
     bool browser_was_created_ = false;
+    bool closing_ = false;
     bool message_loop_quit_ = false;
 
     IMPLEMENT_REFCOUNTING(BrowserWindow);
