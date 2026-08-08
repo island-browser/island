@@ -21,6 +21,8 @@ void IslandApp::OnContextInitialized() {
 
     if (browser_window_ == nullptr) {
         browser_window_ = BrowserWindow::Create(std::string(startup_options_.initial_url()));
+        browser_window_->SetNavigationObserver(navigation_observer_);
+        browser_window_->SetChromeObserver(chrome_observer_);
     }
 }
 
@@ -43,8 +45,18 @@ void IslandApp::RequestClose() {
 void IslandApp::SetNavigationObserver(NavigationObserver* observer) {
     CEF_REQUIRE_UI_THREAD();
 
+    navigation_observer_ = observer;
     if (browser_window_ != nullptr) {
         browser_window_->SetNavigationObserver(observer);
+    }
+}
+
+void IslandApp::SetChromeObserver(ChromeObserver* observer) {
+    CEF_REQUIRE_UI_THREAD();
+
+    chrome_observer_ = observer;
+    if (browser_window_ != nullptr) {
+        browser_window_->SetChromeObserver(observer);
     }
 }
 
