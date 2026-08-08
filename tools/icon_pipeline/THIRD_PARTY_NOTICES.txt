@@ -1,0 +1,21 @@
+Island icon pipeline third-party notices
+
+Lucide 1.30.0
+Release asset: https://github.com/lucide-icons/lucide/releases/download/1.30.0/lucide-icons-1.30.0.zip
+Commit: 249af14dc6c09d846fada19455ac074ed29ee407
+SHA-256: c38157cb46ef10cf21782f3bf90b75a4a7dbbe973ef376ff18b71766bbc1574e
+License: ISC. The pinned Lucide license, including the Feather-derived icon MIT notice, is at
+resources/island/icons/LICENSE-LUCIDE-ISC-AND-FEATHER-MIT.txt. chevron-left and chevron-right are
+Feather-derived and retain that notice.
+
+NanoSVG
+Archive: https://codeload.github.com/memononen/nanosvg/tar.gz/239e102ec2c691f2902e20ace2ed36ee4a35cfe6
+Commit: 239e102ec2c691f2902e20ace2ed36ee4a35cfe6
+SHA-256: 2bc68bdb518d7800252042e5cad50a0ab321596f0cbf49ef2a752926329063d2
+License: tools/icon_pipeline/licenses/NanoSVG-LICENSE.txt
+
+stb_image_write
+Archive: https://codeload.github.com/nothings/stb/tar.gz/2c980bb59875b0d32144a71867fbdebb2f77cd20
+Commit: 2c980bb59875b0d32144a71867fbdebb2f77cd20
+SHA-256: 9a955b1b49a4410088a2e0ee2a9c057c3c907d0c1d75454144cb980aca0ba515
+License: tools/icon_pipeline/licenses/stb-LICENSE.txt
