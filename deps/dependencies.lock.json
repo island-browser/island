@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "dependencies": {
+    "cef": {
+      "version": "150.0.14+g7c1aa68+chromium-150.0.7871.129",
+      "host": "cef-builds.spotifycdn.com",
+      "archive": "tar.bz2",
+      "sentinel": "cmake/cef_macros.cmake",
+      "limits": {"max_archive_bytes": 400000000, "max_members": 50000, "max_member_bytes": 400000000, "max_extract_bytes": 900000000},
+      "targets": {
+        "macosx64": "0d10aae3285c1ee520351ab8d0d2f5cd3762575177fa2ff5048fbb0e589c2f82",
+        "macosarm64": "57f58530234f5b2a24f02479fdbc92b50aa5f94f7a66e32251cb71571284fad1",
+        "windows64": "8969a127f540999407951a5e89fa844f761cd718a7e76ba9c88e11c0348e81a7",
+        "windowsarm64": "b644110b3c0d56625c65ccdf28640b6000750a0afc7e06bf3dbf3c4e7dbe1d63",
+        "linux64": "6ae0afe3e1f4a9d134f1e1f4314e21df4d5e5b09fc34d9ff2230b4266445fe17",
+        "linuxarm64": "7ad8a568ec5e037039e4d5d59583ac3065e3e998148ac2dd27c7a7412ae11958"
+      }
+    },
+    "geist": {
+      "version": "1.7.2",
+      "commit": "a73329da8fc62afc917f796555202e4997f79b7c",
+      "host": "github.com",
+      "archive": "tar.gz",
+      "limits": {"max_archive_bytes": 100000000, "max_members": 10000, "max_member_bytes": 50000000, "max_extract_bytes": 100000000},
+      "url": "https://github.com/vercel/geist-font/archive/a73329da8fc62afc917f796555202e4997f79b7c.tar.gz",
+      "sha256": "e87e1e47d9e15e76d743f2e3d0d5e90895bbeef748be9005018605ea8d2bfb8b",
+      "source": "immutable GitHub commit archive; SHA-256 independently computed on 2026-08-08",
+      "files": [
+        "Geist-Regular.ttf",
+        "Geist-Medium.ttf",
+        "Geist-SemiBold.ttf",
+        "Geist-Bold.ttf",
+        "GeistMono-Regular.ttf",
+        "GeistMono-Medium.ttf",
+        "GeistMono-SemiBold.ttf",
+        "GeistMono-Bold.ttf"
+      ],
+      "license_files": ["OFL.txt", "LICENSE.txt"]
+    }
+  }
+}
