@@ -33,6 +33,13 @@ struct ChromeSnapshot {
     bool operator==(const ChromeSnapshot&) const = default;
 };
 
+class ChromeObserver {
+  public:
+    virtual ~ChromeObserver() = default;
+
+    virtual void OnChromeChanged(const ChromeSnapshot& snapshot) = 0;
+};
+
 }  // namespace island
 
 #endif

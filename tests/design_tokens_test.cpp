@@ -2,10 +2,19 @@
 
 #include <gtest/gtest.h>
 
+#include <type_traits>
+
 #include "chrome_snapshot.h"
 
 namespace island {
 namespace {
+
+class RecordingChromeObserver final : public ChromeObserver {
+  public:
+    void OnChromeChanged(const ChromeSnapshot& snapshot) override { latest_snapshot = snapshot; }
+
+    ChromeSnapshot latest_snapshot;
+};
 
 TEST(ChromeTokens, ProvidesTheExactLightSemanticValues) {
     const ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
@@ -59,6 +68,20 @@ TEST(ChromeSnapshot, UsesValueOnlyChromeGeometryAndFocusContracts) {
     EXPECT_EQ(snapshot.focus_target, FocusTarget::kAddress);
     EXPECT_EQ(snapshot.rail_bounds.width, 286);
     EXPECT_EQ(snapshot.content_bounds, bounds);
+}
+
+TEST(ChromeSnapshot, NotifiesObserversThroughTheNonOwningInterface) {
+    static_assert(std::has_virtual_destructor_v<ChromeObserver>);
+
+    RecordingChromeObserver observer;
+    const ChromeSnapshot snapshot{
+        .focus_target = FocusTarget::kReload,
+        .back_enabled = true,
+    };
+
+    observer.OnChromeChanged(snapshot);
+
+    EXPECT_EQ(observer.latest_snapshot, snapshot);
 }
 
 }  // namespace
