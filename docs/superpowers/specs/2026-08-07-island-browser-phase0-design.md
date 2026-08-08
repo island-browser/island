@@ -1,5 +1,9 @@
 # Island Browser — дизайн-документ (общий контекст + Фаза 0)
 
+> Исторический документ. Текущий реализованный браузерный каркас описан в
+> `docs/superpowers/specs/2026-08-08-island-browser-phase1-design.md` и
+> `docs/superpowers/plans/2026-08-08-island-browser-phase1.md`.
+
 ## Контекст
 
 Island — кроссплатформенный (Windows/macOS/Linux) десктопный браузер с открытым
@@ -18,6 +22,14 @@ spaces + персистентность, command bar, split view + hibernation, 
 а не macOS-only код).
 
 ## Решения по зависимостям (действуют для всех последующих фаз)
+
+> Примечание после реализации (2026-08-08): исторический дизайн ниже описывал
+> начальный замысел. Реализованный Phase 0 использует manifest-driven lock-файл
+> `deps/dependencies.lock.json`: CEF `150.0.14+g7c1aa68+chromium-150.0.7871.129`
+> для шести desktop targets и Geist `1.7.2` по immutable commit archive. Это
+> заменяет устаревшие детали про CEF 131 и mutable Geist `main`, не меняя
+> исходный смысл решения — бинарные зависимости не коммитятся и ставятся через
+> `scripts/setup_deps.sh`.
 
 - **CEF binary distribution**: у CEF нет официального git-репозитория с
   бинарниками — только S3-архивы на `cef-builds.spotifycdn.com`. Официальный

@@ -1,5 +1,9 @@
 # Island Browser — Phase 0 (Setup) Implementation Plan
 
+> Historical document. The current implemented browser surface is documented in
+> `docs/superpowers/specs/2026-08-08-island-browser-phase1-design.md` and
+> `docs/superpowers/plans/2026-08-08-island-browser-phase1.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up the Island repository skeleton — dependency-fetch tooling, a CMake build that fails clearly when CEF isn't present, a GoogleTest harness, and a minimal CEF app that opens an empty `cef_views` window on macOS and closes without crashing.
@@ -7,6 +11,12 @@
 **Architecture:** A CMake superbuild rooted at the repo root. `scripts/setup_deps.sh` vendors the two binary dependencies (CEF, Geist fonts) outside of git into `third_party/cef` and `assets/fonts`. `tests/` is an independent CMake target using `FetchContent(googletest)` — it builds and runs with zero CEF dependency, so it's the first fully-automatable checkpoint. `src/main/` is the actual CEF application: a `CefApp`/`CefBrowserProcessHandler` that creates one top-level `CefWindow` via a `CefWindowDelegate`, no browser view yet (that's Phase 1). Root `CMakeLists.txt` gates `src/main` behind an existence check on `third_party/cef` so a dev who hasn't run the setup script gets one clear error instead of a wall of missing-header failures.
 
 **Tech Stack:** CEF (`cef_views` C++ API), CMake ≥ 3.21, C++20, GoogleTest (via FetchContent), bash (setup script).
+
+> Implementation note (2026-08-08): this historical plan was executed with a newer dependency
+> implementation than the sketch below. The checked-in source uses `deps/dependencies.lock.json` to
+> pin CEF `150.0.14+g7c1aa68+chromium-150.0.7871.129` across six desktop targets and Geist `1.7.2`
+> from an immutable commit archive. Treat embedded CEF 131 and mutable Geist `main` snippets as
+> superseded planning detail, not current commands.
 
 ## Global Constraints
 
