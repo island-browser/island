@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "sources": {
+    "lucide": {
+      "version": "1.30.0",
+      "commit": "249af14dc6c09d846fada19455ac074ed29ee407",
+      "url": "https://github.com/lucide-icons/lucide/releases/download/1.30.0/lucide-icons-1.30.0.zip",
+      "sha256": "c38157cb46ef10cf21782f3bf90b75a4a7dbbe973ef376ff18b71766bbc1574e"
+    },
+    "nanosvg": {
+      "commit": "239e102ec2c691f2902e20ace2ed36ee4a35cfe6",
+      "url": "https://codeload.github.com/memononen/nanosvg/tar.gz/239e102ec2c691f2902e20ace2ed36ee4a35cfe6",
+      "sha256": "2bc68bdb518d7800252042e5cad50a0ab321596f0cbf49ef2a752926329063d2"
+    },
+    "stb": {
+      "commit": "2c980bb59875b0d32144a71867fbdebb2f77cd20",
+      "url": "https://codeload.github.com/nothings/stb/tar.gz/2c980bb59875b0d32144a71867fbdebb2f77cd20",
+      "sha256": "9a955b1b49a4410088a2e0ee2a9c057c3c907d0c1d75454144cb980aca0ba515"
+    }
+  },
+  "icons": [
+    {"name": "chevron-left", "upstream_path": "icons/chevron-left.svg", "source": "resources/island/icons/source/chevron-left.svg", "sha256": "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"},
+    {"name": "chevron-right", "upstream_path": "icons/chevron-right.svg", "source": "resources/island/icons/source/chevron-right.svg", "sha256": "2758143d7b2434e4aa7307dfd34405c87909ff4052f21b5f3f40d45224b4f19b"},
+    {"name": "reload", "upstream_path": "icons/rotate-cw.svg", "source": "resources/island/icons/source/rotate-cw.svg", "sha256": "ddcfe6d87240475946935e77411cd4d15a06f3d28a9b921bafed224ebe953668"},
+    {"name": "globe-2", "upstream_path": "icons/earth.svg", "source": "resources/island/icons/source/globe-2.svg", "sha256": "72ca6996d7032013268f46e9bcf360652136eb0f75465e3c98687fef784bbd41"}
+  ],
+  "dips": [13, 15, 16, 17],
+  "scales": [1, 2],
+  "tones": {
+    "text": "18303a",
+    "secondary": "687a7d",
+    "accent": "168c99"
+  }
+}
