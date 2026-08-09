@@ -3,10 +3,13 @@
 #include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <system_error>
 #include <utility>
 
+#include "app_resources.h"
 #include "cef_address_parser.h"
 #include "design_tokens.h"
+#include "include/base/cef_build.h"
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_color_ids.h"
@@ -26,8 +29,6 @@ constexpr int kChromeWindowWidth = 1440;
 constexpr int kChromeWindowHeight = 900;
 constexpr int kMinimumWindowWidth = 800;
 constexpr int kMinimumWindowHeight = 560;
-constexpr std::string_view kIconResourceRoot = "resources/island/icons";
-
 }  // namespace
 
 CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
@@ -293,13 +294,24 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     CEF_REQUIRE_UI_THREAD();
 
     window_ = window;
+    const IconResources icon_resources = ResolveCurrentProcessIconResources(std::nullopt);
+    std::error_code error;
+    const std::filesystem::path icon_resource_root =
+        std::filesystem::absolute(icon_resources.root, error);
+    if (!icon_resources.manifest_present || error ||
+        !std::filesystem::is_regular_file(icon_resource_root / "manifest.json", error)) {
+        closing_ = true;
+        window_->Close();
+        return;
+    }
+
     const ChromeTheme theme =
         ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground));
     browser_view_ = CefBrowserView::CreateBrowserView(this, CefString(initial_url_),
                                                       CefBrowserSettings(), nullptr, nullptr, this);
     window_->SetToFillLayout();
     chrome_ = std::make_unique<BrowserChrome>(*this, browser_view_, ChromeTokens::ForTheme(theme),
-                                              std::filesystem::path(kIconResourceRoot));
+                                              icon_resource_root);
     chrome_->OnNavigationChanged(navigation_state_.snapshot());
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
     window_->AddChildView(chrome_->root());
@@ -314,7 +326,9 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     window_->SetAccelerator(kForwardAccelerator, kVirtualKeyRight, false, false, true, true);
     window_->SetAccelerator(kReloadAccelerator, kVirtualKeyF5, false, false, false, true);
     window_->SetAccelerator(kReloadWithControlAccelerator, 'R', false, true, false, true);
+#if defined(OS_WIN) || defined(OS_LINUX)
     window_->SetAccelerator(kFocusAddressAccelerator, 'L', false, true, false, true);
+#endif
 }
 
 void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
