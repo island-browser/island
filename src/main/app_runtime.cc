@@ -1,5 +1,6 @@
 #include "app_runtime.h"
 
+#include "font_registry.h"
 #include "island_app.h"
 #include "lifecycle_config.h"
 
@@ -7,6 +8,9 @@ namespace island {
 
 int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& app,
                          IslandAppReleaseObserver* release_observer, void* sandbox_info) {
+    FontRegistry font_registry = FontRegistry::ForCurrentProcess();
+    font_registry.Register();
+
     CefSettings settings;
     settings.remote_debugging_port = kRemoteDebuggingPort;
 #if !defined(CEF_USE_SANDBOX) && !defined(CEF_USE_BOOTSTRAP)
@@ -14,6 +18,7 @@ int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& ap
 #endif
 
     if (!CefInitialize(main_args, settings, app, sandbox_info)) {
+        font_registry.Unregister();
         return CefGetExitCode();
     }
 
@@ -23,6 +28,7 @@ int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& ap
     }
     app = nullptr;
     CefShutdown();
+    font_registry.Unregister();
     return 0;
 }
 
