@@ -82,6 +82,18 @@ class ResolverTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def install_fixture_dependencies(self) -> None:
+        cef = self.root / "cef.tar.bz2"
+        cef_root = f"cef_binary_{self.lock.cef_version}_{self.artifact.target}"
+        make_archive(cef, {f"{cef_root}/cmake/cef_macros.cmake": b"ok", f"{cef_root}/tests/cefsimple/main.cc": b"ok"})
+        fonts = self.root / "fonts.tar.gz"
+        geist_root = f"geist-font-{self.lock.geist_commit}"
+        make_archive(fonts, {**{f"{geist_root}/fonts/{'GeistMono' if name.startswith('GeistMono-') else 'Geist'}/ttf/{name}": b"font" for name in self.lock.geist_files}, **{f"{geist_root}/{name}": b"license" for name in self.lock.geist_licenses}})
+        with patch("deps.install.download", copy_download(cef)):
+            install_cef(self.root, self.lock, self.artifact, False)
+        with patch("deps.install.download", copy_download(fonts)):
+            install_geist(self.root, self.lock, False)
+
     def test_load_lock_rejects_malformed_manifest(self) -> None:
         given = self.root / "broken.json"
         given.write_text("{", encoding="utf-8")
@@ -239,6 +251,32 @@ class ResolverTests(unittest.TestCase):
         (self.root / "third_party" / "cef" / "tests" / "cefsimple" / "main.cc").write_bytes(b"changed")
         with self.assertRaisesRegex(InstallError, "installed files"):
             verify(self.root, self.lock, "macosx64")
+
+    def test_verify_ignores_safety_limit_and_unrelated_target_changes(self) -> None:
+        self.install_fixture_dependencies()
+        document = json.loads((self.root / "deps" / "dependencies.lock.json").read_text(encoding="utf-8"))
+        document["dependencies"]["cef"]["targets"]["linux64"]["max_members"] += 1
+        document["dependencies"]["cef"]["targets"]["windows64"]["max_archive_bytes"] += 1
+        (self.root / "deps" / "dependencies.lock.json").write_text(json.dumps(document), encoding="utf-8")
+        verify(self.root, load_lock(self.root / "deps" / "dependencies.lock.json"), "macosx64")
+
+    def test_verify_rejects_changed_artifact_identity(self) -> None:
+        self.install_fixture_dependencies()
+        document = json.loads((self.root / "deps" / "dependencies.lock.json").read_text(encoding="utf-8"))
+        document["dependencies"]["cef"]["targets"]["macosx64"]["sha256"] = "f" * 64
+        (self.root / "deps" / "dependencies.lock.json").write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaisesRegex(InstallError, "dependency artifact"):
+            verify(self.root, load_lock(self.root / "deps" / "dependencies.lock.json"), "macosx64")
+
+    def test_verify_migrates_valid_legacy_receipt(self) -> None:
+        self.install_fixture_dependencies()
+        receipt_path = self.root / "third_party" / "cef" / ".island-dependency-receipt.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt.pop("contract_sha256")
+        receipt["manifest_sha256"] = "obsolete"
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        verify(self.root, self.lock, "macosx64")
+        self.assertIn("contract_sha256", json.loads(receipt_path.read_text(encoding="utf-8")))
 
     def test_cli_skips_valid_existing_dependencies_without_network(self) -> None:
         cef = self.root / "cef.tar.bz2"

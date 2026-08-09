@@ -213,3 +213,13 @@ def resolve_cef(lock: LockFile, target: str) -> Artifact:
         sha256=digest, archive="tar.bz2", source="official CEF binary distribution",
         max_archive_bytes=maximum, max_members=max_members, max_member_bytes=max_member_bytes, max_extract_bytes=max_extract_bytes, expected_archive_bytes=archive_bytes,
     )
+
+
+def install_contract_sha256(artifact: Artifact, layout: str, required_files: tuple[str, ...]) -> str:
+    """Hash artifact identity and expected installed layout, excluding safety bounds."""
+    payload = json.dumps(
+        {"archive": artifact.archive, "layout": layout, "name": artifact.name, "required_files": required_files, "sha256": artifact.sha256, "target": artifact.target, "url": artifact.url},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()

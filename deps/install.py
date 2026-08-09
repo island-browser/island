@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from deps.model import Artifact, DependencyError, LockFile
+from deps.model import Artifact, DependencyError, LockFile, install_contract_sha256, resolve_cef
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,10 +29,10 @@ class InstallError(DependencyError):
 class Receipt:
     dependency: str
     target: str
-    manifest_sha256: str
     source: str
     archive_sha256: str
     tree_sha256: str
+    contract_sha256: str
 
 
 _RECEIPT = ".island-dependency-receipt.json"
@@ -188,7 +188,7 @@ def install_cef(root: Path, lock: LockFile, artifact: Artifact, dry_run: bool) -
             raise InstallError("CEF archive is missing tests/cefsimple")
         staged = work / "staged"
         os.replace(extracted, staged)
-        _write_receipt(staged, Receipt("cef", artifact.target, lock.digest, artifact.source, artifact.sha256, _tree_sha256(staged)))
+        _write_receipt(staged, Receipt("cef", artifact.target, artifact.source, artifact.sha256, _tree_sha256(staged), install_contract_sha256(artifact, expected_root, ("cmake/cef_macros.cmake", "tests/cefsimple"))))
         _replace(destination, staged)
 
 
@@ -220,28 +220,36 @@ def install_geist(root: Path, lock: LockFile, dry_run: bool) -> None:
             shutil.copyfile(selected[filename], staged / filename)
         for filename, license_path in licenses.items():
             shutil.copyfile(license_path, staged / filename)
-        _write_receipt(staged, Receipt("geist", "all", lock.digest, lock.geist.source, lock.geist.sha256, _tree_sha256(staged)))
+        _write_receipt(staged, Receipt("geist", "all", lock.geist.source, lock.geist.sha256, _tree_sha256(staged), install_contract_sha256(lock.geist, f"geist-font-{lock.geist_commit}", lock.geist_files + lock.geist_licenses)))
         _replace(destination, staged)
 
 
 def verify(root: Path, lock: LockFile, target: str) -> None:
     """Verify installed layouts and immutable receipts without network access."""
+    cef = resolve_cef(lock, target)
     checks = (
-        (root / "third_party" / "cef", "cef", target, lock.cef_hashes[target], "cmake/cef_macros.cmake"),
-        (root / "assets" / "fonts", "geist", "all", lock.geist.sha256, lock.geist_licenses[0]),
+        (root / "third_party" / "cef", cef, f"cef_binary_{lock.cef_version}_{target}", ("cmake/cef_macros.cmake", "tests/cefsimple")),
+        (root / "assets" / "fonts", lock.geist, f"geist-font-{lock.geist_commit}", lock.geist_files + lock.geist_licenses),
     )
-    for destination, name, receipt_target, archive_hash, required in checks:
-        if not (destination / required).is_file():
-            raise InstallError(f"{name} installation is missing {required}")
+    for destination, artifact, layout, required_files in checks:
+        for required in required_files:
+            required_path = destination / required
+            if not required_path.exists():
+                raise InstallError(f"{artifact.name} installation is missing {required}")
         try:
             raw = json.loads((destination / _RECEIPT).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
             raise InstallError(f"{name} receipt is unreadable: {error}") from error
-        if not isinstance(raw, dict) or raw.get("manifest_sha256") != lock.digest or raw.get("archive_sha256") != archive_hash or raw.get("target") != receipt_target:
-            raise InstallError(f"{name} receipt does not match the dependency lock")
+        if not isinstance(raw, dict) or raw.get("dependency") != artifact.name or raw.get("archive_sha256") != artifact.sha256 or raw.get("target") != artifact.target:
+            raise InstallError(f"{artifact.name} receipt does not match the dependency artifact")
         tree_sha256 = raw.get("tree_sha256")
         if not isinstance(tree_sha256, str) or tree_sha256 != _tree_sha256(destination):
-            raise InstallError(f"{name} installed files do not match the receipt")
+            raise InstallError(f"{artifact.name} installed files do not match the receipt")
+        contract = install_contract_sha256(artifact, layout, required_files)
+        if raw.get("contract_sha256") is None:
+            _write_receipt(destination, Receipt(artifact.name, artifact.target, artifact.source, artifact.sha256, tree_sha256, contract))
+        elif raw.get("contract_sha256") != contract:
+            raise InstallError(f"{artifact.name} receipt does not match the installation contract")
     for filename in lock.geist_files:
         if not (root / "assets" / "fonts" / filename).is_file():
             raise InstallError(f"Geist installation is missing {filename}")
