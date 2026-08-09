@@ -17,6 +17,7 @@ function(island_add_linux_browser target)
 
     if(NOT TARGET libcef_lib)
         ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+        set_target_properties(libcef_lib PROPERTIES IMPORTED_GLOBAL TRUE)
     endif()
     SET_CEF_TARGET_OUT_DIR()
 

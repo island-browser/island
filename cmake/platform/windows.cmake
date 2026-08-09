@@ -6,7 +6,10 @@ function(island_add_windows_browser_target)
     set(CEF_TARGET island_browser)
     SET_CEF_TARGET_OUT_DIR()
 
-    ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+    if(NOT TARGET libcef_lib)
+        ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
+        set_target_properties(libcef_lib PROPERTIES IMPORTED_GLOBAL TRUE)
+    endif()
     if(NOT TARGET libcef_dll_wrapper)
         message(FATAL_ERROR
             "island_add_windows_browser_target requires libcef_dll_wrapper before inclusion.")
