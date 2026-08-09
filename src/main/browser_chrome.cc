@@ -193,6 +193,14 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_row->SetID(static_cast<int>(ChromeViewId::kAddressRow));
     CefRefPtr<CefBoxLayout> address_layout = address_row->SetToBoxLayout(HorizontalLayout(tokens_));
 
+    address_location_icon_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    address_location_icon_->SetID(static_cast<int>(ChromeViewId::kAddressLocationIcon));
+    address_location_icon_->SetAccessibleName("Location");
+    address_location_icon_->SetTooltipText("Location");
+    address_location_icon_->SetFocusable(false);
+    address_location_icon_->SetMinimumSize(CefSize(control_height, control_height));
+    address_row->AddChildView(address_location_icon_);
+
     textfield_delegate_ =
         new TextfieldDelegate(this, CefSize(tokens_.spacing_6_dip * 4, control_height));
     address_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
@@ -227,13 +235,34 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     divider->SetID(static_cast<int>(ChromeViewId::kDivider));
     sidebar_->AddChildView(divider);
 
+    active_page_ = CefPanel::CreatePanel(nullptr);
+    active_page_->SetID(static_cast<int>(ChromeViewId::kActivePage));
+    CefRefPtr<CefBoxLayout> active_page_layout =
+        active_page_->SetToBoxLayout(HorizontalLayout(tokens_));
+
+    active_page_fallback_favicon_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    active_page_fallback_favicon_->SetID(
+        static_cast<int>(ChromeViewId::kActivePageFallbackFavicon));
+    active_page_fallback_favicon_->SetAccessibleName("Current page favicon placeholder");
+    active_page_fallback_favicon_->SetTooltipText("Current page favicon placeholder");
+    active_page_fallback_favicon_->SetFocusable(false);
+    active_page_fallback_favicon_->SetMinimumSize(CefSize(control_height, control_height));
+    active_page_->AddChildView(active_page_fallback_favicon_);
+
     active_tab_ = CefLabelButton::CreateLabelButton(button_delegate_, "Island");
     active_tab_->SetID(static_cast<int>(ChromeViewId::kActiveTab));
     active_tab_->SetAccessibleName("Current page: Island");
-    active_tab_->SetTooltipText("Current page");
+    active_tab_->SetTooltipText("Current page title");
     active_tab_->SetFocusable(false);
     active_tab_->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 4, control_height));
-    sidebar_->AddChildView(active_tab_);
+    active_page_->AddChildView(active_tab_);
+    active_page_layout->SetFlexForView(active_tab_, 1);
+
+    active_page_indicator_ =
+        CefPanel::CreatePanel(new PanelDelegate(CefSize(tokens_.spacing_1_dip, control_height)));
+    active_page_indicator_->SetID(static_cast<int>(ChromeViewId::kActivePageIndicator));
+    active_page_->AddChildView(active_page_indicator_);
+    sidebar_->AddChildView(active_page_);
 
     browser_content_ = CefPanel::CreatePanel(nullptr);
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
@@ -400,10 +429,13 @@ void BrowserChrome::ApplyControlTheme() {
     sidebar_->SetBackgroundColor(tokens_.surface.argb);
     browser_content_->SetBackgroundColor(tokens_.background.argb);
     address_field_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    active_page_indicator_->SetBackgroundColor(tokens_.accent.argb);
     address_field_->SetFontList("Geist, 14px");
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
+    address_location_icon_->SetEnabledTextColors(tokens_.text_secondary.argb);
+    active_page_fallback_favicon_->SetEnabledTextColors(tokens_.text_secondary.argb);
     active_tab_->SetEnabledTextColors(tokens_.text.argb);
     validation_message_->SetEnabledTextColors(tokens_.accent.argb);
 
@@ -414,7 +446,7 @@ void BrowserChrome::ApplyControlTheme() {
     const std::optional<CefRefPtr<CefImage>> reload =
         icon_catalog_.Load(ChromeIcon::kReload, IconTone(), ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> location =
-        icon_catalog_.Load(ChromeIcon::kLocation, IconTone(), ChromeIconSize::k16);
+        icon_catalog_.Load(ChromeIcon::kLocation, ChromeIconTone::kSecondary, ChromeIconSize::k16);
     if (back.has_value()) {
         back_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *back);
     }
@@ -425,7 +457,8 @@ void BrowserChrome::ApplyControlTheme() {
         reload_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *reload);
     }
     if (location.has_value()) {
-        active_tab_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
+        address_location_icon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
+        active_page_fallback_favicon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
     }
 }
 

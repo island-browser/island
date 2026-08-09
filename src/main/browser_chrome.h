@@ -34,6 +34,10 @@ enum class ChromeViewId : int {
     kActiveTab = 1012,
     kBrowserContent = 1013,
     kBrowserView = 1014,
+    kAddressLocationIcon = 1015,
+    kActivePage = 1016,
+    kActivePageFallbackFavicon = 1017,
+    kActivePageIndicator = 1018,
 };
 
 struct ChromeViewTreeNode {
@@ -72,11 +76,16 @@ class BrowserChrome final : public NavigationObserver {
                   {{ChromeViewId::kNavigationRow,
                     {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
                    {ChromeViewId::kAddressRow,
-                    {{ChromeViewId::kAddress, {}}, {ChromeViewId::kReload, {}}}},
+                    {{ChromeViewId::kAddressLocationIcon, {}},
+                     {ChromeViewId::kAddress, {}},
+                     {ChromeViewId::kReload, {}}}},
                    {ChromeViewId::kValidationMessage, {}},
                    {ChromeViewId::kSpacer, {}},
                    {ChromeViewId::kDivider, {}},
-                   {ChromeViewId::kActiveTab, {}}}},
+                   {ChromeViewId::kActivePage,
+                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
+                     {ChromeViewId::kActiveTab, {}},
+                     {ChromeViewId::kActivePageIndicator, {}}}}}},
                  {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}}}};
     }
 
@@ -111,9 +120,13 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;
+    CefRefPtr<CefLabelButton> address_location_icon_;
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;
+    CefRefPtr<CefPanel> active_page_;
+    CefRefPtr<CefLabelButton> active_page_fallback_favicon_;
     CefRefPtr<CefLabelButton> active_tab_;
+    CefRefPtr<CefPanel> active_page_indicator_;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     bool detached_ = false;
