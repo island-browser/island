@@ -36,8 +36,12 @@ TEST(BrowserChromeContractTest,
 
 TEST(BrowserChromeContractTest, GivenTheCurrentPageWhenInspectedThenItHasFallbackAndIndicator) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
-    const ChromeViewTreeNode& active_page = tree.children[0].children[5];
+    const ChromeViewTreeNode& rail = tree.children[0];
+    const ChromeViewTreeNode& active_page = rail.children[5];
 
+    ASSERT_EQ(rail.children[0].id, ChromeViewId::kNavigationRow);
+    ASSERT_EQ(rail.children[1].id, ChromeViewId::kAddressRow);
+    ASSERT_EQ(rail.children[5].id, ChromeViewId::kActivePage);
     ASSERT_EQ(active_page.id, ChromeViewId::kActivePage);
     ASSERT_EQ(active_page.children.size(), 3U);
     EXPECT_EQ(active_page.children[0].id, ChromeViewId::kActivePageFallbackFavicon);

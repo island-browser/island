@@ -322,9 +322,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
 
     active_tab_ = CefLabelButton::CreateLabelButton(button_delegate_, "Island");
     active_tab_->SetID(static_cast<int>(ChromeViewId::kActiveTab));
-    active_tab_->SetAccessibleName("Current page: Island");
-    active_tab_->SetTooltipText("Current page title");
-    active_tab_->SetFocusable(false);
+    active_tab_->SetAccessibleName("Current page");
+    active_tab_->SetTooltipText("Focus current page");
+    active_tab_->SetFocusable(true);
     active_tab_->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 4, control_height));
     active_page_->AddChildView(active_tab_);
     active_page_layout->SetFlexForView(active_tab_, 1);
@@ -453,6 +453,9 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kReload);
             host_->FocusBrowserView();
             return;
+        case ChromeViewId::kActiveTab:
+            host_->FocusBrowserView();
+            return;
         default:
             return;
     }
@@ -498,15 +501,20 @@ void BrowserChrome::ProjectNavigation(const NavigationSnapshot& snapshot) {
     forward_button_->SetEnabled(snapshot.can_go_forward);
     reload_button_->SetEnabled(true);
     active_tab_->SetText(snapshot.page_title.empty() ? "Island" : snapshot.page_title);
-    active_tab_->SetAccessibleName("Current page: " + (snapshot.page_title.empty()
-                                                           ? std::string("Island")
-                                                           : snapshot.page_title));
+    active_tab_->SetAccessibleName("Current page");
 }
 
 void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     const bool editing = snapshot.mode != AddressBarMode::kResting;
+    const std::string& text = editing ? snapshot.edit_text : snapshot.display_text;
     address_field_->SetReadOnly(!editing);
-    address_field_->SetText(editing ? snapshot.edit_text : snapshot.display_text);
+    if (address_field_->GetText().ToString() != text) {
+        address_field_->SetText(text);
+    }
+    if (editing && !address_field_->HasFocus()) {
+        address_field_->RequestFocus();
+        ScheduleAddressSelection();
+    }
     const std::string validation_message = AddressErrorMessage(snapshot.validation_error);
     validation_message_->SetText(validation_message);
     validation_message_->SetAccessibleName(validation_message);
