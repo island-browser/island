@@ -6,6 +6,8 @@ on:
       - CMakeLists.txt
       - deps/**
       - scripts/**
+      - resources/**
+      - tools/icon_pipeline/**
       - src/**
       - tests/**
       - .github/workflows/build.yml
@@ -16,6 +18,8 @@ on:
       - CMakeLists.txt
       - deps/**
       - scripts/**
+      - resources/**
+      - tools/icon_pipeline/**
       - src/**
       - tests/**
       - .github/workflows/build.yml
@@ -148,12 +152,38 @@ jobs:
         if: ${{ matrix.setup-shell == 'pwsh' }}
         shell: pwsh
         run: '& .\scripts\setup_deps.ps1 --target ''${{ matrix.target }}'''
+      - name: Verify locked dependencies and committed icon assets
+        shell: bash
+        run: |
+          ${{ matrix.python }} scripts/deps.py verify
+          tools/icon_pipeline/run.sh verify
       - name: Configure
         run: cmake -S . -B build-${{ matrix.target }}-${{ matrix.sandbox-mode }} ${{ matrix.configure-argument }}
       - name: Build
         run: cmake --build build-${{ matrix.target }}-${{ matrix.sandbox-mode }} --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build-${{ matrix.target }}-${{ matrix.sandbox-mode }} --output-on-failure -C Release
+      - name: Verify staged chrome runtime resources
+        shell: bash
+        run: |
+          ${{ matrix.python }} - "${{ matrix.target }}" "build-${{ matrix.target }}-${{ matrix.sandbox-mode }}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          target, build = sys.argv[1:]
+          root = Path(build) / ("src/main/island_browser.app/Contents/Resources/island" if target.startswith("macos") else "Release/resources/island")
+          fonts = root / "fonts"
+          icons = root / "icons"
+          assert len(list(fonts.glob("*.ttf"))) == 8, "expected eight staged Geist TTFs"
+          assert (fonts / "OFL.txt").is_file() and (fonts / "LICENSE.txt").is_file()
+          manifest = json.loads((icons / "manifest.json").read_text())
+          assert (icons / "LICENSE-LUCIDE-ISC-AND-FEATHER-MIT.txt").is_file()
+          assert len(manifest["outputs"]) == 96
+          for output in manifest["outputs"]:
+              staged = root / output["path"].removeprefix("resources/island/")
+              assert staged.is_file(), output["path"]
+          PY
       - name: Upload failed CMake diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
