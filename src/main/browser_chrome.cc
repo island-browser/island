@@ -3,6 +3,9 @@
 #include <string>
 #include <utility>
 
+#include "include/base/cef_bind.h"
+#include "include/base/cef_callback.h"
+#include "include/cef_task.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_button_delegate.h"
@@ -10,6 +13,7 @@
 #include "include/views/cef_panel.h"
 #include "include/views/cef_textfield.h"
 #include "include/views/cef_textfield_delegate.h"
+#include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
 // allow: SIZE_OK — the CEF delegate callbacks must share one composition owner.
@@ -25,6 +29,17 @@ int ControlHeight(const ChromeTokens& tokens) {
 
 int DividerHeight(const ChromeTokens& tokens) {
     return tokens.spacing_1_dip / tokens.spacing_1_dip;
+}
+
+DipRect ToDipRect(const CefRect& bounds) {
+    return {.x = bounds.x, .y = bounds.y, .width = bounds.width, .height = bounds.height};
+}
+
+void SelectAllWhenFocused(CefRefPtr<CefTextfield> textfield) {
+    CEF_REQUIRE_UI_THREAD();
+    if (textfield != nullptr && textfield->HasFocus()) {
+        textfield->SelectAll(false);
+    }
 }
 
 CefBoxLayoutSettings HorizontalLayout(const ChromeTokens& tokens) {
@@ -80,13 +95,20 @@ std::string AddressErrorMessage(const std::optional<AddressError>& error) {
 
 class BrowserChrome::PanelDelegate final : public CefPanelDelegate {
   public:
-    explicit PanelDelegate(CefSize preferred_size) : preferred_size_(preferred_size) {}
+    PanelDelegate(CefSize preferred_size, CefSize minimum_size = CefSize(),
+                  CefSize maximum_size = CefSize())
+        : preferred_size_(preferred_size),
+          minimum_size_(minimum_size),
+          maximum_size_(maximum_size) {}
 
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
-    CefSize GetMinimumSize(CefRefPtr<CefView>) override { return preferred_size_; }
+    CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
+    CefSize GetMaximumSize(CefRefPtr<CefView>) override { return maximum_size_; }
 
   private:
     CefSize preferred_size_;
+    CefSize minimum_size_;
+    CefSize maximum_size_;
 
     IMPLEMENT_REFCOUNTING(PanelDelegate);
 };
@@ -165,7 +187,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
     root_->SetToBoxLayout(HorizontalFillLayout(tokens_));
 
-    sidebar_ = CefPanel::CreatePanel(new PanelDelegate(CefSize(tokens_.rail_width_dip, 0)));
+    const CefSize rail_size(tokens_.rail_width_dip, 0);
+    sidebar_ = CefPanel::CreatePanel(new PanelDelegate(rail_size, rail_size, rail_size));
     sidebar_->SetID(static_cast<int>(ChromeViewId::kRail));
     CefRefPtr<CefBoxLayout> sidebar_layout = sidebar_->SetToBoxLayout(VerticalLayout(tokens_));
 
@@ -178,6 +201,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     back_button_->SetID(static_cast<int>(ChromeViewId::kBack));
     back_button_->SetAccessibleName("Back");
     back_button_->SetTooltipText("Back");
+    back_button_->SetFocusable(true);
     back_button_->SetMinimumSize(CefSize(control_height, control_height));
     navigation_row->AddChildView(back_button_);
 
@@ -185,6 +209,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     forward_button_->SetID(static_cast<int>(ChromeViewId::kForward));
     forward_button_->SetAccessibleName("Forward");
     forward_button_->SetTooltipText("Forward");
+    forward_button_->SetFocusable(true);
     forward_button_->SetMinimumSize(CefSize(control_height, control_height));
     navigation_row->AddChildView(forward_button_);
     sidebar_->AddChildView(navigation_row);
@@ -207,6 +232,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_field_->SetID(static_cast<int>(ChromeViewId::kAddress));
     address_field_->SetAccessibleName("Address");
     address_field_->SetPlaceholderText("Enter address");
+    address_field_->SetFocusable(true);
     address_row->AddChildView(address_field_);
     address_layout->SetFlexForView(address_field_, 1);
 
@@ -214,6 +240,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     reload_button_->SetID(static_cast<int>(ChromeViewId::kReload));
     reload_button_->SetAccessibleName("Reload");
     reload_button_->SetTooltipText("Reload");
+    reload_button_->SetFocusable(true);
     reload_button_->SetMinimumSize(CefSize(control_height, control_height));
     address_row->AddChildView(reload_button_);
     sidebar_->AddChildView(address_row);
@@ -264,7 +291,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     active_page_->AddChildView(active_page_indicator_);
     sidebar_->AddChildView(active_page_);
 
-    browser_content_ = CefPanel::CreatePanel(nullptr);
+    browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
+        CefSize(control_height, control_height), CefSize(control_height, control_height)));
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
     CefRefPtr<CefBoxLayout> browser_content_layout =
         browser_content_->SetToBoxLayout(HorizontalFillLayout(tokens_));
@@ -275,6 +303,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_->AddChildView(sidebar_);
     root_->AddChildView(browser_content_);
     CefRefPtr<CefBoxLayout> root_layout = root_->GetLayout()->AsBoxLayout();
+    root_layout->SetFlexForView(sidebar_, 0);
     root_layout->SetFlexForView(browser_content_, 1);
     ApplyControlTheme();
 }
@@ -293,6 +322,24 @@ CefRefPtr<CefPanel> BrowserChrome::sidebar() const {
 
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
     return BrowserChrome::ViewTreeContract();
+}
+
+ChromeGeometrySnapshot BrowserChrome::view_bounds_snapshot() const {
+    CEF_REQUIRE_UI_THREAD();
+    return {
+        .root_bounds = ToDipRect(root_->GetBounds()),
+        .rail_bounds = ToDipRect(sidebar_->GetBounds()),
+        .browser_content_bounds = ToDipRect(browser_content_->GetBounds()),
+        .browser_view_bounds = ToDipRect(browser_view_->GetBounds()),
+    };
+}
+
+AddressSelectionSnapshot BrowserChrome::address_selection_snapshot() const {
+    CEF_REQUIRE_UI_THREAD();
+    return {
+        .has_focus = address_field_->HasFocus(),
+        .has_selection = address_field_->HasSelection(),
+    };
 }
 
 void BrowserChrome::OnNavigationChanged(const NavigationSnapshot& snapshot) {
@@ -325,7 +372,7 @@ void BrowserChrome::BeginAddressEditing() {
     }
     host_->BeginAddressEditing();
     address_field_->RequestFocus();
-    address_field_->SelectAll(false);
+    ScheduleAddressSelection();
 }
 
 void BrowserChrome::Detach() {
@@ -391,7 +438,7 @@ void BrowserChrome::HandleAddressFocus() {
     CEF_REQUIRE_UI_THREAD();
     if (!detached_) {
         host_->BeginAddressEditing();
-        address_field_->SelectAll(false);
+        ScheduleAddressSelection();
     }
 }
 
@@ -422,6 +469,11 @@ void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     validation_message_->SetVisible(!validation_message.empty());
     address_field_->SetAccessibleName(
         validation_message.empty() ? "Address" : "Address, invalid: " + validation_message);
+}
+
+void BrowserChrome::ScheduleAddressSelection() {
+    CEF_REQUIRE_UI_THREAD();
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(SelectAllWhenFocused, address_field_)));
 }
 
 void BrowserChrome::ApplyControlTheme() {

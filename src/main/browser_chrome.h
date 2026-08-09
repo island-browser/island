@@ -1,12 +1,14 @@
 #ifndef ISLAND_BROWSER_CHROME_H_
 #define ISLAND_BROWSER_CHROME_H_
 
+#include <algorithm>
 #include <filesystem>
 #include <string_view>
 #include <vector>
 
 #include "address_bar_model.h"
 #include "browser_command.h"
+#include "chrome_snapshot.h"
 #include "design_tokens.h"
 #include "icon_catalog.h"
 #include "navigation_state.h"
@@ -47,6 +49,22 @@ struct ChromeViewTreeNode {
     bool operator==(const ChromeViewTreeNode&) const = default;
 };
 
+struct ChromeGeometrySnapshot {
+    DipRect root_bounds;
+    DipRect rail_bounds;
+    DipRect browser_content_bounds;
+    DipRect browser_view_bounds;
+
+    bool operator==(const ChromeGeometrySnapshot&) const = default;
+};
+
+struct AddressSelectionSnapshot {
+    bool has_focus = false;
+    bool has_selection = false;
+
+    bool operator==(const AddressSelectionSnapshot&) const = default;
+};
+
 class BrowserChromeHost {
   public:
     virtual ~BrowserChromeHost() = default;
@@ -70,6 +88,30 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] CefRefPtr<CefPanel> root() const;
     [[nodiscard]] CefRefPtr<CefPanel> sidebar() const;
     [[nodiscard]] ChromeViewTreeNode view_tree_snapshot() const;
+    [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
+    [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
+    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(
+        DipRect root_bounds, const ChromeTokens& tokens) noexcept {
+        const int rail_width = std::min(tokens.rail_width_dip, root_bounds.width);
+        const DipRect rail_bounds = {
+            .x = root_bounds.x,
+            .y = root_bounds.y,
+            .width = rail_width,
+            .height = root_bounds.height,
+        };
+        const DipRect browser_content_bounds = {
+            .x = root_bounds.x + rail_width,
+            .y = root_bounds.y,
+            .width = std::max(0, root_bounds.width - rail_width),
+            .height = root_bounds.height,
+        };
+        return {
+            .root_bounds = root_bounds,
+            .rail_bounds = rail_bounds,
+            .browser_content_bounds = browser_content_bounds,
+            .browser_view_bounds = browser_content_bounds,
+        };
+    }
     [[nodiscard]] static ChromeViewTreeNode ViewTreeContract() {
         return {ChromeViewId::kRoot,
                 {{ChromeViewId::kRail,
@@ -107,6 +149,7 @@ class BrowserChrome final : public NavigationObserver {
     void HandleAddressBlur();
     void ProjectNavigation(const NavigationSnapshot& snapshot);
     void ProjectAddress(const AddressBarSnapshot& snapshot);
+    void ScheduleAddressSelection();
     void ApplyControlTheme();
     [[nodiscard]] ChromeIconTone IconTone() const;
 

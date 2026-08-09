@@ -45,6 +45,18 @@ TEST(BrowserChromeContractTest, GivenTheCurrentPageWhenInspectedThenItHasFallbac
     EXPECT_EQ(active_page.children[2].id, ChromeViewId::kActivePageIndicator);
 }
 
+TEST(BrowserChromeContractTest, GivenReferenceWindowBoundsWhenLaidOutThenRailStaysFixed) {
+    ChromeTokens tokens;
+    tokens.rail_width_dip = 286;
+    const ChromeGeometrySnapshot geometry = BrowserChrome::LayoutForBounds(
+        DipRect{.x = 0, .y = 0, .width = 1440, .height = 900}, tokens);
+
+    EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 286, .height = 900}));
+    EXPECT_EQ(geometry.browser_content_bounds,
+              (DipRect{.x = 286, .y = 0, .width = 1154, .height = 900}));
+    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+}
+
 TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStable) {
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRoot), 1001);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kBack), 1004);
