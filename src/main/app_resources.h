@@ -53,6 +53,9 @@ std::filesystem::path PackagedIconDirectory(ResourcePlatform platform,
 IconResources ResolveIconResources(
     ResourcePlatform platform, const std::filesystem::path& runtime_binary,
     const std::optional<std::filesystem::path>& development_repository_root);
+std::filesystem::path CurrentRuntimeBinaryPath();
+IconResources ResolveCurrentProcessIconResources(
+    const std::optional<std::filesystem::path>& development_repository_root);
 
 }  // namespace island
 

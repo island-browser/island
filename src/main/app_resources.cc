@@ -1,6 +1,18 @@
 #include "app_resources.h"
 
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
+#include <array>
+#include <cstdint>
+#include <string>
 #include <system_error>
+#include <vector>
 
 namespace island {
 namespace {
@@ -32,6 +44,16 @@ std::vector<std::filesystem::path> FontFiles(const std::vector<std::filesystem::
 bool IsRegularFile(const std::filesystem::path& path) {
     std::error_code error;
     return std::filesystem::is_regular_file(path, error);
+}
+
+ResourcePlatform CurrentResourcePlatform() {
+#if defined(__APPLE__)
+    return ResourcePlatform::kMacOS;
+#elif defined(_WIN32)
+    return ResourcePlatform::kWindows;
+#else
+    return ResourcePlatform::kLinux;
+#endif
 }
 
 }  // namespace
@@ -105,6 +127,62 @@ IconResources ResolveIconResources(
     resources.manifest = resources.root / "manifest.json";
     resources.manifest_present = IsRegularFile(resources.manifest);
     return resources;
+}
+
+std::filesystem::path CurrentRuntimeBinaryPath() {
+#if defined(__APPLE__)
+    std::array<char, 1024> buffer = {};
+    std::uint32_t size = static_cast<std::uint32_t>(buffer.size());
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        return buffer.data();
+    }
+    std::vector<char> expanded_buffer(size);
+    if (_NSGetExecutablePath(expanded_buffer.data(), &size) != 0) {
+        return {};
+    }
+    return expanded_buffer.data();
+#elif defined(_WIN32)
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&CurrentRuntimeBinaryPath), &module) == 0) {
+        return {};
+    }
+    std::vector<wchar_t> buffer(1024);
+    while (buffer.size() <= 32768U) {
+        const DWORD length =
+            GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            return {};
+        }
+        if (length < buffer.size() - 1U) {
+            return std::filesystem::path(std::wstring(buffer.data(), length));
+        }
+        buffer.resize(buffer.size() * 2U);
+    }
+    return {};
+#elif defined(__linux__)
+    std::vector<char> buffer(1024);
+    while (buffer.size() <= 32768U) {
+        const ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1U);
+        if (length < 0) {
+            return {};
+        }
+        if (static_cast<std::size_t>(length) < buffer.size() - 1U) {
+            return std::string(buffer.data(), static_cast<std::size_t>(length));
+        }
+        buffer.resize(buffer.size() * 2U);
+    }
+    return {};
+#else
+    return {};
+#endif
+}
+
+IconResources ResolveCurrentProcessIconResources(
+    const std::optional<std::filesystem::path>& development_repository_root) {
+    return ResolveIconResources(CurrentResourcePlatform(), CurrentRuntimeBinaryPath(),
+                                development_repository_root);
 }
 
 }  // namespace island
