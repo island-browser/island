@@ -1,6 +1,9 @@
 #include <cassert>
 
-#include "browser_chrome.h"
+#include "browser_window.h"
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_view.h"
+#include "include/views/cef_window.h"
 
 namespace {
 
@@ -15,6 +18,16 @@ void AssertSingleBrowserChromeTree() {
     assert(tree.children[1].children[0].id == island::ChromeViewId::kBrowserView);
 }
 
+void AssertPrimaryBackgroundClassifiesTheme() {
+    assert(island::ClassifyChromeTheme(CefColorSetARGB(255, 16, 24, 32)) ==
+           island::ChromeTheme::kDark);
+    assert(island::ClassifyChromeTheme(CefColorSetARGB(255, 232, 240, 248)) ==
+           island::ChromeTheme::kLight);
+}
+
 }  // namespace
 
-int main() { AssertSingleBrowserChromeTree(); }
+int main() {
+    AssertSingleBrowserChromeTree();
+    AssertPrimaryBackgroundClassifiesTheme();
+}

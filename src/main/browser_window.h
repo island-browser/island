@@ -9,6 +9,7 @@
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "include/cef_client.h"
+#include "include/internal/cef_types.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "navigation_state.h"
@@ -19,6 +20,20 @@ class CefFrame;
 class CefWindow;
 
 namespace island {
+
+[[nodiscard]] inline ChromeTheme ClassifyChromeTheme(cef_color_t primary_background) noexcept {
+    constexpr std::uint32_t kLuminanceScale = 10000;
+    constexpr std::uint32_t kRedWeight = 2126;
+    constexpr std::uint32_t kGreenWeight = 7152;
+    constexpr std::uint32_t kBlueWeight = 722;
+    constexpr std::uint32_t kDarkThemeLuminance = 128;
+
+    const std::uint32_t luminance = (kRedWeight * CefColorGetR(primary_background) +
+                                     kGreenWeight * CefColorGetG(primary_background) +
+                                     kBlueWeight * CefColorGetB(primary_background)) /
+                                    kLuminanceScale;
+    return luminance < kDarkThemeLuminance ? ChromeTheme::kDark : ChromeTheme::kLight;
+}
 
 class BrowserWindow : public CefClient,
                       public CefDisplayHandler,
@@ -77,6 +92,7 @@ class BrowserWindow : public CefClient,
     void OnWindowCreated(CefRefPtr<CefWindow> window) override;
     void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
     void OnWindowBoundsChanged(CefRefPtr<CefWindow> window, const CefRect& new_bounds) override;
+    void OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool chrome_theme) override;
     CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
     bool CanClose(CefRefPtr<CefWindow> window) override;
     bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override;
@@ -99,6 +115,7 @@ class BrowserWindow : public CefClient,
     explicit BrowserWindow(std::string initial_url);
 
     [[nodiscard]] bool IsMainBrowser(CefRefPtr<CefBrowser> browser) const;
+    void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
     void UpdateWindowTitle();
