@@ -2,7 +2,9 @@
 #include <unistd.h>
 
 #include <array>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "font_registry.h"
@@ -19,16 +21,28 @@ std::filesystem::path CurrentProcessBinary() {
     return std::string(buffer.data(), static_cast<std::size_t>(length));
 }  // namespace
 
-bool RegisterFont(const std::filesystem::path& path) {
-    FcConfig* config = FcConfigGetCurrent();
+struct OwnedFontConfig {
+    FcConfig* config = nullptr;
+    FcConfig* previous = nullptr;
+};
+
+std::mutex fontconfig_mutex;
+std::unordered_map<const FontRegistry*, OwnedFontConfig> font_configs;
+
+bool RegisterFont(FcConfig* config, const std::filesystem::path& path) {
     return config != nullptr &&
            FcConfigAppFontAddFile(config, reinterpret_cast<const FcChar8*>(path.c_str())) == FcTrue;
-}  // namespace
+}
 
-void UnregisterFonts() {
-    FcConfig* config = FcConfigGetCurrent();
-    if (config != nullptr) {
-        FcConfigAppFontClear(config);
+void DestroyFontConfig(const OwnedFontConfig& owned) {
+    if (FcConfigGetCurrent() == owned.config) {
+        FcConfigSetCurrent(owned.previous);
+    }
+    if (owned.config != nullptr) {
+        FcConfigDestroy(owned.config);
+    }
+    if (owned.previous != nullptr) {
+        FcConfigDestroy(owned.previous);
     }
 }
 
@@ -45,6 +59,7 @@ FontRegistry::FontRegistry(FontResources resources) : resources_(std::move(resou
 FontRegistry::~FontRegistry() { Unregister(); }
 
 FontRegistrationReport FontRegistry::Register() {
+    std::lock_guard<std::mutex> lock(fontconfig_mutex);
     FontRegistrationReport report = InitialFontRegistrationReport(resources_);
     if (!report.failures.empty()) {
         return report;
@@ -54,22 +69,43 @@ FontRegistrationReport FontRegistry::Register() {
         return report;
     }
 
+    OwnedFontConfig owned;
+    owned.previous = FcConfigGetCurrent();
+    if (owned.previous != nullptr) {
+        FcConfigReference(owned.previous);
+    }
+    owned.config = FcInitLoadConfigAndFonts();
+    if (owned.config == nullptr) {
+        report.failures = resources_.font_files;
+        if (owned.previous != nullptr) {
+            FcConfigDestroy(owned.previous);
+        }
+        return report;
+    }
+
     for (const std::filesystem::path& font : resources_.font_files) {
-        if (!RegisterFont(font)) {
+        if (!RegisterFont(owned.config, font)) {
             report.failures.push_back(font);
-            Unregister();
+            FcConfigDestroy(owned.config);
+            FcConfigDestroy(owned.previous);
             return report;
         }
-        registered_fonts_.push_back(font);
     }
+    FcConfigReference(owned.config);
+    FcConfigSetCurrent(owned.config);
+    font_configs.emplace(this, owned);
+    registered_fonts_ = resources_.font_files;
     is_registered_ = true;
     report.registered = registered_fonts_;
     return report;
 }
 
 void FontRegistry::Unregister() {
-    if (!registered_fonts_.empty()) {
-        UnregisterFonts();
+    std::lock_guard<std::mutex> lock(fontconfig_mutex);
+    const auto found = font_configs.find(this);
+    if (found != font_configs.end()) {
+        DestroyFontConfig(found->second);
+        font_configs.erase(found);
     }
     registered_fonts_.clear();
     is_registered_ = false;
