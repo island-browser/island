@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <string_view>
 
 #include "include/cef_app.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -10,6 +11,12 @@
 namespace island {
 
 int RunCefAddressParserTests(int argc, char* argv[]) {
+    for (int argument_index = 0; argument_index < argc; ++argument_index) {
+        if (std::string_view(argv[argument_index]) == "--gtest_list_tests") {
+            testing::InitGoogleTest(&argc, argv);
+            return RUN_ALL_TESTS();
+        }
+    }
     testing::InitGoogleTest(&argc, argv);
 
     CefScopedLibraryLoader library_loader;

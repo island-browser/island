@@ -33,6 +33,7 @@ function(island_add_linux_browser target)
 
     COPY_FILES("${target}" "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
     COPY_FILES("${target}" "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")
+    island_stage_chrome_resources("${target}" "${CEF_TARGET_OUT_DIR}/resources/island")
     if(EXISTS "${CEF_BINARY_DIR}/libminigbm.so")
         COPY_FILES("${target}" "libminigbm.so" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
     endif()
