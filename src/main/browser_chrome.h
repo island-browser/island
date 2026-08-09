@@ -139,6 +139,7 @@ class BrowserChrome final : public NavigationObserver {
 
   private:
     class PanelDelegate;
+    class RootPanelDelegate;
     class ButtonDelegate;
     class TextfieldDelegate;
 
@@ -170,6 +171,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> active_page_fallback_favicon_;
     CefRefPtr<CefLabelButton> active_tab_;
     CefRefPtr<CefPanel> active_page_indicator_;
+    CefRefPtr<RootPanelDelegate> root_delegate_;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     bool detached_ = false;

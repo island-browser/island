@@ -113,6 +113,49 @@ class BrowserChrome::PanelDelegate final : public CefPanelDelegate {
     IMPLEMENT_REFCOUNTING(PanelDelegate);
 };
 
+class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
+  public:
+    explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
+
+    void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> browser_content) {
+        rail_ = rail;
+        browser_content_ = browser_content;
+    }
+
+    void SetTokens(ChromeTokens tokens) { tokens_ = tokens; }
+
+    void OnLayoutChanged(CefRefPtr<CefView>, const CefRect& new_bounds) override {
+        if (rail_ == nullptr || browser_content_ == nullptr) {
+            return;
+        }
+
+        const ChromeGeometrySnapshot geometry =
+            BrowserChrome::LayoutForBounds({.x = new_bounds.x,
+                                            .y = new_bounds.y,
+                                            .width = new_bounds.width,
+                                            .height = new_bounds.height},
+                                           tokens_);
+        ApplyBounds(rail_, geometry.rail_bounds);
+        ApplyBounds(browser_content_, geometry.browser_content_bounds);
+        rail_->Layout();
+        browser_content_->Layout();
+    }
+
+  private:
+    static void ApplyBounds(CefRefPtr<CefPanel> panel, const DipRect& bounds) {
+        const CefRect target(bounds.x, bounds.y, bounds.width, bounds.height);
+        if (panel->GetBounds() != target) {
+            panel->SetBounds(target);
+        }
+    }
+
+    ChromeTokens tokens_;
+    CefRefPtr<CefPanel> rail_;
+    CefRefPtr<CefPanel> browser_content_;
+
+    IMPLEMENT_REFCOUNTING(RootPanelDelegate);
+};
+
 class BrowserChrome::ButtonDelegate final : public CefButtonDelegate {
   public:
     explicit ButtonDelegate(BrowserChrome* chrome) : chrome_(chrome) {}
@@ -183,9 +226,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CEF_REQUIRE_UI_THREAD();
 
     const int control_height = ControlHeight(tokens_);
-    root_ = CefPanel::CreatePanel(nullptr);
+    root_delegate_ = new RootPanelDelegate(tokens_);
+    root_ = CefPanel::CreatePanel(root_delegate_);
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
-    root_->SetToBoxLayout(HorizontalFillLayout(tokens_));
 
     const CefSize rail_size(tokens_.rail_width_dip, 0);
     sidebar_ = CefPanel::CreatePanel(new PanelDelegate(rail_size, rail_size, rail_size));
@@ -302,9 +345,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
 
     root_->AddChildView(sidebar_);
     root_->AddChildView(browser_content_);
-    CefRefPtr<CefBoxLayout> root_layout = root_->GetLayout()->AsBoxLayout();
-    root_layout->SetFlexForView(sidebar_, 0);
-    root_layout->SetFlexForView(browser_content_, 1);
+    root_delegate_->SetChildren(sidebar_, browser_content_);
     ApplyControlTheme();
 }
 
@@ -362,7 +403,9 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
         return;
     }
     tokens_ = tokens;
+    root_delegate_->SetTokens(tokens_);
     ApplyControlTheme();
+    root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
 void BrowserChrome::BeginAddressEditing() {

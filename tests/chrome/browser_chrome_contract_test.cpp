@@ -57,6 +57,40 @@ TEST(BrowserChromeContractTest, GivenReferenceWindowBoundsWhenLaidOutThenRailSta
     EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
 }
 
+TEST(BrowserChromeContractTest, GivenMinimumWindowBoundsWhenLaidOutThenBrowserViewStaysNonzero) {
+    ChromeTokens tokens;
+    tokens.rail_width_dip = 286;
+    const ChromeGeometrySnapshot geometry = BrowserChrome::LayoutForBounds(
+        DipRect{.x = 0, .y = 0, .width = 800, .height = 560}, tokens);
+
+    EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 286, .height = 560}));
+    EXPECT_EQ(geometry.browser_content_bounds,
+              (DipRect{.x = 286, .y = 0, .width = 514, .height = 560}));
+    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+}
+
+TEST(BrowserChromeContractTest, GivenNarrowBoundsWhenLaidOutThenBrowserContentClampsAtZero) {
+    ChromeTokens tokens;
+    tokens.rail_width_dip = 286;
+    const ChromeGeometrySnapshot geometry = BrowserChrome::LayoutForBounds(
+        DipRect{.x = 0, .y = 0, .width = 200, .height = 560}, tokens);
+
+    EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 200, .height = 560}));
+    EXPECT_EQ(geometry.browser_content_bounds,
+              (DipRect{.x = 200, .y = 0, .width = 0, .height = 560}));
+    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+}
+
+TEST(BrowserChromeContractTest, GivenZeroBoundsWhenLaidOutThenEveryChildIsZeroSized) {
+    ChromeTokens tokens;
+    tokens.rail_width_dip = 286;
+    const ChromeGeometrySnapshot geometry = BrowserChrome::LayoutForBounds(DipRect{}, tokens);
+
+    EXPECT_EQ(geometry.rail_bounds, DipRect{});
+    EXPECT_EQ(geometry.browser_content_bounds, DipRect{});
+    EXPECT_EQ(geometry.browser_view_bounds, DipRect{});
+}
+
 TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStable) {
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRoot), 1001);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kBack), 1004);
