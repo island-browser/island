@@ -190,7 +190,7 @@ jobs:
           mkdir -p ci-logs
           sudo apt-get update 2>&1 | tee ci-logs/install-${{ matrix.target }}.log
           sudo apt-get install --no-install-recommends --yes fontconfig libfontconfig1-dev \
-            libgtk-3-dev libnss3-dev libasound2-dev pkg-config 2>&1 | tee -a ci-logs/install-${{ matrix.target }}.log
+            libgtk-3-dev libnss3-dev libasound2-dev pkg-config xvfb 2>&1 | tee -a ci-logs/install-${{ matrix.target }}.log
       - name: Install dependencies
         shell: bash
         run: |
@@ -220,7 +220,9 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p ci-logs
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error \
+          # island_cef_tests calls CefInitialize, which needs an X11 display even for
+          # tests that never open a visible window.
+          xvfb-run -a ctest --test-dir build -C Release --output-on-failure --no-tests=error \
             --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
       - name: Package and verify candidate
         shell: bash

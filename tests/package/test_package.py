@@ -72,7 +72,7 @@ class PackageTests(unittest.TestCase):
 
     def test_rejects_missing_runtime_before_writing_artifact(self) -> None:
         self.fixture.stage("windows64")
-        _ = (self.build / "Release/resources.pak").unlink()
+        _ = (self.build / "src/main/Release/resources.pak").unlink()
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("resources.pak", result.stderr)
@@ -103,21 +103,21 @@ class PackageTests(unittest.TestCase):
 
     def test_rejects_windows_bootstrap_without_client_dll(self) -> None:
         self.fixture.stage("windows64", sandbox=True)
-        _ = (self.build / "Release/island_browser.dll").unlink()
+        _ = (self.build / "src/main/Release/island_browser.dll").unlink()
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing sandbox client DLL", result.stderr)
 
     def test_rejects_windows_client_dll_without_bootstrap(self) -> None:
         self.fixture.stage("windows64")
-        self.fixture.write_binary(self.build / "Release/island_browser.dll", "windows64")
+        self.fixture.write_binary(self.build / "src/main/Release/island_browser.dll", "windows64")
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bootstrap/client DLL mismatch", result.stderr)
 
     def test_rejects_windows_sandbox_client_dll_architecture_mismatch(self) -> None:
         self.fixture.stage("windows64", sandbox=True)
-        self.fixture.write_binary(self.build / "Release/island_browser.dll", "windowsarm64")
+        self.fixture.write_binary(self.build / "src/main/Release/island_browser.dll", "windowsarm64")
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("architecture", result.stderr)
@@ -142,7 +142,7 @@ class PackageTests(unittest.TestCase):
         for target, library in (("windows64", "libcef.dll"), ("linux64", "libcef.so")):
             with self.subTest(target=target):
                 self.fixture.stage(target)
-                runtime = self.build / "Release"
+                runtime = self.build / "src/main/Release"
                 _ = (self.root / "outside").write_text("outside", encoding="utf-8")
                 _ = (runtime / library).unlink()
                 _ = (runtime / library).symlink_to("../../../outside")

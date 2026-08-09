@@ -122,6 +122,10 @@ def parse_arguments() -> Arguments:
 
 
 def layout(target: Target) -> Layout:
+    # island_browser is defined inside src/main/CMakeLists.txt, so CMake's per-target runtime
+    # output directory (SET_CEF_TARGET_OUT_DIR) is relative to that subdirectory's binary dir,
+    # not the top-level build directory - hence "src/main/..." below, matching the macOS bundle
+    # path above.
     match target:
         case Target.MACOS_X64 | Target.MACOS_ARM64:
             root = Path("src/main/island_browser.app")
@@ -129,11 +133,11 @@ def layout(target: Target) -> Layout:
             helpers = tuple(root / f"Contents/Frameworks/island_browser Helper{suffix}.app/Contents/MacOS/island_browser Helper{suffix}" for suffix in MAC_HELPER_SUFFIXES)
             return Layout(".zip", (root / "Contents/MacOS/island_browser", framework / "Chromium Embedded Framework", *helpers), root / "Contents/MacOS/island_browser", root, (framework, framework / "Chromium Embedded Framework", *helpers, *(framework / "Resources" / item for item in MAC_RESOURCES)))
         case Target.WINDOWS_X64 | Target.WINDOWS_ARM64:
-            root = Path("Release")
+            root = Path("src/main/Release")
             binaries = (Path("island_browser.exe"), Path("libcef.dll"), Path("chrome_elf.dll"), Path("d3dcompiler_47.dll"), Path("dxcompiler.dll"), Path("dxil.dll"), Path("libEGL.dll"), Path("libGLESv2.dll"), Path("vk_swiftshader.dll"), Path("vulkan-1.dll"))
             return Layout(".zip", tuple(root / item for item in binaries), root / "island_browser.exe", root, tuple(root / item for item in (*binaries, Path("snapshot_blob.bin"), Path("v8_context_snapshot.bin"), Path("vk_swiftshader_icd.json"), *CORE_RESOURCES)))
         case Target.LINUX_X64 | Target.LINUX_ARM64:
-            root = Path("Release")
+            root = Path("src/main/Release")
             binaries = (Path("island_browser"), Path("chrome-sandbox"), Path("libcef.so"), Path("libEGL.so"), Path("libGLESv2.so"), Path("libvk_swiftshader.so"), Path("libvulkan.so.1"))
             return Layout(".tar.gz", tuple(root / item for item in binaries), root / "island_browser", root, tuple(root / item for item in (*binaries, Path("snapshot_blob.bin"), Path("v8_context_snapshot.bin"), *CORE_RESOURCES)))
     assert_never(target)

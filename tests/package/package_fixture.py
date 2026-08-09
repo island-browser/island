@@ -32,7 +32,7 @@ class PackageFixture:
                 _ = (framework / "Resources").symlink_to("Versions/A/Resources")
             self.stage_chrome_resources(root / "Resources/island")
             return
-        root = self.build / "Release"
+        root = self.build / "src/main/Release"
         self.write_binary(root / ("island_browser.exe" if target.startswith("windows") else "island_browser"), target, sandbox)
         for name in ("icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "locales/en-US.pak"):
             self.write(root / name)
@@ -48,7 +48,7 @@ class PackageFixture:
         self.stage_chrome_resources(root / "resources/island")
 
     def runtime_root(self, target: str) -> Path:
-        return self.build / ("src/main/island_browser.app/Contents" if target.startswith("macos") else "Release")
+        return self.build / ("src/main/island_browser.app/Contents" if target.startswith("macos") else "src/main/Release")
 
     def stage_chrome_resources(self, destination: Path) -> None:
         shutil.copytree(self.repository / "resources/island/icons", destination / "icons", dirs_exist_ok=True)

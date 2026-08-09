@@ -83,7 +83,7 @@ class PackageResourceTests(unittest.TestCase):
 
     def _stage_manifest(self) -> tuple[Path, dict[str, list[dict[str, str]]]]:
         self.fixture.stage("linux64")
-        manifest_path = self.build / "Release/resources/island/icons/manifest.json"
+        manifest_path = self.build / "src/main/Release/resources/island/icons/manifest.json"
         manifest: dict[str, list[dict[str, str]]] = json.loads(
             manifest_path.read_text(encoding="utf-8")
         )
