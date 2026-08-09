@@ -50,7 +50,10 @@ def validate_runtime_resources(resources: Path) -> tuple[Path, ...]:
         raise ResourceValidationError("icon manifest must declare exactly 96 PNG resources")
 
     icon_root = manifest_path.parent
+    resolved_icon_root = icon_root.resolve()
+    png_root = icon_root / "png"
     pngs: list[Path] = []
+    declared_pngs: set[Path] = set()
     for output in outputs:
         if not isinstance(output, dict):
             raise ResourceValidationError("icon manifest output is not an object")
@@ -60,10 +63,41 @@ def validate_runtime_resources(resources: Path) -> tuple[Path, ...]:
             raise ResourceValidationError("icon manifest contains an invalid PNG path")
         if not isinstance(expected_digest, str) or len(expected_digest) != 64:
             raise ResourceValidationError(f"icon manifest has an invalid SHA-256: {source_path}")
-        runtime_path = icon_root / source_path.removeprefix(ICON_OUTPUT_PREFIX)
-        if runtime_path.is_symlink() or not runtime_path.is_file():
+        relative_path = source_path.removeprefix(ICON_OUTPUT_PREFIX)
+        components = relative_path.split("/")
+        if (
+            "\\" in source_path
+            or not components
+            or any(component in {"", ".", ".."} for component in components)
+            or components[0] != "png"
+            or not components[-1].endswith(".png")
+        ):
+            raise ResourceValidationError(f"icon manifest contains an unsafe PNG path: {source_path}")
+        runtime_path = icon_root.joinpath(*components)
+        if Path(relative_path).is_absolute() or any(
+            icon_root.joinpath(*components[:index]).is_symlink()
+            for index in range(1, len(components) + 1)
+        ):
+            raise ResourceValidationError(f"icon manifest contains a symlinked PNG path: {source_path}")
+        resolved_runtime_path = runtime_path.resolve()
+        if not resolved_runtime_path.is_relative_to(resolved_icon_root):
+            raise ResourceValidationError(f"icon manifest PNG escapes its resource root: {source_path}")
+        if resolved_runtime_path in declared_pngs:
+            raise ResourceValidationError(f"icon manifest contains a duplicate PNG path: {source_path}")
+        if not runtime_path.is_file():
             raise ResourceValidationError(f"missing declared icon PNG: {runtime_path}")
         if hashlib.sha256(runtime_path.read_bytes()).hexdigest() != expected_digest:
             raise ResourceValidationError(f"icon PNG hash mismatch: {runtime_path}")
+        declared_pngs.add(resolved_runtime_path)
         pngs.append(runtime_path)
+    expected_pngs: set[Path] = set()
+    for path in png_root.rglob("*"):
+        if path.is_symlink():
+            raise ResourceValidationError(f"icon PNG directory contains a symlink: {path}")
+        if path.is_file():
+            if path.suffix != ".png":
+                raise ResourceValidationError(f"icon PNG directory contains a non-PNG resource: {path}")
+            expected_pngs.add(path.resolve())
+    if declared_pngs != expected_pngs:
+        raise ResourceValidationError("icon manifest PNG paths do not match staged resources")
     return required + tuple(pngs)

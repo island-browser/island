@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 from typing import final, override
 
-from package_fixture import PackageFixture
+from .package_fixture import PackageFixture
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
