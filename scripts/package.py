@@ -30,6 +30,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final, TypedDict, assert_never, final, override
 
+from package_resources import ResourceValidationError, validate_runtime_resources
+
 
 SEMVER: Final = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
 EPOCH: Final = (1980, 1, 1, 0, 0, 0)
@@ -146,6 +148,10 @@ def validate(arguments: Arguments, selected: Layout) -> Path:
     for path in required:
         if not path.exists():
             raise PackageError(f"missing required runtime path: {path.relative_to(arguments.build_dir)}")
+    try:
+        _ = validate_runtime_resources(root / ("Contents/Resources/island" if arguments.target.value.startswith("macos") else "resources/island"))
+    except ResourceValidationError as error:
+        raise PackageError(str(error)) from error
     expected = Architecture.ARM64 if arguments.target.value.endswith("arm64") else Architecture.X64
     for binary in (arguments.build_dir / item for item in selected.binaries):
         detected = _architecture(binary)

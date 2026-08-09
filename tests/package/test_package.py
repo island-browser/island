@@ -9,6 +9,8 @@ import zipfile
 from pathlib import Path
 from typing import final, override
 
+from package_fixture import PackageFixture
+
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 PACKAGER = REPOSITORY / "scripts" / "package.py"
@@ -23,6 +25,7 @@ class PackageTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.build = self.root / "build"
         self.output = self.root / "output"
+        self.fixture = PackageFixture(self.build, REPOSITORY)
 
     @override
     def tearDown(self) -> None:
@@ -31,7 +34,7 @@ class PackageTests(unittest.TestCase):
     def test_packages_each_supported_layout_with_metadata_and_checksum(self) -> None:
         for target in ("macosarm64", "windows64", "linux64", "linuxarm64"):
             with self.subTest(target=target):
-                self._stage(target)
+                self.fixture.stage(target)
                 result = self._run(target)
                 artifact = self.output / f"island_browser-1.2.3-{target}{'.tar.gz' if target.startswith('linux') else '.zip'}"
                 self.assertEqual(result.stdout.strip(), str(artifact.resolve()))
@@ -42,6 +45,14 @@ class PackageTests(unittest.TestCase):
                 members = self._members(artifact)
                 self.assertIn("build-metadata.json", members)
                 self.assertIn("THIRD_PARTY_NOTICES.txt", members)
+                resource_prefix = (
+                    "island_browser.app/Contents/Resources/island"
+                    if target.startswith("macos")
+                    else "resources/island"
+                )
+                self.assertIn(f"{resource_prefix}/fonts/Geist-Regular.ttf", members)
+                self.assertIn(f"{resource_prefix}/icons/manifest.json", members)
+                self.assertIn(f"{resource_prefix}/icons/png/reload-text-16@2x.png", members)
                 if target.startswith("macos"):
                     self.assertIn("island_browser.app/Contents/MacOS/island_browser", members)
                     framework = "island_browser.app/Contents/Frameworks/Chromium Embedded Framework.framework/"
@@ -60,42 +71,59 @@ class PackageTests(unittest.TestCase):
                 self.assertEqual(checksum, f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {artifact.name}\n")
 
     def test_rejects_missing_runtime_before_writing_artifact(self) -> None:
-        self._stage("windows64")
+        self.fixture.stage("windows64")
         _ = (self.build / "Release/resources.pak").unlink()
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("resources.pak", result.stderr)
         self.assertFalse(self.output.exists())
 
+    def test_rejects_missing_or_damaged_staged_chrome_assets(self) -> None:
+        for target, path in (
+            ("macosarm64", "Resources/island/fonts/Geist-Regular.ttf"),
+            ("windows64", "resources/island/icons/manifest.json"),
+            ("linux64", "resources/island/icons/png/reload-text-16@2x.png"),
+        ):
+            with self.subTest(target=target, path=path):
+                self.fixture.stage(target)
+                staged = self.fixture.runtime_root(target) / path
+                if staged.name.endswith(".png"):
+                    _ = staged.write_bytes(b"damaged")
+                else:
+                    _ = staged.unlink()
+                result = self._run(target, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(staged.name, result.stderr)
+
     def test_packages_complete_windows_sandbox_bootstrap_with_client_dll(self) -> None:
-        self._stage("windows64", sandbox=True)
+        self.fixture.stage("windows64", sandbox=True)
         _ = self._run("windows64")
         artifact = self.output / "island_browser-1.2.3-windows64.zip"
         self.assertIn("island_browser.dll", self._members(artifact))
 
     def test_rejects_windows_bootstrap_without_client_dll(self) -> None:
-        self._stage("windows64", sandbox=True)
+        self.fixture.stage("windows64", sandbox=True)
         _ = (self.build / "Release/island_browser.dll").unlink()
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing sandbox client DLL", result.stderr)
 
     def test_rejects_windows_client_dll_without_bootstrap(self) -> None:
-        self._stage("windows64")
-        self._write_binary(self.build / "Release/island_browser.dll", "windows64")
+        self.fixture.stage("windows64")
+        self.fixture.write_binary(self.build / "Release/island_browser.dll", "windows64")
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("bootstrap/client DLL mismatch", result.stderr)
 
     def test_rejects_windows_sandbox_client_dll_architecture_mismatch(self) -> None:
-        self._stage("windows64", sandbox=True)
-        self._write_binary(self.build / "Release/island_browser.dll", "windowsarm64")
+        self.fixture.stage("windows64", sandbox=True)
+        self.fixture.write_binary(self.build / "Release/island_browser.dll", "windowsarm64")
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("architecture", result.stderr)
 
     def test_packages_complete_windows_non_sandbox_layout(self) -> None:
-        self._stage("windows64")
+        self.fixture.stage("windows64")
         _ = self._run("windows64")
         artifact = self.output / "island_browser-1.2.3-windows64.zip"
         self.assertNotIn("island_browser.dll", self._members(artifact))
@@ -104,7 +132,7 @@ class PackageTests(unittest.TestCase):
         root = self.build / "src/main/island_browser.app/Contents/Frameworks"
         for path in (root / "Chromium Embedded Framework.framework/Chromium Embedded Framework", root / "island_browser Helper (Renderer).app/Contents/MacOS/island_browser Helper (Renderer)"):
             with self.subTest(path=path.name):
-                self._stage("macosarm64")
+                self.fixture.stage("macosarm64")
                 _ = path.unlink()
                 result = self._run("macosarm64", check=False)
                 self.assertNotEqual(result.returncode, 0)
@@ -113,7 +141,7 @@ class PackageTests(unittest.TestCase):
     def test_rejects_zip_and_tar_symlinks_that_escape_runtime_root(self) -> None:
         for target, library in (("windows64", "libcef.dll"), ("linux64", "libcef.so")):
             with self.subTest(target=target):
-                self._stage(target)
+                self.fixture.stage(target)
                 runtime = self.build / "Release"
                 _ = (self.root / "outside").write_text("outside", encoding="utf-8")
                 _ = (runtime / library).unlink()
@@ -124,7 +152,7 @@ class PackageTests(unittest.TestCase):
                 self.assertFalse(self.output.exists())
 
     def test_rejects_invalid_versions_and_target_architecture_conflicts(self) -> None:
-        self._stage("macosarm64")
+        self.fixture.stage("macosarm64")
         invalid = self._run("macosarm64", version="release", check=False)
         self.assertNotEqual(invalid.returncode, 0)
         self.assertIn("version", invalid.stderr)
@@ -138,7 +166,7 @@ class PackageTests(unittest.TestCase):
         executable = self.build / "src/main/island_browser.app/Contents/MacOS/island_browser"
         for data, label in ((b"unknown", "unknown"), (b"\xca\xfe\xba\xbe", "fat")):
             with self.subTest(label=label):
-                self._stage("macosarm64")
+                self.fixture.stage("macosarm64")
                 _ = executable.write_bytes(data)
                 result = self._run("macosarm64", check=False)
                 self.assertNotEqual(result.returncode, 0)
@@ -153,61 +181,6 @@ class PackageTests(unittest.TestCase):
             capture_output=True,
         )
 
-    def _stage(self, target: str, sandbox: bool = False) -> None:
-        if target.startswith("macos"):
-            root = self.build / "src/main/island_browser.app/Contents"
-            self._write_binary(root / "MacOS/island_browser", target)
-            self._write_binary(root / "Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework", target)
-            for suffix in ("", " (Alerts)", " (GPU)", " (Plugin)", " (Renderer)"):
-                self._write_binary(root / f"Frameworks/island_browser Helper{suffix}.app/Contents/MacOS/island_browser Helper{suffix}", target)
-            framework = root / "Frameworks/Chromium Embedded Framework.framework"
-            for name in ("icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "en.lproj/locale.pak"):
-                self._write(framework / "Versions/A/Resources" / name)
-            if not (framework / "Versions/Current").exists():
-                _ = (framework / "Versions/Current").symlink_to("A")
-            if not (framework / "Resources").exists():
-                _ = (framework / "Resources").symlink_to("Versions/A/Resources")
-            return
-        root = self.build / "Release"
-        self._write_binary(root / ("island_browser.exe" if target.startswith("windows") else "island_browser"), target, sandbox)
-        for name in ("icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "locales/en-US.pak"):
-            self._write(root / name)
-        if target.startswith("windows"):
-            for name in ("libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "libEGL.dll", "libGLESv2.dll", "snapshot_blob.bin", "v8_context_snapshot.bin", "vk_swiftshader.dll", "vulkan-1.dll"):
-                self._write_binary(root / name, target)
-            self._write(root / "vk_swiftshader_icd.json")
-            if sandbox:
-                self._write_binary(root / "island_browser.dll", target)
-        else:
-            for name in ("chrome-sandbox", "libcef.so", "libEGL.so", "libGLESv2.so", "libvk_swiftshader.so", "libvulkan.so.1", "snapshot_blob.bin", "v8_context_snapshot.bin"):
-                self._write_binary(root / name, target)
-
-    @staticmethod
-    def _write(path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _ = path.write_text("fixture", encoding="utf-8")
-
-    @staticmethod
-    def _write_binary(path: Path, target: str, bootstrap: bool = False) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = b""
-        match target:
-            case "macosx64":
-                data = b"\xcf\xfa\xed\xfe\x07\x00\x00\x01"
-            case "macosarm64":
-                data = b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01"
-            case "windows64" | "windowsarm64":
-                data = bytearray(70)
-                data[:2], data[60:64], data[64:68] = b"MZ", (64).to_bytes(4, "little"), b"PE\x00\x00"
-                data[68:70] = (0xAA64 if target.endswith("arm64") else 0x8664).to_bytes(2, "little")
-                data = bytes(data)
-            case "linux64" | "linuxarm64":
-                data = b"\x7fELF" + b"\x00" * 14 + (183 if target.endswith("arm64") else 62).to_bytes(2, "little")
-            case unexpected:
-                raise AssertionError(f"unexpected fixture target: {unexpected}")
-        if bootstrap:
-            data += b"island_browser.dll\x00"
-        _ = path.write_bytes(data)
 
     @staticmethod
     def _members(artifact: Path) -> set[str]:
