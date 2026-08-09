@@ -69,12 +69,16 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         shell: bash
-        run: python3 scripts/deps.py install --target '${{ matrix.target }}'
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          python3 scripts/deps.py install --target '${{ matrix.target }}' 2>&1 | tee ci-logs/install-${{ matrix.target }}.log
       - name: Verify dependency receipt
         shell: bash
         run: |
           set -o pipefail
-          python3 scripts/deps.py verify 2>&1 | tee dependency-receipt.txt
+          mkdir -p ci-logs
+          python3 scripts/deps.py verify 2>&1 | tee ci-logs/verify-${{ matrix.target }}.log | tee dependency-receipt.txt
       - name: Configure Release build
         shell: bash
         run: |
@@ -98,6 +102,7 @@ jobs:
         with:
           name: ci-diagnostics-${{ matrix.target }}
           path: |
+            ci-logs/**
             dependency-receipt.txt
             configure.log
             build.log
@@ -129,17 +134,23 @@ jobs:
       - name: Install native prerequisites
         shell: bash
         run: |
-          sudo apt-get update
+          set -o pipefail
+          mkdir -p ci-logs
+          sudo apt-get update 2>&1 | tee ci-logs/install-${{ matrix.target }}.log
           sudo apt-get install --no-install-recommends --yes fontconfig libfontconfig1-dev \
-            libgtk-3-dev libnss3-dev libasound2-dev pkg-config
+            libgtk-3-dev libnss3-dev libasound2-dev pkg-config 2>&1 | tee -a ci-logs/install-${{ matrix.target }}.log
       - name: Install dependencies
         shell: bash
-        run: python3 scripts/deps.py install --target '${{ matrix.target }}'
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          python3 scripts/deps.py install --target '${{ matrix.target }}' 2>&1 | tee -a ci-logs/install-${{ matrix.target }}.log
       - name: Verify dependency receipt
         shell: bash
         run: |
           set -o pipefail
-          python3 scripts/deps.py verify 2>&1 | tee dependency-receipt.txt
+          mkdir -p ci-logs
+          python3 scripts/deps.py verify 2>&1 | tee ci-logs/verify-${{ matrix.target }}.log | tee dependency-receipt.txt
       - name: Configure Release build
         shell: bash
         run: |
@@ -162,6 +173,7 @@ jobs:
         with:
           name: ci-diagnostics-${{ matrix.target }}
           path: |
+            ci-logs/**
             dependency-receipt.txt
             configure.log
             build.log
@@ -194,12 +206,17 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         shell: pwsh
-        run: python scripts/deps.py install --target '${{ matrix.target }}'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          python scripts/deps.py install --target '${{ matrix.target }}' 2>&1 | Tee-Object -FilePath ci-logs/install-${{ matrix.target }}.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify dependency receipt
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python scripts/deps.py verify 2>&1 | Tee-Object -FilePath dependency-receipt.txt
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          python scripts/deps.py verify 2>&1 | Tee-Object -FilePath ci-logs/verify-${{ matrix.target }}.log | Tee-Object -FilePath dependency-receipt.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Configure Release build
         shell: pwsh
@@ -225,6 +242,7 @@ jobs:
         with:
           name: ci-diagnostics-${{ matrix.target }}
           path: |
+            ci-logs/**
             dependency-receipt.txt
             configure.log
             build.log
