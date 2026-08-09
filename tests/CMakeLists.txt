@@ -81,9 +81,12 @@ if(APPLE)
     )
 else()
     # Unlike the packaged browser target, nothing else stages the CEF runtime
-    # beside this test binary. Without it, running island_cef_tests fails at
-    # process start (STATUS_DLL_NOT_FOUND on Windows / missing .so on Linux).
+    # beside this test binary. Without both, CefInitialize either fails to
+    # start the process (missing binaries: STATUS_DLL_NOT_FOUND on Windows /
+    # missing .so on Linux) or starts and immediately fails to load ICU data
+    # (missing resources: icudtl.dat, *.pak).
     COPY_FILES(island_cef_tests "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "$<TARGET_FILE_DIR:island_cef_tests>")
+    COPY_FILES(island_cef_tests "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "$<TARGET_FILE_DIR:island_cef_tests>")
     if(OS_LINUX)
         set_target_properties(island_cef_tests PROPERTIES
             BUILD_WITH_INSTALL_RPATH TRUE
