@@ -22,6 +22,12 @@ enable_testing()
 
 set(CEF_ROOT "${CMAKE_SOURCE_DIR}/third_party/cef" CACHE PATH "Path to the CEF binary distribution")
 
+if(NOT EXISTS "${CEF_ROOT}/cmake/cef_macros.cmake")
+    message(FATAL_ERROR
+        "CEF binary distribution not found at ${CEF_ROOT}.\n"
+        "Run scripts/setup_deps.sh before configuring this project.")
+endif()
+
 set(ISLAND_FONT_RESOURCE_DIRECTORY "${CMAKE_SOURCE_DIR}/assets/fonts")
 set(ISLAND_ICON_RESOURCE_DIRECTORY "${CMAKE_SOURCE_DIR}/resources/island/icons")
 set(ISLAND_REQUIRED_FONT_RESOURCES
@@ -90,12 +96,6 @@ function(island_stage_chrome_resources target destination)
         VERBATIM
     )
 endfunction()
-
-if(NOT EXISTS "${CEF_ROOT}/cmake/cef_macros.cmake")
-    message(FATAL_ERROR
-        "CEF binary distribution not found at ${CEF_ROOT}.\n"
-        "Run scripts/setup_deps.sh before configuring this project.")
-endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
