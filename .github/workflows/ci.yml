@@ -104,19 +104,22 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          python3 - "$TARGET" <<'PY'
+          python3 - "$TARGET" "$WORKSPACE" <<'PY'
           import re
           import sys
           from pathlib import Path
 
-          target = sys.argv[1]
+          target, workspace = sys.argv[1:]
           logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
           pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
           lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
-          selected = [line for line in lines if pattern.search(line)][:5] or lines[-8:]
-          message = " | ".join(selected)[:1000] or "No target stage log was produced."
-          message = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]+", "<path>", message)
+          selected = [line for line in lines if pattern.search(line)][:20] or lines[-20:]
+          message = " | ".join(selected)[:4000] or "No target stage log was produced."
+          workspace_prefixes = {workspace.rstrip("/\\") + "/", workspace.rstrip("/\\") + "\\"}
+          for prefix in workspace_prefixes:
+              message = message.replace(prefix, "")
           message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           print(f"::error title={target} build diagnostic::{message}")
           PY
@@ -196,19 +199,22 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          python3 - "$TARGET" <<'PY'
+          python3 - "$TARGET" "$WORKSPACE" <<'PY'
           import re
           import sys
           from pathlib import Path
 
-          target = sys.argv[1]
+          target, workspace = sys.argv[1:]
           logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
           pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
           lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
-          selected = [line for line in lines if pattern.search(line)][:5] or lines[-8:]
-          message = " | ".join(selected)[:1000] or "No target stage log was produced."
-          message = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]+", "<path>", message)
+          selected = [line for line in lines if pattern.search(line)][:20] or lines[-20:]
+          message = " | ".join(selected)[:4000] or "No target stage log was produced."
+          workspace_prefixes = {workspace.rstrip("/\\") + "/", workspace.rstrip("/\\") + "\\"}
+          for prefix in workspace_prefixes:
+              message = message.replace(prefix, "")
           message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           print(f"::error title={target} build diagnostic::{message}")
           PY
@@ -286,19 +292,22 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
+          WORKSPACE: ${{ github.workspace }}
         run: |
-          python3 - "$TARGET" <<'PY'
+          python3 - "$TARGET" "$WORKSPACE" <<'PY'
           import re
           import sys
           from pathlib import Path
 
-          target = sys.argv[1]
+          target, workspace = sys.argv[1:]
           logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
           pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
           lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
-          selected = [line for line in lines if pattern.search(line)][:5] or lines[-8:]
-          message = " | ".join(selected)[:1000] or "No target stage log was produced."
-          message = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]+", "<path>", message)
+          selected = [line for line in lines if pattern.search(line)][:20] or lines[-20:]
+          message = " | ".join(selected)[:4000] or "No target stage log was produced."
+          workspace_prefixes = {workspace.rstrip("/\\") + "/", workspace.rstrip("/\\") + "\\"}
+          for prefix in workspace_prefixes:
+              message = message.replace(prefix, "")
           message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
           print(f"::error title={target} build diagnostic::{message}")
           PY
