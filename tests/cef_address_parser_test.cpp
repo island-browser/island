@@ -6,7 +6,9 @@
 #include <string_view>
 
 #include "include/cef_app.h"
+#if defined(OS_MAC)
 #include "include/wrapper/cef_library_loader.h"
+#endif
 
 namespace island {
 
@@ -19,10 +21,12 @@ int RunCefAddressParserTests(int argc, char* argv[]) {
     }
     testing::InitGoogleTest(&argc, argv);
 
+#if defined(OS_MAC)
     CefScopedLibraryLoader library_loader;
     if (!library_loader.LoadInMain()) {
         return 1;
     }
+#endif
 
     CefMainArgs arguments(argc, argv);
     const int subprocess_exit_code = CefExecuteProcess(arguments, nullptr, nullptr);
