@@ -33,6 +33,9 @@ jobs:
       - name: Check dependency setup dry run
         shell: bash
         run: ./scripts/setup_deps.sh --dry-run
+      - name: Install package test fixtures
+        shell: bash
+        run: python3 scripts/deps.py install --target linux64
       - name: Run dependency unit tests
         shell: bash
         run: python3 -m unittest discover -s tests/deps -p 'test_*.py'
