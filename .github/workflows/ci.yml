@@ -38,7 +38,7 @@ jobs:
         run: python3 -m unittest discover -s tests/deps -p 'test_*.py'
       - name: Run package unit tests
         shell: bash
-        run: python3 -m unittest discover -s tests/package -p 'test_*.py'
+        run: python3 -m unittest tests.package.test_package tests.package.test_package_resources
       - name: Verify committed icons
         shell: bash
         run: tools/icon_pipeline/run.sh verify
