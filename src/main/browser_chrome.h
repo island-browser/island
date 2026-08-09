@@ -1,6 +1,15 @@
 #ifndef ISLAND_BROWSER_CHROME_H_
 #define ISLAND_BROWSER_CHROME_H_
 
+#if defined(_WIN32)
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#endif
+
 #include <algorithm>
 #include <filesystem>
 #include <string_view>

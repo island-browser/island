@@ -89,6 +89,7 @@ std::string AddressErrorMessage(const std::optional<AddressError>& error) {
         case AddressError::kInvalidPort:
             return "Enter a valid address port.";
     }
+    return "";
 }
 
 }  // namespace
