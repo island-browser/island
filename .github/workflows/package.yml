@@ -1,161 +1,121 @@
 name: Package unsigned candidates
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - Island CI
     branches:
       - main
-    paths:
-      - CMakeLists.txt
-      - cmake/**
-      - deps/**
-      - scripts/**
-      - resources/**
-      - tools/icon_pipeline/**
-      - src/**
-      - tests/**
-      - .github/workflows/package.yml
+    types:
+      - completed
   workflow_dispatch:
     inputs:
-      candidate_version:
-        description: Optional SemVer candidate version; defaults to this CI run's version.
-        required: false
+      commit_sha:
+        description: Full 40-character commit SHA reachable from main.
+        required: true
         type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: package-candidate-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  group: package-candidate-${{ github.event.workflow_run.head_sha || inputs.commit_sha }}
+  cancel-in-progress: false
 
 jobs:
   prepare-candidate:
-    name: Prepare candidate version
+    name: Resolve successful CI commit
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.version.outputs.value }}
+      sha: ${{ steps.commit.outputs.sha }}
+      version: ${{ steps.commit.outputs.version }}
     steps:
-      - id: version
-        name: Select explicit candidate version
+      - name: Check out main history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 0
+      - id: commit
+        name: Resolve exact candidate commit
         shell: bash
         env:
-          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_SHA: ${{ inputs.commit_sha }}
+          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          version="${CANDIDATE_VERSION:-}"
-          if [ -z "$version" ]; then
-            version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+          set -euo pipefail
+          sha="$UPSTREAM_SHA"
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            sha="$MANUAL_SHA"
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo 'commit_sha must be a full 40-character SHA.' >&2
+              exit 1
+            fi
           fi
-          python3 - "$version" <<'PY'
-          import re
-          import sys
+          GIT_MASTER=1 git cat-file -e "$sha^{commit}"
+          GIT_MASTER=1 git merge-base --is-ancestor "$sha" origin/main
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=0.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
-          pattern = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
-          if re.fullmatch(pattern, sys.argv[1]) is None:
-              raise SystemExit(f"candidate version is not SemVer-like: {sys.argv[1]!r}")
-          PY
-          echo "value=$version" >> "$GITHUB_OUTPUT"
-
-  package:
+  package-macos:
     name: ${{ matrix.target }}
     needs: prepare-candidate
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: macosx64
-            runner: macos-13
-            python: python3
-            setup-shell: bash
-            configure-argument: ''
+            runner: macos-15-intel
+            architecture: x86_64
           - target: macosarm64
-            runner: macos-14
-            python: python3
-            setup-shell: bash
-            configure-argument: ''
-          - target: windows64
-            runner: windows-2022
-            python: python
-            setup-shell: pwsh
-            configure-argument: -DUSE_SANDBOX=ON
-          - target: windowsarm64
-            runner: windows-11-arm
-            python: python
-            setup-shell: pwsh
-            configure-argument: -DUSE_SANDBOX=ON
-          - target: linux64
-            runner: ubuntu-24.04
-            python: python3
-            setup-shell: bash
-            configure-argument: ''
-          - target: linuxarm64
-            runner: ubuntu-24.04-arm
-            python: python3
-            setup-shell: bash
-            configure-argument: ''
+            runner: macos-15
+            architecture: arm64
     steps:
-      - name: Check out source
+      - name: Check out resolved candidate
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.prepare-candidate.outputs.sha }}
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: Install Linux Fontconfig development files
-        if: ${{ startsWith(matrix.target, 'linux') }}
+      - name: Install dependencies
+        shell: bash
+        run: python3 scripts/deps.py install --target '${{ matrix.target }}'
+      - name: Verify dependency receipt
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes libfontconfig1-dev pkg-config
-      - id: cache-key-bash
-        name: Derive dependency cache key (Bash)
-        if: ${{ matrix.setup-shell == 'bash' }}
-        shell: bash
-        run: echo "value=$(${{ matrix.python }} scripts/deps.py print-cache-key --target '${{ matrix.target }}')" >> "$GITHUB_OUTPUT"
-      - id: cache-key-pwsh
-        name: Derive dependency cache key (PowerShell)
-        if: ${{ matrix.setup-shell == 'pwsh' }}
-        shell: pwsh
-        run: '"value=$(& ${{ matrix.python }} scripts/deps.py print-cache-key --target ''${{ matrix.target }}'')" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
-      - name: Restore verified CEF and font dependencies
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
-        with:
-          path: |
-            third_party/cef
-            assets/fonts
-          key: ${{ steps.cache-key-bash.outputs.value || steps.cache-key-pwsh.outputs.value }}
-      - name: Install and verify dependencies (Bash)
-        if: ${{ matrix.setup-shell == 'bash' }}
-        shell: bash
-        run: ./scripts/setup_deps.sh --target '${{ matrix.target }}'
-      - name: Install and verify dependencies (PowerShell)
-        if: ${{ matrix.setup-shell == 'pwsh' }}
-        shell: pwsh
-        run: '& .\scripts\setup_deps.ps1 --target ''${{ matrix.target }}'''
-      - name: Verify locked dependencies and committed icon assets
+          set -o pipefail
+          python3 scripts/deps.py verify 2>&1 | tee dependency-receipt.txt
+      - name: Configure Release build
         shell: bash
         run: |
-          ${{ matrix.python }} scripts/deps.py verify
-          tools/icon_pipeline/run.sh verify
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure-argument }}
-      - name: Build
-        run: cmake --build build --config Release --parallel 2
-      - name: Test
-        run: ctest --test-dir build --output-on-failure -C Release
-      - name: Test package resource validation
-        run: ${{ matrix.python }} -m pytest tests/package/test_package.py -q
-      - name: Package and verify candidate (Bash)
-        if: ${{ matrix.setup-shell == 'bash' }}
+          set -o pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.architecture }}' 2>&1 | tee configure.log
+      - name: Build Release target
         shell: bash
-        env:
-          CANDIDATE_VERSION: ${{ needs.prepare-candidate.outputs.version }}
-          PACKAGE_BUILD_DIR: build
-          PACKAGE_TARGET: ${{ matrix.target }}
-          PYTHON_EXECUTABLE: ${{ matrix.python }}
         run: |
-          "$PYTHON_EXECUTABLE" scripts/package.py --target "$PACKAGE_TARGET" --build-dir "$PACKAGE_BUILD_DIR" --version "$CANDIDATE_VERSION" --output-dir dist
-          "$PYTHON_EXECUTABLE" - "$PACKAGE_TARGET" "$CANDIDATE_VERSION" <<'PY'
+          set -o pipefail
+          cmake --build build --config Release --parallel 2 2>&1 | tee build.log
+      - name: Run native tests
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error \
+            --output-junit junit.xml 2>&1 | tee test.log
+      - name: Package and verify candidate
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/package.py --target '${{ matrix.target }}' --build-dir build \
+            --version '${{ needs.prepare-candidate.outputs.version }}' --output-dir dist 2>&1 | tee package.log
+          python3 - '${{ matrix.target }}' '${{ needs.prepare-candidate.outputs.version }}' <<'PY'
           import hashlib
           import json
           import sys
@@ -164,86 +124,233 @@ jobs:
           from pathlib import Path
 
           target, version = sys.argv[1:]
-          sums = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8").strip().split(maxsplit=1)
-          assert len(sums) == 2, "SHA256SUMS must contain one digest and artifact name"
-          expected_digest, name = sums
+          digest, name = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8").strip().split(maxsplit=1)
           artifact = Path("dist") / name
-          assert artifact.is_file(), f"missing candidate artifact: {artifact}"
-          assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_digest, "artifact SHA-256 mismatch"
-          if name.endswith(".zip"):
-              expected_format = "zip"
-              with zipfile.ZipFile(artifact) as archive:
-                  metadata = json.loads(archive.read("build-metadata.json"))
-          elif name.endswith(".tar.gz"):
-              expected_format = "tar.gz"
-              with tarfile.open(artifact, "r:gz") as archive:
-                  member = archive.extractfile("build-metadata.json")
-                  assert member is not None, "missing build metadata"
-                  metadata = json.load(member)
-          else:
-              raise AssertionError(f"unsupported candidate archive extension: {name}")
-          assert metadata == {"format": expected_format, "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
+          assert artifact.is_file()
+          assert hashlib.sha256(artifact.read_bytes()).hexdigest() == digest
+          with zipfile.ZipFile(artifact) as archive:
+              metadata = json.loads(archive.read("build-metadata.json"))
+          assert metadata == {"format": "zip", "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
           PY
-      - name: Package and verify candidate (PowerShell)
-        if: ${{ matrix.setup-shell == 'pwsh' }}
-        shell: pwsh
-        env:
-          CANDIDATE_VERSION: ${{ needs.prepare-candidate.outputs.version }}
-          PACKAGE_BUILD_DIR: build
-          PACKAGE_TARGET: ${{ matrix.target }}
-          PYTHON_EXECUTABLE: ${{ matrix.python }}
-        run: |
-          & $env:PYTHON_EXECUTABLE scripts/package.py --target $env:PACKAGE_TARGET --build-dir $env:PACKAGE_BUILD_DIR --version $env:CANDIDATE_VERSION --output-dir dist
-          if ($env:PACKAGE_TARGET -like "windows*") {
-            if (-not (Test-Path (Join-Path $env:PACKAGE_BUILD_DIR "Release/island_browser.dll"))) {
-              throw "Windows sandbox package is missing island_browser.dll"
-            }
-          }
-          @'
-          import hashlib
-          import json
-          import os
-          import sys
-          import tarfile
-          import zipfile
-          from pathlib import Path
-
-          target = os.environ["PACKAGE_TARGET"]
-          version = os.environ["CANDIDATE_VERSION"]
-          sums = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8").strip().split(maxsplit=1)
-          assert len(sums) == 2, "SHA256SUMS must contain one digest and artifact name"
-          expected_digest, name = sums
-          artifact = Path("dist") / name
-          assert artifact.is_file(), f"missing candidate artifact: {artifact}"
-          assert hashlib.sha256(artifact.read_bytes()).hexdigest() == expected_digest, "artifact SHA-256 mismatch"
-          if name.endswith(".zip"):
-              expected_format = "zip"
-              with zipfile.ZipFile(artifact) as archive:
-                  metadata = json.loads(archive.read("build-metadata.json"))
-                  if target.startswith("windows"):
-                      assert "island_browser.dll" in archive.namelist(), "missing Windows sandbox DLL"
-          elif name.endswith(".tar.gz"):
-              expected_format = "tar.gz"
-              with tarfile.open(artifact, "r:gz") as archive:
-                  member = archive.extractfile("build-metadata.json")
-                  assert member is not None, "missing build metadata"
-                  metadata = json.load(member)
-          else:
-              raise AssertionError(f"unsupported candidate archive extension: {name}")
-          assert metadata == {"format": expected_format, "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
-          '@ | & $env:PYTHON_EXECUTABLE -
       - name: Upload unsigned candidate
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: unsigned-candidate-${{ needs.prepare-candidate.outputs.version }}-${{ matrix.target }}
           path: dist
           if-no-files-found: error
-          retention-days: 7
-      - name: Upload failed CMake diagnostics
-        if: failure()
+          retention-days: 30
+      - name: Upload target diagnostics
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: package-diagnostics-${{ matrix.target }}
-          path: build/CMakeFiles
-          if-no-files-found: ignore
+          path: |
+            dependency-receipt.txt
+            configure.log
+            build.log
+            test.log
+            package.log
+            junit.xml
+            build/CMakeCache.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  package-linux:
+    name: ${{ matrix.target }}
+    needs: prepare-candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux64
+            runner: ubuntu-24.04
+          - target: linuxarm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Check out resolved candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.prepare-candidate.outputs.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install native prerequisites
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes fontconfig libfontconfig1-dev \
+            libgtk-3-dev libnss3-dev libasound2-dev pkg-config
+      - name: Install dependencies
+        shell: bash
+        run: python3 scripts/deps.py install --target '${{ matrix.target }}'
+      - name: Verify dependency receipt
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/deps.py verify 2>&1 | tee dependency-receipt.txt
+      - name: Configure Release build
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log
+      - name: Build Release target
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --config Release --parallel 2 2>&1 | tee build.log
+      - name: Run native tests
+        shell: bash
+        run: |
+          set -o pipefail
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error \
+            --output-junit junit.xml 2>&1 | tee test.log
+      - name: Package and verify candidate
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/package.py --target '${{ matrix.target }}' --build-dir build \
+            --version '${{ needs.prepare-candidate.outputs.version }}' --output-dir dist 2>&1 | tee package.log
+          python3 - '${{ matrix.target }}' '${{ needs.prepare-candidate.outputs.version }}' <<'PY'
+          import hashlib
+          import json
+          import sys
+          import tarfile
+          from pathlib import Path
+
+          target, version = sys.argv[1:]
+          digest, name = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8").strip().split(maxsplit=1)
+          artifact = Path("dist") / name
+          assert artifact.is_file()
+          assert hashlib.sha256(artifact.read_bytes()).hexdigest() == digest
+          with tarfile.open(artifact, "r:gz") as archive:
+              member = archive.extractfile("build-metadata.json")
+              assert member is not None
+              metadata = json.load(member)
+          assert metadata == {"format": "tar.gz", "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
+          PY
+      - name: Upload unsigned candidate
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-candidate-${{ needs.prepare-candidate.outputs.version }}-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload target diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-diagnostics-${{ matrix.target }}
+          path: |
+            dependency-receipt.txt
+            configure.log
+            build.log
+            test.log
+            package.log
+            junit.xml
+            build/CMakeCache.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  package-windows:
+    name: ${{ matrix.target }}
+    needs: prepare-candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows64
+            runner: windows-2022
+            platform: x64
+          - target: windowsarm64
+            runner: windows-11-arm
+            platform: ARM64
+    steps:
+      - name: Check out resolved candidate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.prepare-candidate.outputs.sha }}
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        shell: pwsh
+        run: python scripts/deps.py install --target '${{ matrix.target }}'
+      - name: Verify dependency receipt
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/deps.py verify 2>&1 | Tee-Object -FilePath dependency-receipt.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Configure Release build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A '${{ matrix.platform }}' -DUSE_SANDBOX=ON 2>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Release target
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --build build --config Release --parallel 2 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run native tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit junit.xml 2>&1 | Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package and verify candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/package.py --target '${{ matrix.target }}' --build-dir build --version '${{ needs.prepare-candidate.outputs.version }}' --output-dir dist 2>&1 | Tee-Object -FilePath package.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @'
+          import hashlib
+          import json
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          target = "${{ matrix.target }}"
+          version = "${{ needs.prepare-candidate.outputs.version }}"
+          digest, name = Path("dist/SHA256SUMS.txt").read_text(encoding="utf-8").strip().split(maxsplit=1)
+          artifact = Path("dist") / name
+          assert artifact.is_file()
+          assert hashlib.sha256(artifact.read_bytes()).hexdigest() == digest
+          with zipfile.ZipFile(artifact) as archive:
+              assert "island_browser.dll" in archive.namelist()
+              metadata = json.loads(archive.read("build-metadata.json"))
+          assert metadata == {"format": "zip", "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
+          '@ | python -
+      - name: Upload unsigned candidate
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: unsigned-candidate-${{ needs.prepare-candidate.outputs.version }}-${{ matrix.target }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload target diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-diagnostics-${{ matrix.target }}
+          path: |
+            dependency-receipt.txt
+            configure.log
+            build.log
+            test.log
+            package.log
+            junit.xml
+            build/CMakeCache.txt
+          if-no-files-found: warn
           retention-days: 7
