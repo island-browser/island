@@ -19,7 +19,7 @@
 namespace {
 
 #if defined(CEF_X11)
-int XErrorHandler(Display* display, XErrorEvent* event) {
+int IslandXErrorHandler(Display* display, XErrorEvent* event) {
     LOG(WARNING) << "X error received: type " << event->type << ", serial " << event->serial
                  << ", error code " << static_cast<int>(event->error_code) << ", request code "
                  << static_cast<int>(event->request_code) << ", minor code "
@@ -27,7 +27,7 @@ int XErrorHandler(Display* display, XErrorEvent* event) {
     return 0;
 }
 
-int XIoErrorHandler(Display* display) { return 0; }
+int IslandXIoErrorHandler(Display* display) { return 0; }
 #endif
 
 }  // namespace
@@ -41,8 +41,8 @@ int main(int argc, char* argv[]) {
     }
 
 #if defined(CEF_X11)
-    XSetErrorHandler(XErrorHandler);
-    XSetIOErrorHandler(XIoErrorHandler);
+    XSetErrorHandler(IslandXErrorHandler);
+    XSetIOErrorHandler(IslandXIoErrorHandler);
 #endif
 
     std::vector<std::string_view> arguments;

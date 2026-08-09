@@ -4,6 +4,13 @@ if(APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET OR "${CMAKE_OSX_DEPLOYMENT
     set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS deployment target" FORCE)
 endif()
 
+if(WIN32)
+    # Match CEF's own CEF_RUNTIME_LIBRARY_FLAG (/MT) so every Windows target -
+    # including GoogleTest, fetched below - links the same static CRT. Mixing
+    # /MT and /MD across a link line trips LNK2005/LNK2038.
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
+endif()
+
 project(island_browser LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)

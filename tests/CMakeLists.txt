@@ -1,7 +1,10 @@
 include(FetchContent)
 
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# island_cef_tests links CEF, which forces the static CRT (/MT) on Windows.
+# A shared-CRT GoogleTest build would mismatch it (LNK2005/LNK2038), so build
+# GoogleTest with the same static CRT the rest of this project now uses.
+set(gtest_force_shared_crt OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     googletest
