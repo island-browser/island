@@ -34,6 +34,14 @@ void IslandApp::ExecuteCommand(BrowserCommand command) {
     }
 }
 
+void IslandApp::BeginAddressEditing() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->BeginAddressEditing();
+    }
+}
+
 void IslandApp::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
 

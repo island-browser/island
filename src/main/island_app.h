@@ -19,6 +19,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OnContextInitialized() override;
 
     void ExecuteCommand(BrowserCommand command);
+    void BeginAddressEditing();
     void RequestClose();
     void SetNavigationObserver(NavigationObserver* observer);
     void SetChromeObserver(ChromeObserver* observer);
