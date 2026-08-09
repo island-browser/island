@@ -100,19 +100,22 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p ci-logs
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.architecture }}' 2>&1 | tee configure.log
+            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.architecture }}' 2>&1 | tee ci-logs/configure-${{ matrix.target }}.log
       - name: Build Release target
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build --config Release --parallel 2 2>&1 | tee build.log
+          mkdir -p ci-logs
+          cmake --build build --config Release --parallel 2 2>&1 | tee ci-logs/build-${{ matrix.target }}.log
       - name: Run native tests
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p ci-logs
           ctest --test-dir build -C Release --output-on-failure --no-tests=error \
-            --output-junit junit.xml 2>&1 | tee test.log
+            --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
       - name: Package and verify candidate
         shell: bash
         run: |
@@ -152,9 +155,6 @@ jobs:
           path: |
             ci-logs/**
             dependency-receipt.txt
-            configure.log
-            build.log
-            test.log
             package.log
             junit.xml
             build/CMakeCache.txt
@@ -207,18 +207,21 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log
+          mkdir -p ci-logs
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee ci-logs/configure-${{ matrix.target }}.log
       - name: Build Release target
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build --config Release --parallel 2 2>&1 | tee build.log
+          mkdir -p ci-logs
+          cmake --build build --config Release --parallel 2 2>&1 | tee ci-logs/build-${{ matrix.target }}.log
       - name: Run native tests
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p ci-logs
           ctest --test-dir build -C Release --output-on-failure --no-tests=error \
-            --output-junit junit.xml 2>&1 | tee test.log
+            --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
       - name: Package and verify candidate
         shell: bash
         run: |
@@ -259,9 +262,6 @@ jobs:
           path: |
             ci-logs/**
             dependency-receipt.txt
-            configure.log
-            build.log
-            test.log
             package.log
             junit.xml
             build/CMakeCache.txt
@@ -310,19 +310,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A '${{ matrix.platform }}' -DUSE_SANDBOX=ON 2>&1 | Tee-Object -FilePath configure.log
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A '${{ matrix.platform }}' -DUSE_SANDBOX=ON 2>&1 | Tee-Object -FilePath ci-logs/configure-${{ matrix.target }}.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Release target
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cmake --build build --config Release --parallel 2 2>&1 | Tee-Object -FilePath build.log
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          cmake --build build --config Release --parallel 2 2>&1 | Tee-Object -FilePath ci-logs/build-${{ matrix.target }}.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run native tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit junit.xml 2>&1 | Tee-Object -FilePath test.log
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit junit.xml 2>&1 | Tee-Object -FilePath ci-logs/test-${{ matrix.target }}.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package and verify candidate
         shell: pwsh
@@ -364,9 +367,6 @@ jobs:
           path: |
             ci-logs/**
             dependency-receipt.txt
-            configure.log
-            build.log
-            test.log
             package.log
             junit.xml
             build/CMakeCache.txt

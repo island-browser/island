@@ -83,19 +83,43 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p ci-logs
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.architecture }}' 2>&1 | tee configure.log
+            -DCMAKE_OSX_ARCHITECTURES='${{ matrix.architecture }}' 2>&1 | tee ci-logs/configure-${{ matrix.target }}.log
       - name: Build Release target
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build --config Release --parallel 2 2>&1 | tee build.log
+          mkdir -p ci-logs
+          cmake --build build --config Release --parallel 2 2>&1 | tee ci-logs/build-${{ matrix.target }}.log
       - name: Run native tests
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p ci-logs
           ctest --test-dir build -C Release --output-on-failure --no-tests=error \
-            --output-junit junit.xml 2>&1 | tee test.log
+            --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
+      - name: Annotate target failure
+        if: failure()
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 - "$TARGET" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          target = sys.argv[1]
+          logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
+          pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
+          lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
+          selected = [line for line in lines if pattern.search(line)][:5] or lines[-8:]
+          message = " | ".join(selected)[:1000] or "No target stage log was produced."
+          message = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]+", "<path>", message)
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title={target} build diagnostic::{message}")
+          PY
       - name: Upload target diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -104,9 +128,6 @@ jobs:
           path: |
             ci-logs/**
             dependency-receipt.txt
-            configure.log
-            build.log
-            test.log
             junit.xml
             build/CMakeCache.txt
           if-no-files-found: warn
@@ -155,18 +176,42 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log
+          mkdir -p ci-logs
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee ci-logs/configure-${{ matrix.target }}.log
       - name: Build Release target
         shell: bash
         run: |
           set -o pipefail
-          cmake --build build --config Release --parallel 2 2>&1 | tee build.log
+          mkdir -p ci-logs
+          cmake --build build --config Release --parallel 2 2>&1 | tee ci-logs/build-${{ matrix.target }}.log
       - name: Run native tests
         shell: bash
         run: |
           set -o pipefail
+          mkdir -p ci-logs
           ctest --test-dir build -C Release --output-on-failure --no-tests=error \
-            --output-junit junit.xml 2>&1 | tee test.log
+            --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
+      - name: Annotate target failure
+        if: failure()
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 - "$TARGET" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          target = sys.argv[1]
+          logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
+          pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
+          lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
+          selected = [line for line in lines if pattern.search(line)][:5] or lines[-8:]
+          message = " | ".join(selected)[:1000] or "No target stage log was produced."
+          message = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]+", "<path>", message)
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title={target} build diagnostic::{message}")
+          PY
       - name: Upload target diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -175,9 +220,6 @@ jobs:
           path: |
             ci-logs/**
             dependency-receipt.txt
-            configure.log
-            build.log
-            test.log
             junit.xml
             build/CMakeCache.txt
           if-no-files-found: warn
@@ -222,20 +264,44 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A '${{ matrix.platform }}' -DUSE_SANDBOX=ON 2>&1 | Tee-Object -FilePath configure.log
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A '${{ matrix.platform }}' -DUSE_SANDBOX=ON 2>&1 | Tee-Object -FilePath ci-logs/configure-${{ matrix.target }}.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build Release target
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          cmake --build build --config Release --parallel 2 2>&1 | Tee-Object -FilePath build.log
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          cmake --build build --config Release --parallel 2 2>&1 | Tee-Object -FilePath ci-logs/build-${{ matrix.target }}.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Run native tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit junit.xml 2>&1 | Tee-Object -FilePath test.log
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error --output-junit junit.xml 2>&1 | Tee-Object -FilePath ci-logs/test-${{ matrix.target }}.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Annotate target failure
+        if: failure()
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          python3 - "$TARGET" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          target = sys.argv[1]
+          logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
+          pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
+          lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
+          selected = [line for line in lines if pattern.search(line)][:5] or lines[-8:]
+          message = " | ".join(selected)[:1000] or "No target stage log was produced."
+          message = re.sub(r"(?:[A-Za-z]:)?[\\/][^\s:]+", "<path>", message)
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title={target} build diagnostic::{message}")
+          PY
       - name: Upload target diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -244,9 +310,6 @@ jobs:
           path: |
             ci-logs/**
             dependency-receipt.txt
-            configure.log
-            build.log
-            test.log
             junit.xml
             build/CMakeCache.txt
           if-no-files-found: warn
