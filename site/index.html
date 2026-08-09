@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
+    <script>document.documentElement.classList.add('js');</script>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Island is an open-source browser built around quiet, focused workspaces.">
     <meta name="theme-color" content="#F3F0E9">
@@ -13,6 +14,7 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+    <div class="scroll-progress" aria-hidden="true"></div>
     <header class="site-header shell">
       <a class="brand" href="index.html" aria-label="Island home">
         <svg aria-hidden="true" viewBox="0 0 32 32">
@@ -82,7 +84,7 @@
         </div>
       </section>
 
-      <section class="intro shell" id="about" aria-labelledby="about-title">
+      <section class="intro shell reveal" id="about" aria-labelledby="about-title">
         <p class="eyebrow">Built with intention</p>
         <div>
           <h2 id="about-title">The web has enough noise. A browser can make room for thought.</h2>
@@ -91,20 +93,20 @@
       </section>
 
       <section class="concepts shell" id="concepts" aria-labelledby="concepts-title">
-        <div class="section-heading">
+        <div class="section-heading reveal">
           <p class="eyebrow">A direction, not a release note</p>
           <h2 id="concepts-title">Designed around context.</h2>
           <p>The following are product concepts under active development. They are not promises of currently available functionality.</p>
         </div>
 
         <article class="feature feature-spaces">
-          <div class="feature-copy">
+          <div class="feature-copy reveal" data-index="01">
             <p class="eyebrow"><span class="mark mark-blue"></span> Spaces</p>
             <h3>Separate the work, not just the windows.</h3>
             <p>Spaces are a proposed way to keep project, research, and personal browsing distinct—without turning each into another inbox.</p>
             <span class="coming">Planned concept</span>
           </div>
-          <div class="fragment spaces-fragment" aria-hidden="true">
+          <div class="fragment spaces-fragment reveal reveal-lag" aria-hidden="true">
             <div class="fragment-head">Spaces <span>3 SPACES</span></div>
             <div class="space-row selected"><i class="mark-blue"></i><span>Work</span><b>···</b></div>
             <div class="space-row"><i class="mark mark-coral"></i><span>Research</span><b>···</b></div>
@@ -113,7 +115,7 @@
         </article>
 
         <article class="feature feature-split">
-          <div class="fragment split-fragment" aria-hidden="true">
+          <div class="fragment split-fragment reveal reveal-lag" aria-hidden="true">
             <div class="split-bar"><b>+</b><span>BUILD / SPLIT SESSION</span><i>↔</i></div>
             <div class="split-panes">
               <div>
@@ -132,7 +134,7 @@
               </div>
             </div>
           </div>
-          <div class="feature-copy">
+          <div class="feature-copy reveal" data-index="02">
             <p class="eyebrow"><span class="mark mark-coral"></span> Split view</p>
             <h3>Put two sources in the same conversation.</h3>
             <p>A proposed split surface keeps comparison close at hand: a brief beside a plan, an issue beside the implementation, a source beside your notes.</p>
@@ -141,13 +143,13 @@
         </article>
 
         <article class="feature feature-command">
-          <div class="feature-copy">
+          <div class="feature-copy reveal" data-index="03">
             <p class="eyebrow"><span class="mark mark-green"></span> Command</p>
             <h3>Reach what matters without leaving the thread.</h3>
             <p>The command surface is being explored as a direct path to tabs, URLs, and context—kept deliberately small, legible, and keyboard-first.</p>
             <span class="coming">Coming later</span>
           </div>
-          <div class="fragment command-fragment" aria-hidden="true">
+          <div class="fragment command-fragment reveal reveal-lag" aria-hidden="true">
             <div class="command-tabs"><b>⌕ Search</b><span>□ Ask</span><i>ESC</i></div>
             <div class="command-search">Search tabs, history, or enter a URL</div>
             <div class="command-result"><span>⌕</span><div><b>Project notes</b><small>workspace.local / today</small></div><i>↵</i></div>
@@ -156,7 +158,7 @@
         </article>
       </section>
 
-      <section class="open-source shell" aria-labelledby="source-title">
+      <section class="open-source shell reveal" aria-labelledby="source-title">
         <p class="eyebrow">Open source</p>
         <h2 id="source-title">Build the browser you want to use.</h2>
         <p>Island is being made in the open. Follow the work, read the design notes, or contribute when the project is ready for you.</p>
@@ -179,5 +181,38 @@
         <a href="https://github.com/impelixx/island">GitHub</a>
       </nav>
     </footer>
+    <script>
+      (function () {
+        var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var revealEls = document.querySelectorAll('.reveal');
+
+        if (reduceMotion || !('IntersectionObserver' in window)) {
+          revealEls.forEach(function (el) { el.classList.add('is-visible'); });
+        } else {
+          var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('is-visible');
+                io.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
+          revealEls.forEach(function (el) { io.observe(el); });
+        }
+
+        var bar = document.querySelector('.scroll-progress');
+        if (bar) {
+          var setProgress = function () {
+            var h = document.documentElement;
+            var scrollable = h.scrollHeight - h.clientHeight;
+            var pct = scrollable > 0 ? (h.scrollTop / scrollable) * 100 : 0;
+            bar.style.width = pct + '%';
+          };
+          document.addEventListener('scroll', setProgress, { passive: true });
+          window.addEventListener('resize', setProgress);
+          setProgress();
+        }
+      })();
+    </script>
   </body>
 </html>
