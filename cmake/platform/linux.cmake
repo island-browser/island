@@ -23,7 +23,11 @@ function(island_add_linux_browser target)
 
     add_executable(${target} "${CMAKE_SOURCE_DIR}/src/main/linux/main_linux.cc")
     target_compile_features(${target} PRIVATE cxx_std_20)
-    target_link_libraries(${target} PRIVATE libcef_lib island_browser_core ${CEF_STANDARD_LIBS})
+    # island_browser_core must precede libcef_lib: with --as-needed (the Ubuntu/Debian GCC
+    # default), ld drops a shared library encountered before anything references its symbols,
+    # so placing the shared libcef_lib ahead of the static archive that needs it silently
+    # discards it and leaves cef_string_utf16_* etc. unresolved.
+    target_link_libraries(${target} PRIVATE island_browser_core libcef_lib ${CEF_STANDARD_LIBS})
     SET_EXECUTABLE_TARGET_PROPERTIES(${target})
 
     set_target_properties(${target} PROPERTIES

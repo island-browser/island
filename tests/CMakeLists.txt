@@ -79,5 +79,16 @@ if(APPLE)
             "$<TARGET_BUNDLE_DIR:island_cef_tests>/Contents/Frameworks/Chromium Embedded Framework.framework"
         VERBATIM
     )
+else()
+    # Unlike the packaged browser target, nothing else stages the CEF runtime
+    # beside this test binary. Without it, running island_cef_tests fails at
+    # process start (STATUS_DLL_NOT_FOUND on Windows / missing .so on Linux).
+    COPY_FILES(island_cef_tests "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "$<TARGET_FILE_DIR:island_cef_tests>")
+    if(OS_LINUX)
+        set_target_properties(island_cef_tests PROPERTIES
+            BUILD_WITH_INSTALL_RPATH TRUE
+            INSTALL_RPATH "$ORIGIN"
+        )
+    endif()
 endif()
 gtest_discover_tests(island_cef_tests)
