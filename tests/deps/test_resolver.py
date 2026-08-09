@@ -125,6 +125,12 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual((linux64.max_members, linux64.max_member_bytes, linux64.max_extract_bytes), (1402, 1726640701, 3340697146))
         self.assertEqual((linuxarm64.max_members, linuxarm64.max_member_bytes, linuxarm64.max_extract_bytes), (1402, 2776441424, 5388195969))
 
+    def test_resolve_uses_measured_macos_and_windows_extraction_bounds(self) -> None:
+        macosx64 = resolve_cef(self.lock, "macosx64")
+        windows64 = resolve_cef(self.lock, "windows64")
+        self.assertEqual((macosx64.max_members, macosx64.max_member_bytes, macosx64.max_extract_bytes), (2116, 417181171, 884718565))
+        self.assertEqual((windows64.max_members, windows64.max_member_bytes, windows64.max_extract_bytes), (1465, 413311263, 930119754))
+
     def test_download_accepts_exact_target_bound(self) -> None:
         artifact = replace(Artifact("fixture", "all", "https://example.test/file", hashlib.sha256(b"complete").hexdigest(), "tar.bz2", "test"), expected_archive_bytes=8, max_archive_bytes=8)
         with patch("deps.install.urlopen", return_value=FixtureResponse(b"complete", {"Content-Length": "8"})):
