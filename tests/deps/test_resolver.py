@@ -99,6 +99,12 @@ class ResolverTests(unittest.TestCase):
             self.assertEqual(artifact.expected_archive_bytes, size)
             self.assertGreaterEqual(artifact.max_archive_bytes, size)
 
+    def test_resolve_uses_linux_extraction_bounds(self) -> None:
+        linux64 = resolve_cef(self.lock, "linux64")
+        linuxarm64 = resolve_cef(self.lock, "linuxarm64")
+        self.assertEqual((linux64.max_members, linux64.max_member_bytes, linux64.max_extract_bytes), (1402, 1726640701, 3340697146))
+        self.assertEqual((linuxarm64.max_members, linuxarm64.max_member_bytes, linuxarm64.max_extract_bytes), (1402, 2776441424, 5388195969))
+
     def test_download_accepts_exact_target_bound(self) -> None:
         artifact = replace(Artifact("fixture", "all", "https://example.test/file", hashlib.sha256(b"complete").hexdigest(), "tar.bz2", "test"), expected_archive_bytes=8, max_archive_bytes=8)
         with patch("deps.install.urlopen", return_value=FixtureResponse(b"complete", {"Content-Length": "8"})):
@@ -148,6 +154,12 @@ class ResolverTests(unittest.TestCase):
         make_archive(archive, {"fixture/file": b"12345"})
         with self.assertRaisesRegex(InstallError, "member exceeds size"):
             extract(archive, self.root / "large-member", replace(self.artifact, max_member_bytes=4))
+
+    def test_extract_rejects_declared_total_size_limit(self) -> None:
+        archive = self.root / "large-total.tar.bz2"
+        make_archive(archive, {"fixture/one": b"123", "fixture/two": b"456"})
+        with self.assertRaisesRegex(InstallError, "extracted size"):
+            extract(archive, self.root / "large-total", replace(self.artifact, max_extract_bytes=5))
 
     def test_download_rejects_archive_size_limit(self) -> None:
         artifact = replace(Artifact("fixture", "all", "https://example.test/file", hashlib.sha256(b"complete").hexdigest(), "tar.bz2", "test"), max_archive_bytes=4)

@@ -56,7 +56,7 @@ class LockFile:
     cef_version: str
     cef_hashes: dict[str, str]
     cef_limits: tuple[int, int, int]
-    cef_archives: dict[str, tuple[str, int, int]]
+    cef_archives: dict[str, tuple[str, int, int, int, int, int]]
     geist_commit: str
     geist: Artifact
     geist_files: tuple[str, ...]
@@ -130,14 +130,17 @@ def load_lock(path: Path) -> LockFile:
     if _string(cef.get("sentinel"), "dependencies.cef.sentinel") != "cmake/cef_macros.cmake":
         raise ManifestError("dependencies.cef.sentinel is incorrect")
     targets = _mapping(cef.get("targets"), "dependencies.cef.targets")
-    archives: dict[str, tuple[str, int, int]] = {}
+    archives: dict[str, tuple[str, int, int, int, int, int]] = {}
     for target, record in targets.items():
         entry = _mapping(record, f"dependencies.cef.targets.{target}")
         archive_bytes = entry.get("archive_bytes")
         maximum = entry.get("max_archive_bytes")
         if not isinstance(archive_bytes, int) or not isinstance(maximum, int) or archive_bytes <= 0 or maximum < archive_bytes:
             raise ManifestError(f"dependencies.cef.targets.{target} has invalid archive bounds")
-        archives[target] = (_sha256(entry.get("sha256"), f"dependencies.cef.targets.{target}.sha256"), archive_bytes, maximum)
+        target_limits = (entry.get("max_members", cef_limits[0]), entry.get("max_member_bytes", cef_limits[1]), entry.get("max_extract_bytes", cef_limits[2]))
+        if not all(isinstance(value, int) and value > 0 for value in target_limits):
+            raise ManifestError(f"dependencies.cef.targets.{target} has invalid extraction bounds")
+        archives[target] = (_sha256(entry.get("sha256"), f"dependencies.cef.targets.{target}.sha256"), archive_bytes, maximum, target_limits[0], target_limits[1], target_limits[2])
     if set(archives) != _CEF_TARGETS:
         raise ManifestError("dependencies.cef.targets must list every supported CEF target")
     if _string(geist.get("host"), "dependencies.geist.host") != "github.com":
@@ -200,7 +203,7 @@ def detect_target(system: str = platform.system(), machine: str = platform.machi
 def resolve_cef(lock: LockFile, target: str) -> Artifact:
     """Resolve the CEF artifact for a validated target."""
     try:
-        digest, archive_bytes, maximum = lock.cef_archives[target]
+        digest, archive_bytes, maximum, max_members, max_member_bytes, max_extract_bytes = lock.cef_archives[target]
     except KeyError as error:
         raise TargetError(target) from error
     encoded_version = quote(lock.cef_version, safe="")
@@ -208,5 +211,5 @@ def resolve_cef(lock: LockFile, target: str) -> Artifact:
         name="cef", target=target,
         url=f"https://{_CEF_HOST}/cef_binary_{encoded_version}_{target}.tar.bz2",
         sha256=digest, archive="tar.bz2", source="official CEF binary distribution",
-        max_archive_bytes=maximum, max_members=lock.cef_limits[0], max_member_bytes=lock.cef_limits[1], max_extract_bytes=lock.cef_limits[2], expected_archive_bytes=archive_bytes,
+        max_archive_bytes=maximum, max_members=max_members, max_member_bytes=max_member_bytes, max_extract_bytes=max_extract_bytes, expected_archive_bytes=archive_bytes,
     )

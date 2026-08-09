@@ -12,8 +12,8 @@
         "macosarm64": {"sha256": "57f58530234f5b2a24f02479fdbc92b50aa5f94f7a66e32251cb71571284fad1", "archive_bytes": 285042171, "max_archive_bytes": 287892593},
         "windows64": {"sha256": "8969a127f540999407951a5e89fa844f761cd718a7e76ba9c88e11c0348e81a7", "archive_bytes": 346862808, "max_archive_bytes": 350331437},
         "windowsarm64": {"sha256": "b644110b3c0d56625c65ccdf28640b6000750a0afc7e06bf3dbf3c4e7dbe1d63", "archive_bytes": 323575662, "max_archive_bytes": 326811419},
-        "linux64": {"sha256": "6ae0afe3e1f4a9d134f1e1f4314e21df4d5e5b09fc34d9ff2230b4266445fe17", "archive_bytes": 667825046, "max_archive_bytes": 674503297},
-        "linuxarm64": {"sha256": "7ad8a568ec5e037039e4d5d59583ac3065e3e998148ac2dd27c7a7412ae11958", "archive_bytes": 839173804, "max_archive_bytes": 847565543}
+        "linux64": {"sha256": "6ae0afe3e1f4a9d134f1e1f4314e21df4d5e5b09fc34d9ff2230b4266445fe17", "archive_bytes": 667825046, "max_archive_bytes": 674503297, "member_count": 1388, "max_members": 1402, "largest_member_bytes": 1709545248, "max_member_bytes": 1726640701, "extracted_regular_bytes": 3307620936, "max_extract_bytes": 3340697146},
+        "linuxarm64": {"sha256": "7ad8a568ec5e037039e4d5d59583ac3065e3e998148ac2dd27c7a7412ae11958", "archive_bytes": 839173804, "max_archive_bytes": 847565543, "member_count": 1388, "max_members": 1402, "largest_member_bytes": 2748951904, "max_member_bytes": 2776441424, "extracted_regular_bytes": 5334847494, "max_extract_bytes": 5388195969}
       }
     },
     "geist": {
