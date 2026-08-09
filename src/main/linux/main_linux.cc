@@ -1,3 +1,5 @@
+#include "include/base/cef_build.h"
+
 #if defined(CEF_X11)
 #include <X11/Xlib.h>
 #endif

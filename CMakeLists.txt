@@ -97,6 +97,14 @@ function(island_stage_chrome_resources target destination)
     )
 endfunction()
 
+if(NOT DEFINED PROJECT_ARCH AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+    # third_party/cef/cmake/cef_variables.cmake only recognizes a host processor
+    # literally named "arm64" (as macOS reports it). Linux reports "aarch64",
+    # so without this it silently falls back to x86_64 flags such as -m64.
+    set(PROJECT_ARCH "arm64")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 

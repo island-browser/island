@@ -29,6 +29,11 @@ add_executable(island_tests
 target_compile_features(island_tests PRIVATE cxx_std_20)
 target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE GTest::gtest_main)
+if(WIN32)
+    # browser_chrome_contract_test.cpp pulls in CEF headers that call std::min/
+    # std::max; without these defines windows.h's min/max macros clobber them.
+    target_compile_definitions(island_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
 
 include(GoogleTest)
 gtest_discover_tests(island_tests)
