@@ -9,6 +9,7 @@
 #include "design_tokens.h"
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
+#include "include/cef_color_ids.h"
 #include "include/cef_frame.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_fill_layout.h"
@@ -292,17 +293,19 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     CEF_REQUIRE_UI_THREAD();
 
     window_ = window;
+    const ChromeTheme theme =
+        ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground));
     browser_view_ = CefBrowserView::CreateBrowserView(this, CefString(initial_url_),
                                                       CefBrowserSettings(), nullptr, nullptr, this);
     window_->SetToFillLayout();
-    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view_,
-                                              ChromeTokens::ForTheme(ChromeTheme::kLight),
+    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view_, ChromeTokens::ForTheme(theme),
                                               std::filesystem::path(kIconResourceRoot));
     chrome_->OnNavigationChanged(navigation_state_.snapshot());
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
     window_->AddChildView(chrome_->root());
     window_->SetTitle(CefString("Island"));
     window_->CenterWindow(CefSize(kChromeWindowWidth, kChromeWindowHeight));
+    ApplyTheme(window_, theme, true);
     window_->Show();
     window_->Activate();
     browser_view_->RequestFocus();
@@ -347,6 +350,14 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         .height = new_bounds.height,
     };
     PublishChromeSnapshot();
+}
+
+void BrowserWindow::OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!closing_) {
+        ApplyTheme(window, ClassifyChromeTheme(window->GetThemeColor(CEF_ColorPrimaryBackground)),
+                   false);
+    }
 }
 
 CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView>) {
@@ -414,6 +425,22 @@ BrowserWindow::ChromeToolbarType BrowserWindow::GetChromeToolbarType(CefRefPtr<C
 
 bool BrowserWindow::IsMainBrowser(CefRefPtr<CefBrowser> browser) const {
     return browser_ != nullptr && browser_->IsSame(browser);
+}
+
+void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views) {
+    const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+    window->SetThemeColor(CEF_ColorPrimaryBackground, tokens.background.argb);
+    window->SetThemeColor(CEF_ColorPrimaryForeground, tokens.text.argb);
+    window->SetThemeColor(CEF_ColorSecondaryForeground, tokens.text_secondary.argb);
+    window->SetThemeColor(CEF_ColorAccent, tokens.accent.argb);
+    if (notify_views) {
+        window->ThemeChanged();
+    }
+    if (chrome_ != nullptr) {
+        chrome_->ApplyTheme(tokens);
+    }
+    chrome_snapshot_.theme = theme;
+    PublishChromeSnapshot();
 }
 
 void BrowserWindow::PublishChromeSnapshot() {
