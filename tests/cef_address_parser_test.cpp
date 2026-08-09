@@ -68,6 +68,20 @@ TEST(CefAddressParser, CanonicalizesInternationalizedAndIpv6InputDeterministical
     EXPECT_EQ(ipv6.url, "https://[::1]/");
 }
 
+TEST(CefAddressParser, AcceptsOnlyValidBracketedIpv6AuthorityTails) {
+    for (const std::string_view input :
+         {"https://[::1]", "https://[::1]:8443/", "https://[::1]/path?query=value#section"}) {
+        EXPECT_TRUE(ParseAndValidate(input).is_valid()) << input;
+    }
+
+    for (const std::string_view input :
+         {"https://[::1]evil", "https://[::1]:443evil/", "https://[::1]]/",
+          "https://[::1]@example.test/", "https://[::1]%2fevil/", "https://[::1]%00/",
+          "https://[::1]%0a/", "https://[::1"}) {
+        EXPECT_FALSE(ParseAndValidate(input).is_valid()) << input;
+    }
+}
+
 TEST(CefAddressParser, RejectsRelativeSearchAndImplicitSchemeInput) {
     for (const std::string_view input : {"/relative/path", "example.test"}) {
         EXPECT_EQ(ParseAndValidate(input).error, AddressError::kNotAbsolute) << input;

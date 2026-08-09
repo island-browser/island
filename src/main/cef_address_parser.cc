@@ -112,6 +112,31 @@ bool HasEmptyAuthority(std::string_view input) {
            input[host_start] == '#';
 }
 
+bool HasInvalidBracketedIpv6Authority(std::string_view input) {
+    const std::size_t authority_start = input.find("://");
+    if (authority_start == std::string_view::npos) {
+        return false;
+    }
+    input.remove_prefix(authority_start + 3);
+    input = input.substr(0, input.find_first_of("/?#"));
+    if (!input.starts_with('[')) {
+        return false;
+    }
+
+    const std::size_t bracket = input.find(']');
+    if (bracket == std::string_view::npos) {
+        return true;
+    }
+    const std::string_view tail = input.substr(bracket + 1);
+    if (tail.empty() || tail.front() != ':') {
+        return !tail.empty();
+    }
+    const std::string_view port = tail.substr(1);
+    return port.empty() || !std::all_of(port.begin(), port.end(), [](unsigned char character) {
+               return std::isdigit(character) != 0;
+           });
+}
+
 }  // namespace
 
 ValidatedAddress ParseAndValidate(std::string_view input) {
@@ -123,14 +148,16 @@ ValidatedAddress ParseAndValidate(std::string_view input) {
     }
 
     const std::string scheme = ExplicitScheme(input);
+    const bool has_invalid_bracketed_ipv6_authority = HasInvalidBracketedIpv6Authority(input);
     CefURLParts parsed;
     if (!CefParseURL(CefString(std::string(input)), parsed)) {
-        ParsedAddressParts parts{.original = std::string(input),
-                                 .scheme = scheme,
-                                 .host = HostFromAuthority(input),
-                                 .port = PortFromAuthority(input),
-                                 .is_absolute = !scheme.empty(),
-                                 .has_credentials = HasCredentialsDelimiter(input)};
+        ParsedAddressParts parts{
+            .original = std::string(input),
+            .scheme = scheme,
+            .host = has_invalid_bracketed_ipv6_authority ? "" : HostFromAuthority(input),
+            .port = PortFromAuthority(input),
+            .is_absolute = !scheme.empty(),
+            .has_credentials = HasCredentialsDelimiter(input)};
         return ValidateAddress(parts);
     }
 
@@ -138,7 +165,9 @@ ValidatedAddress ParseAndValidate(std::string_view input) {
     ParsedAddressParts parts{
         .original = CefString(&parsed.spec).ToString(),
         .scheme = CefString(&parsed.scheme).ToString(),
-        .host = HasEmptyAuthority(input) ? "" : CefString(&parsed.host).ToString(),
+        .host = HasEmptyAuthority(input) || has_invalid_bracketed_ipv6_authority
+                    ? ""
+                    : CefString(&parsed.host).ToString(),
         .port = explicit_port.empty() ? CefString(&parsed.port).ToString() : explicit_port,
         .is_absolute = parsed.scheme.length > 0,
         .has_credentials = parsed.username.length > 0 || parsed.password.length > 0 ||
