@@ -29,6 +29,11 @@ std::vector<std::filesystem::path> FontFiles(const std::vector<std::filesystem::
     return {assets.begin(), assets.begin() + 8};
 }
 
+bool IsRegularFile(const std::filesystem::path& path) {
+    std::error_code error;
+    return std::filesystem::is_regular_file(path, error);
+}
+
 }  // namespace
 
 std::filesystem::path PackagedFontDirectory(ResourcePlatform platform,
@@ -39,6 +44,18 @@ std::filesystem::path PackagedFontDirectory(ResourcePlatform platform,
         case ResourcePlatform::kWindows:
         case ResourcePlatform::kLinux:
             return runtime_binary.parent_path() / "resources" / "island" / "fonts";
+    }
+    return {};
+}
+
+std::filesystem::path PackagedIconDirectory(ResourcePlatform platform,
+                                            const std::filesystem::path& runtime_binary) {
+    switch (platform) {
+        case ResourcePlatform::kMacOS:
+            return runtime_binary.parent_path().parent_path() / "Resources" / "island" / "icons";
+        case ResourcePlatform::kWindows:
+        case ResourcePlatform::kLinux:
+            return runtime_binary.parent_path() / "resources" / "island" / "icons";
     }
     return {};
 }
@@ -69,6 +86,24 @@ FontResources ResolveFontResources(
 
     resources.expected_assets = packaged_assets;
     resources.missing_assets = resources.missing_packaged_assets;
+    return resources;
+}
+
+IconResources ResolveIconResources(
+    ResourcePlatform platform, const std::filesystem::path& runtime_binary,
+    const std::optional<std::filesystem::path>& development_repository_root) {
+    IconResources resources;
+    resources.root = PackagedIconDirectory(platform, runtime_binary);
+    resources.manifest = resources.root / "manifest.json";
+    resources.manifest_present = IsRegularFile(resources.manifest);
+    if (resources.manifest_present || !development_repository_root.has_value()) {
+        return resources;
+    }
+
+    resources.using_fallback = true;
+    resources.root = *development_repository_root / "resources" / "island" / "icons";
+    resources.manifest = resources.root / "manifest.json";
+    resources.manifest_present = IsRegularFile(resources.manifest);
     return resources;
 }
 

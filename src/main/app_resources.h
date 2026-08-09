@@ -36,9 +36,21 @@ struct FontResources {
     bool using_fallback = false;
 };
 
+struct IconResources {
+    std::filesystem::path root;
+    std::filesystem::path manifest;
+    bool manifest_present = false;
+    bool using_fallback = false;
+};
+
 std::filesystem::path PackagedFontDirectory(ResourcePlatform platform,
                                             const std::filesystem::path& runtime_binary);
 FontResources ResolveFontResources(
+    ResourcePlatform platform, const std::filesystem::path& runtime_binary,
+    const std::optional<std::filesystem::path>& development_repository_root);
+std::filesystem::path PackagedIconDirectory(ResourcePlatform platform,
+                                            const std::filesystem::path& runtime_binary);
+IconResources ResolveIconResources(
     ResourcePlatform platform, const std::filesystem::path& runtime_binary,
     const std::optional<std::filesystem::path>& development_repository_root);
 
