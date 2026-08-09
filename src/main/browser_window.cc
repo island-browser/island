@@ -437,6 +437,13 @@ BrowserWindow::ChromeToolbarType BrowserWindow::GetChromeToolbarType(CefRefPtr<C
     return CEF_CTT_NONE;
 }
 
+void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!closing_ && browser_view_ != nullptr && view != nullptr && view->IsSame(browser_view_)) {
+        CancelAddressEditing();
+    }
+}
+
 bool BrowserWindow::IsMainBrowser(CefRefPtr<CefBrowser> browser) const {
     return browser_ != nullptr && browser_->IsSame(browser);
 }

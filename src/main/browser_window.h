@@ -102,6 +102,7 @@ class BrowserWindow : public CefClient,
     void OnBrowserDestroyed(CefRefPtr<CefBrowserView> browser_view,
                             CefRefPtr<CefBrowser> browser) override;
     ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView> browser_view) override;
+    void OnFocus(CefRefPtr<CefView> view) override;
 
   private:
     enum AcceleratorId {
