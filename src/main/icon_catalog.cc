@@ -25,6 +25,7 @@ std::string_view IconFilename(ChromeIcon icon) {
         case ChromeIcon::kLocation:
             return "globe-2";
     }
+    return {};
 }
 
 std::string_view ToneFilename(ChromeIconTone tone) {
@@ -36,6 +37,7 @@ std::string_view ToneFilename(ChromeIconTone tone) {
         case ChromeIconTone::kAccent:
             return "accent";
     }
+    return {};
 }
 
 std::string_view SizeFilename(ChromeIconSize size) {
@@ -49,6 +51,7 @@ std::string_view SizeFilename(ChromeIconSize size) {
         case ChromeIconSize::k17:
             return "17";
     }
+    return {};
 }
 
 std::optional<std::vector<char>> ReadPng(const std::filesystem::path& path) {

@@ -1,0 +1,148 @@
+name: Publish nightly unsigned candidates
+
+on:
+  workflow_run:
+    workflows:
+      - Package unsigned candidates
+    branches:
+      - main
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: Run ID of a completed "Package unsigned candidates" workflow run to republish.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-nightly:
+    name: Publish nightly release
+    if: >-
+      github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Resolve source package run
+        id: source-run
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_RUN_ID: ${{ inputs.package_run_id }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          run_id="$WORKFLOW_RUN_ID"
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            run_id="$MANUAL_RUN_ID"
+          fi
+          if [ -z "$run_id" ]; then
+            echo "Could not resolve a package run id." >&2
+            exit 1
+          fi
+          conclusion="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')"
+          if [ "$conclusion" != success ]; then
+            echo "Package run $run_id did not conclude successfully (conclusion=$conclusion)." >&2
+            exit 1
+          fi
+          sha="$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json headSha --jq '.headSha')"
+          if [ -z "$sha" ]; then
+            sha="$WORKFLOW_RUN_SHA"
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Download all unsigned candidates
+        shell: bash
+        env:
+          RUN_ID: ${{ steps.source-run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p nightly-staging
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'unsigned-candidate-*' --dir nightly-staging
+          find nightly-staging -maxdepth 1 -mindepth 1 -type d | sort
+
+      - name: Determine candidate version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          first_dir="$(find nightly-staging -maxdepth 1 -mindepth 1 -type d | sort | head -n1)"
+          if [ -z "$first_dir" ]; then
+            echo "No unsigned-candidate-* artifacts were downloaded." >&2
+            exit 1
+          fi
+          name="$(basename "$first_dir")"
+          # Artifact name shape: unsigned-candidate-<version>-<target>
+          version="${name#unsigned-candidate-}"
+          version="${version%-*}"
+          if [ -z "$version" ]; then
+            echo "Could not parse a version from artifact name: $name" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble release assets and combined checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p nightly-dist
+          : > nightly-dist/SHA256SUMS.txt
+          for candidate_dir in nightly-staging/unsigned-candidate-*; do
+            [ -d "$candidate_dir/dist" ] || continue
+            for artifact in "$candidate_dir"/dist/*; do
+              base="$(basename "$artifact")"
+              if [ "$base" = "SHA256SUMS.txt" ]; then
+                cat "$artifact" >> nightly-dist/SHA256SUMS.txt
+                continue
+              fi
+              if [ -e "nightly-dist/$base" ]; then
+                echo "Duplicate artifact filename across targets: $base" >&2
+                exit 1
+              fi
+              cp "$artifact" "nightly-dist/$base"
+            done
+          done
+          echo "Assembled nightly assets:"
+          ls -la nightly-dist
+
+      - name: Verify combined checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd nightly-dist
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Replace the moving nightly release
+        shell: bash
+        env:
+          SHA: ${{ steps.source-run.outputs.sha }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          fi
+          gh release create nightly nightly-dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "Nightly ($VERSION)" \
+            --prerelease \
+            --notes "Automated nightly build from commit ${SHA}. Every archive in this release is **unsigned and not notarized** (see \`build-metadata.json\` inside each archive: \`signed: false\`, \`notarized: false\`, \`publicReleaseEligible: false\`). Stable, signed releases remain gated behind \`release.yml\` and protected \`v*\` tags. Verify checksums against \`SHA256SUMS.txt\` before running any binary from this release."

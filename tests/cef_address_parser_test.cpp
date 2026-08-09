@@ -9,6 +9,9 @@
 #if defined(OS_MAC)
 #include "include/wrapper/cef_library_loader.h"
 #endif
+#if defined(OS_WIN)
+#include <windows.h>
+#endif
 
 namespace island {
 
@@ -28,7 +31,11 @@ int RunCefAddressParserTests(int argc, char* argv[]) {
     }
 #endif
 
+#if defined(OS_WIN)
+    CefMainArgs arguments(::GetModuleHandle(nullptr));
+#else
     CefMainArgs arguments(argc, argv);
+#endif
     const int subprocess_exit_code = CefExecuteProcess(arguments, nullptr, nullptr);
     if (subprocess_exit_code >= 0) {
         return subprocess_exit_code;
