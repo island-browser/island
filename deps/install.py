@@ -147,6 +147,49 @@ def extract(archive: Path, destination: Path, artifact: Artifact) -> Path:
     return roots[0]
 
 
+def extract_selected(archive: Path, destination: Path, artifact: Artifact, selected: dict[str, str]) -> None:
+    """Validate every tar entry while materializing only named safe outputs."""
+    mode = "r:bz2" if artifact.archive == "tar.bz2" else "r:gz"
+    selected_casefold = {name.casefold(): name for name in selected}
+    extracted: set[str] = set()
+    extracted_size = 0
+    member_count = 0
+    try:
+        with tarfile.open(archive, mode) as bundle:
+            for member in bundle:
+                _safe_member(member)
+                member_count += 1
+                if member_count > artifact.max_members:
+                    raise InstallError("archive exceeds member count limit")
+                if member.size > artifact.max_member_bytes:
+                    raise InstallError("archive member exceeds size limit")
+                extracted_size += member.size
+                if extracted_size > artifact.max_extract_bytes:
+                    raise InstallError("archive exceeds extracted size limit")
+                name = PurePosixPath(member.name).as_posix()
+                folded = name.casefold()
+                if folded in selected_casefold and name != selected_casefold[folded]:
+                    raise InstallError("archive has a case-fold collision for a selected file")
+                if name not in selected:
+                    continue
+                output_name = selected[name]
+                if output_name in extracted:
+                    raise InstallError("archive has duplicate selected file entries")
+                if not member.isfile():
+                    raise InstallError("archive selected entry is not a regular file")
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise InstallError("archive selected entry cannot be read")
+                with source, (destination / output_name).open("wb") as output:
+                    while chunk := source.read(_CHUNK):
+                        output.write(chunk)
+                extracted.add(output_name)
+    except (OSError, tarfile.TarError) as error:
+        raise InstallError(f"archive extraction failed: {error}") from error
+    if extracted != set(selected.values()):
+        raise InstallError("Geist archive is missing required static files")
+
+
 def _write_receipt(destination: Path, receipt: Receipt) -> None:
     content = json.dumps(asdict(receipt), sort_keys=True, separators=(",", ":")) + "\n"
     (destination / _RECEIPT).write_text(content, encoding="utf-8")
@@ -202,24 +245,15 @@ def install_geist(root: Path, lock: LockFile, dry_run: bool) -> None:
         work = Path(temporary)
         archive = work / "download.tar.gz"
         download(lock.geist, archive, frozenset({"github.com", "codeload.github.com"}))
-        extracted = extract(archive, work / "extract", lock.geist)
-        if extracted.name != f"geist-font-{lock.geist_commit}":
-            raise InstallError("Geist archive root does not match the pinned commit")
         staged = work / "staged"
         staged.mkdir()
+        archive_root = f"geist-font-{lock.geist_commit}"
         selected = {
-            filename: extracted / "fonts" / ("GeistMono" if filename.startswith("GeistMono-") else "Geist") / "ttf" / filename
+            f"{archive_root}/fonts/{'GeistMono' if filename.startswith('GeistMono-') else 'Geist'}/ttf/{filename}": filename
             for filename in lock.geist_files
         }
-        if not all(path.is_file() for path in selected.values()):
-            raise InstallError("Geist archive is missing required static TTF weights")
-        licenses = {filename: extracted / filename for filename in lock.geist_licenses}
-        if not all(path.is_file() for path in licenses.values()):
-            raise InstallError("Geist archive is missing required license files")
-        for filename in lock.geist_files:
-            shutil.copyfile(selected[filename], staged / filename)
-        for filename, license_path in licenses.items():
-            shutil.copyfile(license_path, staged / filename)
+        selected.update({f"{archive_root}/{filename}": filename for filename in lock.geist_licenses})
+        extract_selected(archive, staged, lock.geist, selected)
         _write_receipt(staged, Receipt("geist", "all", lock.geist.source, lock.geist.sha256, _tree_sha256(staged), install_contract_sha256(lock.geist, f"geist-font-{lock.geist_commit}", lock.geist_files + lock.geist_licenses)))
         _replace(destination, staged)
 

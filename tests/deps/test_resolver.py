@@ -14,7 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from deps.install import InstallError, download, extract, install_cef, install_geist, verify
+from deps.install import InstallError, download, extract, extract_selected, install_cef, install_geist, verify
 from deps.model import Artifact, ManifestError, load_lock, resolve_cef
 from deps.updates import UpdateError, compare_digest, parse_sha256_sidecar
 
@@ -52,6 +52,14 @@ def make_archive(path: Path, files: dict[str, bytes], link: bool = False) -> Non
             member.type = tarfile.SYMTYPE
             member.linkname = "outside"
             archive.addfile(member)
+
+
+def make_archive_entries(path: Path, entries: list[tuple[str, bytes]]) -> None:
+    with tarfile.open(path, "w:gz") as archive:
+        for name, content in entries:
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
 
 
 def load_cli():
@@ -172,6 +180,41 @@ class ResolverTests(unittest.TestCase):
         make_archive(archive, {"fixture/one": b"123", "fixture/two": b"456"})
         with self.assertRaisesRegex(InstallError, "extracted size"):
             extract(archive, self.root / "large-total", replace(self.artifact, max_extract_bytes=5))
+
+    def test_selected_extraction_skips_windows_invalid_unselected_members(self) -> None:
+        archive = self.root / "geist.tar.gz"
+        root = f"geist-font-{self.lock.geist_commit}"
+        selected_path = f"{root}/fonts/Geist/ttf/Geist-Regular.ttf"
+        make_archive_entries(archive, [(selected_path, b"font"), (f"{root}/sources/|", b"invalid-on-windows"), (f"{root}/CON", b"reserved-on-windows")])
+        output = self.root / "selected"
+        output.mkdir()
+        extract_selected(archive, output, self.lock.geist, {selected_path: "Geist-Regular.ttf"})
+        self.assertEqual((output / "Geist-Regular.ttf").read_bytes(), b"font")
+        self.assertFalse((output / "sources").exists())
+
+    def test_selected_extraction_rejects_duplicate_or_casefold_selected_paths(self) -> None:
+        archive = self.root / "duplicate.tar.gz"
+        root = f"geist-font-{self.lock.geist_commit}"
+        selected_path = f"{root}/fonts/Geist/ttf/Geist-Regular.ttf"
+        make_archive_entries(archive, [(selected_path, b"one"), (selected_path, b"two")])
+        output = self.root / "duplicate"
+        output.mkdir()
+        with self.assertRaisesRegex(InstallError, "duplicate selected"):
+            extract_selected(archive, output, self.lock.geist, {selected_path: "Geist-Regular.ttf"})
+        collision = self.root / "collision.tar.gz"
+        make_archive_entries(collision, [(selected_path.swapcase(), b"collision"), (selected_path, b"font")])
+        with self.assertRaisesRegex(InstallError, "case-fold collision"):
+            extract_selected(collision, output, self.lock.geist, {selected_path: "Geist-Regular.ttf"})
+
+    def test_selected_extraction_validates_unselected_traversal(self) -> None:
+        archive = self.root / "traversal-selected.tar.gz"
+        root = f"geist-font-{self.lock.geist_commit}"
+        selected_path = f"{root}/fonts/Geist/ttf/Geist-Regular.ttf"
+        make_archive_entries(archive, [(selected_path, b"font"), ("../escape", b"bad")])
+        output = self.root / "traversal-selected"
+        output.mkdir()
+        with self.assertRaisesRegex(InstallError, "unsafe path"):
+            extract_selected(archive, output, self.lock.geist, {selected_path: "Geist-Regular.ttf"})
 
     def test_download_rejects_archive_size_limit(self) -> None:
         artifact = replace(Artifact("fixture", "all", "https://example.test/file", hashlib.sha256(b"complete").hexdigest(), "tar.bz2", "test"), max_archive_bytes=4)
