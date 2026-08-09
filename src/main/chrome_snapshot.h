@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "design_tokens.h"
+
 namespace island {
 
 struct DipRect {
@@ -29,6 +31,7 @@ struct ChromeSnapshot {
     bool back_enabled = false;
     bool forward_enabled = false;
     std::string active_page_title;
+    ChromeTheme theme = ChromeTheme::kLight;
 
     bool operator==(const ChromeSnapshot&) const = default;
 };

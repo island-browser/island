@@ -70,6 +70,10 @@ TEST(ChromeSnapshot, UsesValueOnlyChromeGeometryAndFocusContracts) {
     EXPECT_EQ(snapshot.content_bounds, bounds);
 }
 
+TEST(ChromeSnapshot, DefaultsToTheLightChromeTheme) {
+    EXPECT_EQ(ChromeSnapshot{}.theme, ChromeTheme::kLight);
+}
+
 TEST(ChromeSnapshot, NotifiesObserversThroughTheNonOwningInterface) {
     static_assert(std::has_virtual_destructor_v<ChromeObserver>);
 
@@ -77,11 +81,13 @@ TEST(ChromeSnapshot, NotifiesObserversThroughTheNonOwningInterface) {
     const ChromeSnapshot snapshot{
         .focus_target = FocusTarget::kReload,
         .back_enabled = true,
+        .theme = ChromeTheme::kDark,
     };
 
     observer.OnChromeChanged(snapshot);
 
     EXPECT_EQ(observer.latest_snapshot, snapshot);
+    EXPECT_EQ(observer.latest_snapshot.theme, ChromeTheme::kDark);
 }
 
 }  // namespace
