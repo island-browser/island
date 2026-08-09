@@ -9,6 +9,8 @@ on:
       - cmake/**
       - deps/**
       - scripts/**
+      - resources/**
+      - tools/icon_pipeline/**
       - src/**
       - tests/**
       - .github/workflows/package.yml
@@ -124,12 +126,19 @@ jobs:
         if: ${{ matrix.setup-shell == 'pwsh' }}
         shell: pwsh
         run: '& .\scripts\setup_deps.ps1 --target ''${{ matrix.target }}'''
+      - name: Verify locked dependencies and committed icon assets
+        shell: bash
+        run: |
+          ${{ matrix.python }} scripts/deps.py verify
+          tools/icon_pipeline/run.sh verify
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure-argument }}
       - name: Build
         run: cmake --build build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure -C Release
+      - name: Test package resource validation
+        run: ${{ matrix.python }} -m pytest tests/package/test_package.py -q
       - name: Package and verify candidate (Bash)
         if: ${{ matrix.setup-shell == 'bash' }}
         shell: bash
