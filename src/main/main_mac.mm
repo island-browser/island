@@ -60,6 +60,7 @@
 - (void)goBack:(id)sender;
 - (void)goForward:(id)sender;
 - (void)reload:(id)sender;
+- (void)focusAddress:(id)sender;
 @end
 
 @implementation IslandMenuActions
@@ -90,6 +91,12 @@
 - (void)reload:(id)sender {
     if (app_ != nullptr) {
         app_->ExecuteCommand(island::BrowserCommand::kReload);
+    }
+}
+
+- (void)focusAddress:(id)sender {
+    if (app_ != nullptr) {
+        app_->BeginAddressEditing();
     }
 }
 @end
@@ -142,17 +149,24 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     NSMenuItem* reload_menu_item = [[NSMenuItem alloc] initWithTitle:@"Reload"
                                                               action:@selector(reload:)
                                                        keyEquivalent:@"r"];
+    NSMenuItem* focus_address_menu_item = [[NSMenuItem alloc] initWithTitle:@"Focus Address"
+                                                                     action:@selector(focusAddress:)
+                                                              keyEquivalent:@"l"];
+    [focus_address_menu_item setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
     [back_menu_item setTarget:menu_actions];
     [forward_menu_item setTarget:menu_actions];
     [reload_menu_item setTarget:menu_actions];
+    [focus_address_menu_item setTarget:menu_actions];
     [browser_menu addItem:back_menu_item];
     [browser_menu addItem:forward_menu_item];
     [browser_menu addItem:reload_menu_item];
+    [browser_menu addItem:focus_address_menu_item];
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
     [NSApp setMainMenu:main_menu];
 
+    [focus_address_menu_item release];
     [reload_menu_item release];
     [forward_menu_item release];
     [back_menu_item release];
