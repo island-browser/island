@@ -92,6 +92,18 @@ class ResolverTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "Unsupported CEF target"):
             resolve_cef(self.lock, "plan9")
 
+    def test_resolve_uses_target_specific_archive_bounds(self) -> None:
+        expected = {"macosx64": 321634893, "macosarm64": 285042171, "windows64": 346862808, "windowsarm64": 323575662, "linux64": 667825046, "linuxarm64": 839173804}
+        for target, size in expected.items():
+            artifact = resolve_cef(self.lock, target)
+            self.assertEqual(artifact.expected_archive_bytes, size)
+            self.assertGreaterEqual(artifact.max_archive_bytes, size)
+
+    def test_download_accepts_exact_target_bound(self) -> None:
+        artifact = replace(Artifact("fixture", "all", "https://example.test/file", hashlib.sha256(b"complete").hexdigest(), "tar.bz2", "test"), expected_archive_bytes=8, max_archive_bytes=8)
+        with patch("deps.install.urlopen", return_value=FixtureResponse(b"complete", {"Content-Length": "8"})):
+            download(artifact, self.root / "exact", frozenset({"example.test"}))
+
     def test_download_rejects_hash_mismatch_before_extraction(self) -> None:
         given = Artifact("fixture", "all", "https://example.test/file", "0" * 64, "tar.bz2", "test")
         destination = self.root / "download"

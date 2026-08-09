@@ -93,6 +93,8 @@ def download(artifact: Artifact, destination: Path, allowed_hosts: frozenset[str
                     if expected is None:
                         if content_length is not None and content_length.isdecimal():
                             expected = int(content_length)
+                            if artifact.expected_archive_bytes and expected != artifact.expected_archive_bytes:
+                                raise InstallError(f"download size does not match expected artifact for {artifact.name}")
                             if expected > artifact.max_archive_bytes:
                                 raise InstallError(f"download exceeds archive size limit for {artifact.name}")
                     elif response.headers.get("Content-Range") != f"bytes {received}-{expected - 1}/{expected}":
