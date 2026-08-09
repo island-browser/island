@@ -167,6 +167,10 @@ void TestRegistrationReportPreservesFallbackAndMissingAssetState() {
 int main() {
     static_assert(!std::is_copy_constructible_v<island::FontRegistry>);
     static_assert(!std::is_copy_assignable_v<island::FontRegistry>);
+    static_assert(
+        std::is_same_v<decltype(island::CurrentRuntimeBinaryPath()), std::filesystem::path>);
+    static_assert(std::is_same_v<decltype(island::ResolveCurrentProcessIconResources(std::nullopt)),
+                                 island::IconResources>);
     TestPackagedFontDirectoryUsesPlatformLayouts();
     TestPackagedIconDirectoryUsesPlatformLayouts();
     TestIconResourcesUseThePackagedManifestBeforeAnExplicitFallback();
