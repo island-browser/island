@@ -11,7 +11,6 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <div class="scroll-progress" aria-hidden="true"></div>
     <header class="site-header shell">
       <a class="brand" href="index.html" aria-label="Island home">
         <svg aria-hidden="true" viewBox="0 0 32 32">
@@ -20,8 +19,8 @@
         <span>Island</span>
       </a>
       <nav aria-label="Primary navigation">
-        <a href="index.html#concepts">Concepts</a>
-        <a href="index.html#about">About</a>
+        <a href="index.html#rail">The rail</a>
+        <a href="index.html#availability">Availability</a>
         <a href="privacy.html" aria-current="page">Privacy</a>
       </nav>
     </header>
@@ -74,19 +73,6 @@
             });
           }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
           revealEls.forEach(function (el) { io.observe(el); });
-        }
-
-        var bar = document.querySelector('.scroll-progress');
-        if (bar) {
-          var setProgress = function () {
-            var h = document.documentElement;
-            var scrollable = h.scrollHeight - h.clientHeight;
-            var pct = scrollable > 0 ? (h.scrollTop / scrollable) * 100 : 0;
-            bar.style.width = pct + '%';
-          };
-          document.addEventListener('scroll', setProgress, { passive: true });
-          window.addEventListener('resize', setProgress);
-          setProgress();
         }
       })();
     </script>

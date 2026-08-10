@@ -4,27 +4,36 @@
     <meta charset="utf-8">
     <script>document.documentElement.classList.add('js');</script>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Island is an open-source browser built around quiet, focused workspaces.">
+    <meta name="description" content="Island is an open-source native desktop browser in development, built on CEF with a calm left rail for the current page.">
     <meta name="theme-color" content="#F3F0E9">
-    <meta property="og:title" content="Island — a browser for focused work">
-    <meta property="og:description" content="An open-source browser shaped around calm, distinct workspaces.">
+    <meta property="og:title" content="Island — a calm native browser">
+    <meta property="og:description" content="An open-source native browser, in development for macOS.">
     <meta property="og:type" content="website">
     <link rel="stylesheet" href="assets/css/site.css">
-    <title>Island — a browser for focused work</title>
+    <title>Island — a calm native browser</title>
+
+    <!-- Inline SVG sprite: the four locked Lucide glyphs used by the real chrome. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></symbol>
+        <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+        <symbol id="i-rotate-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+        <symbol id="i-globe-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></symbol>
+      </defs>
+    </svg>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <div class="scroll-progress" aria-hidden="true"></div>
     <header class="site-header shell">
-      <a class="brand" href="index.html" aria-label="Island home">
+      <a class="brand" href="index.html" aria-label="Island home" aria-current="page">
         <svg aria-hidden="true" viewBox="0 0 32 32">
           <path d="M5 20.5c3.2-1.1 5.3-4.2 6.2-9.4 3.5 1.9 5.5 5 6 9.4 3.6-1 6.7-.5 9.8 1.8-4.7 4.3-13.7 5.3-22 1.1Z"/>
         </svg>
         <span>Island</span>
       </a>
       <nav aria-label="Primary navigation">
-        <a href="#concepts">Concepts</a>
-        <a href="#about">About</a>
+        <a href="#rail">The rail</a>
+        <a href="#availability">Availability</a>
         <a href="privacy.html">Privacy</a>
       </nav>
       <a class="header-source" href="https://github.com/impelixx/island" aria-label="View Island source on GitHub">
@@ -36,132 +45,147 @@
       <section class="hero shell" aria-labelledby="hero-title">
         <div class="hero-copy">
           <p class="eyebrow"><span class="mark mark-blue"></span> An open-source browser</p>
-          <h1 id="hero-title">A calmer place to work on the web.</h1>
+          <h1 id="hero-title">A calm place to browse, one page at a time.</h1>
           <p class="lede">
-            Island is a browser in progress, designed around the way focused work actually moves:
-            between contexts, sources, and decisions.
+            Island is a native desktop browser in development. It puts a single quiet rail to the
+            left of the page: back, forward, reload, one address, and the page you're on.
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/impelixx/island">
               Follow the project <span aria-hidden="true">→</span>
             </a>
-            <a class="button button-text" href="#concepts">
-              See the concepts <span aria-hidden="true">↓</span>
+            <a class="button button-text" href="#rail">
+              See the rail <span aria-hidden="true">↓</span>
             </a>
           </div>
-          <p class="availability">Desktop build for macOS is in development. Other platforms are coming later.</p>
+          <p class="availability"><span class="mark"></span>The desktop build is in development for macOS first. Other platforms are planned.</p>
         </div>
+
         <div class="hero-visual">
-          <div class="browser browser-main" aria-hidden="true">
-            <aside class="browser-sidebar">
-              <div class="window-controls"><i></i><i></i><i></i><b>‹</b><b>›</b></div>
-              <div class="address">⌘ <span>workspace.local / today</span></div>
-              <div class="tool-row"><span>↓</span><span>□</span><span>◷</span><span>⊙</span></div>
-              <div class="space-title"><span class="mark mark-blue"></span><b>FOCUS</b><span>⌖</span></div>
-              <div class="tabs">
-                <div class="tab active"><span>●</span>Project notes</div>
-                <div class="tab">New tab <b>⌘T</b></div>
+          <!--
+            Illustration of the running product's actual view tree (BrowserChrome::ViewTreeContract):
+            a 286px rail with a navigation row (Back, Forward), an address row
+            (Location, Address, Reload), a divider, and one active-page row,
+            beside a single browser canvas. Decorative; the copy describes the same.
+          -->
+          <div class="browser" aria-hidden="true">
+            <aside class="rail">
+              <div class="rail-window"><i></i><i></i><i></i></div>
+              <div class="rail-row rail-row--nav">
+                <span class="rail-btn"><svg><use href="#i-chevron-left"/></svg></span>
+                <span class="rail-btn"><svg><use href="#i-chevron-right"/></svg></span>
               </div>
-              <div class="space-switch">
-                <span class="active"><i></i>01</span><span><i></i></span><span><i></i></span><b>+</b>
+              <div class="rail-row">
+                <span class="rail-address"><svg class="loc"><use href="#i-globe-2"/></svg><span class="fill">Island</span></span>
+                <span class="rail-reload"><svg><use href="#i-rotate-cw"/></svg></span>
+              </div>
+              <hr class="rail-divider">
+              <div class="active-page">
+                <span class="favicon"><svg><use href="#i-globe-2"/></svg></span>
+                <span class="label">Island</span>
+                <span class="indicator"></span>
               </div>
             </aside>
-            <div class="browser-canvas">
-              <div class="canvas-bar"><b>+</b><span>FOCUS / TODAY</span><i>⌘K</i></div>
-              <div class="page-sheet">
-                <p class="sheet-label">WORKSPACE NOTE</p>
-                <h2>Keep the thread.</h2>
-                <p>One browser surface, arranged around the work you mean to return to.</p>
-                <div class="sheet-lines"><i></i><i></i><i></i></div>
-                <div class="sheet-footer"><span class="mark mark-blue"></span> Today’s focus</div>
+            <div class="canvas">
+              <div class="canvas-page">
+                <p class="page-title">Island Browser</p>
+                <p class="page-note">This is the local page the app opens with — no network request.</p>
               </div>
             </div>
           </div>
-          <p class="concept-caption">
-            <strong>Future product concept.</strong> The tabs, spaces, split view, and command surface
-            shown here are not shipping. Today’s macOS build is an empty native-window foundation.
+          <p class="hero-caption">
+            <strong>What runs today.</strong> The current macOS build opens one native window with the
+            rail shown here and a local starting page. It is a real foundation, not a finished browser.
           </p>
         </div>
       </section>
 
       <section class="intro shell reveal" id="about" aria-labelledby="about-title">
-        <p class="eyebrow">Built with intention</p>
+        <p class="eyebrow">Why it's being built</p>
         <div>
-          <h2 id="about-title">The web has enough noise. A browser can make room for thought.</h2>
-          <p>Island explores a quieter model: familiar browsing, organized by the work in front of you rather than by a growing pile of tabs.</p>
+          <h2 id="about-title">The browser chrome should get out of the way.</h2>
+          <p>Island keeps the interface small and legible so the page stays in front. Navigation, an address, and the current page live in one calm rail at the left edge — nothing more competes for your attention.</p>
         </div>
       </section>
 
-      <section class="concepts shell" id="concepts" aria-labelledby="concepts-title">
+      <section class="ledger shell" id="rail" aria-labelledby="rail-title">
         <div class="section-heading reveal">
-          <p class="eyebrow">A direction, not a release note</p>
-          <h2 id="concepts-title">Designed around context.</h2>
-          <p>The following are product concepts under active development. They are not promises of currently available functionality.</p>
+          <p class="eyebrow">The rail, today</p>
+          <h2 id="rail-title">What the current build actually has.</h2>
+          <p>These are the working pieces of the macOS build in development — not a roadmap and not a promise of what's next.</p>
         </div>
 
-        <article class="feature feature-spaces">
-          <div class="feature-copy reveal" data-index="01">
-            <p class="eyebrow"><span class="mark mark-blue"></span> Spaces</p>
-            <h3>Separate the work, not just the windows.</h3>
-            <p>Spaces are a proposed way to keep project, research, and personal browsing distinct—without turning each into another inbox.</p>
-            <span class="coming">Planned concept</span>
-          </div>
-          <div class="fragment spaces-fragment reveal reveal-lag" aria-hidden="true">
-            <div class="fragment-head">Spaces <span>3 SPACES</span></div>
-            <div class="space-row selected"><i class="mark-blue"></i><span>Work</span><b>···</b></div>
-            <div class="space-row"><i class="mark mark-coral"></i><span>Research</span><b>···</b></div>
-            <div class="space-row"><i class="mark mark-green"></i><span>Personal</span><b>···</b></div>
-          </div>
-        </article>
-
-        <article class="feature feature-split">
-          <div class="fragment split-fragment reveal reveal-lag" aria-hidden="true">
-            <div class="split-bar"><b>+</b><span>BUILD / SPLIT SESSION</span><i>↔</i></div>
-            <div class="split-panes">
-              <div>
-                <p>SPRINT 24</p>
-                <h4>Current sprint</h4>
-                <small>12 issues · 68% complete</small>
-                <em></em>
-                <span>BRW-218<br><b>Unify command menu results</b></span>
-              </div>
-              <i></i>
-              <div>
-                <p>NOTES</p>
-                <h4>Release notes</h4>
-                <small>October updates</small>
-                <span>A quieter way to keep related work close.</span>
-              </div>
+        <div class="rail-list">
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">01</span>
+              <h3>Back and forward</h3>
             </div>
-          </div>
-          <div class="feature-copy reveal" data-index="02">
-            <p class="eyebrow"><span class="mark mark-coral"></span> Split view</p>
-            <h3>Put two sources in the same conversation.</h3>
-            <p>A proposed split surface keeps comparison close at hand: a brief beside a plan, an issue beside the implementation, a source beside your notes.</p>
-            <span class="coming">Planned concept</span>
-          </div>
-        </article>
+            <div class="lift-copy">
+              <p>Move backward and forward through the current page's history from the top of the rail. Keyboard shortcuts work too.</p>
+              <span class="lift-spec">Working in the build</span>
+            </div>
+          </article>
 
-        <article class="feature feature-command">
-          <div class="feature-copy reveal" data-index="03">
-            <p class="eyebrow"><span class="mark mark-green"></span> Command</p>
-            <h3>Reach what matters without leaving the thread.</h3>
-            <p>The command surface is being explored as a direct path to tabs, URLs, and context—kept deliberately small, legible, and keyboard-first.</p>
-            <span class="coming">Coming later</span>
-          </div>
-          <div class="fragment command-fragment reveal reveal-lag" aria-hidden="true">
-            <div class="command-tabs"><b>⌕ Search</b><span>□ Ask</span><i>ESC</i></div>
-            <div class="command-search">Search tabs, history, or enter a URL</div>
-            <div class="command-result"><span>⌕</span><div><b>Project notes</b><small>workspace.local / today</small></div><i>↵</i></div>
-            <div class="command-result"><span>□</span><div><b>Open a new tab</b><small>Start with a URL or search</small></div><i>⌘T</i></div>
-          </div>
-        </article>
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">02</span>
+              <h3>One address</h3>
+            </div>
+            <div class="lift-copy">
+              <p>A single address field accepts a URL and takes you there. It validates what you type and keeps the current address in view when you're not editing it.</p>
+              <span class="lift-spec">Working in the build</span>
+            </div>
+          </article>
+
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">03</span>
+              <h3>Reload</h3>
+            </div>
+            <div class="lift-copy">
+              <p>Reload the current page from beside the address field, or with the usual keyboard shortcut.</p>
+              <span class="lift-spec">Working in the build</span>
+            </div>
+          </article>
+
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">04</span>
+              <h3>The current page</h3>
+            </div>
+            <div class="lift-copy">
+              <p>One row at the foot of the rail shows the page you're on, with an accent line marking it as active. Selecting it returns focus to the page.</p>
+              <span class="lift-spec">Working in the build</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="availability-block shell reveal" id="availability" aria-labelledby="availability-title">
+        <div class="section-heading">
+          <p class="eyebrow">Availability</p>
+          <h2 id="availability-title">Where you can run it.</h2>
+          <p>Honest platform status for the in-development build. Signed public releases are still to come.</p>
+        </div>
+        <div class="availability-grid">
+          <article class="availability-item">
+            <span class="status-chip status-chip--active">In development</span>
+            <h3>macOS</h3>
+            <p>Island is being built and verified on macOS first. The current build runs on Apple silicon; broader macOS and notarized releases are still in progress.</p>
+          </article>
+          <article class="availability-item">
+            <span class="status-chip status-chip--planned">Planned</span>
+            <h3>Windows &amp; Linux</h3>
+            <p>Support for Windows and Linux is planned. Those builds still need platform verification before they're treated as available.</p>
+          </article>
+        </div>
       </section>
 
       <section class="open-source shell reveal" aria-labelledby="source-title">
         <p class="eyebrow">Open source</p>
-        <h2 id="source-title">Build the browser you want to use.</h2>
-        <p>Island is being made in the open. Follow the work, read the design notes, or contribute when the project is ready for you.</p>
+        <h2 id="source-title">Built in the open.</h2>
+        <p>Island is being made in public. Follow the work, read the design notes, or contribute when the project is ready for you.</p>
         <a class="button button-primary" href="https://github.com/impelixx/island">
           Visit the repository <span aria-hidden="true">→</span>
         </a>
@@ -169,7 +193,7 @@
     </main>
 
     <footer class="site-footer shell">
-      <a class="brand" href="index.html">
+      <a class="brand" href="index.html" aria-current="page">
         <svg aria-hidden="true" viewBox="0 0 32 32">
           <path d="M5 20.5c3.2-1.1 5.3-4.2 6.2-9.4 3.5 1.9 5.5 5 6 9.4 3.6-1 6.7-.5 9.8 1.8-4.7 4.3-13.7 5.3-22 1.1Z"/>
         </svg>
@@ -181,6 +205,7 @@
         <a href="https://github.com/impelixx/island">GitHub</a>
       </nav>
     </footer>
+
     <script>
       (function () {
         var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -198,19 +223,6 @@
             });
           }, { threshold: 0.15, rootMargin: '0px 0px -8% 0px' });
           revealEls.forEach(function (el) { io.observe(el); });
-        }
-
-        var bar = document.querySelector('.scroll-progress');
-        if (bar) {
-          var setProgress = function () {
-            var h = document.documentElement;
-            var scrollable = h.scrollHeight - h.clientHeight;
-            var pct = scrollable > 0 ? (h.scrollTop / scrollable) * 100 : 0;
-            bar.style.width = pct + '%';
-          };
-          document.addEventListener('scroll', setProgress, { passive: true });
-          window.addEventListener('resize', setProgress);
-          setProgress();
         }
       })();
     </script>
