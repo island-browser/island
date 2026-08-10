@@ -99,6 +99,69 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] ChromeViewTreeNode view_tree_snapshot() const;
     [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
     [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
+
+    // Address-editing leading edge and ActivePageIndicator thickness in DIP;
+    // both are 2 so the rail accent and the address accent read as one mark.
+    [[nodiscard]] static constexpr int AddressFocusLeadingEdgeDip() { return 2; }
+    [[nodiscard]] static constexpr int ActivePageIndicatorWidthDip() {
+        return AddressFocusLeadingEdgeDip();
+    }
+
+    enum class SurfaceSlot : std::uint8_t {
+        kRoot,
+        kRail,
+        kBrowserContent,
+        kHairline,
+        kAddressWell,
+        kAccent,
+    };
+    [[nodiscard]] static ArgbColor ChromeSurfaceRole(SurfaceSlot slot, ChromeTheme theme) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+        switch (slot) {
+            case SurfaceSlot::kRoot:
+            case SurfaceSlot::kBrowserContent:
+                return tokens.background;
+            case SurfaceSlot::kRail:
+                return tokens.surface;
+            case SurfaceSlot::kHairline:
+                return tokens.border;
+            case SurfaceSlot::kAddressWell:
+                return tokens.surface_secondary;
+            case SurfaceSlot::kAccent:
+                return tokens.accent;
+        }
+        return tokens.background;
+    }
+    [[nodiscard]] ArgbColor ChromeSurfaceRoleForResolvedTokens(SurfaceSlot slot) const {
+        switch (slot) {
+            case SurfaceSlot::kRoot:
+            case SurfaceSlot::kBrowserContent:
+                return tokens_.background;
+            case SurfaceSlot::kRail:
+                return tokens_.surface;
+            case SurfaceSlot::kHairline:
+                return tokens_.border;
+            case SurfaceSlot::kAddressWell:
+                return tokens_.surface_secondary;
+            case SurfaceSlot::kAccent:
+                return tokens_.accent;
+        }
+        return tokens_.background;
+    }
+
+    // Justified: navigation, location, and the favicon placeholder use the
+    // secondary tone so the canonical accent only signals an action or active
+    // state (contract rules.accent_semantics); the accent would otherwise
+    // claim idle affordances.
+    [[nodiscard]] static constexpr ChromeIconTone NavigationIconTone() {
+        return ChromeIconTone::kSecondary;
+    }
+    [[nodiscard]] static constexpr ChromeIconTone AddressLocationIconTone() {
+        return ChromeIconTone::kSecondary;
+    }
+    [[nodiscard]] static constexpr ChromeIconTone FallbackFaviconIconTone() {
+        return ChromeIconTone::kSecondary;
+    }
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(
         DipRect root_bounds, const ChromeTokens& tokens) noexcept {
         const int rail_width = std::min(tokens.rail_width_dip, root_bounds.width);
@@ -161,7 +224,7 @@ class BrowserChrome final : public NavigationObserver {
     void ProjectAddress(const AddressBarSnapshot& snapshot);
     void ScheduleAddressSelection();
     void ApplyControlTheme();
-    [[nodiscard]] ChromeIconTone IconTone() const;
+    void UpdateAddressFocusLeadingEdge();
 
     BrowserChromeHost* host_;
     ChromeTokens tokens_;
@@ -170,6 +233,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefBrowserView> browser_view_;
+    CefRefPtr<CefPanel> address_focus_leading_edge_;
+    CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;

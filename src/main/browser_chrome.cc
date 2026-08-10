@@ -262,6 +262,10 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_row->SetID(static_cast<int>(ChromeViewId::kAddressRow));
     CefRefPtr<CefBoxLayout> address_layout = address_row->SetToBoxLayout(HorizontalLayout(tokens_));
 
+    address_focus_leading_edge_ = CefPanel::CreatePanel(
+        new PanelDelegate(CefSize(AddressFocusLeadingEdgeDip(), control_height)));
+    address_row->AddChildView(address_focus_leading_edge_);
+
     address_location_icon_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     address_location_icon_->SetID(static_cast<int>(ChromeViewId::kAddressLocationIcon));
     address_location_icon_->SetAccessibleName("Location");
@@ -304,6 +308,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<CefPanel> divider = CefPanel::CreatePanel(
         new PanelDelegate(CefSize(tokens_.rail_width_dip, DividerHeight(tokens_))));
     divider->SetID(static_cast<int>(ChromeViewId::kDivider));
+    divider_ = divider;
     sidebar_->AddChildView(divider);
 
     active_page_ = CefPanel::CreatePanel(nullptr);
@@ -329,8 +334,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     active_page_->AddChildView(active_tab_);
     active_page_layout->SetFlexForView(active_tab_, 1);
 
-    active_page_indicator_ =
-        CefPanel::CreatePanel(new PanelDelegate(CefSize(tokens_.spacing_1_dip, control_height)));
+    active_page_indicator_ = CefPanel::CreatePanel(
+        new PanelDelegate(CefSize(ActivePageIndicatorWidthDip(), control_height)));
     active_page_indicator_->SetID(static_cast<int>(ChromeViewId::kActivePageIndicator));
     active_page_->AddChildView(active_page_indicator_);
     sidebar_->AddChildView(active_page_);
@@ -485,6 +490,7 @@ void BrowserChrome::HandleAddressFocus() {
     CEF_REQUIRE_UI_THREAD();
     if (!detached_) {
         host_->BeginAddressEditing();
+        UpdateAddressFocusLeadingEdge();
         ScheduleAddressSelection();
     }
 }
@@ -493,6 +499,7 @@ void BrowserChrome::HandleAddressBlur() {
     CEF_REQUIRE_UI_THREAD();
     if (!detached_) {
         host_->CancelAddressEditing();
+        UpdateAddressFocusLeadingEdge();
     }
 }
 
@@ -529,12 +536,23 @@ void BrowserChrome::ScheduleAddressSelection() {
 }
 
 void BrowserChrome::ApplyControlTheme() {
-    root_->SetBackgroundColor(tokens_.background.argb);
-    sidebar_->SetBackgroundColor(tokens_.surface.argb);
-    browser_content_->SetBackgroundColor(tokens_.background.argb);
-    address_field_->SetBackgroundColor(tokens_.surface_secondary.argb);
-    active_page_indicator_->SetBackgroundColor(tokens_.accent.argb);
-    address_field_->SetFontList("Geist, 14px");
+    const ArgbColor background = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRoot);
+    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
+    const ArgbColor browser_content =
+        ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kBrowserContent);
+    const ArgbColor hairline = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kHairline);
+    const ArgbColor address_well = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAddressWell);
+    const ArgbColor accent = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAccent);
+
+    root_->SetBackgroundColor(background.argb);
+    sidebar_->SetBackgroundColor(rail.argb);
+    browser_content_->SetBackgroundColor(browser_content.argb);
+    divider_->SetBackgroundColor(hairline.argb);
+    address_field_->SetBackgroundColor(address_well.argb);
+    active_page_indicator_->SetBackgroundColor(accent.argb);
+    UpdateAddressFocusLeadingEdge();
+    address_field_->SetFontList("Geist Mono, 14px");
+    active_tab_->SetFontList("Geist, 14px");
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
@@ -544,13 +562,13 @@ void BrowserChrome::ApplyControlTheme() {
     validation_message_->SetEnabledTextColors(tokens_.accent.argb);
 
     const std::optional<CefRefPtr<CefImage>> back =
-        icon_catalog_.Load(ChromeIcon::kBack, IconTone(), ChromeIconSize::k16);
+        icon_catalog_.Load(ChromeIcon::kBack, NavigationIconTone(), ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> forward =
-        icon_catalog_.Load(ChromeIcon::kForward, IconTone(), ChromeIconSize::k16);
+        icon_catalog_.Load(ChromeIcon::kForward, NavigationIconTone(), ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> reload =
-        icon_catalog_.Load(ChromeIcon::kReload, IconTone(), ChromeIconSize::k16);
+        icon_catalog_.Load(ChromeIcon::kReload, NavigationIconTone(), ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> location =
-        icon_catalog_.Load(ChromeIcon::kLocation, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+        icon_catalog_.Load(ChromeIcon::kLocation, AddressLocationIconTone(), ChromeIconSize::k16);
     if (back.has_value()) {
         back_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *back);
     }
@@ -566,6 +584,12 @@ void BrowserChrome::ApplyControlTheme() {
     }
 }
 
-ChromeIconTone BrowserChrome::IconTone() const { return ChromeIconTone::kText; }
+void BrowserChrome::UpdateAddressFocusLeadingEdge() {
+    CEF_REQUIRE_UI_THREAD();
+    const ArgbColor accent = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAccent);
+    const ArgbColor well = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAddressWell);
+    address_focus_leading_edge_->SetBackgroundColor(address_field_->HasFocus() ? accent.argb
+                                                                               : well.argb);
+}
 
 }  // namespace island

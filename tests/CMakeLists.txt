@@ -17,6 +17,7 @@ add_executable(island_tests
     address_bar_model_test.cpp
     address_policy_test.cpp
     chrome/browser_chrome_contract_test.cpp
+    chrome/browser_chrome_style_test.cpp
     design_tokens_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
