@@ -5,48 +5,149 @@
 namespace island {
 namespace {
 
+const ChromeViewTreeNode* FindChild(const ChromeViewTreeNode& node, ChromeViewId id) {
+    for (const ChromeViewTreeNode& child : node.children) {
+        if (child.id == id) {
+            return &child;
+        }
+        if (const ChromeViewTreeNode* match = FindChild(child, id); match != nullptr) {
+            return match;
+        }
+    }
+    return nullptr;
+}
+
 TEST(BrowserChromeContractTest, GivenTheChromeTreeWhenInspectedThenItHasOneRailAndOneBrowserView) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
 
     ASSERT_EQ(tree.id, ChromeViewId::kRoot);
     ASSERT_EQ(tree.children.size(), 2U);
     EXPECT_EQ(tree.children[0].id, ChromeViewId::kRail);
-    ASSERT_EQ(tree.children[1].id, ChromeViewId::kBrowserContent);
-    ASSERT_EQ(tree.children[1].children.size(), 1U);
-    EXPECT_EQ(tree.children[1].children[0].id, ChromeViewId::kBrowserView);
+    ASSERT_NE(FindChild(tree, ChromeViewId::kBrowserContent), nullptr);
+    const ChromeViewTreeNode* browser_content = FindChild(tree, ChromeViewId::kBrowserContent);
+    ASSERT_EQ(browser_content->children.size(), 1U);
+    EXPECT_EQ(browser_content->children[0].id, ChromeViewId::kBrowserView);
 }
 
 TEST(BrowserChromeContractTest,
      GivenTheAddressControlWhenInspectedThenItContainsLocationAndTrailingReload) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
-    const ChromeViewTreeNode& rail = tree.children[0];
-    const ChromeViewTreeNode& navigation_row = rail.children[0];
-    const ChromeViewTreeNode& address_row = rail.children[1];
+    const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
+    ASSERT_NE(rail, nullptr);
+    const ChromeViewTreeNode* navigation_row = FindChild(*rail, ChromeViewId::kNavigationRow);
+    const ChromeViewTreeNode* address_row = FindChild(*rail, ChromeViewId::kAddressRow);
 
-    ASSERT_EQ(navigation_row.id, ChromeViewId::kNavigationRow);
-    ASSERT_EQ(navigation_row.children.size(), 2U);
-    EXPECT_EQ(navigation_row.children[0].id, ChromeViewId::kBack);
-    EXPECT_EQ(navigation_row.children[1].id, ChromeViewId::kForward);
-    ASSERT_EQ(address_row.id, ChromeViewId::kAddressRow);
-    ASSERT_EQ(address_row.children.size(), 3U);
-    EXPECT_EQ(address_row.children[0].id, ChromeViewId::kAddressLocationIcon);
-    EXPECT_EQ(address_row.children[1].id, ChromeViewId::kAddress);
-    EXPECT_EQ(address_row.children[2].id, ChromeViewId::kReload);
+    ASSERT_NE(navigation_row, nullptr);
+    ASSERT_EQ(navigation_row->children.size(), 2U);
+    EXPECT_EQ(navigation_row->children[0].id, ChromeViewId::kBack);
+    EXPECT_EQ(navigation_row->children[1].id, ChromeViewId::kForward);
+    ASSERT_NE(address_row, nullptr);
+    ASSERT_EQ(address_row->children.size(), 3U);
+    EXPECT_EQ(address_row->children[0].id, ChromeViewId::kAddressLocationIcon);
+    EXPECT_EQ(address_row->children[1].id, ChromeViewId::kAddress);
+    EXPECT_EQ(address_row->children[2].id, ChromeViewId::kReload);
 }
 
 TEST(BrowserChromeContractTest, GivenTheCurrentPageWhenInspectedThenItHasFallbackAndIndicator) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
-    const ChromeViewTreeNode& rail = tree.children[0];
-    const ChromeViewTreeNode& active_page = rail.children[5];
+    const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
+    ASSERT_NE(rail, nullptr);
+    const ChromeViewTreeNode* active_page = FindChild(*rail, ChromeViewId::kActivePage);
 
-    ASSERT_EQ(rail.children[0].id, ChromeViewId::kNavigationRow);
-    ASSERT_EQ(rail.children[1].id, ChromeViewId::kAddressRow);
-    ASSERT_EQ(rail.children[5].id, ChromeViewId::kActivePage);
-    ASSERT_EQ(active_page.id, ChromeViewId::kActivePage);
-    ASSERT_EQ(active_page.children.size(), 3U);
-    EXPECT_EQ(active_page.children[0].id, ChromeViewId::kActivePageFallbackFavicon);
-    EXPECT_EQ(active_page.children[1].id, ChromeViewId::kActiveTab);
-    EXPECT_EQ(active_page.children[2].id, ChromeViewId::kActivePageIndicator);
+    ASSERT_NE(FindChild(*rail, ChromeViewId::kNavigationRow), nullptr);
+    ASSERT_NE(FindChild(*rail, ChromeViewId::kAddressRow), nullptr);
+    ASSERT_NE(FindChild(*rail, ChromeViewId::kValidationMessage), nullptr);
+    ASSERT_NE(FindChild(*rail, ChromeViewId::kSpacer), nullptr);
+    ASSERT_NE(FindChild(*rail, ChromeViewId::kDivider), nullptr);
+    ASSERT_NE(active_page, nullptr);
+    ASSERT_EQ(active_page->children.size(), 3U);
+    EXPECT_EQ(active_page->children[0].id, ChromeViewId::kActivePageFallbackFavicon);
+    EXPECT_EQ(active_page->children[1].id, ChromeViewId::kActiveTab);
+    EXPECT_EQ(active_page->children[2].id, ChromeViewId::kActivePageIndicator);
+}
+
+TEST(BrowserChromeContractTest,
+     GivenTheRailWhenInspectedThenItExposesTabStripAndSpaceSwitcherCollections) {
+    const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
+    const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
+    ASSERT_NE(rail, nullptr);
+
+    const ChromeViewTreeNode* tab_strip = FindChild(*rail, ChromeViewId::kTabStrip);
+    ASSERT_NE(tab_strip, nullptr);
+    EXPECT_EQ(tab_strip->children.size(), 0U);
+
+    const ChromeViewTreeNode* space_switcher = FindChild(*rail, ChromeViewId::kSpaceSwitcher);
+    ASSERT_NE(space_switcher, nullptr);
+    EXPECT_EQ(space_switcher->children.size(), 0U);
+}
+
+TEST(BrowserChromeContractTest, GivenTabStripEntriesWhenProjectedThenEachEntryHasTheTabItemShape) {
+    const std::vector<TabStripEntrySnapshot> tabs = {
+        {.title = "Island"},
+        {.title = "A very long page title that must truncate in the rail"},
+    };
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
+        {.color = ArgbColor{0xFF336699}, .name = "Personal"}};
+    const ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract(tabs, spaces);
+    const ChromeViewTreeNode* tab_strip = FindChild(tree, ChromeViewId::kTabStrip);
+    ASSERT_NE(tab_strip, nullptr);
+
+    ASSERT_EQ(tab_strip->children.size(), tabs.size());
+    for (const ChromeViewTreeNode& entry : tab_strip->children) {
+        EXPECT_EQ(entry.id, ChromeViewId::kTabStripEntry);
+        ASSERT_EQ(entry.children.size(), 3U);
+        EXPECT_EQ(entry.children[0].id, ChromeViewId::kTabStripEntryFavicon);
+        EXPECT_EQ(entry.children[1].id, ChromeViewId::kTabStripEntryTitle);
+        EXPECT_EQ(entry.children[2].id, ChromeViewId::kTabStripEntryClose);
+        for (const ChromeViewTreeNode& child : entry.children) {
+            EXPECT_TRUE(child.children.empty());
+        }
+    }
+}
+
+TEST(BrowserChromeContractTest,
+     GivenSpaceSwitcherEntriesWhenProjectedThenEachEntryHasTheSpaceItemShape) {
+    const std::vector<TabStripEntrySnapshot> tabs = {{.title = "Island"}};
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
+        {.color = ArgbColor{0xFF336699}, .name = "Personal"},
+        {.color = ArgbColor{0xFF993366},
+         .name = "A very long space name that must truncate in the rail"},
+    };
+    const ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract(tabs, spaces);
+    const ChromeViewTreeNode* space_switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
+    ASSERT_NE(space_switcher, nullptr);
+
+    ASSERT_EQ(space_switcher->children.size(), spaces.size());
+    for (const ChromeViewTreeNode& entry : space_switcher->children) {
+        EXPECT_EQ(entry.id, ChromeViewId::kSpaceSwitcherEntry);
+        ASSERT_EQ(entry.children.size(), 2U);
+        EXPECT_EQ(entry.children[0].id, ChromeViewId::kSpaceSwitcherEntryColorMark);
+        EXPECT_EQ(entry.children[1].id, ChromeViewId::kSpaceSwitcherEntryName);
+        for (const ChromeViewTreeNode& child : entry.children) {
+            EXPECT_TRUE(child.children.empty());
+        }
+    }
+}
+
+TEST(BrowserChromeContractTest,
+     GivenNoTabsOrSpacesWhenProjectedThenBothCollectionsAreEmptyAndFixedRegionsRemain) {
+    const ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract({}, {});
+    const ChromeViewTreeNode* tab_strip = FindChild(tree, ChromeViewId::kTabStrip);
+    const ChromeViewTreeNode* space_switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
+    ASSERT_NE(tab_strip, nullptr);
+    ASSERT_NE(space_switcher, nullptr);
+    EXPECT_TRUE(tab_strip->children.empty());
+    EXPECT_TRUE(space_switcher->children.empty());
+
+    const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
+    ASSERT_NE(rail, nullptr);
+    EXPECT_NE(FindChild(*rail, ChromeViewId::kNavigationRow), nullptr);
+    EXPECT_NE(FindChild(*rail, ChromeViewId::kAddressRow), nullptr);
+    EXPECT_NE(FindChild(*rail, ChromeViewId::kActivePage), nullptr);
+    const ChromeViewTreeNode* browser_content = FindChild(tree, ChromeViewId::kBrowserContent);
+    ASSERT_NE(browser_content, nullptr);
+    ASSERT_EQ(browser_content->children.size(), 1U);
+    EXPECT_EQ(browser_content->children[0].id, ChromeViewId::kBrowserView);
 }
 
 TEST(BrowserChromeContractTest, GivenReferenceWindowBoundsWhenLaidOutThenRailStaysFixed) {
@@ -107,6 +208,27 @@ TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStabl
     EXPECT_EQ(static_cast<int>(ChromeViewId::kActivePage), 1016);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kActivePageFallbackFavicon), 1017);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kActivePageIndicator), 1018);
+}
+
+TEST(BrowserChromeContractTest, GivenTheCollectionIdsWhenComparedThenTheyStartAfter1018) {
+    EXPECT_GT(static_cast<int>(ChromeViewId::kTabStrip),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kTabStripEntry),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kTabStripEntryFavicon),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kTabStripEntryTitle),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kTabStripEntryClose),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kSpaceSwitcher),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
+    EXPECT_GT(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName),
+              static_cast<int>(ChromeViewId::kActivePageIndicator));
 }
 
 }  // namespace
