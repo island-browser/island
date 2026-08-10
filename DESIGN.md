@@ -2,6 +2,7 @@
 
 ## 0. Research Log
 
+- Accepted design: Ledger (recorded by the shared design-contract unit).
 - Concrete reference: `browser.pen` canonical frames `01 iP7WU`, `02 Sl8RT`, `03 WWVGY`, `04 ppc35`, `05 ugsnW`, `06 zXkwR`, and `09 V20eP` are the sole visual source; frames `07 fMGeC` and `08 I3cB58` are rejected and excluded.
 - Interaction reference: beui.dev `shared-layout-bg` source inspected; the site adapts its restrained state-feedback principle as an opacity/transform hover treatment rather than importing a motion dependency.
 - Font assets: no self-hosted Geist files are currently available to this ownership unit; robust system fallbacks are used until the repository dependency setup vendors Geist.
@@ -14,6 +15,101 @@ browser canvas—rather than a literal island motif. The identity is precise, us
 one small mark, a deliberate teal action color, and generous space for the product to speak.
 
 ## 2. Color
+
+### Canonical token contract
+
+The fenced `design-tokens` block below is the single machine-readable source of truth for the Island
+design contract. The tables in this section document it in human-readable form; the native runtime
+tokens (`src/main/design_tokens.cc`), the product-site stylesheet (`site/assets/css/site.css`), and
+the drift tests (`tests/design/test_token_contract.py`, `tests/design_tokens_test.cpp`) must stay
+consistent with it. Any change to these values must update the block and pass the drift tests before
+it ships. Colors are opaque `#RRGGBB` hex; spacings, radii, and the rail width are DIP values. The
+site-only marker colors are part of the contract because both the shared design surface and the
+browser chrome rely on them.
+
+```design-tokens
+{
+  "contract": "island-design-tokens",
+  "version": 1,
+  "accepted_design": "Ledger",
+  "colors": {
+    "light": {
+      "background": "#F3F0E9",
+      "surface": "#FFFEFB",
+      "surface_secondary": "#ECE9E2",
+      "text": "#18303A",
+      "text_secondary": "#687A7D",
+      "border": "#D8D8D0",
+      "accent": "#168C99"
+    },
+    "dark": {
+      "background": "#0D1B26",
+      "surface": "#142633",
+      "surface_secondary": "#1B3040",
+      "text": "#EAF3F3",
+      "text_secondary": "#9CB0B5",
+      "border": "#29414E",
+      "accent": "#168C99"
+    },
+    "site_only": {
+      "space_blue": "#168C99",
+      "space_coral": "#7B8588",
+      "space_green": "#A4AAA9"
+    }
+  },
+  "spacing": {
+    "space_1": 4,
+    "space_2": 8,
+    "space_3": 12,
+    "space_4": 16,
+    "space_6": 24
+  },
+  "radii": {
+    "radius_small": 8,
+    "radius_medium": 12
+  },
+  "rail_width_dip": 286,
+  "typography": {
+    "ui_family": "Geist",
+    "mono_family": "Geist Mono",
+    "ui_stack": "Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif",
+    "mono_stack": "\"Geist Mono\", ui-monospace, SFMono-Regular, Menlo, monospace"
+  },
+  "motion": {
+    "fast_ms": 160,
+    "enter_ms": 480,
+    "reveal_ms": 700,
+    "ease_out": "cubic-bezier(.16, 1, .3, 1)",
+    "composited_properties_only": ["opacity", "transform", "filter"]
+  },
+  "material": {
+    "shell_material": "surface_secondary at 90% over its assigned background",
+    "blur_px": 18,
+    "shadow": "0 16px 48px"
+  },
+  "depth": {
+    "product_window": "1px border plus one soft low-opacity shadow; no glass stack",
+    "text_sections": "open; no card grids"
+  },
+  "accessibility": {
+    "target": "WCAG 2.2 AA",
+    "body_contrast_min": 4.5,
+    "large_text_contrast_min": 3.0,
+    "focus_ring": "3px solid accent with 4px offset",
+    "reduced_motion": "prefers-reduced-motion cancels entrance motion and transitions; content and states remain",
+    "min_content_width_dp": 320
+  },
+  "rules": {
+    "accent_semantics": "accent only signifies an action or active state",
+    "light_mode_text": "all readable light-mode text uses the text token",
+    "phase3_exclusions": "tabs, tab strip, spaces, split view, command palette, and session restore are Phase 3 concerns and do not exist in the shared design contract",
+    "no_recolor": "this unit formalized the existing shared tokens; it did not recolor them",
+    "no_literal_imagery": "no photos, tropical colors, or generic AI gradients"
+  }
+}
+```
+
+### Documented colors
 
 | Role | Token | Light | Dark | Usage |
 | --- | --- | --- | --- | --- |
@@ -46,7 +142,7 @@ local font files.
 | --- | --- | --- | --- | --- | --- |
 | Display | `--type-display` | `clamp(40px, 6vw, 72px)` | 500 | 0.98 | Hero |
 | H1 | `--type-h1` | `clamp(32px, 4vw, 52px)` | 500 | 1.04 | Major headings |
-| H2 | `--type-h2` | `clamp(24px, 3vw, 36px)` | 500 | 1.12 | Feature headings |
+| H2 | `--type-h2` | `clamp(24px, 3.2vw, 40px)` | 500 | 1.12 | Feature headings |
 | Body | `--type-body` | 16px | 400 | 1.55 | Default copy |
 | Body small | `--type-small` | 14px | 400 | 1.5 | Supporting copy |
 | Mono label | `--type-mono` | 12px | 600 | 1.4 | Labels and keys |
@@ -124,4 +220,6 @@ single border and a soft low-opacity shadow to read as a physical product window
 | Item | Location | Why accepted | Owner / Exit |
 | --- | --- | --- | --- |
 | Geist / Geist Mono absent | `site/assets/css/site.css` font stack | Vendor outputs are owned by dependency setup and are unavailable here. | Replace fallbacks with local `@font-face` once `assets/fonts/` exists. |
+| CEF theme parity gap | `src/main/browser_window.cc` dark detection | The browser chrome derives its light/dark tokens from the OS via the CEF window theme, which has no automated visual verification yet (`docs/phase2-visual-acceptance.md`). Values themselves are drift-guarded by `tests/design_tokens_test.cpp` and `tests/design/test_token_contract.py`. | Close the gap with the native visual acceptance evidence once the manual checklist is run on real hardware. |
+| Product-window corner rounding | `site/assets/css/site.css` browser mockups | Browser product windows intentionally use rounded, larger corner treatments as illustrative compositions, not as entries in the reusable radius scale. | Promote one only when the contract explicitly needs it. |
 | Public Pages base URL | `site/404.html` | The repository remote is known, but its conventional project Pages URL currently returns 404. The 404 page is self-contained and links to the verified repository instead of assuming a deployed Pages path. | Restore a Pages home link only after the deployed base URL responds successfully. |
