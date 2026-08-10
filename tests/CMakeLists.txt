@@ -20,6 +20,7 @@ add_executable(island_tests
     design_tokens_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
+    space_test.cpp
     startup_options_test.cpp
     tab_test.cpp
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
@@ -27,6 +28,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/space.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
 )
