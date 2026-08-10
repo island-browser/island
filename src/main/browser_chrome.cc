@@ -300,10 +300,20 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     validation_message_->SetVisible(false);
     sidebar_->AddChildView(validation_message_);
 
+    tab_strip_ = CefPanel::CreatePanel(nullptr);
+    tab_strip_->SetID(static_cast<int>(ChromeViewId::kTabStrip));
+    tab_strip_->SetToBoxLayout(VerticalLayout(tokens_));
+    sidebar_->AddChildView(tab_strip_);
+
     CefRefPtr<CefPanel> spacer = CefPanel::CreatePanel(nullptr);
     spacer->SetID(static_cast<int>(ChromeViewId::kSpacer));
     sidebar_->AddChildView(spacer);
     sidebar_layout->SetFlexForView(spacer, 1);
+
+    space_switcher_ = CefPanel::CreatePanel(nullptr);
+    space_switcher_->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcher));
+    space_switcher_->SetToBoxLayout(VerticalLayout(tokens_));
+    sidebar_->AddChildView(space_switcher_);
 
     CefRefPtr<CefPanel> divider = CefPanel::CreatePanel(
         new PanelDelegate(CefSize(tokens_.rail_width_dip, DividerHeight(tokens_))));

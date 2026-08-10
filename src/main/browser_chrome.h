@@ -49,6 +49,17 @@ enum class ChromeViewId : int {
     kActivePage = 1016,
     kActivePageFallbackFavicon = 1017,
     kActivePageIndicator = 1018,
+    // Phase 3 collection regions start after the highest Phase 2 id; existing
+    // values are never renumbered or reused.
+    kTabStrip = 1019,
+    kTabStripEntry = 1020,
+    kTabStripEntryFavicon = 1021,
+    kTabStripEntryTitle = 1022,
+    kTabStripEntryClose = 1023,
+    kSpaceSwitcher = 1024,
+    kSpaceSwitcherEntry = 1025,
+    kSpaceSwitcherEntryColorMark = 1026,
+    kSpaceSwitcherEntryName = 1027,
 };
 
 struct ChromeViewTreeNode {
@@ -56,6 +67,26 @@ struct ChromeViewTreeNode {
     std::vector<ChromeViewTreeNode> children;
 
     bool operator==(const ChromeViewTreeNode&) const = default;
+};
+
+// One tab-strip row as projected from a Tab: the title label carries the
+// truncating page title; favicon-or-fallback and the close affordance are the
+// sibling affordance nodes in the contract tree. U4 supplies these snapshots
+// from the active space's Tab list.
+struct TabStripEntrySnapshot {
+    std::string title;
+
+    bool operator==(const TabStripEntrySnapshot&) const = default;
+};
+
+// One space-switcher row as projected from a Space: the color mark carries the
+// space's color and the name label carries the truncating space name. U5
+// supplies these snapshots from the window's space list.
+struct SpaceSwitcherEntrySnapshot {
+    ArgbColor color;
+    std::string name;
+
+    bool operator==(const SpaceSwitcherEntrySnapshot&) const = default;
 };
 
 struct ChromeGeometrySnapshot {
@@ -184,6 +215,10 @@ class BrowserChrome final : public NavigationObserver {
             .browser_view_bounds = browser_content_bounds,
         };
     }
+    // The fixed rail regions keep their Phase 2 shape; the collection regions
+    // (kTabStrip, kSpaceSwitcher) are present but empty because Phase 3 U3
+    // wires no real tab/space data yet. Per-entry structure is asserted
+    // through CollectionCountContract below, not by absolute rail index.
     [[nodiscard]] static ChromeViewTreeNode ViewTreeContract() {
         return {ChromeViewId::kRoot,
                 {{ChromeViewId::kRail,
@@ -194,13 +229,46 @@ class BrowserChrome final : public NavigationObserver {
                      {ChromeViewId::kAddress, {}},
                      {ChromeViewId::kReload, {}}}},
                    {ChromeViewId::kValidationMessage, {}},
+                   {ChromeViewId::kTabStrip, {}},
                    {ChromeViewId::kSpacer, {}},
+                   {ChromeViewId::kSpaceSwitcher, {}},
                    {ChromeViewId::kDivider, {}},
                    {ChromeViewId::kActivePage,
                     {{ChromeViewId::kActivePageFallbackFavicon, {}},
                      {ChromeViewId::kActiveTab, {}},
                      {ChromeViewId::kActivePageIndicator, {}}}}}},
                  {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}}}};
+    }
+
+    // Projects the collection regions the way U4/U5 will: one entry node per
+    // tab/space snapshot, each with the fixed sub-shape the design requires
+    // (tab: favicon-or-fallback, truncating title, close affordance; space:
+    // color mark, truncating name). The count comes from the snapshots, so no
+    // absolute positional index is ever asserted against these regions.
+    [[nodiscard]] static ChromeViewTreeNode CollectionCountContract(
+        const std::vector<TabStripEntrySnapshot>& tabs,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces) {
+        ChromeViewTreeNode tree = ViewTreeContract();
+        ChromeViewTreeNode& rail = tree.children[0];
+        for (ChromeViewTreeNode& child : rail.children) {
+            if (child.id == ChromeViewId::kTabStrip) {
+                child.children.reserve(tabs.size());
+                for (std::size_t i = 0; i < tabs.size(); ++i) {
+                    child.children.push_back({ChromeViewId::kTabStripEntry,
+                                              {{ChromeViewId::kTabStripEntryFavicon, {}},
+                                               {ChromeViewId::kTabStripEntryTitle, {}},
+                                               {ChromeViewId::kTabStripEntryClose, {}}}});
+                }
+            } else if (child.id == ChromeViewId::kSpaceSwitcher) {
+                child.children.reserve(spaces.size());
+                for (std::size_t i = 0; i < spaces.size(); ++i) {
+                    child.children.push_back({ChromeViewId::kSpaceSwitcherEntry,
+                                              {{ChromeViewId::kSpaceSwitcherEntryColorMark, {}},
+                                               {ChromeViewId::kSpaceSwitcherEntryName, {}}}});
+                }
+            }
+        }
+        return tree;
     }
 
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
@@ -241,6 +309,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> address_location_icon_;
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;
+    CefRefPtr<CefPanel> tab_strip_;
+    CefRefPtr<CefPanel> space_switcher_;
     CefRefPtr<CefPanel> active_page_;
     CefRefPtr<CefLabelButton> active_page_fallback_favicon_;
     CefRefPtr<CefLabelButton> active_tab_;
