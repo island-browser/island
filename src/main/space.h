@@ -11,6 +11,8 @@
 #include "tab.h"
 #include "tab_id.h"
 
+#include "include/cef_request_context.h"
+
 namespace island {
 
 using SpaceColor = ArgbColor;
@@ -80,7 +82,11 @@ class Space {
     bool SetSplit(SplitPairing pairing);
     void ClearSplit();
 
+    // U2: returns the space's CefRequestContext, creating it lazily on first access.
+    [[nodiscard]] CefRefPtr<CefRequestContext> request_context() const noexcept;
+
   private:
+    void CreateRequestContextIfNeeded(const std::string& cache_path);
     void MaintainActiveIndexAfterRemoval(std::size_t removed_index);
 
     SpaceId id_;
@@ -89,6 +95,7 @@ class Space {
     std::vector<Tab> tabs_;
     std::size_t active_tab_index_ = 0;
     std::optional<SplitPairing> split_;
+    mutable CefRefPtr<CefRequestContext> request_context_;
 };
 
 }  // namespace island
