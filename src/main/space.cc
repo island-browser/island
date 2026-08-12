@@ -144,6 +144,24 @@ bool Space::SetSplit(SplitPairing pairing) {
 
 void Space::ClearSplit() { split_.reset(); }
 
+void Space::CreateRequestContextIfNeeded(const std::string& cache_path) {
+    if (request_context_) {
+        return;
+    }
+    if (cache_path.empty()) {
+        request_context_ =
+            CefRequestContext::CreateContext(CefRequestContext::GetGlobalContext(), nullptr);
+    } else {
+        CefRequestContextSettings settings;
+        CefString(&settings.cache_path) = cache_path;
+        request_context_ = CefRequestContext::CreateContext(settings, nullptr);
+    }
+}
+
+CefRefPtr<CefRequestContext> Space::request_context() const noexcept {
+    return request_context_;
+}
+
 void Space::MaintainActiveIndexAfterRemoval(std::size_t removed_index) {
     if (tabs_.empty()) {
         active_tab_index_ = 0;
