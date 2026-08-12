@@ -112,10 +112,18 @@ if(NOT DEFINED PROJECT_ARCH AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     set(PROJECT_ARCH "arm64")
 endif()
 
+option(ISLAND_ENABLE_SEARCH "Build Island search index modules" OFF)
+
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 
 add_subdirectory(tests)
+
+# Guarded Search S0 hook: the on-device search kernel is pure C++20 and never
+# links CEF. Default OFF keeps the Phase 0-3 flow byte-for-byte unchanged.
+if(ISLAND_ENABLE_SEARCH)
+    add_subdirectory(src/search)
+endif()
 
 if(NOT APPLE AND NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Island Phase 0 supports Apple, Windows, and Linux hosts only.")

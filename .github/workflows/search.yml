@@ -1,0 +1,108 @@
+name: Island Search
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: island-search-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  search-native:
+    name: search ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macosarm64
+            runner: macos-15
+            cmake_arguments: ''
+          - target: macosx64
+            runner: macos-15-intel
+            cmake_arguments: -DCMAKE_OSX_ARCHITECTURES=x86_64
+          - target: linux64
+            runner: ubuntu-24.04
+            cmake_arguments: ''
+          - target: linuxarm64
+            runner: ubuntu-24.04-arm
+            cmake_arguments: ''
+          - target: windows64
+            runner: windows-2022
+            cmake_arguments: -A x64
+          - target: windowsarm64
+            runner: windows-11-arm
+            cmake_arguments: -A ARM64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Configure search build
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          # Configure src/search as its own source root: the search kernel is
+          # CEF-free, and its standalone mode keeps cmake away from the root
+          # CEF/font/icon sentinels of the browser build.
+          cmake -S src/search -B build-search -DCMAKE_BUILD_TYPE=Release \
+            -DISLAND_ENABLE_SEARCH=ON ${{ matrix.cmake_arguments }} \
+            2>&1 | tee ci-logs/configure-${{ matrix.target }}.log
+      - name: Build search targets
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          cmake --build build-search --config Release --parallel 2 \
+            --target island_search --target island_search_tests \
+            --target island_search_posting_codec_harness \
+            2>&1 | tee ci-logs/build-${{ matrix.target }}.log
+      - name: Run search tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          ctest --test-dir build-search -C Release --output-on-failure --no-tests=error \
+            --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
+      - name: Annotate target failure
+        if: failure()
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          python3 - "$TARGET" "$WORKSPACE" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          target, workspace = sys.argv[1:]
+          logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
+          pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
+          lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
+          selected = [line for line in lines if pattern.search(line)][:20] or lines[-20:]
+          message = " | ".join(selected)[:4000] or "No target stage log was produced."
+          workspace_prefixes = {workspace.rstrip("/\\") + "/", workspace.rstrip("/\\") + "\\"}
+          for prefix in workspace_prefixes:
+              message = message.replace(prefix, "")
+          message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=search {target} build diagnostic::{message}")
+          PY
+      - name: Upload target diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: search-diagnostics-${{ matrix.target }}
+          path: |
+            ci-logs/**
+            junit.xml
+            build-search/CMakeCache.txt
+          if-no-files-found: warn
+          retention-days: 7

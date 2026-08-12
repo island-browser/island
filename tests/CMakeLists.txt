@@ -100,3 +100,32 @@ else()
     endif()
 endif()
 gtest_discover_tests(island_cef_tests)
+
+if(ISLAND_ENABLE_SEARCH)
+    include(GoogleTest)
+
+    add_executable(island_search_tests
+        search/benchmark_corpus_test.cpp
+        search/byte_lru_cache_test.cpp
+        search/mem_sampler_test.cpp
+        search/query_parser_test.cpp
+        search/ranker_test.cpp
+        search/tokenizer_test.cpp
+        "${CMAKE_SOURCE_DIR}/bench/search/benchmark_corpus.cc"
+    )
+    target_compile_features(island_search_tests PRIVATE cxx_std_20)
+    # benchmark_corpus_test.cpp includes search/benchmark_corpus.h, which lives
+    # under bench/search/, so expose the bench/ root for that include form.
+    target_include_directories(island_search_tests PRIVATE "${CMAKE_SOURCE_DIR}/bench")
+    target_link_libraries(island_search_tests PRIVATE island_search GTest::gtest_main)
+    gtest_discover_tests(island_search_tests)
+
+    # Self-contained standalone regression harness with its own main(); not part
+    # of the GTest tree.
+    add_executable(island_search_posting_codec_harness
+        search/posting_codec_test.cpp
+    )
+    target_compile_features(island_search_posting_codec_harness PRIVATE cxx_std_20)
+    target_link_libraries(island_search_posting_codec_harness PRIVATE island_search)
+    add_test(NAME PostingCodecStandaloneHarness COMMAND island_search_posting_codec_harness)
+endif()
