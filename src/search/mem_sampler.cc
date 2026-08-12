@@ -11,8 +11,13 @@
 #include <cstdio>
 #elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
-#include <psapi.h>
+// <windows.h> must precede <psapi.h>: psapi.h declares its API using windef.h
+// types (BOOL, DWORD, HWND) that only windows.h defines, so the reversed
+// order fails to compile under MSVC.
+// clang-format off
 #include <windows.h>
+#include <psapi.h>
+// clang-format on
 #endif
 
 namespace island {
