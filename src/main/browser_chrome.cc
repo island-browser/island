@@ -51,22 +51,44 @@ CefBoxLayoutSettings HorizontalLayout(const ChromeTokens& tokens) {
     return settings;
 }
 
-CefBoxLayoutSettings HorizontalFillLayout(const ChromeTokens& tokens) {
-    const int zero_dip = tokens.spacing_1_dip - tokens.spacing_1_dip;
+// The browser_content panel holds the single CefBrowserView with a uniform
+// floating-canvas gutter on every side. CEF cannot round or clip the BrowserView,
+// so the floating read comes entirely from this rectangular inset: the tinted
+// background shows through the gap and the page reads as a raised card. No spacing
+// between the panel and the view beyond the gutter.
+CefBoxLayoutSettings FloatingCanvasLayout(const ChromeTokens& tokens) {
+    const int pad = BrowserChrome::BrowserContentPaddingDip();
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(true);
-    settings.between_child_spacing = zero_dip;
-    settings.inside_border_horizontal_spacing = zero_dip;
-    settings.inside_border_vertical_spacing = zero_dip;
+    settings.between_child_spacing = tokens.spacing_1_dip - tokens.spacing_1_dip;
+    settings.inside_border_insets = CefInsets(pad, pad, pad, pad);
     return settings;
 }
 
-CefBoxLayoutSettings VerticalLayout(const ChromeTokens& tokens) {
+// The rail uses a dedicated layout: a top inset (RailTopInsetDip) reserves the
+// platform title-bar / traffic-light region, and a calmer between-section step
+// (RailSectionSpacingDip) replaces the cramped generic cadence. Side and bottom
+// insets stay on spacing_3 so the rail padding stays consistent.
+CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
+    CefBoxLayoutSettings settings;
+    settings.horizontal = static_cast<int>(false);
+    settings.between_child_spacing = BrowserChrome::RailSectionSpacingDip();
+    settings.inside_border_insets =
+        CefInsets(BrowserChrome::RailTopInsetDip(), tokens.spacing_3_dip, tokens.spacing_3_dip,
+                  tokens.spacing_3_dip);
+    return settings;
+}
+
+// Collection regions (tab strip, space switcher) are empty until Phase 3 wires
+// entries; zero inside borders keep an empty collection from injecting phantom
+// padding into the rail rhythm. Entry separation stays on spacing_2.
+CefBoxLayoutSettings CollectionLayout(const ChromeTokens& tokens) {
+    const int zero_dip = tokens.spacing_1_dip - tokens.spacing_1_dip;
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(false);
     settings.between_child_spacing = tokens.spacing_2_dip;
-    settings.inside_border_horizontal_spacing = tokens.spacing_3_dip;
-    settings.inside_border_vertical_spacing = tokens.spacing_3_dip;
+    settings.inside_border_horizontal_spacing = zero_dip;
+    settings.inside_border_vertical_spacing = zero_dip;
     return settings;
 }
 
@@ -112,6 +134,44 @@ class BrowserChrome::PanelDelegate final : public CefPanelDelegate {
     CefSize maximum_size_;
 
     IMPLEMENT_REFCOUNTING(PanelDelegate);
+};
+
+// CefView resets any custom background color when CefViewDelegate::OnThemeChanged is
+// called, and CefWindow::ThemeChanged() fires that reset asynchronously after the
+// chrome applies its colors. The rail and its panels therefore re-assert their chrome
+// surface in OnThemeChanged so the tinted rail survives the reset instead of falling
+// back to the window's primary background.
+class BrowserChrome::SurfacePanelDelegate final : public CefPanelDelegate {
+  public:
+    SurfacePanelDelegate(BrowserChrome* chrome, BrowserChrome::SurfaceSlot slot,
+                         CefSize preferred_size = CefSize(), CefSize minimum_size = CefSize(),
+                         CefSize maximum_size = CefSize())
+        : chrome_(chrome),
+          slot_(slot),
+          preferred_size_(preferred_size),
+          minimum_size_(minimum_size),
+          maximum_size_(maximum_size) {}
+
+    void Detach() { chrome_ = nullptr; }
+
+    CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
+    CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
+    CefSize GetMaximumSize(CefRefPtr<CefView>) override { return maximum_size_; }
+
+    void OnThemeChanged(CefRefPtr<CefView> view) override {
+        if (chrome_ != nullptr) {
+            view->SetBackgroundColor(chrome_->ResolveSurfaceColor(slot_).argb);
+        }
+    }
+
+  private:
+    BrowserChrome* chrome_;
+    BrowserChrome::SurfaceSlot slot_;
+    CefSize preferred_size_;
+    CefSize minimum_size_;
+    CefSize maximum_size_;
+
+    IMPLEMENT_REFCOUNTING(SurfacePanelDelegate);
 };
 
 class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
@@ -232,12 +292,19 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
 
     const CefSize rail_size(tokens_.rail_width_dip, 0);
-    sidebar_ = CefPanel::CreatePanel(new PanelDelegate(rail_size, rail_size, rail_size));
+    CefRefPtr<SurfacePanelDelegate> rail_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail, rail_size, rail_size, rail_size);
+    surface_delegates_.push_back(rail_delegate);
+    sidebar_ = CefPanel::CreatePanel(rail_delegate);
     sidebar_->SetID(static_cast<int>(ChromeViewId::kRail));
-    CefRefPtr<CefBoxLayout> sidebar_layout = sidebar_->SetToBoxLayout(VerticalLayout(tokens_));
+    sidebar_->SetToBoxLayout(RailLayout(tokens_));
 
-    CefRefPtr<CefPanel> navigation_row = CefPanel::CreatePanel(nullptr);
+    CefRefPtr<SurfacePanelDelegate> navigation_row_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(navigation_row_delegate);
+    CefRefPtr<CefPanel> navigation_row = CefPanel::CreatePanel(navigation_row_delegate);
     navigation_row->SetID(static_cast<int>(ChromeViewId::kNavigationRow));
+    navigation_row_ = navigation_row;
     navigation_row->SetToBoxLayout(HorizontalLayout(tokens_));
 
     button_delegate_ = new ButtonDelegate(this);
@@ -258,8 +325,12 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     navigation_row->AddChildView(forward_button_);
     sidebar_->AddChildView(navigation_row);
 
-    CefRefPtr<CefPanel> address_row = CefPanel::CreatePanel(nullptr);
+    CefRefPtr<SurfacePanelDelegate> address_row_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(address_row_delegate);
+    CefRefPtr<CefPanel> address_row = CefPanel::CreatePanel(address_row_delegate);
     address_row->SetID(static_cast<int>(ChromeViewId::kAddressRow));
+    address_row_ = address_row;
     CefRefPtr<CefBoxLayout> address_layout = address_row->SetToBoxLayout(HorizontalLayout(tokens_));
 
     address_focus_leading_edge_ = CefPanel::CreatePanel(
@@ -300,28 +371,50 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     validation_message_->SetVisible(false);
     sidebar_->AddChildView(validation_message_);
 
-    tab_strip_ = CefPanel::CreatePanel(nullptr);
+    CefRefPtr<SurfacePanelDelegate> tab_strip_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(tab_strip_delegate);
+    tab_strip_ = CefPanel::CreatePanel(tab_strip_delegate);
     tab_strip_->SetID(static_cast<int>(ChromeViewId::kTabStrip));
-    tab_strip_->SetToBoxLayout(VerticalLayout(tokens_));
+    tab_strip_->SetToBoxLayout(CollectionLayout(tokens_));
     sidebar_->AddChildView(tab_strip_);
 
-    CefRefPtr<CefPanel> spacer = CefPanel::CreatePanel(nullptr);
+    // The spacer stays in its contract position between the two collection regions.
+    // It carries no flex and zero preferred size, so it is inert: the rail sections
+    // top-align and the divider + active-page card sit at the top of the lower group,
+    // with the open tinted rail below the card reading as intentional negative space.
+    CefRefPtr<SurfacePanelDelegate> spacer_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(spacer_delegate);
+    CefRefPtr<CefPanel> spacer = CefPanel::CreatePanel(spacer_delegate);
     spacer->SetID(static_cast<int>(ChromeViewId::kSpacer));
+    spacer_ = spacer;
     sidebar_->AddChildView(spacer);
-    sidebar_layout->SetFlexForView(spacer, 1);
 
-    space_switcher_ = CefPanel::CreatePanel(nullptr);
+    CefRefPtr<SurfacePanelDelegate> space_switcher_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(space_switcher_delegate);
+    space_switcher_ = CefPanel::CreatePanel(space_switcher_delegate);
     space_switcher_->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcher));
-    space_switcher_->SetToBoxLayout(VerticalLayout(tokens_));
+    space_switcher_->SetToBoxLayout(CollectionLayout(tokens_));
     sidebar_->AddChildView(space_switcher_);
 
+    // The hairline divider and the active-page pill sit at the TOP of the lower group,
+    // immediately after the (empty) collections, so the current page reads as a compact
+    // card near the top instead of being pinned to the far bottom.
     CefRefPtr<CefPanel> divider = CefPanel::CreatePanel(
         new PanelDelegate(CefSize(tokens_.rail_width_dip, DividerHeight(tokens_))));
     divider->SetID(static_cast<int>(ChromeViewId::kDivider));
     divider_ = divider;
     sidebar_->AddChildView(divider);
 
-    active_page_ = CefPanel::CreatePanel(nullptr);
+    // The active-page card is a compact pill: a bounded single-row height so it reads
+    // as a raised chip against the tinted rail, not a full-height stretched row.
+    CefRefPtr<SurfacePanelDelegate> active_page_delegate = new SurfacePanelDelegate(
+        this, SurfaceSlot::kActivePage, CefSize(0, control_height + tokens_.spacing_2_dip),
+        CefSize(0, 0), CefSize(tokens_.rail_width_dip, control_height + tokens_.spacing_2_dip));
+    surface_delegates_.push_back(active_page_delegate);
+    active_page_ = CefPanel::CreatePanel(active_page_delegate);
     active_page_->SetID(static_cast<int>(ChromeViewId::kActivePage));
     CefRefPtr<CefBoxLayout> active_page_layout =
         active_page_->SetToBoxLayout(HorizontalLayout(tokens_));
@@ -354,7 +447,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         CefSize(control_height, control_height), CefSize(control_height, control_height)));
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
     CefRefPtr<CefBoxLayout> browser_content_layout =
-        browser_content_->SetToBoxLayout(HorizontalFillLayout(tokens_));
+        browser_content_->SetToBoxLayout(FloatingCanvasLayout(tokens_));
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
     browser_content_->AddChildView(browser_view_);
     browser_content_layout->SetFlexForView(browser_view_, 1);
@@ -443,6 +536,9 @@ void BrowserChrome::Detach() {
     host_ = nullptr;
     button_delegate_->Detach();
     textfield_delegate_->Detach();
+    for (const CefRefPtr<SurfacePanelDelegate>& surface_delegate : surface_delegates_) {
+        surface_delegate->Detach();
+    }
     if (browser_view_ != nullptr && browser_content_ != nullptr) {
         browser_content_->RemoveChildView(browser_view_);
     }
@@ -552,13 +648,35 @@ void BrowserChrome::ApplyControlTheme() {
         ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kBrowserContent);
     const ArgbColor hairline = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kHairline);
     const ArgbColor address_well = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAddressWell);
+    const ArgbColor nav_control = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kNavControl);
+    const ArgbColor active_page_fill = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
     const ArgbColor accent = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAccent);
 
     root_->SetBackgroundColor(background.argb);
     sidebar_->SetBackgroundColor(rail.argb);
     browser_content_->SetBackgroundColor(browser_content.argb);
+    // Rail-descendant panels are created with no delegate and would otherwise inherit
+    // the window's primary background; painting them the rail color keeps the whole
+    // column one uniform tinted surface so the floating card separates cleanly.
+    navigation_row_->SetBackgroundColor(rail.argb);
+    address_row_->SetBackgroundColor(rail.argb);
+    tab_strip_->SetBackgroundColor(rail.argb);
+    space_switcher_->SetBackgroundColor(rail.argb);
+    spacer_->SetBackgroundColor(rail.argb);
     divider_->SetBackgroundColor(hairline.argb);
+    // The address unit is one raised surface pill: the location glyph, field, and
+    // reload chip all carry the same surface fill so they read as a single control
+    // group with consistent padding, matching the canonical .rail-address /
+    // .rail-reload anatomy.
+    address_location_icon_->SetBackgroundColor(address_well.argb);
     address_field_->SetBackgroundColor(address_well.argb);
+    reload_button_->SetBackgroundColor(address_well.argb);
+    // Back and Forward are quiet icon chips on the same raised step; CEF layers the
+    // native hover/pressed ring over this base fill when targeted.
+    back_button_->SetBackgroundColor(nav_control.argb);
+    forward_button_->SetBackgroundColor(nav_control.argb);
+    // The active-page card lifts to the primary surface against the tinted rail.
+    active_page_->SetBackgroundColor(active_page_fill.argb);
     active_page_indicator_->SetBackgroundColor(accent.argb);
     UpdateAddressFocusLeadingEdge();
     address_field_->SetFontList("Geist Mono, 14px");

@@ -138,12 +138,33 @@ class BrowserChrome final : public NavigationObserver {
         return AddressFocusLeadingEdgeDip();
     }
 
+    // Top inset reserving the platform title-bar / traffic-light region so the
+    // navigation row clears the window controls instead of colliding with them. The
+    // window uses a hidden title bar (content extends into the title region), so the
+    // controls overlay the top of the rail. Token-derived: spacing_6 (24) +
+    // spacing_3 (12) = 36 DIP.
+    [[nodiscard]] static constexpr int RailTopInsetDip() { return 36; }
+
+    // Vertical cadence between rail sections. A calm spacing_4 (16) step instead of
+    // the cramped spacing_2 (8) so the cluster reads as composed ledger sections.
+    [[nodiscard]] static constexpr int RailSectionSpacingDip() { return 16; }
+
+    // Uniform gutter padding the browser_content panel on every side so the single
+    // CefBrowserView reads as a floating card over the tinted canvas. spacing_3 (12)
+    // is the calm edge: wide enough to separate the card from the rail and window
+    // edge, tight enough to keep the canvas dominant at the 800x560 minimum.
+    // CEF cannot round or clip the CefBrowserView, so the floating read comes from
+    // this rectangular inset, not from a corner radius.
+    [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 12; }
+
     enum class SurfaceSlot : std::uint8_t {
         kRoot,
         kRail,
         kBrowserContent,
         kHairline,
         kAddressWell,
+        kNavControl,
+        kActivePage,
         kAccent,
     };
     [[nodiscard]] static ArgbColor ChromeSurfaceRole(SurfaceSlot slot, ChromeTheme theme) {
@@ -153,11 +174,24 @@ class BrowserChrome final : public NavigationObserver {
             case SurfaceSlot::kBrowserContent:
                 return tokens.background;
             case SurfaceSlot::kRail:
-                return tokens.surface;
+                // The calm tinted rail sits one step off the canvas so the floating
+                // browser card separates from it.
+                return tokens.surface_secondary;
             case SurfaceSlot::kHairline:
                 return tokens.border;
             case SurfaceSlot::kAddressWell:
-                return tokens.surface_secondary;
+                // The address pill lifts to the primary surface so it reads as a raised
+                // rounded field against the tinted rail, matching the canonical
+                // .rail-address anatomy (surface fill, hairline edge).
+                return tokens.surface;
+            case SurfaceSlot::kNavControl:
+                // Nav icon-button hover/pressed fill stays on the quiet surface step so
+                // the tinted rail keeps the controls calm until targeted.
+                return tokens.surface;
+            case SurfaceSlot::kActivePage:
+                // The active-page pill lifts to the primary surface against the tinted
+                // rail so the current page reads as the one raised card.
+                return tokens.surface;
             case SurfaceSlot::kAccent:
                 return tokens.accent;
         }
@@ -169,11 +203,15 @@ class BrowserChrome final : public NavigationObserver {
             case SurfaceSlot::kBrowserContent:
                 return tokens_.background;
             case SurfaceSlot::kRail:
-                return tokens_.surface;
+                return tokens_.surface_secondary;
             case SurfaceSlot::kHairline:
                 return tokens_.border;
             case SurfaceSlot::kAddressWell:
-                return tokens_.surface_secondary;
+                return tokens_.surface;
+            case SurfaceSlot::kNavControl:
+                return tokens_.surface;
+            case SurfaceSlot::kActivePage:
+                return tokens_.surface;
             case SurfaceSlot::kAccent:
                 return tokens_.accent;
         }
@@ -202,17 +240,31 @@ class BrowserChrome final : public NavigationObserver {
             .width = rail_width,
             .height = root_bounds.height,
         };
+        // The floating-canvas gutter insets the browser card on every side; it shrinks
+        // the content region symmetrically and is clamped so the card never inverts on
+        // very narrow windows.
+        const int pad = BrowserContentPaddingDip();
+        const int content_x = root_bounds.x + rail_width;
+        const int content_width = std::max(0, root_bounds.width - rail_width);
         const DipRect browser_content_bounds = {
-            .x = root_bounds.x + rail_width,
+            .x = content_x,
             .y = root_bounds.y,
-            .width = std::max(0, root_bounds.width - rail_width),
+            .width = content_width,
             .height = root_bounds.height,
+        };
+        const int inset_width = std::max(0, content_width - 2 * pad);
+        const int inset_height = std::max(0, root_bounds.height - 2 * pad);
+        const DipRect browser_view_bounds = {
+            .x = content_x + std::min(pad, content_width / 2),
+            .y = root_bounds.y + std::min(pad, root_bounds.height / 2),
+            .width = inset_width,
+            .height = inset_height,
         };
         return {
             .root_bounds = root_bounds,
             .rail_bounds = rail_bounds,
             .browser_content_bounds = browser_content_bounds,
-            .browser_view_bounds = browser_content_bounds,
+            .browser_view_bounds = browser_view_bounds,
         };
     }
     // The fixed rail regions keep their Phase 2 shape; the collection regions
@@ -277,9 +329,17 @@ class BrowserChrome final : public NavigationObserver {
     void BeginAddressEditing();
     void Detach();
 
+    // Resolves the current tokens' color for a chrome surface slot. Exposed so the
+    // surface-panel delegate can re-assert the color when CEF resets custom view
+    // backgrounds on theme change.
+    [[nodiscard]] ArgbColor ResolveSurfaceColor(SurfaceSlot slot) const {
+        return ChromeSurfaceRoleForResolvedTokens(slot);
+    }
+
   private:
     class PanelDelegate;
     class RootPanelDelegate;
+    class SurfacePanelDelegate;
     class ButtonDelegate;
     class TextfieldDelegate;
 
@@ -301,6 +361,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefBrowserView> browser_view_;
+    CefRefPtr<CefPanel> navigation_row_;
+    CefRefPtr<CefPanel> address_row_;
+    CefRefPtr<CefPanel> spacer_;
     CefRefPtr<CefPanel> address_focus_leading_edge_;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
@@ -318,6 +381,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<RootPanelDelegate> root_delegate_;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
+    std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;
     bool detached_ = false;
 };
 

@@ -150,16 +150,25 @@ TEST(BrowserChromeContractTest,
     EXPECT_EQ(browser_content->children[0].id, ChromeViewId::kBrowserView);
 }
 
+// The floating-canvas layout insets the browser view inside the browser_content
+// panel by BrowserContentPaddingDip() on every side, so browser_view_bounds is now a
+// strict inset of browser_content_bounds rather than equal to it. These tests pin the
+// new geometry: the rail stays fixed at 286 DIP, the content panel keeps the remaining
+// width, and the view is the content panel shrunk by the gutter (clamped at zero so the
+// card never inverts on narrow windows). The ID/tree contract is untouched.
 TEST(BrowserChromeContractTest, GivenReferenceWindowBoundsWhenLaidOutThenRailStaysFixed) {
     ChromeTokens tokens;
     tokens.rail_width_dip = 286;
     const ChromeGeometrySnapshot geometry = BrowserChrome::LayoutForBounds(
         DipRect{.x = 0, .y = 0, .width = 1440, .height = 900}, tokens);
+    const int pad = BrowserChrome::BrowserContentPaddingDip();
 
     EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 286, .height = 900}));
     EXPECT_EQ(geometry.browser_content_bounds,
               (DipRect{.x = 286, .y = 0, .width = 1154, .height = 900}));
-    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+    EXPECT_EQ(
+        geometry.browser_view_bounds,
+        (DipRect{.x = 286 + pad, .y = pad, .width = 1154 - 2 * pad, .height = 900 - 2 * pad}));
 }
 
 TEST(BrowserChromeContractTest, GivenMinimumWindowBoundsWhenLaidOutThenBrowserViewStaysNonzero) {
@@ -167,11 +176,15 @@ TEST(BrowserChromeContractTest, GivenMinimumWindowBoundsWhenLaidOutThenBrowserVi
     tokens.rail_width_dip = 286;
     const ChromeGeometrySnapshot geometry = BrowserChrome::LayoutForBounds(
         DipRect{.x = 0, .y = 0, .width = 800, .height = 560}, tokens);
+    const int pad = BrowserChrome::BrowserContentPaddingDip();
 
     EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 286, .height = 560}));
     EXPECT_EQ(geometry.browser_content_bounds,
               (DipRect{.x = 286, .y = 0, .width = 514, .height = 560}));
-    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+    EXPECT_EQ(geometry.browser_view_bounds,
+              (DipRect{.x = 286 + pad, .y = pad, .width = 514 - 2 * pad, .height = 560 - 2 * pad}));
+    EXPECT_GT(geometry.browser_view_bounds.width, 0);
+    EXPECT_GT(geometry.browser_view_bounds.height, 0);
 }
 
 TEST(BrowserChromeContractTest, GivenNarrowBoundsWhenLaidOutThenBrowserContentClampsAtZero) {
@@ -183,7 +196,8 @@ TEST(BrowserChromeContractTest, GivenNarrowBoundsWhenLaidOutThenBrowserContentCl
     EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 200, .height = 560}));
     EXPECT_EQ(geometry.browser_content_bounds,
               (DipRect{.x = 200, .y = 0, .width = 0, .height = 560}));
-    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+    EXPECT_EQ(geometry.browser_view_bounds.width, 0);
+    EXPECT_GE(geometry.browser_view_bounds.height, 0);
 }
 
 TEST(BrowserChromeContractTest, GivenZeroBoundsWhenLaidOutThenEveryChildIsZeroSized) {
