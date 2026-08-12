@@ -200,7 +200,12 @@ def _windows_mode(root: Path) -> WindowsMode:
 
 
 def _architecture(executable: Path) -> Architecture:
-    data = executable.read_bytes()[:128]
+    # 1024 bytes covers the MS-DOS stub + Rich header so e_lfanew (at 0x3C)
+    # can reach "PE\0\0" for real MSVC/Chromium builds, which place it at 0x80
+    # or beyond. A 128-byte cap stops before the PE signature and reports every
+    # real Windows binary as UNKNOWN, which then fails packaging. Mach-O/ELF
+    # magic is in the first 4 bytes, so the larger read does not affect them.
+    data = executable.read_bytes()[:1024]
     if data[:4] in (b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"):
         return Architecture.FAT
     if data[:4] == b"\xcf\xfa\xed\xfe":

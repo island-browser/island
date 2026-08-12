@@ -72,9 +72,16 @@ class PackageFixture:
             case "macosarm64":
                 data = b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01"
             case "windows64" | "windowsarm64":
-                data = bytearray(70)
-                data[:2], data[60:64], data[64:68] = b"MZ", (64).to_bytes(4, "little"), b"PE\x00\x00"
-                data[68:70] = (0xAA64 if target.endswith("arm64") else 0x8664).to_bytes(2, "little")
+                # Real MSVC/Chromium PE binaries place the PE signature at
+                # e_lfanew = 0x80 (the DOS stub plus Rich header), not at 0x40,
+                # so the fixture must mirror that or it hides the 128-byte
+                # truncation bug in package._architecture().
+                machine = 0xAA64 if target.endswith("arm64") else 0x8664
+                data = bytearray(512)
+                data[0:2] = b"MZ"
+                data[0x3C:0x40] = (0x80).to_bytes(4, "little")
+                data[0x80:0x84] = b"PE\x00\x00"
+                data[0x84:0x86] = machine.to_bytes(2, "little")
                 data = bytes(data)
             case "linux64" | "linuxarm64":
                 data = b"\x7fELF" + b"\x00" * 14 + (183 if target.endswith("arm64") else 62).to_bytes(2, "little")
