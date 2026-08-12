@@ -135,11 +135,18 @@ def layout(target: Target) -> Layout:
         case Target.WINDOWS_X64 | Target.WINDOWS_ARM64:
             root = Path("src/main/Release")
             binaries = (Path("island_browser.exe"), Path("libcef.dll"), Path("chrome_elf.dll"), Path("d3dcompiler_47.dll"), Path("dxcompiler.dll"), Path("dxil.dll"), Path("libEGL.dll"), Path("libGLESv2.dll"), Path("vk_swiftshader.dll"), Path("vulkan-1.dll"))
-            return Layout(".zip", tuple(root / item for item in binaries), root / "island_browser.exe", root, tuple(root / item for item in (*binaries, Path("snapshot_blob.bin"), Path("v8_context_snapshot.bin"), Path("vk_swiftshader_icd.json"), *CORE_RESOURCES)))
+            # CEF 150 / Chromium 150 no longer ships snapshot_blob.bin as a
+            # separate file: the V8 startup snapshot was consolidated into
+            # v8_context_snapshot.bin, and the CEF_BINARY_FILES macro therefore
+            # never copies it into CEF_TARGET_OUT_DIR. macOS already omits it
+            # (the snapshot lives inside the framework bundle). Requiring it on
+            # Windows/Linux made packaging fail with "missing required runtime
+            # path: .../snapshot_blob.bin" on every non-macOS target.
+            return Layout(".zip", tuple(root / item for item in binaries), root / "island_browser.exe", root, tuple(root / item for item in (*binaries, Path("v8_context_snapshot.bin"), Path("vk_swiftshader_icd.json"), *CORE_RESOURCES)))
         case Target.LINUX_X64 | Target.LINUX_ARM64:
             root = Path("src/main/Release")
             binaries = (Path("island_browser"), Path("chrome-sandbox"), Path("libcef.so"), Path("libEGL.so"), Path("libGLESv2.so"), Path("libvk_swiftshader.so"), Path("libvulkan.so.1"))
-            return Layout(".tar.gz", tuple(root / item for item in binaries), root / "island_browser", root, tuple(root / item for item in (*binaries, Path("snapshot_blob.bin"), Path("v8_context_snapshot.bin"), *CORE_RESOURCES)))
+            return Layout(".tar.gz", tuple(root / item for item in binaries), root / "island_browser", root, tuple(root / item for item in (*binaries, Path("v8_context_snapshot.bin"), *CORE_RESOURCES)))
     assert_never(target)
 
 
