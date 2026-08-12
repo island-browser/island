@@ -296,14 +296,15 @@ that Phase 3 implementation is complete before proceeding.
       space via the UI. After a few seconds, run `pgrep -ef island_browser` again and verify the
       renderer process(es) for that space have exited. Do this for at least two spaces to confirm the
       pattern.
-- [ ] **Memory growth — private footprint or PSS:** Open the app and note the private memory footprint
-      of the `island_browser` main process (Instruments, Activity Monitor via "Memory > Real Memory" or
-      `ps` column `RSIZE` on macOS, or `/proc` on Linux). Create and close several spaces (e.g., 5 new
-      spaces, then close each). After all closes, measure the footprint again. Verify it has not grown
-      unbounded — some growth is expected (cached content, internal buffers), but should return close to
-      baseline after tabs/spaces are closed (allowing for CEF's internal memory pooling). Document
-      observations; an obvious memory leak would show footprint grow to 200%+ after a small number of
-      close operations.
+- [ ] **Memory growth — private footprint or PSS:** Open the app and note the memory footprint of the
+      `island_browser` main process. Use a measure of private or proportional memory, not RSS:
+      on macOS, use `vmmap --summary` and read the `footprint` value, or Instruments allocations; on
+      Linux, use proportional set size (PSS) from `/proc/<pid>/smaps_rollup`. (Activity Monitor "Real
+      Memory" and `ps RSIZE` measure RSS, which includes shared pages and is not a private-footprint
+      metric.) Create and close several spaces (e.g., 5 new spaces, then close each). After all closes,
+      measure the footprint again. Verify it has not grown unbounded — growth should be proportional to
+      cached content, not accumulated on close. Document observations; an obvious memory leak would show
+      footprint growing without returning toward baseline after repeated open/close cycles.
 - [ ] **Process count — no accumulation:** Using `pgrep -c island_browser`, measure the process count
       when the window is empty (no tabs/spaces), when it has multiple tabs/spaces, and after closing all
       but one tab/space. Verify the count drops back down after closures, not remaining elevated.
