@@ -13,6 +13,16 @@ int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& ap
 
     CefSettings settings;
     settings.remote_debugging_port = kRemoteDebuggingPort;
+    // Test-friendly isolated cache root: never touch the OS keychain via the
+    // Chromium Safe Storage helper. Pointing root_cache_path at a dedicated
+    // per-process directory keeps CEF state out of the user's profile and stops
+    // the "wants to use your confidential information stored in Chromium Safe
+    // Storage" prompt from firing during tests and smoke runs.
+    CefString(&settings.root_cache_path) = "/tmp/island_cef_cache";
+    // Disable session-cookie persistence so CEF never encrypts cookies to disk
+    // through Chromium Safe Storage; this is the macOS keychain popup users hit
+    // during tests.
+    settings.persist_session_cookies = false;
 #if !defined(CEF_USE_SANDBOX) && !defined(CEF_USE_BOOTSTRAP)
     settings.no_sandbox = true;
 #endif
