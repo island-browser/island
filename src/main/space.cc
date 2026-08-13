@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "include/cef_request_context_handler.h"
+
 namespace island {
 
 Space::Space(SpaceId id, std::string name, SpaceColor color)
@@ -149,8 +151,8 @@ void Space::CreateRequestContextIfNeeded(const std::string& cache_path) {
         return;
     }
     if (cache_path.empty()) {
-        request_context_ =
-            CefRequestContext::CreateContext(CefRequestContext::GetGlobalContext(), nullptr);
+        request_context_ = CefRequestContext::CreateContext(
+            CefRequestContext::GetGlobalContext(), CefRefPtr<CefRequestContextHandler>());
     } else {
         CefRequestContextSettings settings;
         CefString(&settings.cache_path) = cache_path;
