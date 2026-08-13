@@ -13,6 +13,8 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "navigation_state.h"
+#include "space.h"
+#include "tab.h"
 
 class CefBrowser;
 class CefBrowserView;
@@ -115,7 +117,14 @@ class BrowserWindow : public CefClient,
 
     explicit BrowserWindow(std::string initial_url);
 
-    [[nodiscard]] bool IsMainBrowser(CefRefPtr<CefBrowser> browser) const;
+    [[nodiscard]] Space& active_space() noexcept { return spaces_[active_space_index_]; }
+    [[nodiscard]] const Space& active_space() const noexcept {
+        return spaces_[active_space_index_];
+    }
+    [[nodiscard]] Tab* FindTabByBrowser(CefRefPtr<CefBrowser> browser) noexcept;
+    [[nodiscard]] const Tab* FindTabByBrowser(CefRefPtr<CefBrowser> browser) const noexcept;
+    [[nodiscard]] Tab* active_tab() noexcept;
+    [[nodiscard]] const Tab* active_tab() const noexcept;
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
@@ -123,15 +132,14 @@ class BrowserWindow : public CefClient,
     void CloseNavigationAndQuitMessageLoop();
 
     std::string initial_url_;
-    NavigationState navigation_state_;
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
     ChromeSnapshot chrome_snapshot_;
     CefRefPtr<CefWindow> window_;
-    CefRefPtr<CefBrowserView> browser_view_;
-    CefRefPtr<CefBrowser> browser_;
+    std::vector<Space> spaces_;
+    std::size_t active_space_index_ = 0;
     bool browser_was_created_ = false;
     bool closing_ = false;
     bool message_loop_quit_ = false;

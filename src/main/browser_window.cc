@@ -40,6 +40,9 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
 }
 
 BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(initial_url)) {
+    spaces_.emplace_back(SpaceId{1}, "Default", ArgbColor{0xFF5B8DEF});
+    active_space().CreateRequestContextIfNeeded("");
+    active_space().AppendTab(Tab{TabId{1}});
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
@@ -51,25 +54,28 @@ BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(i
         .width = kChromeWindowWidth - chrome_snapshot_.rail_bounds.width,
         .height = kChromeWindowHeight,
     };
-    navigation_state_.SetObserver(this);
+    if (!active_space().tabs().empty()) {
+        active_space().tabs()[0].navigation_state().SetObserver(this);
+    }
 }
 
 void BrowserWindow::ExecuteCommand(BrowserCommand command) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || browser_ == nullptr) {
+    Tab* tab = active_tab();
+    if (closing_ || tab == nullptr || tab->browser() == nullptr) {
         return;
     }
 
     switch (command) {
         case BrowserCommand::kBack:
-            browser_->GoBack();
+            tab->browser()->GoBack();
             return;
         case BrowserCommand::kForward:
-            browser_->GoForward();
+            tab->browser()->GoForward();
             return;
         case BrowserCommand::kReload:
-            browser_->Reload();
+            tab->browser()->Reload();
             return;
     }
 }
@@ -79,7 +85,10 @@ void BrowserWindow::SetNavigationObserver(NavigationObserver* observer) {
 
     navigation_observer_ = observer == this ? nullptr : observer;
     if (navigation_observer_ != nullptr && !closing_) {
-        navigation_observer_->OnNavigationChanged(navigation_state_.snapshot());
+        const Tab* tab = active_tab();
+        if (tab != nullptr) {
+            navigation_observer_->OnNavigationChanged(tab->navigation_state().snapshot());
+        }
     }
 }
 
@@ -93,7 +102,9 @@ void BrowserWindow::SetChromeObserver(ChromeObserver* observer) {
 }
 
 const NavigationSnapshot& BrowserWindow::navigation_snapshot() const noexcept {
-    return navigation_state_.snapshot();
+    const Tab* tab = active_tab();
+    static const NavigationSnapshot kEmpty;
+    return tab != nullptr ? tab->navigation_state().snapshot() : kEmpty;
 }
 
 const ChromeSnapshot& BrowserWindow::chrome_snapshot() const noexcept { return chrome_snapshot_; }
@@ -149,11 +160,12 @@ void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
     if (chrome_ != nullptr) {
         chrome_->OnAddressChanged(address_bar_model_.snapshot());
     }
-    if (!url.has_value() || browser_ == nullptr) {
+    Tab* tab = active_tab();
+    if (!url.has_value() || tab == nullptr || tab->browser() == nullptr) {
         return;
     }
 
-    CefRefPtr<CefFrame> main_frame = browser_->GetMainFrame();
+    CefRefPtr<CefFrame> main_frame = tab->browser()->GetMainFrame();
     if (main_frame != nullptr) {
         main_frame->LoadURL(*url);
     }
@@ -161,8 +173,9 @@ void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
 
 void BrowserWindow::FocusBrowserView() {
     CEF_REQUIRE_UI_THREAD();
-    if (!closing_ && browser_view_ != nullptr) {
-        browser_view_->RequestFocus();
+    const Tab* tab = active_tab();
+    if (!closing_ && tab != nullptr && tab->browser_view() != nullptr) {
+        tab->browser_view()->RequestFocus();
     }
 }
 
@@ -197,21 +210,23 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
                                     const CefString& url) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain()) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr || !frame->IsMain()) {
         return;
     }
 
-    navigation_state_.SetAddress(url.ToString());
+    owner->navigation_state().SetAddress(url.ToString());
 }
 
 void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || !IsMainBrowser(browser)) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr) {
         return;
     }
 
-    navigation_state_.OnTitleChange(title.ToString());
+    owner->navigation_state().OnTitleChange(title.ToString());
     UpdateWindowTitle();
 }
 
@@ -229,7 +244,10 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
         return;
     }
     browser_was_created_ = true;
-    browser_ = browser;
+    Tab* owner = FindTabByBrowser(browser);
+    if (owner != nullptr) {
+        owner->SetBrowser(browser);
+    }
 }
 
 bool BrowserWindow::DoClose(CefRefPtr<CefBrowser>) {
@@ -237,12 +255,16 @@ bool BrowserWindow::DoClose(CefRefPtr<CefBrowser>) {
     return false;
 }
 
-void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser>) {
+void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
 
     closing_ = true;
     DetachChromeAndObservers();
-    browser_ = nullptr;
+    Tab* owner = FindTabByBrowser(browser);
+    if (owner != nullptr) {
+        owner->SetBrowser(nullptr);
+        owner->SetBrowserView(nullptr);
+    }
     CloseNavigationAndQuitMessageLoop();
 }
 
@@ -250,11 +272,12 @@ void BrowserWindow::OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool, bo
                                          bool can_go_forward) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || !IsMainBrowser(browser)) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr) {
         return;
     }
 
-    navigation_state_.OnLoadingStateChange(can_go_back, can_go_forward);
+    owner->navigation_state().OnLoadingStateChange(can_go_back, can_go_forward);
 }
 
 void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
