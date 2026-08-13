@@ -21,6 +21,8 @@ void Space::SetColor(SpaceColor color) { color_ = color; }
 
 const std::vector<Tab>& Space::tabs() const noexcept { return tabs_; }
 
+std::vector<Tab>& Space::editable_tabs() noexcept { return tabs_; }
+
 std::size_t Space::tab_count() const noexcept { return tabs_.size(); }
 
 void Space::AppendTab(Tab tab) {
@@ -150,14 +152,15 @@ void Space::CreateRequestContextIfNeeded(const std::string& cache_path) {
     if (request_context_) {
         return;
     }
-    if (cache_path.empty()) {
-        request_context_ = CefRequestContext::CreateContext(
-            CefRequestContext::GetGlobalContext(), CefRefPtr<CefRequestContextHandler>());
-    } else {
-        CefRequestContextSettings settings;
+    CefRequestContextSettings settings;
+    if (!cache_path.empty()) {
         CefString(&settings.cache_path) = cache_path;
-        request_context_ = CefRequestContext::CreateContext(settings, nullptr);
     }
+    // Always create a fresh per-space context. Using the global CEF request
+    // context (via CreateContext(GetGlobalContext(), ...)) segfaults when CEF
+    // is not yet initialized (e.g. in tests) because it dereferences a null
+    // global context reference.
+    request_context_ = CefRequestContext::CreateContext(settings, nullptr);
 }
 
 CefRefPtr<CefRequestContext> Space::request_context() const noexcept {
