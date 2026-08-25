@@ -12,7 +12,9 @@ add_library(island_browser_core STATIC
     icon_catalog.cc
     island_app.cc
     navigation_state.cc
+    space.cc
     startup_options.cc
+    tab.cc
 )
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
