@@ -17,18 +17,16 @@ Automated coverage that *is* in place and does not require a human:
 - `tests/tab_test.cpp` — `TabId` uniqueness, tab add/remove/active-index semantics.
 - `tests/space_test.cpp` — `SpaceId` uniqueness, space add/remove/reorder, active-tab index bounds
   on active-tab removal.
-- `tests/browser_window_test.cpp` — multi-space restructuring, per-space `CefRequestContext`
-  identity, tab/space switching and re-parenting.
 - `tests/chrome/browser_chrome_contract_test.cpp` — fixed rail regions (Phase 2 `ChromeViewId`
   values unchanged), tab-strip collection region shape and count, space-switcher collection region
   shape and count.
-- `tests/command_palette_test.cpp` — result composition (active-space tabs, space list), fuzzy-match
-  ordering, Escape closes without side effects, URL submission delegation to `AddressModel`.
 - `tests/session_store_test.cpp` — serialize/deserialize round-trip, each malformed-file case
   (missing/unreadable/schema-invalid) falls back cleanly to fresh session, restored URLs violating
   current allow-list are rejected.
 - `tests/cef_address_parser_test.cpp` — URL allow/reject rules (already existed in Phase 2).
-- `tests/chrome_tokens_test.cpp` / `design_tokens_test.cpp` — light/dark token values.
+- `tests/design_tokens_test.cpp` — light/dark token values.
+- `tests/browser_window_test.cpp` — planned in units U2/U4/U5/U6; not yet implemented.
+- `tests/command_palette_test.cpp` — planned in unit U7; not yet implemented.
 
 What those tests cannot verify: that the rendered tab strip and space switcher are visually
 correct, that the divider in split view is draggable on a real compositor, that focus order and

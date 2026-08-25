@@ -37,13 +37,13 @@ class PackageFixture:
         for name in ("icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "locales/en-US.pak"):
             self.write(root / name)
         if target.startswith("windows"):
-            for name in ("libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "libEGL.dll", "libGLESv2.dll", "snapshot_blob.bin", "v8_context_snapshot.bin", "vk_swiftshader.dll", "vulkan-1.dll"):
+            for name in ("libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "libEGL.dll", "libGLESv2.dll", "v8_context_snapshot.bin", "vk_swiftshader.dll", "vulkan-1.dll"):
                 self.write_binary(root / name, target)
             self.write(root / "vk_swiftshader_icd.json")
             if sandbox:
                 self.write_binary(root / "island_browser.dll", target)
         else:
-            for name in ("chrome-sandbox", "libcef.so", "libEGL.so", "libGLESv2.so", "libvk_swiftshader.so", "libvulkan.so.1", "snapshot_blob.bin", "v8_context_snapshot.bin"):
+            for name in ("chrome-sandbox", "libcef.so", "libEGL.so", "libGLESv2.so", "libvk_swiftshader.so", "libvulkan.so.1", "v8_context_snapshot.bin"):
                 self.write_binary(root / name, target)
         self.stage_chrome_resources(root / "resources/island")
 
