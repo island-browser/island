@@ -49,6 +49,7 @@ class Space {
     void SetColor(SpaceColor color);
 
     [[nodiscard]] const std::vector<Tab>& tabs() const noexcept;
+    [[nodiscard]] std::vector<Tab>& tabs() noexcept;
     [[nodiscard]] std::size_t tab_count() const noexcept;
 
     // The appended tab becomes the active tab.
@@ -86,7 +87,7 @@ class Space {
     [[nodiscard]] CefRefPtr<CefRequestContext> request_context() const noexcept;
 
   private:
-    void CreateRequestContextIfNeeded(const std::string& cache_path);
+    void CreateRequestContextIfNeeded(const std::string& cache_path) const;
     void MaintainActiveIndexAfterRemoval(std::size_t removed_index);
 
     SpaceId id_;

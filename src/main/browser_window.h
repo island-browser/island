@@ -123,6 +123,7 @@ class BrowserWindow : public CefClient,
     }
     [[nodiscard]] Tab* FindTabByBrowser(CefRefPtr<CefBrowser> browser) noexcept;
     [[nodiscard]] const Tab* FindTabByBrowser(CefRefPtr<CefBrowser> browser) const noexcept;
+    [[nodiscard]] Tab* FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept;
     [[nodiscard]] Tab* active_tab() noexcept;
     [[nodiscard]] const Tab* active_tab() const noexcept;
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
