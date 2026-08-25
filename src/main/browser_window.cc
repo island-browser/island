@@ -41,7 +41,6 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
 
 BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(initial_url)) {
     spaces_.emplace_back(SpaceId{1}, "Default", ArgbColor{0xFF5B8DEF});
-    active_space().CreateRequestContextIfNeeded("");
     active_space().AppendTab(Tab{TabId{1}});
     chrome_snapshot_.rail_bounds = {
         .x = 0,
@@ -54,8 +53,9 @@ BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(i
         .width = kChromeWindowWidth - chrome_snapshot_.rail_bounds.width,
         .height = kChromeWindowHeight,
     };
-    if (!active_space().tabs().empty()) {
-        active_space().tabs()[0].navigation_state().SetObserver(this);
+    Tab* tab = active_tab();
+    if (tab != nullptr) {
+        tab->navigation_state().SetObserver(this);
     }
 }
 
@@ -284,33 +284,36 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
                                 TransitionType) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain()) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr || !frame->IsMain()) {
         return;
     }
 
-    navigation_state_.OnLoadStart(frame->GetURL().ToString());
+    owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
 }
 
 void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                               int http_status_code) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain()) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr || !frame->IsMain()) {
         return;
     }
 
-    navigation_state_.OnLoadEnd(http_status_code);
+    owner->navigation_state().OnLoadEnd(http_status_code);
 }
 
 void BrowserWindow::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                 ErrorCode error_code, const CefString&, const CefString&) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (closing_ || !IsMainBrowser(browser) || !frame->IsMain() || error_code == ERR_ABORTED) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr || !frame->IsMain() || error_code == ERR_ABORTED) {
         return;
     }
 
-    navigation_state_.OnLoadError(static_cast<int>(error_code));
+    owner->navigation_state().OnLoadError(static_cast<int>(error_code));
 }
 
 void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
@@ -330,12 +333,18 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 
     const ChromeTheme theme =
         ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground));
-    browser_view_ = CefBrowserView::CreateBrowserView(this, CefString(initial_url_),
-                                                      CefBrowserSettings(), nullptr, nullptr, this);
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+        this, CefString(initial_url_), CefBrowserSettings(), nullptr,
+        active_space().request_context(), this);
+    Tab* tab = active_tab();
+    if (tab != nullptr) {
+        tab->SetBrowserView(browser_view);
+    }
     window_->SetToFillLayout();
-    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view_, ChromeTokens::ForTheme(theme),
+    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view, ChromeTokens::ForTheme(theme),
                                               icon_resource_root);
-    chrome_->OnNavigationChanged(navigation_state_.snapshot());
+    chrome_->OnNavigationChanged(tab != nullptr ? tab->navigation_state().snapshot()
+                                                 : NavigationSnapshot{});
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
     window_->AddChildView(chrome_->root());
     window_->SetTitle(CefString("Island"));
@@ -343,7 +352,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     ApplyTheme(window_, theme, true);
     window_->Show();
     window_->Activate();
-    browser_view_->RequestFocus();
+    browser_view->RequestFocus();
 
     window_->SetAccelerator(kBackAccelerator, kVirtualKeyLeft, false, false, true, true);
     window_->SetAccelerator(kForwardAccelerator, kVirtualKeyRight, false, false, true, true);
@@ -360,7 +369,6 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     closing_ = true;
     DetachChromeAndObservers();
     window_ = nullptr;
-    browser_view_ = nullptr;
 
     if (!browser_was_created_) {
         CloseNavigationAndQuitMessageLoop();
@@ -404,11 +412,12 @@ CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView>) {
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (browser_ == nullptr) {
+    const Tab* tab = active_tab();
+    if (tab == nullptr || tab->browser() == nullptr) {
         return true;
     }
 
-    return browser_->GetHost()->TryCloseBrowser();
+    return tab->browser()->GetHost()->TryCloseBrowser();
 }
 
 bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
@@ -437,22 +446,27 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
     }
 }
 
-void BrowserWindow::OnBrowserCreated(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> browser) {
+void BrowserWindow::OnBrowserCreated(CefRefPtr<CefBrowserView> browser_view,
+                                     CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return;
     }
     browser_was_created_ = true;
-    browser_ = browser;
+    Tab* owner = FindTabByBrowserView(browser_view);
+    if (owner != nullptr) {
+        owner->SetBrowser(browser);
+    }
 }
 
 void BrowserWindow::OnBrowserDestroyed(CefRefPtr<CefBrowserView>, CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
 
-    if (IsMainBrowser(browser)) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (owner != nullptr) {
         DetachChromeAndObservers();
-        browser_ = nullptr;
-        browser_view_ = nullptr;
+        owner->SetBrowser(nullptr);
+        owner->SetBrowserView(nullptr);
     }
 }
 
@@ -462,13 +476,61 @@ BrowserWindow::ChromeToolbarType BrowserWindow::GetChromeToolbarType(CefRefPtr<C
 
 void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
     CEF_REQUIRE_UI_THREAD();
-    if (!closing_ && browser_view_ != nullptr && view != nullptr && view->IsSame(browser_view_)) {
+    const Tab* tab = active_tab();
+    if (!closing_ && tab != nullptr && tab->browser_view() != nullptr && view != nullptr &&
+        view->IsSame(tab->browser_view())) {
         CancelAddressEditing();
     }
 }
 
-bool BrowserWindow::IsMainBrowser(CefRefPtr<CefBrowser> browser) const {
-    return browser_ != nullptr && browser_->IsSame(browser);
+Tab* BrowserWindow::FindTabByBrowser(CefRefPtr<CefBrowser> browser) noexcept {
+    if (browser == nullptr) {
+        return nullptr;
+    }
+    for (Space& space : spaces_) {
+        for (Tab& tab : space.tabs()) {
+            if (tab.browser() != nullptr && tab.browser()->IsSame(browser)) {
+                return &tab;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const Tab* BrowserWindow::FindTabByBrowser(CefRefPtr<CefBrowser> browser) const noexcept {
+    if (browser == nullptr) {
+        return nullptr;
+    }
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            if (tab.browser() != nullptr && tab.browser()->IsSame(browser)) {
+                return &tab;
+            }
+        }
+    }
+    return nullptr;
+}
+
+Tab* BrowserWindow::FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept {
+    if (browser_view == nullptr) {
+        return nullptr;
+    }
+    for (Space& space : spaces_) {
+        for (Tab& tab : space.tabs()) {
+            if (tab.browser_view() != nullptr && tab.browser_view()->IsSame(browser_view)) {
+                return &tab;
+            }
+        }
+    }
+    return nullptr;
+}
+
+Tab* BrowserWindow::active_tab() noexcept {
+    return active_space().FindTab(active_space().active_tab_id());
+}
+
+const Tab* BrowserWindow::active_tab() const noexcept {
+    return active_space().FindTab(active_space().active_tab_id());
 }
 
 void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views) {
@@ -496,7 +558,10 @@ void BrowserWindow::PublishChromeSnapshot() {
 void BrowserWindow::DetachChromeAndObservers() {
     navigation_observer_ = nullptr;
     chrome_observer_ = nullptr;
-    navigation_state_.SetObserver(nullptr);
+    Tab* tab = active_tab();
+    if (tab != nullptr) {
+        tab->navigation_state().SetObserver(nullptr);
+    }
     if (chrome_ != nullptr) {
         CefRefPtr<CefPanel> root = chrome_->root();
         chrome_->Detach();
@@ -508,13 +573,17 @@ void BrowserWindow::DetachChromeAndObservers() {
 }
 
 void BrowserWindow::UpdateWindowTitle() {
-    if (window_ != nullptr) {
-        window_->SetTitle(CefString(navigation_state_.snapshot().display_title));
+    const Tab* tab = active_tab();
+    if (window_ != nullptr && tab != nullptr) {
+        window_->SetTitle(CefString(tab->navigation_state().snapshot().display_title));
     }
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {
-    navigation_state_.Close();
+    Tab* tab = active_tab();
+    if (tab != nullptr) {
+        tab->navigation_state().Close();
+    }
 
     if (message_loop_quit_) {
         return;

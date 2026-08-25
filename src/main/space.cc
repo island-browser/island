@@ -21,7 +21,7 @@ void Space::SetColor(SpaceColor color) { color_ = color; }
 
 const std::vector<Tab>& Space::tabs() const noexcept { return tabs_; }
 
-std::vector<Tab>& Space::editable_tabs() noexcept { return tabs_; }
+std::vector<Tab>& Space::tabs() noexcept { return tabs_; }
 
 std::size_t Space::tab_count() const noexcept { return tabs_.size(); }
 
@@ -148,7 +148,7 @@ bool Space::SetSplit(SplitPairing pairing) {
 
 void Space::ClearSplit() { split_.reset(); }
 
-void Space::CreateRequestContextIfNeeded(const std::string& cache_path) {
+void Space::CreateRequestContextIfNeeded(const std::string& cache_path) const {
     if (request_context_) {
         return;
     }
@@ -164,6 +164,7 @@ void Space::CreateRequestContextIfNeeded(const std::string& cache_path) {
 }
 
 CefRefPtr<CefRequestContext> Space::request_context() const noexcept {
+    CreateRequestContextIfNeeded("");
     return request_context_;
 }
 
