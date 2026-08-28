@@ -371,6 +371,9 @@ TEST(SessionStore, SaveDoesNotLeaveATruncatedFileAfterWrite) {
 
     std::ifstream in(path);
     std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // Windows refuses to remove a file while a handle is still open, so the
+    // reader must be closed before the cleanup below rather than at scope exit.
+    in.close();
     EXPECT_TRUE(content.starts_with('{'));
     EXPECT_TRUE(content.ends_with('\n'));
 
@@ -400,6 +403,9 @@ TEST(SessionStore, ProducesDeterministicOutputForSameInput) {
     std::ifstream in_b(path_b, std::ios::binary);
     std::string content_a((std::istreambuf_iterator<char>(in_a)), std::istreambuf_iterator<char>());
     std::string content_b((std::istreambuf_iterator<char>(in_b)), std::istreambuf_iterator<char>());
+    // Windows refuses to remove a file while a handle is still open.
+    in_a.close();
+    in_b.close();
 
     EXPECT_EQ(content_a, content_b);
 
@@ -440,6 +446,8 @@ TEST(SessionStore, SaveWritesReadableJsonWithExpectedKeys) {
     // Then: the file contains the expected keys
     std::ifstream in(path);
     std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // Windows refuses to remove a file while a handle is still open.
+    in.close();
     EXPECT_TRUE(content.find("\"version\"") != std::string::npos);
     EXPECT_TRUE(content.find("\"spaces\"") != std::string::npos);
     EXPECT_TRUE(content.find("\"id\"") != std::string::npos);
