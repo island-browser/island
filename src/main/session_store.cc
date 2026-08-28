@@ -1,15 +1,16 @@
 #include "session_store.h"
 
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <ostream>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <variant>
+#include <utility>
 #include <vector>
 
 namespace island {
@@ -145,52 +146,60 @@ class Writer {
 // JSON parser
 // =========================================================================
 
-class ParseError : public std::runtime_error {
-  public:
-    using std::runtime_error::runtime_error;
-};
-
+// Recursive-descent parser that never throws.  `island_browser_core` links
+// against CEF, which builds this translation unit with -fno-exceptions, so
+// every failure is recorded in `failed_` and surfaced as an empty Parse()
+// result instead.
 class Parser {
   public:
     explicit Parser(std::string_view input) : input_(input), pos_(0) {}
 
-    Value Parse() {
+    // Returns std::nullopt when the input is not a single well-formed JSON
+    // value, including when trailing content follows the root value.
+    std::optional<Value> Parse() {
         Value v = ParseValue();
+        if (failed_) return std::nullopt;
         SkipWhitespace();
-        if (pos_ != input_.size()) {
-            throw ParseError("trailing content after root value");
-        }
+        if (pos_ != input_.size()) return std::nullopt;
         return v;
     }
 
   private:
+    // Marks the parse as failed and yields a placeholder null value so callers
+    // can `return Fail();` from any value-producing helper.
+    Value Fail() {
+        failed_ = true;
+        return Value{};
+    }
+
     void SkipWhitespace() {
         while (pos_ < input_.size() && (input_[pos_] == ' ' || input_[pos_] == '\t' ||
                                         input_[pos_] == '\n' || input_[pos_] == '\r'))
             ++pos_;
     }
 
+    // Returns '\0' and marks failure when the input is exhausted.
     char Peek() {
         SkipWhitespace();
-        if (pos_ >= input_.size()) throw ParseError("unexpected end of input");
+        if (pos_ >= input_.size()) {
+            Fail();
+            return '\0';
+        }
         return input_[pos_];
     }
 
-    char Next() {
-        SkipWhitespace();
-        if (pos_ >= input_.size()) throw ParseError("unexpected end of input");
-        return input_[pos_++];
-    }
-
-    void Expect(char expected) {
+    bool Expect(char expected) {
         SkipWhitespace();
         if (pos_ >= input_.size() || input_[pos_] != expected) {
-            throw ParseError("expected '" + std::string(1, expected) + "'");
+            Fail();
+            return false;
         }
         ++pos_;
+        return true;
     }
 
     Value ParseValue() {
+        if (failed_) return Value{};
         switch (Peek()) {
             case '{':
                 return ParseObject();
@@ -205,15 +214,14 @@ class Parser {
             case 'n':
                 return ParseLiteral("null", Type::kNull, false);
             default:
+                if (failed_) return Value{};
                 return ParseNumber();
         }
     }
 
     Value ParseLiteral(std::string_view expected, Type t, bool bool_val) {
         for (char c : expected) {
-            if (pos_ >= input_.size() || input_[pos_] != c) {
-                throw ParseError("expected literal '" + std::string(expected) + "'");
-            }
+            if (pos_ >= input_.size() || input_[pos_] != c) return Fail();
             ++pos_;
         }
         Value v;
@@ -223,12 +231,12 @@ class Parser {
     }
 
     Value ParseString() {
-        Expect('"');
+        if (!Expect('"')) return Value{};
         std::string result;
         while (pos_ < input_.size() && input_[pos_] != '"') {
             if (input_[pos_] == '\\') {
                 ++pos_;
-                if (pos_ >= input_.size()) throw ParseError("unterminated string escape");
+                if (pos_ >= input_.size()) return Fail();
                 switch (input_[pos_]) {
                     case '"':
                         result += '"';
@@ -249,14 +257,14 @@ class Parser {
                         result += '\t';
                         break;
                     default:
-                        throw ParseError("unknown escape character");
+                        return Fail();
                 }
                 ++pos_;
             } else {
                 result += input_[pos_++];
             }
         }
-        Expect('"');
+        if (!Expect('"')) return Value{};
         Value v;
         v.type = Type::kString;
         v.string_val = std::move(result);
@@ -267,7 +275,7 @@ class Parser {
         std::size_t start = pos_;
         if (pos_ < input_.size() && input_[pos_] == '-') ++pos_;
         if (pos_ >= input_.size() || !std::isdigit(static_cast<unsigned char>(input_[pos_]))) {
-            throw ParseError("expected digit");
+            return Fail();
         }
         while (pos_ < input_.size() && std::isdigit(static_cast<unsigned char>(input_[pos_])))
             ++pos_;
@@ -275,9 +283,7 @@ class Parser {
         std::string_view num_str = input_.substr(start, pos_ - start);
         std::int64_t val = 0;
         auto [ptr, ec] = std::from_chars(num_str.data(), num_str.data() + num_str.size(), val);
-        if (ec != std::errc{}) {
-            throw ParseError("invalid number");
-        }
+        if (ec != std::errc{}) return Fail();
 
         Value v;
         v.type = Type::kInt;
@@ -286,7 +292,7 @@ class Parser {
     }
 
     Value ParseObject() {
-        Expect('{');
+        if (!Expect('{')) return Value{};
         Value v;
         v.type = Type::kObject;
 
@@ -298,26 +304,27 @@ class Parser {
 
         for (;;) {
             SkipWhitespace();
-            // key must be a string
+            // A member key must be a JSON string.
             Value key = ParseString();
-            if (!key.IsString()) throw ParseError("object key must be a string");
-            Expect(':');
+            if (failed_) return Value{};
+            if (!Expect(':')) return Value{};
             Value val = ParseValue();
+            if (failed_) return Value{};
             v.object_val.emplace_back(std::move(key.string_val), std::move(val));
 
             SkipWhitespace();
-            if (pos_ >= input_.size()) throw ParseError("unterminated object");
+            if (pos_ >= input_.size()) return Fail();
             if (input_[pos_] == '}') {
                 ++pos_;
                 return v;
             }
-            if (input_[pos_] != ',') throw ParseError("expected ',' or '}' in object");
+            if (input_[pos_] != ',') return Fail();
             ++pos_;  // consume comma
         }
     }
 
     Value ParseArray() {
-        Expect('[');
+        if (!Expect('[')) return Value{};
         Value v;
         v.type = Type::kArray;
 
@@ -329,19 +336,21 @@ class Parser {
 
         for (;;) {
             v.array_val.push_back(ParseValue());
+            if (failed_) return Value{};
             SkipWhitespace();
-            if (pos_ >= input_.size()) throw ParseError("unterminated array");
+            if (pos_ >= input_.size()) return Fail();
             if (input_[pos_] == ']') {
                 ++pos_;
                 return v;
             }
-            if (input_[pos_] != ',') throw ParseError("expected ',' or ']' in array");
+            if (input_[pos_] != ',') return Fail();
             ++pos_;
         }
     }
 
     std::string_view input_;
     std::size_t pos_;
+    bool failed_ = false;
 };
 
 }  // namespace json
@@ -553,33 +562,25 @@ LoadResult SessionStore::Load(const std::filesystem::path& path) {
         return {SessionState::Default(), SessionError::kFileReadError};
     }
 
-    // Read the entire file into a string
+    // Read the entire file into a string.
     std::string content;
-    try {
-        content.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    } catch (...) {
+    content.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    if (in.bad()) {
         return {SessionState::Default(), SessionError::kFileReadError};
     }
 
-    // Parse JSON
-    json::Value root;
-    try {
-        root = json::Parser(content).Parse();
-    } catch (const json::ParseError&) {
+    // Parse JSON.
+    std::optional<json::Value> root = json::Parser(content).Parse();
+    if (!root.has_value()) {
         return {SessionState::Default(), SessionError::kParseError};
     }
 
-    // Validate and convert
-    return ParseSessionState(root);
+    // Validate and convert.
+    return ParseSessionState(*root);
 }
 
 SessionError SessionStore::Save(const std::filesystem::path& path, const SessionState& state) {
-    std::string json_text;
-    try {
-        json_text = SerializeToJson(state);
-    } catch (...) {
-        return SessionError::kFileWriteError;
-    }
+    const std::string json_text = SerializeToJson(state);
 
     // Atomic write: write to a temp file in the same directory, then rename.
     // This guarantees the target file is either intact or absent — never
