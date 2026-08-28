@@ -21,6 +21,7 @@ add_executable(island_tests
     design_tokens_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
+    search_provider_test.cpp
     session_store_test.cpp
     space_test.cpp
     startup_options_test.cpp
@@ -30,6 +31,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
     "${CMAKE_SOURCE_DIR}/src/main/session_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"

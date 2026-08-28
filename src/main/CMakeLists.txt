@@ -12,6 +12,7 @@ add_library(island_browser_core STATIC
     icon_catalog.cc
     island_app.cc
     navigation_state.cc
+    search_provider.cc
     session_store.cc
     space.cc
     startup_options.cc
