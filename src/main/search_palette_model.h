@@ -91,6 +91,27 @@ enum class PaletteSurfaceSlot : std::uint8_t {
 // Pure so the placement is testable without a CefWindow.
 [[nodiscard]] DipRect SearchPaletteBounds(const DipRect& window_bounds, int content_height) noexcept;
 
+// What a submission should do once the palette has accepted it. Keeping the
+// decision in a pure function makes the empty-query rejection and the
+// null-active-browser no-op testable without a CefBrowser.
+enum class SearchDispatch : std::uint8_t {
+    kRejectedEmptyQuery,
+    kNoActiveBrowser,
+    kNavigate,
+};
+
+struct SearchDispatchDecision {
+    SearchDispatch dispatch = SearchDispatch::kRejectedEmptyQuery;
+    // Only populated when dispatch is kNavigate.
+    std::string url;
+
+    bool operator==(const SearchDispatchDecision&) const = default;
+};
+
+[[nodiscard]] SearchDispatchDecision DecideSearchDispatch(std::string_view query,
+                                                          SearchProviderId provider,
+                                                          bool has_active_browser);
+
 // The accessible name for one provider row, matching the Phase 2 rail
 // accessibility bar: every row states the action it performs.
 [[nodiscard]] std::string SearchProviderRowAccessibleName(const SearchProvider& provider,

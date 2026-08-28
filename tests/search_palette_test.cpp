@@ -98,6 +98,32 @@ TEST(SearchPaletteTest, GivenEveryProviderRowWhenSubmittedThenTheUrlMatchesThePr
     }
 }
 
+TEST(SearchPaletteTest, GivenABlankQueryWhenDispatchedThenNothingNavigates) {
+    const SearchDispatchDecision decision =
+        DecideSearchDispatch("   ", SearchProviderId::kGoogle, /*has_active_browser=*/true);
+
+    EXPECT_EQ(decision.dispatch, SearchDispatch::kRejectedEmptyQuery);
+    EXPECT_EQ(decision.url, "");
+}
+
+TEST(SearchPaletteTest, GivenNoActiveBrowserWhenDispatchedThenItIsADefinedNoOp) {
+    const SearchDispatchDecision decision =
+        DecideSearchDispatch("island", SearchProviderId::kGoogle, /*has_active_browser=*/false);
+
+    EXPECT_EQ(decision.dispatch, SearchDispatch::kNoActiveBrowser);
+    EXPECT_EQ(decision.url, "");
+}
+
+TEST(SearchPaletteTest, GivenAnActiveBrowserWhenDispatchedThenTheComposedUrlIsNavigated) {
+    const SearchDispatchDecision decision = DecideSearchDispatch(
+        "island browser", SearchProviderId::kClaude, /*has_active_browser=*/true);
+
+    EXPECT_EQ(decision.dispatch, SearchDispatch::kNavigate);
+    EXPECT_EQ(decision.url, "https://claude.ai/new?q=island%20browser");
+    EXPECT_EQ(decision.url,
+              ComposeSearchUrl(*FindSearchProvider(SearchProviderId::kClaude), "island browser"));
+}
+
 TEST(SearchPaletteTest, GivenAProviderRowWhenNamedThenItStatesTheActionItPerforms) {
     EXPECT_EQ(SearchProviderRowAccessibleName(SearchProviders()[0], "island"),
               "Search with ChatGPT for island");

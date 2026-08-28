@@ -98,6 +98,19 @@ DipRect SearchPaletteBounds(const DipRect& window_bounds, int content_height) no
     };
 }
 
+SearchDispatchDecision DecideSearchDispatch(std::string_view query, SearchProviderId provider,
+                                            bool has_active_browser) {
+    if (!IsSubmittableQuery(query)) {
+        // No navigation and no error page: the palette simply stays open.
+        return {.dispatch = SearchDispatch::kRejectedEmptyQuery, .url = ""};
+    }
+    const SearchProvider* entry = FindSearchProvider(provider);
+    if (entry == nullptr || !has_active_browser) {
+        return {.dispatch = SearchDispatch::kNoActiveBrowser, .url = ""};
+    }
+    return {.dispatch = SearchDispatch::kNavigate, .url = ComposeSearchUrl(*entry, query)};
+}
+
 std::string SearchProviderRowAccessibleName(const SearchProvider& provider,
                                             std::string_view query) {
     std::string name = "Search with ";

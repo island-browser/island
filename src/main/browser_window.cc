@@ -595,11 +595,37 @@ void BrowserWindow::UpdateWindowTitle() {
     }
 }
 
+CefRefPtr<CefBrowser> BrowserWindow::ActiveBrowser() {
+    CEF_REQUIRE_UI_THREAD();
+    const Tab* tab = active_tab();
+    return closing_ || tab == nullptr ? nullptr : tab->browser();
+}
+
 void BrowserWindow::OnSearchPaletteSubmitted(const SearchSubmission& submission) {
     CEF_REQUIRE_UI_THREAD();
-    // U3 wires this to the active tab through the ActiveTabProvider seam; the
-    // palette itself never holds a CefBrowser.
-    (void)submission;
+    SubmitSearchQuery(submission.query, submission.provider);
+}
+
+void BrowserWindow::SubmitSearchQuery(std::string_view query, SearchProviderId provider) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    CefRefPtr<CefBrowser> browser = ActiveBrowser();
+    const SearchDispatchDecision decision =
+        DecideSearchDispatch(query, provider, browser != nullptr);
+    if (decision.dispatch != SearchDispatch::kNavigate) {
+        return;
+    }
+
+    CefRefPtr<CefFrame> main_frame = browser->GetMainFrame();
+    if (main_frame != nullptr) {
+        main_frame->LoadURL(decision.url);
+    }
+    if (search_palette_ != nullptr) {
+        search_palette_->Hide();
+    }
     FocusBrowserView();
 }
 

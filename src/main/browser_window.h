@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "active_tab_provider.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
@@ -45,6 +46,7 @@ class BrowserWindow : public CefClient,
                       public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public BrowserChromeHost,
+                      public ActiveTabProvider,
                       public SearchPaletteHost,
                       public NavigationObserver {
   public:
@@ -61,6 +63,9 @@ class BrowserWindow : public CefClient,
     // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
     // macOS, where NSMenu key equivalents own the command keys.
     void ShowSearchPalette();
+    // Navigates the active tab to the provider URL for `query`. A blank query is
+    // rejected and a null ActiveBrowser() is a defined no-op; neither navigates.
+    void SubmitSearchQuery(std::string_view query, SearchProviderId provider);
 
     void ExecuteBrowserCommand(BrowserCommand command) override;
     void BeginAddressEditing() override;
@@ -68,6 +73,8 @@ class BrowserWindow : public CefClient,
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
+
+    [[nodiscard]] CefRefPtr<CefBrowser> ActiveBrowser() override;
 
     void OnSearchPaletteSubmitted(const SearchSubmission& submission) override;
     void OnSearchPaletteDismissed() override;
