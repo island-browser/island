@@ -71,3 +71,82 @@ pgrep -fl island_browser || true
 ```
 
 Stable public release remains blocked until signing and notarization verification are implemented.
+
+<!-- Generated: 2026-08-28 | Updated: 2026-08-28 -->
+
+## Repository map
+
+Every directory below owns an `AGENTS.md` carrying a `Parent:` HTML comment that points back up this
+tree. This root file is the only one without such a tag. The sections above this marker are
+hand-maintained project instructions and take precedence over anything a nested `AGENTS.md` says.
+
+| Directory | Purpose |
+|-----------|---------|
+| `src/` | C++20 application sources (see `src/AGENTS.md`) |
+| `tests/` | GoogleTest and pytest suites (see `tests/AGENTS.md`) |
+| `bench/` | Deterministic benchmark support code (see `bench/AGENTS.md`) |
+| `scripts/` | Dependency and packaging entrypoints (see `scripts/AGENTS.md`) |
+| `deps/` | Dependency lock model, installer, and update checks (see `deps/AGENTS.md`) |
+| `cmake/` | Platform CMake modules included by `src/main` (see `cmake/AGENTS.md`) |
+| `docs/` | Process docs, phase specs, and phase plans (see `docs/AGENTS.md`) |
+| `resources/` | Committed runtime icon resources (see `resources/AGENTS.md`) |
+| `tools/` | Offline icon generation pipeline (see `tools/AGENTS.md`) |
+| `.github/` | CI, packaging, and release automation (see `.github/AGENTS.md`) |
+
+### Root files
+
+| File | Description |
+|------|-------------|
+| `CMakeLists.txt` | Top-level build: CEF sentinel check, font/icon resource gates, `island_stage_chrome_resources`, the `ISLAND_ENABLE_SEARCH` option, then `tests/` and `src/main/` |
+| `CLAUDE.md` | Loader that pulls this file in via `@AGENTS.md` |
+| `DESIGN.md` | Long-form product/visual design narrative |
+| `README.md` | Human-facing project overview |
+| `.clang-format` | Google base, 4-space indent, 100 columns, left-aligned pointers |
+
+### Search build (opt-in)
+
+The Verification commands above build and run the default suite only — **103 tests** on `main`. The
+Phase S0 search kernel under `src/search/` is guarded by `ISLAND_ENABLE_SEARCH`, which is declared
+`OFF`, so none of it is configured, compiled, or run by those commands.
+
+To build and test the search kernel on its own, without CEF and without `scripts/setup_deps.sh`
+(this is what `.github/workflows/search.yml` runs on all six targets):
+
+```bash
+cmake -B build-search -S src/search -DISLAND_ENABLE_SEARCH=ON
+cmake --build build-search
+ctest --test-dir build-search --output-on-failure
+```
+
+That reports 84 tests. To build the browser and the search kernel together instead:
+
+```bash
+cmake -B build-search-root -S . -DISLAND_ENABLE_SEARCH=ON
+cmake --build build-search-root
+ctest --test-dir build-search-root --output-on-failure
+```
+
+That reports 187 tests (103 + 84). The Python suites are separate from `ctest` entirely:
+
+```bash
+python3 -m pytest tests/deps tests/package tests/design
+```
+
+### Excluded from this documentation tree
+
+No `AGENTS.md` is generated under: `third_party/` and `assets/` (both vendored by
+`scripts/setup_deps.sh` and gitignored), any `build*/` or `dist*/` directory, `site/`, `.omc/`,
+`.omo/`, `.opencode/`, `.playwright-mcp/`, `.claude/`, the `.codegraph` symlink, and the `.cache/` /
+`.pytest_cache/` / `.ruff_cache/` / `__pycache__/` caches.
+
+Three further leaf directories are covered by a note in their parent instead of their own file,
+because they hold only generated output or vendored inputs: `resources/island/icons/{source,png}/`
+and `tools/icon_pipeline/{licenses,vendor}/`.
+
+Two directories that exist in some working trees are **not** documented here because they are not
+present on `main`: `docker/` and `tests/container/`, which belong to an uncommitted hybrid
+native/container build lane. An `AGENTS.md` for each should land in the same change as the code.
+
+Treat the two lists above as the declared scope when checking this tree for completeness.
+
+<!-- MANUAL: Notes added below this line are preserved on regeneration -->
