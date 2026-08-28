@@ -15,12 +15,14 @@
 #include "include/views/cef_window_delegate.h"
 #include "navigation_state.h"
 #include "search_palette.h"
+#include "sidebar_state.h"
 #include "space.h"
 #include "tab.h"
 
 class CefBrowser;
 class CefBrowserView;
 class CefFrame;
+class CefOverlayController;
 class CefWindow;
 
 namespace island {
@@ -63,6 +65,11 @@ class BrowserWindow : public CefClient,
     // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
     // macOS, where NSMenu key equivalents own the command keys.
     void ShowSearchPalette();
+    // Flips the explicit Cmd/Ctrl+B pin. Available on every platform; hover is a
+    // macOS-only enhancement layered on the same state.
+    void ToggleSidebar();
+    // The macOS hover seam's entry point: a pointer position in window DIP.
+    void OnSidebarHoverPointer(int x_dip);
     // Navigates the active tab to the provider URL for `query`. A blank query is
     // rejected and a null ActiveBrowser() is a defined no-op; neither navigates.
     void SubmitSearchQuery(std::string_view query, SearchProviderId provider);
@@ -130,6 +137,7 @@ class BrowserWindow : public CefClient,
         kReloadWithControlAccelerator,
         kFocusAddressAccelerator,
         kOpenPaletteAccelerator,
+        kToggleSidebarAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url);
@@ -146,6 +154,9 @@ class BrowserWindow : public CefClient,
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
+    void CreateHoverSliver();
+    void ApplySidebarState();
+    void UninstallHoverSeam();
     void UpdateWindowTitle();
     void CloseNavigationAndQuitMessageLoop();
 
@@ -153,6 +164,10 @@ class BrowserWindow : public CefClient,
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
     std::unique_ptr<SearchPalette> search_palette_;
+    SidebarState sidebar_state_;
+    CefRefPtr<CefPanel> hover_sliver_;
+    CefRefPtr<CefOverlayController> hover_sliver_overlay_;
+    void* hover_seam_ = nullptr;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
     ChromeSnapshot chrome_snapshot_;

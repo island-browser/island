@@ -16,6 +16,7 @@ add_library(island_browser_core STATIC
     search_palette_model.cc
     search_provider.cc
     session_store.cc
+    sidebar_state.cc
     space.cc
     startup_options.cc
     tab.cc
@@ -27,7 +28,7 @@ SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)
 
-    target_sources(island_browser_core PRIVATE macos/font_registry_mac.mm)
+    target_sources(island_browser_core PRIVATE macos/font_registry_mac.mm macos/sidebar_hover_mac.mm)
     target_link_libraries(island_browser_core PRIVATE "-framework CoreFoundation" "-framework CoreText")
 
     set(CEF_TARGET island_browser)
@@ -92,13 +93,13 @@ if(APPLE)
         )
     endforeach()
 elseif(WIN32)
-    target_sources(island_browser_core PRIVATE windows/font_registry_win.cc)
+    target_sources(island_browser_core PRIVATE windows/font_registry_win.cc sidebar_hover_stub.cc)
     target_link_libraries(island_browser_core PRIVATE gdi32)
     include("${CMAKE_SOURCE_DIR}/cmake/platform/windows.cmake")
     island_add_windows_browser_target()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Fontconfig REQUIRED)
-    target_sources(island_browser_core PRIVATE linux/font_registry_linux.cc)
+    target_sources(island_browser_core PRIVATE linux/font_registry_linux.cc sidebar_hover_stub.cc)
     target_link_libraries(island_browser_core PRIVATE Fontconfig::Fontconfig)
     include("${CMAKE_SOURCE_DIR}/cmake/platform/linux.cmake")
     island_add_linux_browser(island_browser)

@@ -50,6 +50,14 @@ void IslandApp::ShowSearchPalette() {
     }
 }
 
+void IslandApp::ToggleSidebar() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ToggleSidebar();
+    }
+}
+
 void IslandApp::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
 

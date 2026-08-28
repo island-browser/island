@@ -127,8 +127,62 @@ TEST(SearchPaletteTest, GivenAnActiveBrowserWhenDispatchedThenTheComposedUrlIsNa
 TEST(SearchPaletteTest, GivenAProviderRowWhenNamedThenItStatesTheActionItPerforms) {
     EXPECT_EQ(SearchProviderRowAccessibleName(SearchProviders()[0], "island"),
               "Search with ChatGPT for island");
-    EXPECT_EQ(SearchProviderRowAccessibleName(SearchProviders()[4], ""),
-              "Search with Google for ");
+    EXPECT_EQ(SearchProviderRowAccessibleName(SearchProviders()[4], ""), "Search with Google for ");
+}
+
+TEST(SearchPaletteTest, GivenEveryPaletteSlotWhenResolvedThenItComesFromTokensAlone) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+        for (const PaletteSurfaceSlot slot :
+             {PaletteSurfaceSlot::kPanel, PaletteSurfaceSlot::kQueryWell, PaletteSurfaceSlot::kRow,
+              PaletteSurfaceSlot::kHighlightedRow, PaletteSurfaceSlot::kBorder}) {
+            // A re-assertion after ThemeChanged() must be deterministic, so the
+            // slot color has to be a pure function of the resolved tokens.
+            EXPECT_EQ(PaletteSurfaceRole(slot, theme), PaletteSurfaceRoleForTokens(slot, tokens));
+            EXPECT_EQ(PaletteSurfaceRole(slot, theme), PaletteSurfaceRole(slot, theme));
+        }
+    }
+}
+
+TEST(SearchPaletteTest, GivenThePaletteSlotsWhenResolvedThenTheyMapToTheIntendedTokenRoles) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+
+        EXPECT_EQ(PaletteSurfaceRole(PaletteSurfaceSlot::kPanel, theme), tokens.surface);
+        EXPECT_EQ(PaletteSurfaceRole(PaletteSurfaceSlot::kQueryWell, theme),
+                  tokens.surface_secondary);
+        EXPECT_EQ(PaletteSurfaceRole(PaletteSurfaceSlot::kRow, theme), tokens.surface);
+        EXPECT_EQ(PaletteSurfaceRole(PaletteSurfaceSlot::kHighlightedRow, theme),
+                  tokens.surface_secondary);
+        EXPECT_EQ(PaletteSurfaceRole(PaletteSurfaceSlot::kBorder, theme), tokens.border);
+        // The highlighted row must be distinguishable from a resting row in
+        // both themes, otherwise the keyboard selection is invisible.
+        EXPECT_NE(PaletteSurfaceRole(PaletteSurfaceSlot::kHighlightedRow, theme),
+                  PaletteSurfaceRole(PaletteSurfaceSlot::kRow, theme));
+    }
+}
+
+TEST(SearchPaletteTest, GivenTheThemesWhenComparedThenEveryPaletteSlotDiffers) {
+    for (const PaletteSurfaceSlot slot :
+         {PaletteSurfaceSlot::kPanel, PaletteSurfaceSlot::kQueryWell, PaletteSurfaceSlot::kRow,
+          PaletteSurfaceSlot::kHighlightedRow, PaletteSurfaceSlot::kBorder}) {
+        EXPECT_NE(PaletteSurfaceRole(slot, ChromeTheme::kLight),
+                  PaletteSurfaceRole(slot, ChromeTheme::kDark));
+    }
+}
+
+TEST(SearchPaletteTest, GivenAWindowWhenThePaletteIsPlacedThenItIsCenteredAndClamped) {
+    const DipRect wide = SearchPaletteBounds({.x = 0, .y = 0, .width = 1440, .height = 900}, 400);
+    EXPECT_EQ(wide.width, SearchPaletteWidthDip());
+    EXPECT_EQ(wide.x, (1440 - SearchPaletteWidthDip()) / 2);
+    EXPECT_EQ(wide.y, SearchPaletteTopOffsetDip());
+    EXPECT_EQ(wide.height, 400);
+
+    // A window narrower than the palette clamps it instead of overflowing.
+    const DipRect narrow = SearchPaletteBounds({.x = 0, .y = 0, .width = 320, .height = 240}, 400);
+    EXPECT_EQ(narrow.x, 0);
+    EXPECT_EQ(narrow.width, 320);
+    EXPECT_LE(narrow.y + narrow.height, 240);
 }
 
 }  // namespace

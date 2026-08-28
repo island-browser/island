@@ -245,6 +245,27 @@ TEST(BrowserChromeContractTest, GivenTheCollectionIdsWhenComparedThenTheyStartAf
               static_cast<int>(ChromeViewId::kActivePageIndicator));
 }
 
+TEST(BrowserChromeContractTest, GivenAHiddenSidebarWhenLaidOutThenTheRailTakesNoLayoutWidth) {
+    ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
+    tokens.rail_width_dip = 286;
+    const DipRect root = {.x = 0, .y = 0, .width = 1440, .height = 900};
+
+    const ChromeGeometrySnapshot hidden =
+        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_revealed=*/false);
+    const ChromeGeometrySnapshot revealed =
+        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_revealed=*/true);
+
+    EXPECT_EQ(hidden.rail_bounds.width, 0);
+    EXPECT_EQ(hidden.browser_content_bounds.x, 0);
+    EXPECT_EQ(hidden.browser_content_bounds.width, 1440);
+    EXPECT_EQ(revealed.rail_bounds.width, 286);
+    EXPECT_EQ(revealed.browser_content_bounds.x, 286);
+    EXPECT_EQ(revealed.browser_content_bounds.width, 1440 - 286);
+    // The two-argument overload is the revealed layout, so every existing
+    // caller and contract assertion keeps its meaning.
+    EXPECT_EQ(BrowserChrome::LayoutForBounds(root, tokens), revealed);
+}
+
 TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenComparedThenTheyStartAfter1027) {
     EXPECT_EQ(static_cast<int>(ChromeViewId::kHoverSliver), 1028);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kSearchPalette), 1029);
