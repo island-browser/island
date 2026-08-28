@@ -42,6 +42,14 @@ void IslandApp::BeginAddressEditing() {
     }
 }
 
+void IslandApp::ShowSearchPalette() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowSearchPalette();
+    }
+}
+
 void IslandApp::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
 

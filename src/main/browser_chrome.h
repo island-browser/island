@@ -60,6 +60,14 @@ enum class ChromeViewId : int {
     kSpaceSwitcherEntry = 1025,
     kSpaceSwitcherEntryColorMark = 1026,
     kSpaceSwitcherEntryName = 1027,
+    // Window-level overlay regions. These are reported through
+    // CefOverlayController and are deliberately absent from ViewTreeContract():
+    // they are children of the CefWindow, not of the rail or the root panel.
+    kHoverSliver = 1028,
+    kSearchPalette = 1029,
+    kSearchPaletteQuery = 1030,
+    kSearchPaletteProvider = 1031,
+    kSearchPaletteProviderName = 1032,
 };
 
 struct ChromeViewTreeNode {

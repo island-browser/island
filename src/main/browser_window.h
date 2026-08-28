@@ -13,6 +13,7 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "navigation_state.h"
+#include "search_palette.h"
 #include "space.h"
 #include "tab.h"
 
@@ -44,6 +45,7 @@ class BrowserWindow : public CefClient,
                       public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public BrowserChromeHost,
+                      public SearchPaletteHost,
                       public NavigationObserver {
   public:
     static CefRefPtr<BrowserWindow> Create(std::string initial_url);
@@ -55,6 +57,10 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] const ChromeSnapshot& chrome_snapshot() const noexcept;
     [[nodiscard]] ChromeViewTreeNode chrome_view_tree_snapshot() const;
     void RequestClose();
+    // Opens the Cmd/Ctrl+K search palette, creating it on first use. Public so the
+    // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
+    // macOS, where NSMenu key equivalents own the command keys.
+    void ShowSearchPalette();
 
     void ExecuteBrowserCommand(BrowserCommand command) override;
     void BeginAddressEditing() override;
@@ -62,6 +68,9 @@ class BrowserWindow : public CefClient,
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
+
+    void OnSearchPaletteSubmitted(const SearchSubmission& submission) override;
+    void OnSearchPaletteDismissed() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
@@ -113,6 +122,7 @@ class BrowserWindow : public CefClient,
         kReloadAccelerator,
         kReloadWithControlAccelerator,
         kFocusAddressAccelerator,
+        kOpenPaletteAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url);
@@ -135,6 +145,7 @@ class BrowserWindow : public CefClient,
     std::string initial_url_;
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
+    std::unique_ptr<SearchPalette> search_palette_;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
     ChromeSnapshot chrome_snapshot_;

@@ -361,6 +361,9 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 #if defined(OS_WIN) || defined(OS_LINUX)
     window_->SetAccelerator(kFocusAddressAccelerator, 'L', false, true, false, true);
 #endif
+    // ctrl_pressed maps to Cmd on macOS and Ctrl elsewhere; high_priority so the
+    // palette opens while web content holds focus.
+    window_->SetAccelerator(kOpenPaletteAccelerator, 'K', false, true, false, true);
 }
 
 void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
@@ -394,6 +397,9 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         .width = std::max(0, new_bounds.width - chrome_snapshot_.rail_bounds.width),
         .height = new_bounds.height,
     };
+    if (search_palette_ != nullptr) {
+        search_palette_->UpdateBounds();
+    }
     PublishChromeSnapshot();
 }
 
@@ -440,6 +446,9 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
             } else {
                 BeginAddressEditing();
             }
+            return true;
+        case kOpenPaletteAccelerator:
+            ShowSearchPalette();
             return true;
         default:
             return false;
@@ -545,6 +554,9 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     if (chrome_ != nullptr) {
         chrome_->ApplyTheme(tokens);
     }
+    if (search_palette_ != nullptr) {
+        search_palette_->ApplyTheme(tokens);
+    }
     chrome_snapshot_.theme = theme;
     PublishChromeSnapshot();
 }
@@ -558,6 +570,10 @@ void BrowserWindow::PublishChromeSnapshot() {
 void BrowserWindow::DetachChromeAndObservers() {
     navigation_observer_ = nullptr;
     chrome_observer_ = nullptr;
+    if (search_palette_ != nullptr) {
+        search_palette_->Detach();
+        search_palette_.reset();
+    }
     Tab* tab = active_tab();
     if (tab != nullptr) {
         tab->navigation_state().SetObserver(nullptr);
@@ -577,6 +593,36 @@ void BrowserWindow::UpdateWindowTitle() {
     if (window_ != nullptr && tab != nullptr) {
         window_->SetTitle(CefString(tab->navigation_state().snapshot().display_title));
     }
+}
+
+void BrowserWindow::OnSearchPaletteSubmitted(const SearchSubmission& submission) {
+    CEF_REQUIRE_UI_THREAD();
+    // U3 wires this to the active tab through the ActiveTabProvider seam; the
+    // palette itself never holds a CefBrowser.
+    (void)submission;
+    FocusBrowserView();
+}
+
+void BrowserWindow::OnSearchPaletteDismissed() {
+    CEF_REQUIRE_UI_THREAD();
+    // Escape restores focus to the invocation point, which is the browser view
+    // by default.
+    FocusBrowserView();
+}
+
+void BrowserWindow::ShowSearchPalette() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    if (search_palette_ == nullptr) {
+        // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
+        search_palette_ = std::make_unique<SearchPalette>(
+            *this, window_,
+            ChromeTokens::ForTheme(
+                ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground))));
+    }
+    search_palette_->Show();
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {

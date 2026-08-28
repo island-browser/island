@@ -245,5 +245,29 @@ TEST(BrowserChromeContractTest, GivenTheCollectionIdsWhenComparedThenTheyStartAf
               static_cast<int>(ChromeViewId::kActivePageIndicator));
 }
 
+TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenComparedThenTheyStartAfter1027) {
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kHoverSliver), 1028);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kSearchPalette), 1029);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kSearchPaletteQuery), 1030);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kSearchPaletteProvider), 1031);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kSearchPaletteProviderName), 1032);
+    EXPECT_GT(static_cast<int>(ChromeViewId::kHoverSliver),
+              static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
+}
+
+TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenTheTreeIsInspectedThenNoneOfThemAppear) {
+    const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
+
+    // The hover sliver and the palette are window-level overlays reported
+    // through CefOverlayController, so the chrome view tree keeps its exact
+    // Phase 2/3 shape and never gains an overlay node.
+    EXPECT_EQ(FindChild(tree, ChromeViewId::kHoverSliver), nullptr);
+    EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPalette), nullptr);
+    EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPaletteQuery), nullptr);
+    EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPaletteProvider), nullptr);
+    EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPaletteProviderName), nullptr);
+    ASSERT_EQ(tree.children.size(), 2U);
+}
+
 }  // namespace
 }  // namespace island
