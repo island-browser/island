@@ -36,6 +36,12 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # PRs on this repo are frequently pushed by the Claude GitHub App,
+          # which makes claude[bot] the triggering actor. The action refuses
+          # non-human actors unless they are allow-listed. Scoped to this one
+          # bot on purpose: '*' would let any external App invoke the action
+          # with a prompt it controls on a public repository.
+          allowed_bots: 'claude[bot]'
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
