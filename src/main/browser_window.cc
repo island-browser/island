@@ -16,6 +16,8 @@
 #include "include/cef_frame.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_fill_layout.h"
+#include "include/views/cef_overlay_controller.h"
+#include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 
@@ -29,6 +31,20 @@ constexpr int kChromeWindowWidth = 1440;
 constexpr int kChromeWindowHeight = 900;
 constexpr int kMinimumWindowWidth = 800;
 constexpr int kMinimumWindowHeight = 560;
+
+// The edge sliver is a bare fill panel; it only needs a preferred size so the
+// overlay controller does not collapse it to nothing before SetBounds applies.
+class HoverSliverDelegate final : public CefPanelDelegate {
+  public:
+    CefSize GetPreferredSize(CefRefPtr<CefView>) override {
+        return CefSize(kHoverSliverWidthDip, kChromeWindowHeight);
+    }
+    CefSize GetMinimumSize(CefRefPtr<CefView>) override { return CefSize(kHoverSliverWidthDip, 0); }
+
+  private:
+    IMPLEMENT_REFCOUNTING(HoverSliverDelegate);
+};
+
 }  // namespace
 
 CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
@@ -42,11 +58,11 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
 BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(initial_url)) {
     spaces_.emplace_back(SpaceId{1}, "Default", ArgbColor{0xFF5B8DEF});
     active_space().AppendTab(Tab{TabId{1}});
-    chrome_snapshot_.rail_bounds = {
-        .x = 0,
-        .y = 0,
-        .width = ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip,
-        .height = kChromeWindowHeight};
+    chrome_snapshot_.rail_bounds = {.x = 0,
+                                    .y = 0,
+                                    .width = sidebar_state_.RailWidthDip(
+                                        ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip),
+                                    .height = kChromeWindowHeight};
     chrome_snapshot_.content_bounds = {
         .x = chrome_snapshot_.rail_bounds.width,
         .y = 0,
@@ -333,9 +349,9 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 
     const ChromeTheme theme =
         ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground));
-    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-        this, CefString(initial_url_), CefBrowserSettings(), nullptr,
-        active_space().request_context(), this);
+    CefRefPtr<CefBrowserView> browser_view =
+        CefBrowserView::CreateBrowserView(this, CefString(initial_url_), CefBrowserSettings(),
+                                          nullptr, active_space().request_context(), this);
     Tab* tab = active_tab();
     if (tab != nullptr) {
         tab->SetBrowserView(browser_view);
@@ -344,7 +360,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     chrome_ = std::make_unique<BrowserChrome>(*this, browser_view, ChromeTokens::ForTheme(theme),
                                               icon_resource_root);
     chrome_->OnNavigationChanged(tab != nullptr ? tab->navigation_state().snapshot()
-                                                 : NavigationSnapshot{});
+                                                : NavigationSnapshot{});
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
     window_->AddChildView(chrome_->root());
     window_->SetTitle(CefString("Island"));
@@ -361,6 +377,25 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 #if defined(OS_WIN) || defined(OS_LINUX)
     window_->SetAccelerator(kFocusAddressAccelerator, 'L', false, true, false, true);
 #endif
+    // ctrl_pressed maps to Cmd on macOS and Ctrl elsewhere; high_priority so the
+    // palette opens while web content holds focus.
+    window_->SetAccelerator(kOpenPaletteAccelerator, 'K', false, true, false, true);
+    window_->SetAccelerator(kToggleSidebarAccelerator, 'B', false, true, false, true);
+
+    CreateHoverSliver();
+    ApplySidebarState();
+    // The seam only observes; every chrome mutation it triggers is posted onto the
+    // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
+    // cannot create a refcount cycle, and OnWindowDestroyed uninstalls it.
+    // CefWindowHandle is a pointer on macOS and Windows but an unsigned long
+    // X11 XID on Linux, so a plain conversion to the seam's opaque void* is
+    // ill-formed there; reinterpret_cast is well-defined for both shapes.
+    hover_seam_ = InstallSidebarHoverSeam(
+        reinterpret_cast<void*>(window_->GetWindowHandle()),
+        [](void* context, int x_dip) {
+            static_cast<BrowserWindow*>(context)->OnSidebarHoverPointer(x_dip);
+        },
+        this);
 }
 
 void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
@@ -384,8 +419,10 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
-        .width =
-            std::min(ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip, new_bounds.width),
+        // The hidden rail reports 0 width so observers never see a snapshot
+        // claiming a 286 DIP rail while the sidebar is collapsed.
+        .width = sidebar_state_.RailWidthDip(
+            std::min(ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip, new_bounds.width)),
         .height = new_bounds.height,
     };
     chrome_snapshot_.content_bounds = {
@@ -394,6 +431,10 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         .width = std::max(0, new_bounds.width - chrome_snapshot_.rail_bounds.width),
         .height = new_bounds.height,
     };
+    if (search_palette_ != nullptr) {
+        search_palette_->UpdateBounds();
+    }
+    ApplySidebarState();
     PublishChromeSnapshot();
 }
 
@@ -440,6 +481,12 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
             } else {
                 BeginAddressEditing();
             }
+            return true;
+        case kOpenPaletteAccelerator:
+            ShowSearchPalette();
+            return true;
+        case kToggleSidebarAccelerator:
+            ToggleSidebar();
             return true;
         default:
             return false;
@@ -545,7 +592,11 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     if (chrome_ != nullptr) {
         chrome_->ApplyTheme(tokens);
     }
+    if (search_palette_ != nullptr) {
+        search_palette_->ApplyTheme(tokens);
+    }
     chrome_snapshot_.theme = theme;
+    ApplySidebarState();
     PublishChromeSnapshot();
 }
 
@@ -558,6 +609,19 @@ void BrowserWindow::PublishChromeSnapshot() {
 void BrowserWindow::DetachChromeAndObservers() {
     navigation_observer_ = nullptr;
     chrome_observer_ = nullptr;
+    UninstallHoverSeam();
+    if (hover_sliver_overlay_ != nullptr) {
+        if (hover_sliver_overlay_->IsValid()) {
+            hover_sliver_overlay_->SetVisible(false);
+            hover_sliver_overlay_->Destroy();
+        }
+        hover_sliver_overlay_ = nullptr;
+    }
+    hover_sliver_ = nullptr;
+    if (search_palette_ != nullptr) {
+        search_palette_->Detach();
+        search_palette_.reset();
+    }
     Tab* tab = active_tab();
     if (tab != nullptr) {
         tab->navigation_state().SetObserver(nullptr);
@@ -576,6 +640,134 @@ void BrowserWindow::UpdateWindowTitle() {
     const Tab* tab = active_tab();
     if (window_ != nullptr && tab != nullptr) {
         window_->SetTitle(CefString(tab->navigation_state().snapshot().display_title));
+    }
+}
+
+CefRefPtr<CefBrowser> BrowserWindow::ActiveBrowser() {
+    CEF_REQUIRE_UI_THREAD();
+    const Tab* tab = active_tab();
+    return closing_ || tab == nullptr ? nullptr : tab->browser();
+}
+
+void BrowserWindow::OnSearchPaletteSubmitted(const SearchSubmission& submission) {
+    CEF_REQUIRE_UI_THREAD();
+    SubmitSearchQuery(submission.query, submission.provider);
+}
+
+void BrowserWindow::SubmitSearchQuery(std::string_view query, SearchProviderId provider) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+
+    CefRefPtr<CefBrowser> browser = ActiveBrowser();
+    const SearchDispatchDecision decision =
+        DecideSearchDispatch(query, provider, browser != nullptr);
+    if (decision.dispatch != SearchDispatch::kNavigate) {
+        return;
+    }
+
+    CefRefPtr<CefFrame> main_frame = browser->GetMainFrame();
+    if (main_frame != nullptr) {
+        main_frame->LoadURL(decision.url);
+    }
+    if (search_palette_ != nullptr) {
+        search_palette_->Hide();
+    }
+    FocusBrowserView();
+}
+
+void BrowserWindow::OnSearchPaletteDismissed() {
+    CEF_REQUIRE_UI_THREAD();
+    // Escape restores focus to the invocation point, which is the browser view
+    // by default.
+    FocusBrowserView();
+}
+
+void BrowserWindow::ShowSearchPalette() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    if (search_palette_ == nullptr) {
+        // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
+        search_palette_ = std::make_unique<SearchPalette>(
+            *this, window_,
+            ChromeTokens::ForTheme(
+                ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground))));
+    }
+    search_palette_->Show();
+}
+
+void BrowserWindow::ToggleSidebar() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    sidebar_state_.Toggle();
+    ApplySidebarState();
+}
+
+void BrowserWindow::OnSidebarHoverPointer(int x_dip) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    const bool was_revealed = sidebar_state_.revealed();
+    sidebar_state_.OnPointerMoved(x_dip,
+                                  ChromeTokens::ForTheme(chrome_snapshot_.theme).rail_width_dip);
+    if (sidebar_state_.revealed() != was_revealed) {
+        ApplySidebarState();
+    }
+}
+
+void BrowserWindow::CreateHoverSliver() {
+    CEF_REQUIRE_UI_THREAD();
+    if (window_ == nullptr || hover_sliver_ != nullptr) {
+        return;
+    }
+    hover_sliver_ = CefPanel::CreatePanel(new HoverSliverDelegate());
+    hover_sliver_->SetID(static_cast<int>(ChromeViewId::kHoverSliver));
+    hover_sliver_->SetBackgroundColor(ChromeTokens::ForTheme(chrome_snapshot_.theme).accent.argb);
+    // can_activate is false: a 2-DIP edge marker must never take keyboard focus.
+    hover_sliver_overlay_ =
+        window_->AddOverlayView(hover_sliver_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/false);
+}
+
+void BrowserWindow::ApplySidebarState() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    const bool revealed = sidebar_state_.revealed();
+    if (chrome_ != nullptr) {
+        chrome_->SetSidebarRevealed(revealed);
+    }
+    if (hover_sliver_overlay_ != nullptr && window_ != nullptr) {
+        const CefSize window_size = window_->GetSize();
+        hover_sliver_->SetVisible(sidebar_state_.sliver_visible());
+        hover_sliver_overlay_->SetVisible(sidebar_state_.sliver_visible());
+        hover_sliver_overlay_->SetBounds(CefRect(0, 0, kHoverSliverWidthDip, window_size.height));
+    }
+    if (hover_sliver_ != nullptr) {
+        hover_sliver_->SetBackgroundColor(
+            ChromeTokens::ForTheme(chrome_snapshot_.theme).accent.argb);
+    }
+    // Keep the published snapshot's rail/content split in step with the reveal
+    // state so observers never read a stale 286 DIP rail.
+    const int window_width =
+        chrome_snapshot_.rail_bounds.width + chrome_snapshot_.content_bounds.width;
+    const int rail_width = sidebar_state_.RailWidthDip(
+        std::min(ChromeTokens::ForTheme(chrome_snapshot_.theme).rail_width_dip, window_width));
+    chrome_snapshot_.rail_bounds.width = rail_width;
+    chrome_snapshot_.content_bounds.x = rail_width;
+    chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width);
+}
+
+void BrowserWindow::UninstallHoverSeam() {
+    if (hover_seam_ != nullptr) {
+        RemoveSidebarHoverSeam(hover_seam_);
+        hover_seam_ = nullptr;
     }
 }
 

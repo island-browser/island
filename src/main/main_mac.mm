@@ -61,6 +61,8 @@
 - (void)goForward:(id)sender;
 - (void)reload:(id)sender;
 - (void)focusAddress:(id)sender;
+- (void)openSearchPalette:(id)sender;
+- (void)toggleSidebar:(id)sender;
 @end
 
 @implementation IslandMenuActions
@@ -97,6 +99,18 @@
 - (void)focusAddress:(id)sender {
     if (app_ != nullptr) {
         app_->BeginAddressEditing();
+    }
+}
+
+- (void)openSearchPalette:(id)sender {
+    if (app_ != nullptr) {
+        app_->ShowSearchPalette();
+    }
+}
+
+- (void)toggleSidebar:(id)sender {
+    if (app_ != nullptr) {
+        app_->ToggleSidebar();
     }
 }
 @end
@@ -152,7 +166,21 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     NSMenuItem* focus_address_menu_item = [[NSMenuItem alloc] initWithTitle:@"Focus Address"
                                                                      action:@selector(focusAddress:)
                                                               keyEquivalent:@"l"];
+    // CefWindow::SetAccelerator never dispatches on macOS, where NSMenu key
+    // equivalents own the command keys, so the palette gets the same menu route
+    // Focus Address already uses.
+    NSMenuItem* search_menu_item = [[NSMenuItem alloc] initWithTitle:@"Search"
+                                                              action:@selector(openSearchPalette:)
+                                                       keyEquivalent:@"k"];
+    [search_menu_item setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+    NSMenuItem* toggle_sidebar_menu_item =
+        [[NSMenuItem alloc] initWithTitle:@"Toggle Sidebar"
+                                   action:@selector(toggleSidebar:)
+                            keyEquivalent:@"b"];
+    [toggle_sidebar_menu_item setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+    [toggle_sidebar_menu_item setTarget:menu_actions];
     [focus_address_menu_item setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+    [search_menu_item setTarget:menu_actions];
     [back_menu_item setTarget:menu_actions];
     [forward_menu_item setTarget:menu_actions];
     [reload_menu_item setTarget:menu_actions];
@@ -161,11 +189,15 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [browser_menu addItem:forward_menu_item];
     [browser_menu addItem:reload_menu_item];
     [browser_menu addItem:focus_address_menu_item];
+    [browser_menu addItem:search_menu_item];
+    [browser_menu addItem:toggle_sidebar_menu_item];
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
     [NSApp setMainMenu:main_menu];
 
+    [toggle_sidebar_menu_item release];
+    [search_menu_item release];
     [focus_address_menu_item release];
     [reload_menu_item release];
     [forward_menu_item release];

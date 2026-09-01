@@ -21,6 +21,7 @@
 #include "design_tokens.h"
 #include "icon_catalog.h"
 #include "navigation_state.h"
+#include "sidebar_state.h"
 
 class CefBrowserView;
 class CefButton;
@@ -60,6 +61,14 @@ enum class ChromeViewId : int {
     kSpaceSwitcherEntry = 1025,
     kSpaceSwitcherEntryColorMark = 1026,
     kSpaceSwitcherEntryName = 1027,
+    // Window-level overlay regions. These are reported through
+    // CefOverlayController and are deliberately absent from ViewTreeContract():
+    // they are children of the CefWindow, not of the rail or the root panel.
+    kHoverSliver = 1028,
+    kSearchPalette = 1029,
+    kSearchPaletteQuery = 1030,
+    kSearchPaletteProvider = 1031,
+    kSearchPaletteProviderName = 1032,
 };
 
 struct ChromeViewTreeNode {
@@ -233,7 +242,16 @@ class BrowserChrome final : public NavigationObserver {
     }
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(
         DipRect root_bounds, const ChromeTokens& tokens) noexcept {
-        const int rail_width = std::min(tokens.rail_width_dip, root_bounds.width);
+        return LayoutForBounds(root_bounds, tokens, /*sidebar_revealed=*/true);
+    }
+    // The hidden sidebar occupies 0 DIP of layout width; the rail stays in the
+    // view tree, so the contract shape is unchanged and only the content
+    // x-offset moves. This is the single layout path for both states.
+    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
+                                                                const ChromeTokens& tokens,
+                                                                bool sidebar_revealed) noexcept {
+        const int rail_width =
+            sidebar_revealed ? std::min(tokens.rail_width_dip, root_bounds.width) : 0;
         const DipRect rail_bounds = {
             .x = root_bounds.x,
             .y = root_bounds.y,
@@ -326,6 +344,10 @@ class BrowserChrome final : public NavigationObserver {
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
     void ApplyTheme(ChromeTokens tokens);
+    // Applies the reveal state to the rail's layout width. Runtime geometry only:
+    // the rail is never removed from the tree.
+    void SetSidebarRevealed(bool revealed);
+    [[nodiscard]] bool sidebar_revealed() const noexcept { return sidebar_revealed_; }
     void BeginAddressEditing();
     void Detach();
 
@@ -378,10 +400,12 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> active_page_fallback_favicon_;
     CefRefPtr<CefLabelButton> active_tab_;
     CefRefPtr<CefPanel> active_page_indicator_;
+    CefRefPtr<SurfacePanelDelegate> rail_delegate_;
     CefRefPtr<RootPanelDelegate> root_delegate_;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;
+    bool sidebar_revealed_ = kSidebarRevealedByDefault;
     bool detached_ = false;
 };
 
