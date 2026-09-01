@@ -17,6 +17,9 @@ concurrency:
 jobs:
   search-native:
     name: search ${{ matrix.target }}
+    # Six native targets per run. Dependabot here only bumps GitHub Actions
+    # versions, so skip the matrix on its pull requests.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:

@@ -51,6 +51,10 @@ jobs:
 
   native-macos:
     name: ${{ matrix.target }}
+    # The native matrices take ~45 minutes per target across six runners.
+    # Dependabot here only bumps GitHub Actions versions, so skip them on its
+    # pull requests and let the cheap portable job stand as the gate.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -141,6 +145,10 @@ jobs:
 
   native-linux:
     name: ${{ matrix.target }}
+    # The native matrices take ~45 minutes per target across six runners.
+    # Dependabot here only bumps GitHub Actions versions, so skip them on its
+    # pull requests and let the cheap portable job stand as the gate.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -238,6 +246,10 @@ jobs:
 
   native-windows:
     name: ${{ matrix.target }}
+    # The native matrices take ~45 minutes per target across six runners.
+    # Dependabot here only bumps GitHub Actions versions, so skip them on its
+    # pull requests and let the cheap portable job stand as the gate.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
@@ -342,7 +354,11 @@ jobs:
       - name: Require every CI job to succeed
         shell: bash
         run: |
+          # The native matrices are skipped on Dependabot pull requests, and a
+          # skipped job must not read as a failure here.
           test '${{ needs.portable.result }}' = success
-          test '${{ needs.native-macos.result }}' = success
-          test '${{ needs.native-linux.result }}' = success
-          test '${{ needs.native-windows.result }}' = success
+          for r in '${{ needs.native-macos.result }}' \
+                   '${{ needs.native-linux.result }}' \
+                   '${{ needs.native-windows.result }}'; do
+              test "$r" = success || test "$r" = skipped
+          done
