@@ -2,6 +2,7 @@
 #define ISLAND_SEARCH_PROVIDER_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>

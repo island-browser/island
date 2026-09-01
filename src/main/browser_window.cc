@@ -387,8 +387,11 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     // The seam only observes; every chrome mutation it triggers is posted onto the
     // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
     // cannot create a refcount cycle, and OnWindowDestroyed uninstalls it.
+    // CefWindowHandle is a pointer on macOS and Windows but an unsigned long
+    // X11 XID on Linux, so a plain conversion to the seam's opaque void* is
+    // ill-formed there; reinterpret_cast is well-defined for both shapes.
     hover_seam_ = InstallSidebarHoverSeam(
-        window_->GetWindowHandle(),
+        reinterpret_cast<void*>(window_->GetWindowHandle()),
         [](void* context, int x_dip) {
             static_cast<BrowserWindow*>(context)->OnSidebarHoverPointer(x_dip);
         },
