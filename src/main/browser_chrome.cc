@@ -154,6 +154,14 @@ class BrowserChrome::SurfacePanelDelegate final : public CefPanelDelegate {
 
     void Detach() { chrome_ = nullptr; }
 
+    // The rail's fixed width becomes 0 while the sidebar is hidden, so the
+    // box layout stops reserving space for it.
+    void SetFixedWidth(int width) {
+        preferred_size_.width = width;
+        minimum_size_.width = width;
+        maximum_size_.width = width;
+    }
+
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
     CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
     CefSize GetMaximumSize(CefRefPtr<CefView>) override { return maximum_size_; }
@@ -185,6 +193,8 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
 
     void SetTokens(ChromeTokens tokens) { tokens_ = tokens; }
 
+    void SetSidebarRevealed(bool revealed) { sidebar_revealed_ = revealed; }
+
     void OnLayoutChanged(CefRefPtr<CefView>, const CefRect& new_bounds) override {
         if (rail_ == nullptr || browser_content_ == nullptr) {
             return;
@@ -195,7 +205,7 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
                                             .y = new_bounds.y,
                                             .width = new_bounds.width,
                                             .height = new_bounds.height},
-                                           tokens_);
+                                           tokens_, sidebar_revealed_);
         ApplyBounds(rail_, geometry.rail_bounds);
         ApplyBounds(browser_content_, geometry.browser_content_bounds);
         rail_->Layout();
@@ -211,6 +221,7 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     }
 
     ChromeTokens tokens_;
+    bool sidebar_revealed_ = kSidebarRevealedByDefault;
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> browser_content_;
 
@@ -295,6 +306,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<SurfacePanelDelegate> rail_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail, rail_size, rail_size, rail_size);
     surface_delegates_.push_back(rail_delegate);
+    rail_delegate_ = rail_delegate;
     sidebar_ = CefPanel::CreatePanel(rail_delegate);
     sidebar_->SetID(static_cast<int>(ChromeViewId::kRail));
     sidebar_->SetToBoxLayout(RailLayout(tokens_));
@@ -456,6 +468,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_->AddChildView(browser_content_);
     root_delegate_->SetChildren(sidebar_, browser_content_);
     ApplyControlTheme();
+    // Apply the hidden-by-default reveal state before the first layout so no
+    // frame ever shows a rail the sidebar state says is collapsed.
+    SetSidebarRevealed(sidebar_revealed_);
 }
 
 BrowserChrome::~BrowserChrome() { Detach(); }
@@ -514,6 +529,21 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
     tokens_ = tokens;
     root_delegate_->SetTokens(tokens_);
     ApplyControlTheme();
+    rail_delegate_->SetFixedWidth(sidebar_revealed_ ? tokens_.rail_width_dip : 0);
+    root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
+}
+
+void BrowserChrome::SetSidebarRevealed(bool revealed) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    sidebar_revealed_ = revealed;
+    rail_delegate_->SetFixedWidth(revealed ? tokens_.rail_width_dip : 0);
+    // The rail keeps its place in the view tree; hiding it only removes it from
+    // layout, so ViewTreeContract() is unaffected.
+    sidebar_->SetVisible(revealed);
+    root_delegate_->SetSidebarRevealed(revealed);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 

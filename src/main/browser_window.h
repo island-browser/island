@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "active_tab_provider.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
@@ -13,12 +14,15 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "navigation_state.h"
+#include "search_palette.h"
+#include "sidebar_state.h"
 #include "space.h"
 #include "tab.h"
 
 class CefBrowser;
 class CefBrowserView;
 class CefFrame;
+class CefOverlayController;
 class CefWindow;
 
 namespace island {
@@ -44,6 +48,8 @@ class BrowserWindow : public CefClient,
                       public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public BrowserChromeHost,
+                      public ActiveTabProvider,
+                      public SearchPaletteHost,
                       public NavigationObserver {
   public:
     static CefRefPtr<BrowserWindow> Create(std::string initial_url);
@@ -55,6 +61,18 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] const ChromeSnapshot& chrome_snapshot() const noexcept;
     [[nodiscard]] ChromeViewTreeNode chrome_view_tree_snapshot() const;
     void RequestClose();
+    // Opens the Cmd/Ctrl+K search palette, creating it on first use. Public so the
+    // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
+    // macOS, where NSMenu key equivalents own the command keys.
+    void ShowSearchPalette();
+    // Flips the explicit Cmd/Ctrl+B pin. Available on every platform; hover is a
+    // macOS-only enhancement layered on the same state.
+    void ToggleSidebar();
+    // The macOS hover seam's entry point: a pointer position in window DIP.
+    void OnSidebarHoverPointer(int x_dip);
+    // Navigates the active tab to the provider URL for `query`. A blank query is
+    // rejected and a null ActiveBrowser() is a defined no-op; neither navigates.
+    void SubmitSearchQuery(std::string_view query, SearchProviderId provider);
 
     void ExecuteBrowserCommand(BrowserCommand command) override;
     void BeginAddressEditing() override;
@@ -62,6 +80,11 @@ class BrowserWindow : public CefClient,
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
+
+    [[nodiscard]] CefRefPtr<CefBrowser> ActiveBrowser() override;
+
+    void OnSearchPaletteSubmitted(const SearchSubmission& submission) override;
+    void OnSearchPaletteDismissed() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
@@ -113,6 +136,8 @@ class BrowserWindow : public CefClient,
         kReloadAccelerator,
         kReloadWithControlAccelerator,
         kFocusAddressAccelerator,
+        kOpenPaletteAccelerator,
+        kToggleSidebarAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url);
@@ -129,12 +154,20 @@ class BrowserWindow : public CefClient,
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
+    void CreateHoverSliver();
+    void ApplySidebarState();
+    void UninstallHoverSeam();
     void UpdateWindowTitle();
     void CloseNavigationAndQuitMessageLoop();
 
     std::string initial_url_;
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
+    std::unique_ptr<SearchPalette> search_palette_;
+    SidebarState sidebar_state_;
+    CefRefPtr<CefPanel> hover_sliver_;
+    CefRefPtr<CefOverlayController> hover_sliver_overlay_;
+    void* hover_seam_ = nullptr;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
     ChromeSnapshot chrome_snapshot_;
