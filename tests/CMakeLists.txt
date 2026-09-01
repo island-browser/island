@@ -122,6 +122,7 @@ if(ISLAND_ENABLE_SEARCH)
         search/memtable_test.cpp
         search/query_parser_test.cpp
         search/ranker_test.cpp
+        search/segment_test.cpp
         search/tokenizer_test.cpp
         search/varint_crc32c_test.cpp
         "${CMAKE_SOURCE_DIR}/bench/search/benchmark_corpus.cc"
