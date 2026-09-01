@@ -12,12 +12,20 @@ on:
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
+    # Don't review Claude's own pull requests. Claude-authored branches are
+    # reviewed by a human before merge, so an automated review of them adds
+    # noise rather than signal.
+    #
+    # Both halves are needed: the PR can be opened by the app (user.type is
+    # Bot), or opened by a human and then pushed to by the app, which makes
+    # claude[bot] the triggering actor on the synchronize event. Skipping is
+    # deliberate rather than removing allowed_bots below -- an unguarded bot
+    # run fails the action outright and shows up as a red check, whereas an
+    # unmet job condition is reported as skipped.
+    if: >-
+      github.event.pull_request.user.type != 'Bot' &&
+      github.triggering_actor != 'claude[bot]' &&
+      github.triggering_actor != 'claude'
     runs-on: ubuntu-latest
     permissions:
       contents: read
