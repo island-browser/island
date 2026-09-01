@@ -67,11 +67,14 @@ if(ISLAND_SEARCH_STANDALONE)
 endif()
 
 add_library(island_search STATIC
+    crc32c.cc
     mem_sampler.cc
+    memtable.cc
     posting_codec.cc
     query_parser.cc
     ranker.cc
     tokenizer.cc
+    varint.cc
 )
 target_compile_features(island_search PUBLIC cxx_std_20)
 # Search headers are included as "search/<header>", rooted at src/.
@@ -92,9 +95,11 @@ if(ISLAND_SEARCH_STANDALONE)
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/benchmark_corpus_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/byte_lru_cache_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/mem_sampler_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/memtable_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/query_parser_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/ranker_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/tokenizer_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/varint_crc32c_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/bench/search/benchmark_corpus.cc"
     )
     target_compile_features(island_search_tests PRIVATE cxx_std_20)

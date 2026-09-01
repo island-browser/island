@@ -113,9 +113,11 @@ if(ISLAND_ENABLE_SEARCH)
         search/benchmark_corpus_test.cpp
         search/byte_lru_cache_test.cpp
         search/mem_sampler_test.cpp
+        search/memtable_test.cpp
         search/query_parser_test.cpp
         search/ranker_test.cpp
         search/tokenizer_test.cpp
+        search/varint_crc32c_test.cpp
         "${CMAKE_SOURCE_DIR}/bench/search/benchmark_corpus.cc"
     )
     target_compile_features(island_search_tests PRIVATE cxx_std_20)
