@@ -73,6 +73,9 @@ add_library(island_search STATIC
     posting_codec.cc
     query_parser.cc
     ranker.cc
+    store/segment.cc
+    store/segment_header.cc
+    store/segment_writer.cc
     tokenizer.cc
     varint.cc
 )
@@ -98,6 +101,7 @@ if(ISLAND_SEARCH_STANDALONE)
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/memtable_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/query_parser_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/ranker_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/segment_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/tokenizer_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/varint_crc32c_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/bench/search/benchmark_corpus.cc"
