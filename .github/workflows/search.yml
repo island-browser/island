@@ -74,6 +74,36 @@ jobs:
           mkdir -p ci-logs
           ctest --test-dir build-search -C Release --output-on-failure --no-tests=error \
             --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
+
+      - name: Run the search memory gate
+        shell: bash
+        # Non-blocking on purpose. The S0 design targets a 32 MB RSS delta at
+        # 100k documents and the kernel currently measures roughly 5x that, so
+        # a blocking gate would make every pull request red for a reason
+        # unrelated to its own changes. The number is still printed on every
+        # target so a regression stays visible. Turn continue-on-error off in
+        # the same change that brings the delta under the ceiling -- see
+        # docs/search-phase-s0-membench.md.
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p ci-logs
+          # Multi-config generators (MSVC) put the binary under a per-config
+          # subdirectory; single-config ones do not. Resolve both rather than
+          # assuming, so the Windows targets do not silently skip the gate.
+          bench=""
+          for candidate in build-search/bench/search_membench \
+                           build-search/bench/Release/search_membench \
+                           build-search/bench/search_membench.exe \
+                           build-search/bench/Release/search_membench.exe; do
+            if [ -x "$candidate" ]; then bench="$candidate"; break; fi
+          done
+          if [ -z "$bench" ]; then
+            echo "search_membench binary not found under build-search/bench" >&2
+            exit 1
+          fi
+          "$bench" --ceiling-bytes 33554432 2>&1 \
+            | tee ci-logs/membench-${{ matrix.target }}.log
       - name: Annotate target failure
         if: failure()
         shell: bash

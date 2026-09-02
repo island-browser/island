@@ -33,6 +33,7 @@ not treat these interfaces as a settled contract.
 | `ranker.{h,cc}` | BM25-lite with `RankingWeights`, `CorpusStats`, title/url field weighting, and a half-life recency boost |
 | `byte_lru_cache.h` | Header-only LRU cache bounded by total byte size |
 | `mem_sampler.{h,cc}` | Process memory sampling used by the memory-budget benchmarks |
+| `bench/` | The `search_membench` memory gate (see `bench/AGENTS.md`) |
 | `cache/` | Byte-bounded LRU cache of decoded posting lists (see `cache/AGENTS.md`) |
 | `index/` | The Ingest/Query/Flush facade (see `index/AGENTS.md`) |
 | `store/` | On-disk segment format, writer, and mmap reader (see `store/AGENTS.md`) |

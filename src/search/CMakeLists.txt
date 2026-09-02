@@ -89,6 +89,13 @@ if(WIN32)
     target_link_libraries(island_search PUBLIC psapi)
 endif()
 
+# ---- Memory gate ---------------------------------------------------------
+# search_membench builds in both configurations: it needs only island_search
+# and the bench corpus generator, so unlike the test targets it is not confined
+# to the standalone tree. Registering it with add_test() puts the 32 MB ceiling
+# under `ctest` alongside the unit tests.
+add_subdirectory(bench)
+
 # ---- Tests (standalone only) --------------------------------------------------
 # In the browser build the same test sources are compiled by tests/
 # CMakeLists.txt behind ISLAND_ENABLE_SEARCH; defining them again here would
