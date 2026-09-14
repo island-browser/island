@@ -22,9 +22,7 @@ SearchError MakeError(SearchErrorKind kind, std::string detail) {
     return error;
 }
 
-char LowerAscii(char c) {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-}
+char LowerAscii(char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
 
 bool HasSchemeCaseInsensitive(std::string_view url, std::string_view scheme) {
     if (url.size() < scheme.size()) {
@@ -122,9 +120,9 @@ Expected<DocId, SearchError> SearchIndex::Ingest(const DocumentInput& input) {
             MakeError(SearchErrorKind::kInvalidInput, "ingest requires a non-empty url"));
     }
     if (IsPrivacyRefusedUrl(input.url)) {
-        return Expected<DocId, SearchError>::Error(MakeError(
-            SearchErrorKind::kRefusedForPrivacy,
-            "refused: data: URLs and credentialed URLs never enter a persisted index"));
+        return Expected<DocId, SearchError>::Error(
+            MakeError(SearchErrorKind::kRefusedForPrivacy,
+                      "refused: data: URLs and credentialed URLs never enter a persisted index"));
     }
 
     // One tokenizer pass shared with Query: the same Tokenize over the same
@@ -138,11 +136,16 @@ Expected<DocId, SearchError> SearchIndex::Ingest(const DocumentInput& input) {
     document.visited_at_ms = input.visited_at_ms;
     document.partition_tag = input.partition_tag;
 
-    const DocId id = memtable_.AddDocument(std::move(document), title_tokens, url_tokens);
+    const std::optional<DocId> id =
+        memtable_.AddDocument(std::move(document), title_tokens, url_tokens);
+    if (!id.has_value()) {
+        return Expected<DocId, SearchError>::Error(MakeError(
+            SearchErrorKind::kInvalidInput, "document field exceeds the 1 MiB arena chunk size"));
+    }
     // A newly ingested term's segment posting list is unchanged, but a term
     // that now resolves differently must not be served from a stale entry.
     cache_.Clear();
-    return Expected<DocId, SearchError>(id);
+    return Expected<DocId, SearchError>(*id);
 }
 
 const std::vector<std::uint64_t>* SearchIndex::SegmentPostings(const std::string& term) const {
@@ -179,10 +182,20 @@ std::optional<StoredDocument> SearchIndex::LoadDocument(DocId id) const {
         return record->document;
     }
     const std::optional<MemTableRecord> record = memtable_.RecordAt(id);
-    if (!record.has_value() || record->document == nullptr) {
+    if (!record.has_value()) {
         return std::nullopt;
     }
-    return *record->document;
+    // The MemTable stores bytes in its arena; materialize the owned strings
+    // the StoredDocument contract expects.
+    StoredDocument document;
+    document.id = id;
+    document.url = std::string(record->document.url);
+    document.title = std::string(record->document.title);
+    document.visited_at_ms = record->document.visited_at_ms;
+    if (record->document.partition_tag.has_value()) {
+        document.partition_tag = std::string(*record->document.partition_tag);
+    }
+    return document;
 }
 
 std::optional<DocumentStat> SearchIndex::BuildStat(DocId id, std::uint64_t query_now_ms) const {
@@ -264,8 +277,7 @@ SearchResult SearchIndex::Query(const struct Query& query, std::uint64_t query_n
     for (const DocumentStat& stat : corpus) {
         total_length += static_cast<double>(stat.title_length + stat.url_length);
     }
-    stats.avg_doc_length =
-        corpus.empty() ? 0.0 : total_length / static_cast<double>(corpus.size());
+    stats.avg_doc_length = corpus.empty() ? 0.0 : total_length / static_cast<double>(corpus.size());
 
     const std::vector<std::string> query_terms(distinct.begin(), distinct.end());
     const std::vector<ScoredDoc> ranked =

@@ -63,12 +63,12 @@ std::unique_ptr<SearchIndex> OpenIndex(const TempDir& tmp,
 }
 
 void IngestCorpus(SearchIndex& index) {
-    ASSERT_TRUE(index.Ingest(MakeInput("https://island.test/browser", "Island Browser Notes",
-                                       kNowMs - 1000))
-                    .has_value());
     ASSERT_TRUE(
-        index.Ingest(MakeInput("https://notes.test/daily", "Daily Notes", kNowMs - 2000))
+        index
+            .Ingest(MakeInput("https://island.test/browser", "Island Browser Notes", kNowMs - 1000))
             .has_value());
+    ASSERT_TRUE(index.Ingest(MakeInput("https://notes.test/daily", "Daily Notes", kNowMs - 2000))
+                    .has_value());
     ASSERT_TRUE(
         index.Ingest(MakeInput("https://zebra.test/", "Zebra Facts", kNowMs - 3000)).has_value());
 }
@@ -259,9 +259,8 @@ TEST(SearchIndex, DocumentsIngestedAfterFlushAreQueryableAlongsideTheSegment) {
     IngestCorpus(*index);
     ASSERT_TRUE(index->Flush().has_value());
 
-    ASSERT_TRUE(
-        index->Ingest(MakeInput("https://post.test/notes", "Post Flush Notes", kNowMs))
-            .has_value());
+    ASSERT_TRUE(index->Ingest(MakeInput("https://post.test/notes", "Post Flush Notes", kNowMs))
+                    .has_value());
 
     Query query;
     query.text = "notes";
@@ -274,7 +273,8 @@ TEST(SearchIndex, FlushingTwiceInOneSessionKeepsEveryDocument) {
     auto index = OpenIndex(tmp);
     IngestCorpus(*index);
     ASSERT_TRUE(index->Flush().has_value());
-    ASSERT_TRUE(index->Ingest(MakeInput("https://x.test/notes", "Extra Notes", kNowMs)).has_value());
+    ASSERT_TRUE(
+        index->Ingest(MakeInput("https://x.test/notes", "Extra Notes", kNowMs)).has_value());
     ASSERT_TRUE(index->Flush().has_value());
 
     Query query;
@@ -405,10 +405,32 @@ TEST(SearchIndex, RepeatedQueriesHitTheCache) {
 
     Query query;
     query.text = "notes";
-    index->Query(query, kNowMs);
+    static_cast<void>(index->Query(query, kNowMs));
     const std::size_t hits_before = index->cache().hit_count();
-    index->Query(query, kNowMs);
+    static_cast<void>(index->Query(query, kNowMs));
     EXPECT_GT(index->cache().hit_count(), hits_before);
+}
+
+TEST(SearchIndex, LoadDocumentCarriesTheStoredId) {
+    TempDir tmp;
+    auto index = OpenIndex(tmp);
+    const Expected<DocId, SearchError> ingested =
+        index->Ingest(MakeInput("https://island.test/entry", "Island Notes", 5000));
+    ASSERT_TRUE(ingested.has_value()) << ingested.error().detail;
+    const DocId id = ingested.value();
+
+    const std::optional<StoredDocument> from_memtable = index->LoadDocument(id);
+    ASSERT_TRUE(from_memtable.has_value());
+    EXPECT_EQ(from_memtable->id, id);
+    EXPECT_EQ(from_memtable->url, "https://island.test/entry");
+    EXPECT_EQ(from_memtable->title, "Island Notes");
+
+    // The same identity survives a flush into the on-disk segment.
+    ASSERT_TRUE(index->Flush().has_value());
+    const std::optional<StoredDocument> from_segment = index->LoadDocument(id);
+    ASSERT_TRUE(from_segment.has_value());
+    EXPECT_EQ(from_segment->id, id);
+    EXPECT_EQ(from_segment->url, "https://island.test/entry");
 }
 
 }  // namespace

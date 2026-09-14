@@ -65,8 +65,7 @@ class SearchIndex {
     // Ranks the segment and the MemTable together and returns the top
     // query.max_results hits. `query_now_ms` feeds the recency term, so the
     // index never reads a clock. Total: never throws, never fails.
-    [[nodiscard]] SearchResult Query(const struct Query& query,
-                                     std::uint64_t query_now_ms) const;
+    [[nodiscard]] SearchResult Query(const struct Query& query, std::uint64_t query_now_ms) const;
 
     // Serializes the MemTable to `segment_path` via the atomic writer, then
     // re-opens it read-only as the active segment.
@@ -87,6 +86,11 @@ class SearchIndex {
         return segment_error_;
     }
 
+    // Materializes the stored document for `id` (segment or MemTable), or
+    // std::nullopt when the id is unknown. The returned record carries the
+    // stored identity, url, title, and visit timestamp.
+    [[nodiscard]] std::optional<StoredDocument> LoadDocument(DocId id) const;
+
     [[nodiscard]] std::uint64_t next_doc_id() const noexcept { return memtable_.next_doc_id(); }
     [[nodiscard]] const BlockCache& cache() const noexcept { return cache_; }
 
@@ -100,10 +104,7 @@ class SearchIndex {
 
     // Builds the ranker's view of one document, deriving per-field term
     // frequencies by re-tokenizing the stored url and title.
-    [[nodiscard]] std::optional<DocumentStat> BuildStat(DocId id,
-                                                        std::uint64_t query_now_ms) const;
-
-    [[nodiscard]] std::optional<StoredDocument> LoadDocument(DocId id) const;
+    [[nodiscard]] std::optional<DocumentStat> BuildStat(DocId id, std::uint64_t query_now_ms) const;
 
     Options options_;
     MemTable memtable_;
