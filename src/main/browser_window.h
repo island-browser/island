@@ -9,6 +9,8 @@
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
+#include "command_palette.h"
+#include "command_palette_view.h"
 #include "include/cef_client.h"
 #include "include/internal/cef_types.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -17,6 +19,7 @@
 #include "search_palette.h"
 #include "sidebar_state.h"
 #include "space.h"
+#include "space_rename_overlay.h"
 #include "tab.h"
 
 class CefBrowser;
@@ -50,11 +53,41 @@ class BrowserWindow : public CefClient,
                       public BrowserChromeHost,
                       public ActiveTabProvider,
                       public SearchPaletteHost,
+                      public CommandPaletteHost,
+                      public SpaceRenameOverlayHost,
                       public NavigationObserver {
   public:
     static CefRefPtr<BrowserWindow> Create(std::string initial_url);
+    // Test seam: constructs the window headless — no CefWindow, no chrome, no
+    // CefBrowserView — so command dispatch, space/tab bookkeeping, and the
+    // fallbacks below are exercisable without a CEF runtime. Production entry
+    // points remain Create/OnWindowCreated; every command must behave the same
+    // in both shapes.
+    static CefRefPtr<BrowserWindow> CreateHeadlessForTest(std::string initial_url);
 
     void ExecuteCommand(BrowserCommand command);
+    // Direct-index switching and space bookkeeping take explicit methods
+    // instead of enum commands so the argument-carrying paths stay
+    // unit-testable. All return false and change nothing when the index is out
+    // of range.
+    [[nodiscard]] bool SelectActiveSpaceTabIndex(std::size_t index);
+    [[nodiscard]] bool SelectSpaceIndex(std::size_t index);
+    // Closes the tab at |index| in the active space. Closing the last tab of a
+    // space closes that space; closing the last remaining space recreates a
+    // single fresh default space.
+    [[nodiscard]] bool CloseActiveSpaceTabIndex(std::size_t index);
+    // Renames the space at |space_index|; an empty name is rejected.
+    [[nodiscard]] bool RenameSpace(std::size_t space_index, std::string name);
+    // Moves the space at |from_index| to |to_index|; the active space follows.
+    [[nodiscard]] bool MoveSpace(std::size_t from_index, std::size_t to_index);
+
+    // Observation seams for tests and palette snapshots. FindSpace returns
+    // nullptr for unknown ids; ids are never derived from vector position.
+    [[nodiscard]] std::size_t space_count() const noexcept { return spaces_.size(); }
+    [[nodiscard]] std::size_t active_space_index() const noexcept { return active_space_index_; }
+    [[nodiscard]] SpaceId active_space_id() const noexcept { return active_space().id(); }
+    [[nodiscard]] TabId active_tab_id() const noexcept { return active_space().active_tab_id(); }
+    [[nodiscard]] const Space* FindSpace(SpaceId id) const noexcept;
     void SetNavigationObserver(NavigationObserver* observer);
     void SetChromeObserver(ChromeObserver* observer);
     [[nodiscard]] const NavigationSnapshot& navigation_snapshot() const noexcept;
@@ -65,6 +98,16 @@ class BrowserWindow : public CefClient,
     // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
     // macOS, where NSMenu key equivalents own the command keys.
     void ShowSearchPalette();
+    // Opens the Cmd/Ctrl+Shift+K command palette (tabs, spaces, go-to-URL),
+    // creating it on first use. The Phase 3 design fixes Cmd/Ctrl+K on the
+    // command palette; the later search palette keeps Cmd/Ctrl+Shift+K.
+    void ShowCommandPalette();
+    // Opens the rename overlay for the active space. Menu-driven on macOS (no
+    // key equivalent); F2 is the cross-platform accelerator.
+    void BeginSpaceRenaming();
+    // Moves the active space by |delta| positions (-1 left, +1 right); false
+    // when the move would leave the space list.
+    [[nodiscard]] bool MoveActiveSpace(int delta);
     // Flips the explicit Cmd/Ctrl+B pin. Available on every platform; hover is a
     // macOS-only enhancement layered on the same state.
     void ToggleSidebar();
@@ -75,6 +118,9 @@ class BrowserWindow : public CefClient,
     void SubmitSearchQuery(std::string_view query, SearchProviderId provider);
 
     void ExecuteBrowserCommand(BrowserCommand command) override;
+    void SelectTab(std::size_t index) override;
+    void CloseTab(std::size_t index) override;
+    void SelectSpace(std::size_t index) override;
     void BeginAddressEditing() override;
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
@@ -85,6 +131,13 @@ class BrowserWindow : public CefClient,
 
     void OnSearchPaletteSubmitted(const SearchSubmission& submission) override;
     void OnSearchPaletteDismissed() override;
+
+    void OnCommandPaletteSubmitted(const PaletteSelection& selection,
+                                   std::string_view url_query) override;
+    void OnCommandPaletteDismissed() override;
+
+    void OnSpaceRenameCommitted(std::string name) override;
+    void OnSpaceRenameCancelled() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
@@ -138,6 +191,23 @@ class BrowserWindow : public CefClient,
         kFocusAddressAccelerator,
         kOpenPaletteAccelerator,
         kToggleSidebarAccelerator,
+        // Phase 3 tab commands. The direct-index block is contiguous so
+        // OnAccelerator can range-check the nine tab positions.
+        kNewTabAccelerator,
+        kCloseTabAccelerator,
+        kNextTabAccelerator,
+        kPreviousTabAccelerator,
+        kOpenSearchPaletteAccelerator,
+        kRenameSpaceAccelerator,
+        kSelectTab1Accelerator,
+        kSelectTab2Accelerator,
+        kSelectTab3Accelerator,
+        kSelectTab4Accelerator,
+        kSelectTab5Accelerator,
+        kSelectTab6Accelerator,
+        kSelectTab7Accelerator,
+        kSelectTab8Accelerator,
+        kSelectTab9Accelerator,
     };
 
     explicit BrowserWindow(std::string initial_url);
@@ -151,6 +221,41 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] Tab* FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept;
     [[nodiscard]] Tab* active_tab() noexcept;
     [[nodiscard]] const Tab* active_tab() const noexcept;
+    // Detaches the projection from the current active tab before a mutation
+    // changes which tab/space is active; Attach re-subscribes to the (possibly
+    // new) active tab, pushes its snapshot through the address model and
+    // chrome, re-attaches its browser view into the content slot, and refreshes
+    // the collection rows. Both are no-ops while closing.
+    void DetachActiveTabObservers();
+    void AttachActiveTabObservers();
+    void AttachActiveTabBrowserView();
+    void UpdateChromeCollections();
+    [[nodiscard]] static Space CreateDefaultSpace();
+    // Session restore: rebuilds spaces, tabs, active selections, and split
+    // pairings from the session file. Returns false and leaves the model in
+    // its fresh-install shape for every non-recoverable outcome (missing,
+    // unreadable, or schema-invalid file), which the caller treats as the
+    // fixed-startup-page fallback.
+    bool RestoreSession();
+    // Serializes the current model for the next launch. Clean quit only — no
+    // autosave, no crash hook.
+    void SaveSession() const;
+    // The URL a restored tab's browser view loads: the tab's validated startup
+    // URL, else the window's fixed startup page.
+    [[nodiscard]] std::string StartupUrlForTab(const Tab& tab) const;
+    // Removes the space at |index| from the model and applies the encoded
+    // fallbacks: the previous neighbor becomes active (the next one at index 0),
+    // and an empty window recreates a single fresh default space. Returns the
+    // removed space so its browsers can be closed after the model mutation.
+    Space RemoveSpaceAtIndex(std::size_t index);
+    // Closes every CefBrowser owned by |space|'s tabs. Must run after the
+    // model mutation, never while iterating spaces_.
+    void CloseSpaceBrowsers(Space& space);
+    // Palette routing: the selection is resolved against the current model by
+    // identity (TabId/SpaceId), never by the position it was listed at.
+    void ActivatePaletteTab(TabId id);
+    void ActivatePaletteSpace(SpaceId id);
+    void SubmitPaletteUrl(std::string_view query, const ValidatedAddress& address);
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
@@ -164,6 +269,8 @@ class BrowserWindow : public CefClient,
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
     std::unique_ptr<SearchPalette> search_palette_;
+    std::unique_ptr<CommandPaletteView> command_palette_;
+    std::unique_ptr<SpaceRenameOverlay> space_rename_overlay_;
     SidebarState sidebar_state_;
     CefRefPtr<CefPanel> hover_sliver_;
     CefRefPtr<CefOverlayController> hover_sliver_overlay_;
@@ -174,6 +281,12 @@ class BrowserWindow : public CefClient,
     CefRefPtr<CefWindow> window_;
     std::vector<Space> spaces_;
     std::size_t active_space_index_ = 0;
+    // Monotonic source of "Space N" display names so removals never produce a
+    // duplicate name later.
+    std::uint32_t created_space_count_ = 1;
+    // The active tab's page title last projected into the collection rows, so
+    // title-only navigation changes avoid rebuilding both collections.
+    std::string projected_page_title_;
     bool browser_was_created_ = false;
     bool closing_ = false;
     bool message_loop_quit_ = false;

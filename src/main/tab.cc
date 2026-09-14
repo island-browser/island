@@ -6,13 +6,15 @@ Tab::Tab(TabId id) : id_(id) {}
 
 TabId Tab::id() const noexcept { return id_; }
 
+void Tab::SetStartupUrl(std::string url) { startup_url_ = std::move(url); }
+
+const std::string& Tab::startup_url() const noexcept { return startup_url_; }
+
 NavigationState& Tab::navigation_state() noexcept { return navigation_state_; }
 
 const NavigationState& Tab::navigation_state() const noexcept { return navigation_state_; }
 
-void Tab::SetBrowserView(CefRefPtr<CefBrowserView> browser_view) {
-    browser_view_ = browser_view;
-}
+void Tab::SetBrowserView(CefRefPtr<CefBrowserView> browser_view) { browser_view_ = browser_view; }
 
 void Tab::SetBrowser(CefRefPtr<CefBrowser> browser) { browser_ = browser; }
 

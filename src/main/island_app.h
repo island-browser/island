@@ -21,8 +21,17 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void ExecuteCommand(BrowserCommand command);
     void BeginAddressEditing();
     void ShowSearchPalette();
+    void ShowCommandPalette();
     void ToggleSidebar();
+    void BeginSpaceRenaming();
+    // Space reorder menu entries; a move that would leave the space list is a
+    // no-op.
+    void MoveSpaceLeft();
+    void MoveSpaceRight();
     void RequestClose();
+    // Direct-index tab switch (Cmd/Ctrl+1..9) for the macOS menu; an
+    // out-of-range index is a no-op.
+    void SelectActiveSpaceTabIndex(std::size_t index);
     void SetNavigationObserver(NavigationObserver* observer);
     void SetChromeObserver(ChromeObserver* observer);
 

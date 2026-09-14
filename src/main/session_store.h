@@ -91,6 +91,13 @@ class SessionStore {
   public:
     SessionStore() = delete;
 
+    // The platform app-data session file path: macOS
+    // ~/Library/Application Support/Island/session.json; Windows
+    // %APPDATA%\Island\session.json; Linux $XDG_DATA_HOME/Island/session.json
+    // with ~/.local/share/Island/session.json as the fallback. Callers that
+    // need isolation (tests) pass explicit paths instead.
+    [[nodiscard]] static std::filesystem::path DefaultSessionFilePath();
+
     // Load and validate the JSON session file at `path`.
     //
     // - File not found → returns Default() + kFileReadError.

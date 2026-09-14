@@ -3,6 +3,7 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -609,6 +610,34 @@ SessionError SessionStore::Save(const std::filesystem::path& path, const Session
     }
 
     return SessionError::kNone;
+}
+
+std::filesystem::path SessionStore::DefaultSessionFilePath() {
+#if defined(_WIN32)
+    const char* const app_data = std::getenv("APPDATA");
+    std::filesystem::path base =
+        app_data != nullptr && *app_data != '\0'
+            ? std::filesystem::path(app_data)
+            : std::filesystem::path(std::getenv("USERPROFILE")) / "AppData" / "Roaming";
+    return base / "Island" / "session.json";
+#elif defined(__APPLE__)
+    const char* const home = std::getenv("HOME");
+    if (home == nullptr || *home == '\0') {
+        return std::filesystem::path("session.json");
+    }
+    return std::filesystem::path(home) / "Library" / "Application Support" / "Island" /
+           "session.json";
+#else
+    const char* const xdg_data_home = std::getenv("XDG_DATA_HOME");
+    if (xdg_data_home != nullptr && *xdg_data_home != '\0') {
+        return std::filesystem::path(xdg_data_home) / "Island" / "session.json";
+    }
+    const char* const home = std::getenv("HOME");
+    if (home == nullptr || *home == '\0') {
+        return std::filesystem::path("session.json");
+    }
+    return std::filesystem::path(home) / ".local" / "share" / "Island" / "session.json";
+#endif
 }
 
 }  // namespace island

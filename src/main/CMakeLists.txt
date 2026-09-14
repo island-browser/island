@@ -8,6 +8,8 @@ add_library(island_browser_core STATIC
     browser_chrome.cc
     browser_window.cc
     cef_address_parser.cc
+    command_palette.cc
+    command_palette_view.cc
     design_tokens.cc
     icon_catalog.cc
     island_app.cc
@@ -18,6 +20,7 @@ add_library(island_browser_core STATIC
     session_store.cc
     sidebar_state.cc
     space.cc
+    space_rename_overlay.cc
     startup_options.cc
     tab.cc
 )

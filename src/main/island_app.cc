@@ -50,6 +50,38 @@ void IslandApp::ShowSearchPalette() {
     }
 }
 
+void IslandApp::ShowCommandPalette() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCommandPalette();
+    }
+}
+
+void IslandApp::BeginSpaceRenaming() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->BeginSpaceRenaming();
+    }
+}
+
+void IslandApp::MoveSpaceLeft() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(browser_window_->MoveActiveSpace(-1));
+    }
+}
+
+void IslandApp::MoveSpaceRight() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(browser_window_->MoveActiveSpace(1));
+    }
+}
+
 void IslandApp::ToggleSidebar() {
     CEF_REQUIRE_UI_THREAD();
 
@@ -63,6 +95,14 @@ void IslandApp::RequestClose() {
 
     if (browser_window_ != nullptr) {
         browser_window_->RequestClose();
+    }
+}
+
+void IslandApp::SelectActiveSpaceTabIndex(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(browser_window_->SelectActiveSpaceTabIndex(index));
     }
 }
 

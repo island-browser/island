@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -23,6 +24,7 @@
 #include "navigation_state.h"
 #include "sidebar_state.h"
 
+class CefBoxLayout;
 class CefBrowserView;
 class CefButton;
 class CefLabelButton;
@@ -69,6 +71,12 @@ enum class ChromeViewId : int {
     kSearchPaletteQuery = 1030,
     kSearchPaletteProvider = 1031,
     kSearchPaletteProviderName = 1032,
+    kCommandPalette = 1033,
+    kCommandPaletteQuery = 1034,
+    kCommandPaletteResult = 1035,
+    kCommandPaletteResultName = 1036,
+    kSpaceRenameOverlay = 1037,
+    kSpaceRenameField = 1038,
 };
 
 struct ChromeViewTreeNode {
@@ -80,20 +88,23 @@ struct ChromeViewTreeNode {
 
 // One tab-strip row as projected from a Tab: the title label carries the
 // truncating page title; favicon-or-fallback and the close affordance are the
-// sibling affordance nodes in the contract tree. U4 supplies these snapshots
-// from the active space's Tab list.
+// sibling affordance nodes in the contract tree. The active flag drives the
+// row's active/inactive accessible state and surface tint.
 struct TabStripEntrySnapshot {
     std::string title;
+    bool active = false;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
 
 // One space-switcher row as projected from a Space: the color mark carries the
-// space's color and the name label carries the truncating space name. U5
-// supplies these snapshots from the window's space list.
+// space's color and the name label carries the truncating space name. The
+// active flag drives the row's active/inactive accessible state and surface
+// tint the same way.
 struct SpaceSwitcherEntrySnapshot {
     ArgbColor color;
     std::string name;
+    bool active = false;
 
     bool operator==(const SpaceSwitcherEntrySnapshot&) const = default;
 };
@@ -114,11 +125,25 @@ struct AddressSelectionSnapshot {
     bool operator==(const AddressSelectionSnapshot&) const = default;
 };
 
+// What a tab-strip or space-switcher entry button did. Declared at namespace
+// scope so the chrome's private handler can name it without pulling the
+// delegate's definition into the header.
+enum class CollectionButtonAction : std::uint8_t {
+    kActivateTab,
+    kCloseTab,
+    kActivateSpace,
+};
+
 class BrowserChromeHost {
   public:
     virtual ~BrowserChromeHost() = default;
 
     virtual void ExecuteBrowserCommand(BrowserCommand command) = 0;
+    // Collection-entry activation, reported by entry position in the current
+    // projection. Hosts must keep these safe to call headless (no chrome).
+    virtual void SelectTab(std::size_t index) = 0;
+    virtual void CloseTab(std::size_t index) = 0;
+    virtual void SelectSpace(std::size_t index) = 0;
     virtual void BeginAddressEditing() = 0;
     virtual void CancelAddressEditing() = 0;
     virtual void SubmitAddressDraft(std::string_view draft) = 0;
@@ -310,11 +335,13 @@ class BrowserChrome final : public NavigationObserver {
                  {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}}}};
     }
 
-    // Projects the collection regions the way U4/U5 will: one entry node per
-    // tab/space snapshot, each with the fixed sub-shape the design requires
-    // (tab: favicon-or-fallback, truncating title, close affordance; space:
-    // color mark, truncating name). The count comes from the snapshots, so no
-    // absolute positional index is ever asserted against these regions.
+    // Projects the collection regions the way U4/U5 wire them at runtime: one
+    // entry node per tab/space snapshot, each with the fixed sub-shape the
+    // design requires (tab: favicon-or-fallback, truncating title, close
+    // affordance; space: color mark, truncating name). The count comes from
+    // the snapshots, so no absolute positional index is ever asserted against
+    // these regions. This is the single projection both the runtime view tree
+    // snapshot and the contract tests go through.
     [[nodiscard]] static ChromeViewTreeNode CollectionCountContract(
         const std::vector<TabStripEntrySnapshot>& tabs,
         const std::vector<SpaceSwitcherEntrySnapshot>& spaces) {
@@ -341,6 +368,29 @@ class BrowserChrome final : public NavigationObserver {
         return tree;
     }
 
+    // Rail rows show at most this many characters of a tab title or space name;
+    // longer text keeps the first characters and an ellipsis so the cut never
+    // splits a UTF-8 sequence. The accessible names below always carry the full
+    // untruncated text.
+    [[nodiscard]] static constexpr std::size_t CollectionTitleCharacterLimit() { return 24; }
+    [[nodiscard]] static std::string TruncateCollectionTitle(std::string title);
+    // Accessible names announce the entry text and the active/inactive state,
+    // matching the Phase 2 rail requirement for keyboard-focusable entries.
+    [[nodiscard]] static std::string TabEntryAccessibleName(const TabStripEntrySnapshot& entry);
+    [[nodiscard]] static std::string TabCloseAccessibleName(const TabStripEntrySnapshot& entry);
+    [[nodiscard]] static std::string SpaceEntryAccessibleName(
+        const SpaceSwitcherEntrySnapshot& entry);
+
+    // Rebuilds the tab-strip collection from the active space's Tab list and
+    // the space switcher from the window's space list. Rows are keyboard
+    // focusable through their affordance buttons and announce active state.
+    void SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries);
+    void SetSpaceSwitcherEntries(const std::vector<SpaceSwitcherEntrySnapshot>& entries);
+    // Swaps the CefBrowserView living in the content slot when the active tab
+    // or space changes. The previous view is detached, not destroyed; the new
+    // one takes the kBrowserView contract id.
+    void AttachBrowserView(CefRefPtr<CefBrowserView> browser_view);
+
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
     void ApplyTheme(ChromeTokens tokens);
@@ -363,9 +413,11 @@ class BrowserChrome final : public NavigationObserver {
     class RootPanelDelegate;
     class SurfacePanelDelegate;
     class ButtonDelegate;
+    class CollectionButtonDelegate;
     class TextfieldDelegate;
 
     void HandleButtonPressed(ChromeViewId view_id);
+    void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
     bool HandleAddressKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void HandleAddressUserAction(CefRefPtr<CefTextfield> textfield);
     void HandleAddressFocus();
@@ -374,6 +426,7 @@ class BrowserChrome final : public NavigationObserver {
     void ProjectAddress(const AddressBarSnapshot& snapshot);
     void ScheduleAddressSelection();
     void ApplyControlTheme();
+    void ApplyCollectionTheme();
     void UpdateAddressFocusLeadingEdge();
 
     BrowserChromeHost* host_;
@@ -382,6 +435,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> root_;
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<CefBoxLayout> browser_content_layout_;
     CefRefPtr<CefBrowserView> browser_view_;
     CefRefPtr<CefPanel> navigation_row_;
     CefRefPtr<CefPanel> address_row_;
@@ -396,6 +450,26 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
     CefRefPtr<CefPanel> space_switcher_;
+    // Per-entry runtime views, index-aligned with tab_entries_/space_entries_.
+    struct TabEntryViews {
+        CefRefPtr<CefPanel> row;
+        CefRefPtr<CefLabelButton> favicon;
+        CefRefPtr<CefLabelButton> title;
+        CefRefPtr<CefLabelButton> close;
+    };
+    struct SpaceEntryViews {
+        CefRefPtr<CefPanel> row;
+        CefRefPtr<CefPanel> color_mark;
+        CefRefPtr<CefLabelButton> name;
+    };
+    std::vector<TabStripEntrySnapshot> tab_entries_;
+    std::vector<SpaceSwitcherEntrySnapshot> space_entries_;
+    std::vector<TabEntryViews> tab_entry_views_;
+    std::vector<SpaceEntryViews> space_entry_views_;
+    // Kept per region: rebuilding one collection must not detach the other's
+    // still-live entry buttons.
+    std::vector<CefRefPtr<CollectionButtonDelegate>> tab_button_delegates_;
+    std::vector<CefRefPtr<CollectionButtonDelegate>> space_button_delegates_;
     CefRefPtr<CefPanel> active_page_;
     CefRefPtr<CefLabelButton> active_page_fallback_favicon_;
     CefRefPtr<CefLabelButton> active_tab_;

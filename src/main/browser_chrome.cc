@@ -23,6 +23,18 @@ namespace {
 constexpr int kReturnKeyCode = 0x0D;
 constexpr int kEscapeKeyCode = 0x1B;
 
+// Advances to the byte offset just past the UTF-8 code point starting at
+// |byte_index|; continuation bytes never start a new character, so truncation
+// and character counts never split a sequence.
+std::size_t AdvanceUtf8Character(const std::string& text, std::size_t byte_index) {
+    ++byte_index;
+    while (byte_index < text.size() &&
+           (static_cast<unsigned char>(text[byte_index]) & 0xC0) == 0x80) {
+        ++byte_index;
+    }
+    return byte_index;
+}
+
 int ControlHeight(const ChromeTokens& tokens) {
     return tokens.spacing_6_dip + tokens.spacing_4_dip;
 }
@@ -247,6 +259,32 @@ class BrowserChrome::ButtonDelegate final : public CefButtonDelegate {
     IMPLEMENT_REFCOUNTING(ButtonDelegate);
 };
 
+// Per-entry button delegate for the collection regions. Entry rows share the
+// contract ChromeViewIds, so the entry index travels with the delegate instead
+// of the view id.
+class BrowserChrome::CollectionButtonDelegate final : public CefButtonDelegate {
+  public:
+    CollectionButtonDelegate(BrowserChrome* chrome, CollectionButtonAction action,
+                             std::size_t index)
+        : chrome_(chrome), action_(action), index_(index) {}
+
+    void Detach() { chrome_ = nullptr; }
+
+    void OnButtonPressed(CefRefPtr<CefButton>) override {
+        CEF_REQUIRE_UI_THREAD();
+        if (chrome_ != nullptr) {
+            chrome_->HandleCollectionButtonPressed(action_, index_);
+        }
+    }
+
+  private:
+    BrowserChrome* chrome_;
+    CollectionButtonAction action_;
+    std::size_t index_;
+
+    IMPLEMENT_REFCOUNTING(CollectionButtonDelegate);
+};
+
 class BrowserChrome::TextfieldDelegate final : public CefTextfieldDelegate {
   public:
     TextfieldDelegate(BrowserChrome* chrome, CefSize preferred_size)
@@ -458,11 +496,10 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
         CefSize(control_height, control_height), CefSize(control_height, control_height)));
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
-    CefRefPtr<CefBoxLayout> browser_content_layout =
-        browser_content_->SetToBoxLayout(FloatingCanvasLayout(tokens_));
+    browser_content_layout_ = browser_content_->SetToBoxLayout(FloatingCanvasLayout(tokens_));
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
     browser_content_->AddChildView(browser_view_);
-    browser_content_layout->SetFlexForView(browser_view_, 1);
+    browser_content_layout_->SetFlexForView(browser_view_, 1);
 
     root_->AddChildView(sidebar_);
     root_->AddChildView(browser_content_);
@@ -486,7 +523,10 @@ CefRefPtr<CefPanel> BrowserChrome::sidebar() const {
 }
 
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
-    return BrowserChrome::ViewTreeContract();
+    // The live projection: fixed regions from the contract, collection entries
+    // from the snapshots the window last pushed, so the snapshot always matches
+    // the rows actually in the view tree.
+    return BrowserChrome::CollectionCountContract(tab_entries_, space_entries_);
 }
 
 ChromeGeometrySnapshot BrowserChrome::view_bounds_snapshot() const {
@@ -505,6 +545,170 @@ AddressSelectionSnapshot BrowserChrome::address_selection_snapshot() const {
         .has_focus = address_field_->HasFocus(),
         .has_selection = address_field_->HasSelection(),
     };
+}
+
+std::string BrowserChrome::TruncateCollectionTitle(std::string title) {
+    const std::size_t limit = CollectionTitleCharacterLimit();
+    std::size_t characters = 0;
+    std::size_t index = 0;
+    while (index < title.size()) {
+        index = AdvanceUtf8Character(title, index);
+        ++characters;
+    }
+    if (characters <= limit) {
+        return title;
+    }
+    // Keep the first limit-1 characters and append an ellipsis so the displayed
+    // text never exceeds the limit and never splits a UTF-8 sequence. The
+    // accessible names below still carry the full untruncated text.
+    constexpr std::string_view kEllipsis = "\xE2\x80\xA6";
+    std::size_t cut = 0;
+    for (std::size_t kept = 1; kept < limit; ++kept) {
+        cut = AdvanceUtf8Character(title, cut);
+    }
+    return title.substr(0, cut) + std::string(kEllipsis);
+}
+
+std::string BrowserChrome::TabEntryAccessibleName(const TabStripEntrySnapshot& entry) {
+    return "Tab: " + entry.title + (entry.active ? ", active" : ", inactive");
+}
+
+std::string BrowserChrome::TabCloseAccessibleName(const TabStripEntrySnapshot& entry) {
+    return "Close tab: " + entry.title;
+}
+
+std::string BrowserChrome::SpaceEntryAccessibleName(const SpaceSwitcherEntrySnapshot& entry) {
+    return "Space: " + entry.name + (entry.active ? ", active" : ", inactive");
+}
+
+void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : tab_button_delegates_) {
+        delegate->Detach();
+    }
+    tab_button_delegates_.clear();
+    tab_entry_views_.clear();
+    tab_entries_ = entries;
+    tab_strip_->RemoveAllChildViews();
+
+    const int control_height = ControlHeight(tokens_);
+    const std::optional<CefRefPtr<CefImage>> fallback_icon =
+        icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const TabStripEntrySnapshot& entry = entries[index];
+        TabEntryViews views;
+        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, control_height)));
+        views.row->SetID(static_cast<int>(ChromeViewId::kTabStripEntry));
+        CefRefPtr<CefBoxLayout> row_layout = views.row->SetToBoxLayout(HorizontalLayout(tokens_));
+
+        views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
+        views.favicon->SetAccessibleName("Tab favicon placeholder");
+        views.favicon->SetTooltipText("Tab favicon placeholder");
+        views.favicon->SetFocusable(false);
+        views.favicon->SetMinimumSize(CefSize(control_height, control_height));
+        if (fallback_icon.has_value()) {
+            views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
+        }
+        views.row->AddChildView(views.favicon);
+
+        CefRefPtr<CollectionButtonDelegate> title_delegate = new CollectionButtonDelegate(
+            this, CollectionButtonAction::kActivateTab, index);
+        tab_button_delegates_.push_back(title_delegate);
+        views.title = CefLabelButton::CreateLabelButton(title_delegate,
+                                                        TruncateCollectionTitle(entry.title));
+        views.title->SetID(static_cast<int>(ChromeViewId::kTabStripEntryTitle));
+        views.title->SetAccessibleName(TabEntryAccessibleName(entry));
+        views.title->SetTooltipText(entry.title);
+        views.title->SetFocusable(true);
+        views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, control_height));
+        views.row->AddChildView(views.title);
+        row_layout->SetFlexForView(views.title, 1);
+
+        CefRefPtr<CollectionButtonDelegate> close_delegate =
+            new CollectionButtonDelegate(this, CollectionButtonAction::kCloseTab, index);
+        tab_button_delegates_.push_back(close_delegate);
+        views.close = CefLabelButton::CreateLabelButton(close_delegate, "\xC3\x97");
+        views.close->SetID(static_cast<int>(ChromeViewId::kTabStripEntryClose));
+        views.close->SetAccessibleName(TabCloseAccessibleName(entry));
+        views.close->SetTooltipText("Close tab");
+        views.close->SetFocusable(true);
+        views.close->SetMinimumSize(CefSize(control_height, control_height));
+        views.row->AddChildView(views.close);
+
+        tab_entry_views_.push_back(views);
+        tab_strip_->AddChildView(views.row);
+    }
+    ApplyCollectionTheme();
+}
+
+void BrowserChrome::SetSpaceSwitcherEntries(
+    const std::vector<SpaceSwitcherEntrySnapshot>& entries) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : space_button_delegates_) {
+        delegate->Detach();
+    }
+    space_button_delegates_.clear();
+    space_entry_views_.clear();
+    space_entries_ = entries;
+    space_switcher_->RemoveAllChildViews();
+
+    const int control_height = ControlHeight(tokens_);
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const SpaceSwitcherEntrySnapshot& entry = entries[index];
+        SpaceEntryViews views;
+        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, control_height)));
+        views.row->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry));
+        CefRefPtr<CefBoxLayout> row_layout = views.row->SetToBoxLayout(HorizontalLayout(tokens_));
+
+        views.color_mark = CefPanel::CreatePanel(
+            new PanelDelegate(CefSize(tokens_.spacing_3_dip, tokens_.spacing_3_dip)));
+        views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
+        views.row->AddChildView(views.color_mark);
+
+        CefRefPtr<CollectionButtonDelegate> name_delegate = new CollectionButtonDelegate(
+            this, CollectionButtonAction::kActivateSpace, index);
+        space_button_delegates_.push_back(name_delegate);
+        views.name = CefLabelButton::CreateLabelButton(name_delegate,
+                                                       TruncateCollectionTitle(entry.name));
+        views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
+        views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
+        views.name->SetTooltipText(entry.name);
+        views.name->SetFocusable(true);
+        views.name->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, control_height));
+        views.row->AddChildView(views.name);
+        row_layout->SetFlexForView(views.name, 1);
+
+        space_entry_views_.push_back(views);
+        space_switcher_->AddChildView(views.row);
+    }
+    ApplyCollectionTheme();
+}
+
+void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || browser_view == nullptr) {
+        return;
+    }
+    if (browser_view_ != nullptr && browser_view->IsSame(browser_view_)) {
+        return;
+    }
+    if (browser_view_ != nullptr) {
+        browser_content_->RemoveChildView(browser_view_);
+    }
+    browser_view_ = browser_view;
+    browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
+    browser_content_->AddChildView(browser_view_);
+    if (browser_content_layout_ != nullptr) {
+        browser_content_layout_->SetFlexForView(browser_view_, 1);
+    }
+    browser_content_->Layout();
 }
 
 void BrowserChrome::OnNavigationChanged(const NavigationSnapshot& snapshot) {
@@ -566,6 +770,12 @@ void BrowserChrome::Detach() {
     host_ = nullptr;
     button_delegate_->Detach();
     textfield_delegate_->Detach();
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : tab_button_delegates_) {
+        delegate->Detach();
+    }
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : space_button_delegates_) {
+        delegate->Detach();
+    }
     for (const CefRefPtr<SurfacePanelDelegate>& surface_delegate : surface_delegates_) {
         surface_delegate->Detach();
     }
@@ -598,6 +808,25 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->FocusBrowserView();
             return;
         default:
+            return;
+    }
+}
+
+void BrowserChrome::HandleCollectionButtonPressed(CollectionButtonAction action,
+                                                  std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    switch (action) {
+        case CollectionButtonAction::kActivateTab:
+            host_->SelectTab(index);
+            return;
+        case CollectionButtonAction::kCloseTab:
+            host_->CloseTab(index);
+            return;
+        case CollectionButtonAction::kActivateSpace:
+            host_->SelectSpace(index);
             return;
     }
 }
@@ -739,6 +968,36 @@ void BrowserChrome::ApplyControlTheme() {
     if (location.has_value()) {
         address_location_icon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
         active_page_fallback_favicon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
+    }
+    ApplyCollectionTheme();
+}
+
+// Entry rows tint like the rail when inactive and lift to the active-page
+// surface when active, so the current tab and current space read as the raised
+// rows the same way the active-page card does. Re-asserted here (not through a
+// SurfacePanelDelegate) because the tint depends on the entry's active state,
+// which changes independently of the theme.
+void BrowserChrome::ApplyCollectionTheme() {
+    CEF_REQUIRE_UI_THREAD();
+    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
+    const ArgbColor surface = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
+    for (std::size_t index = 0;
+         index < tab_entry_views_.size() && index < tab_entries_.size(); ++index) {
+        const TabStripEntrySnapshot& entry = tab_entries_[index];
+        const TabEntryViews& views = tab_entry_views_[index];
+        const ArgbColor row_fill = entry.active ? surface : rail;
+        views.row->SetBackgroundColor(row_fill.argb);
+        views.favicon->SetBackgroundColor(row_fill.argb);
+        views.title->SetEnabledTextColors(tokens_.text.argb);
+        views.close->SetEnabledTextColors(tokens_.text_secondary.argb);
+    }
+    for (std::size_t index = 0;
+         index < space_entry_views_.size() && index < space_entries_.size(); ++index) {
+        const SpaceSwitcherEntrySnapshot& entry = space_entries_[index];
+        const SpaceEntryViews& views = space_entry_views_[index];
+        views.row->SetBackgroundColor(entry.active ? surface.argb : rail.argb);
+        views.color_mark->SetBackgroundColor(entry.color.argb);
+        views.name->SetEnabledTextColors(tokens_.text.argb);
     }
 }
 

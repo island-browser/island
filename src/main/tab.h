@@ -1,11 +1,12 @@
 #ifndef ISLAND_TAB_H_
 #define ISLAND_TAB_H_
 
-#include "navigation_state.h"
-#include "tab_id.h"
+#include <string>
 
 #include "include/cef_browser.h"
 #include "include/views/cef_browser_view.h"
+#include "navigation_state.h"
+#include "tab_id.h"
 
 class CefBrowserView;
 class CefBrowser;
@@ -31,6 +32,12 @@ class Tab {
     [[nodiscard]] NavigationState& navigation_state() noexcept;
     [[nodiscard]] const NavigationState& navigation_state() const noexcept;
 
+    // The URL this tab's CefBrowserView loads when it is created. Empty means
+    // the window's fixed startup page; session restore sets a persisted URL
+    // here after it passes the address validation path.
+    void SetStartupUrl(std::string url);
+    [[nodiscard]] const std::string& startup_url() const noexcept;
+
     // U2: Caller-built CEF browser seam. The tab's CefBrowserView is created and owned
     // externally (by BrowserWindow); the tab holds raw CefRefPtr references to the view and
     // its underlying CefBrowser. Callers SetBrowserView after BrowserWindow creates the view;
@@ -43,6 +50,7 @@ class Tab {
 
   private:
     TabId id_;
+    std::string startup_url_;
     NavigationState navigation_state_;
 
     CefRefPtr<CefBrowserView> browser_view_;

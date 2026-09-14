@@ -62,7 +62,18 @@
 - (void)reload:(id)sender;
 - (void)focusAddress:(id)sender;
 - (void)openSearchPalette:(id)sender;
+- (void)openCommandPalette:(id)sender;
 - (void)toggleSidebar:(id)sender;
+- (void)newTab:(id)sender;
+- (void)closeTab:(id)sender;
+- (void)selectNextTab:(id)sender;
+- (void)selectPreviousTab:(id)sender;
+- (void)selectNumberedTab:(id)sender;
+- (void)newSpace:(id)sender;
+- (void)closeSpace:(id)sender;
+- (void)beginSpaceRenaming:(id)sender;
+- (void)moveSpaceLeft:(id)sender;
+- (void)moveSpaceRight:(id)sender;
 @end
 
 @implementation IslandMenuActions
@@ -108,9 +119,77 @@
     }
 }
 
+- (void)openCommandPalette:(id)sender {
+    if (app_ != nullptr) {
+        app_->ShowCommandPalette();
+    }
+}
+
+- (void)beginSpaceRenaming:(id)sender {
+    if (app_ != nullptr) {
+        app_->BeginSpaceRenaming();
+    }
+}
+
+- (void)moveSpaceLeft:(id)sender {
+    if (app_ != nullptr) {
+        app_->MoveSpaceLeft();
+    }
+}
+
+- (void)moveSpaceRight:(id)sender {
+    if (app_ != nullptr) {
+        app_->MoveSpaceRight();
+    }
+}
+
 - (void)toggleSidebar:(id)sender {
     if (app_ != nullptr) {
         app_->ToggleSidebar();
+    }
+}
+
+- (void)newTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kNewTab);
+    }
+}
+
+- (void)closeTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kCloseTab);
+    }
+}
+
+// Cmd/Ctrl+Shift+[ and Cmd/Ctrl+Shift+] are previous/next tab: Cmd+[ and Cmd+]
+// already own Back/Forward, so the plain bracket keys stay navigation-only.
+- (void)selectNextTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kNextTab);
+    }
+}
+
+- (void)selectPreviousTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kPreviousTab);
+    }
+}
+
+- (void)selectNumberedTab:(id)sender {
+    if (app_ != nullptr && [sender isKindOfClass:[NSMenuItem class]]) {
+        app_->SelectActiveSpaceTabIndex(static_cast<std::size_t>([sender tag] - 1));
+    }
+}
+
+- (void)newSpace:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kNewSpace);
+    }
+}
+
+- (void)closeSpace:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kCloseSpace);
     }
 }
 @end
@@ -136,6 +215,26 @@ island::StartupOptions ParseStartupOptions(int argc, char* argv[]) {
     }
 
     return island::StartupOptions::Parse(std::span<const std::string_view>(arguments));
+}
+
+// Creates a Browser-menu item targeting |menu_actions| and appends it to
+// |menu|. The caller releases the returned item once the menu owns it; a zero
+// |tag| leaves the item untagged. Pass an empty |key_equivalent| for items the
+// design fixes no key for — they stay reachable from the menu without a
+// shortcut.
+NSMenuItem* AddBrowserMenuItem(NSMenu* menu, IslandMenuActions* menu_actions, NSString* title,
+                               SEL action, NSString* key_equivalent,
+                               NSEventModifierFlags modifiers, NSInteger tag) {
+    NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:title
+                                                  action:action
+                                           keyEquivalent:key_equivalent];
+    [item setKeyEquivalentModifierMask:modifiers];
+    [item setTarget:menu_actions];
+    if (tag != 0) {
+        [item setTag:tag];
+    }
+    [menu addItem:item];
+    return item;
 }
 
 void InstallMainMenu(IslandMenuActions* menu_actions) {
@@ -167,12 +266,15 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
                                                                      action:@selector(focusAddress:)
                                                               keyEquivalent:@"l"];
     // CefWindow::SetAccelerator never dispatches on macOS, where NSMenu key
-    // equivalents own the command keys, so the palette gets the same menu route
-    // Focus Address already uses.
-    NSMenuItem* search_menu_item = [[NSMenuItem alloc] initWithTitle:@"Search"
-                                                              action:@selector(openSearchPalette:)
-                                                       keyEquivalent:@"k"];
-    [search_menu_item setKeyEquivalentModifierMask:NSEventModifierFlagCommand];
+    // equivalents own the command keys, so the palettes get the same menu route
+    // Focus Address already uses. The Phase 3 design fixes Cmd+K on the command
+    // palette; the search palette keeps Cmd+Shift+K.
+    NSMenuItem* command_palette_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Command Palette",
+                           @selector(openCommandPalette:), @"k", NSEventModifierFlagCommand, 0);
+    NSMenuItem* search_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Search", @selector(openSearchPalette:),
+                           @"k", NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
     NSMenuItem* toggle_sidebar_menu_item =
         [[NSMenuItem alloc] initWithTitle:@"Toggle Sidebar"
                                    action:@selector(toggleSidebar:)
@@ -191,13 +293,74 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [browser_menu addItem:focus_address_menu_item];
     [browser_menu addItem:search_menu_item];
     [browser_menu addItem:toggle_sidebar_menu_item];
+    [browser_menu addItem:[NSMenuItem separatorItem]];
+
+    NSMenuItem* new_tab_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"New Tab", @selector(newTab:), @"t",
+                           NSEventModifierFlagCommand, 0);
+    NSMenuItem* close_tab_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Close Tab", @selector(closeTab:), @"w",
+                           NSEventModifierFlagCommand, 0);
+    // Cmd+[ and Cmd+] already own Back/Forward, so previous/next tab take the
+    // shifted brackets.
+    NSMenuItem* previous_tab_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Select Previous Tab",
+                           @selector(selectPreviousTab:), @"[",
+                           NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
+    NSMenuItem* next_tab_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Select Next Tab", @selector(selectNextTab:),
+                           @"]", NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
+    [browser_menu addItem:[NSMenuItem separatorItem]];
+    // Cmd+1..9 switch directly to the tab at that position of the active
+    // space; out-of-range positions are a no-op.
+    NSMutableArray<NSMenuItem*>* numbered_tab_items = [NSMutableArray arrayWithCapacity:9];
+    for (NSInteger position = 1; position <= 9; ++position) {
+        NSString* title = [NSString stringWithFormat:@"Select Tab %ld", static_cast<long>(position)];
+        NSString* key = [NSString stringWithFormat:@"%ld", static_cast<long>(position)];
+        [numbered_tab_items addObject:AddBrowserMenuItem(
+                                          browser_menu, menu_actions, title,
+                                          @selector(selectNumberedTab:), key,
+                                          NSEventModifierFlagCommand, position)];
+    }
+    [browser_menu addItem:[NSMenuItem separatorItem]];
+    NSMenuItem* new_space_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"New Space", @selector(newSpace:), @"",
+                           NSEventModifierFlagCommand, 0);
+    NSMenuItem* close_space_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Close Space", @selector(closeSpace:), @"",
+                           NSEventModifierFlagCommand, 0);
+    // Rename and reorder stay reachable without memorizing a shortcut: menu
+    // entries are their entry point, and F2 is the cross-platform rename
+    // accelerator registered in BrowserWindow.
+    NSMenuItem* rename_space_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Rename Space…",
+                           @selector(beginSpaceRenaming:), @"", NSEventModifierFlagCommand, 0);
+    NSMenuItem* move_space_left_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Move Space Left",
+                           @selector(moveSpaceLeft:), @"", NSEventModifierFlagCommand, 0);
+    NSMenuItem* move_space_right_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Move Space Right",
+                           @selector(moveSpaceRight:), @"", NSEventModifierFlagCommand, 0);
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
     [NSApp setMainMenu:main_menu];
 
+    [move_space_right_menu_item release];
+    [move_space_left_menu_item release];
+    [rename_space_menu_item release];
+    [close_space_menu_item release];
+    [new_space_menu_item release];
+    for (NSMenuItem* item in numbered_tab_items) {
+        [item release];
+    }
+    [next_tab_menu_item release];
+    [previous_tab_menu_item release];
+    [close_tab_menu_item release];
+    [new_tab_menu_item release];
     [toggle_sidebar_menu_item release];
     [search_menu_item release];
+    [command_palette_menu_item release];
     [focus_address_menu_item release];
     [reload_menu_item release];
     [forward_menu_item release];
