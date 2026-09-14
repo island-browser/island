@@ -1,0 +1,117 @@
+name: Linux container builds
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-container-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux-container:
+    name: ${{ matrix.target }} (native container)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux64
+            runner: ubuntu-24.04
+            arch: x64
+            cef_target: linux64
+          - target: linuxarm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+            cef_target: linuxarm64
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Verify image lock digest pinning
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import json, sys
+          lock = json.loads(open('docker/images.lock.json').read())
+          for name, record in lock['images'].items():
+              digest = record['manifestDigest']
+              if not digest.startswith('sha256:'):
+                  print(f'error: {name} manifestDigest is not pinned by digest: {digest}', file=sys.stderr)
+                  sys.exit(1)
+          print('All image digests are pinned.')
+          "
+      - name: Build linux-build image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --target linux-build -t island-linux-build:locked -f docker/Dockerfile .
+      - name: Run deps fetch in locked image (network enabled)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/container-artifacts build/reports
+          docker run --rm \
+            --network=default \
+            --user="$(id -u):$(id -g)" \
+            --workdir=/work \
+            --mount="type=bind,source=$(pwd),target=/src,readonly" \
+            --mount="type=volume,source=island-work-${{ github.run_id }}-${{ matrix.target }},target=/work" \
+            --mount="type=volume,source=island-deps-cache-${{ github.run_id }}-${{ matrix.target }},target=/work/deps-cache" \
+            --mount="type=volume,source=island-compiler-cache-${{ github.run_id }}-${{ matrix.target }},target=/work/compiler-cache" \
+            --mount="type=bind,source=$(pwd)/build/container-artifacts,target=/work/out" \
+            --env="ISLAND_TARGET=${{ matrix.target }}" \
+            island-linux-build:locked \
+            python3 /src/scripts/deps.py install --target ${{ matrix.cef_target }}
+      - name: Run container routing tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests/container -p 'test_*.py'
+      - name: Upload container diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-container-diagnostics-${{ matrix.target }}
+          path: |
+            build/reports/**
+            build/container-artifacts/**
+          if-no-files-found: warn
+          retention-days: 7
+
+  qemu-preflight:
+    name: QEMU cross-arch preflight (informational, non-authoritative)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3
+        with:
+          platforms: arm64
+      - name: Verify image lock has arm64 digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import json, sys
+          lock = json.loads(open('docker/images.lock.json').read())
+          for name, record in lock['images'].items():
+              arch_digests = record.get('architectureDigests', {})
+              if 'linux/arm64' not in arch_digests:
+                  print(f'warning: {name} has no linux/arm64 architecture digest', file=sys.stderr)
+          print('QEMU preflight: image lock arm64 digests verified (informational only).')
+          "

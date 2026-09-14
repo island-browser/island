@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "tasks": {
+    "portable": {
+      "stage": "portable-tests",
+      "networkPolicy": "none",
+      "sourceAccess": "read-only",
+      "outputs": ["build/reports"],
+      "architectures": ["x64", "arm64"],
+      "entryPoint": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "/src/tests/deps",
+        "-p",
+        "test_*.py"
+      ],
+      "description": "Run dependency Python tests in the locked portable-tests image with no network access."
+    },
+    "linux-native": {
+      "stage": "linux-build",
+      "networkPolicy": "dependency-fetch",
+      "sourceAccess": "read-only",
+      "outputs": ["build/container-artifacts", "build/reports"],
+      "architectures": ["x64", "arm64"],
+      "entryPoint": [
+        "bash",
+        "/src/scripts/container_linux_build.sh"
+      ],
+      "description": "Build and test the Linux product in the locked linux-build image on a matching native architecture: copy /src into /work, install CEF/Geist from the deps lock, configure+build with Ninja, run CTest under Xvfb, export logs. The router appends --target <linux64|linuxarm64> and sets ISLAND_TARGET."
+    },
+    "macos-native": {
+      "stage": "native",
+      "networkPolicy": "dependency-fetch",
+      "sourceAccess": "read-only",
+      "outputs": ["build", "build/reports"],
+      "architectures": ["x64", "arm64"],
+      "entryPoint": ["python3", "/src/scripts/island.py", "build", "native"],
+      "description": "Native macOS build. Routed to the host toolchain; never containerized."
+    },
+    "windows-native": {
+      "stage": "native",
+      "networkPolicy": "dependency-fetch",
+      "sourceAccess": "read-only",
+      "outputs": ["build", "build/reports"],
+      "architectures": ["x64", "arm64"],
+      "entryPoint": ["python3", "/src/scripts/island.py", "build", "native"],
+      "description": "Native Windows build. Routed to the host toolchain; never containerized."
+    }
+  }
+}

@@ -1,0 +1,55 @@
+# Exclude everything that must never enter the container build context.
+# The host wrapper mounts /src read-only at runtime; the build context is only
+# used for image construction, not for source delivery.
+
+# Version control and local state
+.git
+.gitignore
+
+# Build outputs and dependency vendors (mounted or fetched at runtime, not baked in)
+build/
+build-*/
+third_party/
+assets/fonts/
+dist-phase2/
+dist/
+
+# Agent, session, and local tool state
+.omc/
+.omo/
+.playwright-mcp/
+.claude/
+.codegraph
+.opencode/
+
+# Design files and site-local agent state
+*.pen
+site/.omc/
+
+# OS artifacts
+.DS_Store
+
+# Editor and cache
+.cache/
+__pycache__/
+*.pyc
+
+# Reports and artifacts produced by the router itself
+build/reports/
+build/container-artifacts/
+
+# Docker metadata (avoid recursive context)
+docker/
+
+# Documentation not needed inside the image
+docs/
+
+# Tests are mounted at runtime, not baked into the image
+tests/
+
+# Scripts are mounted at runtime; the image only carries the OS and tools
+scripts/
+
+# Task declarations and locks are mounted at runtime
+build/tasks.json
+deps/
