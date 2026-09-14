@@ -72,6 +72,30 @@ def _tree_sha256(directory: Path) -> str:
     return digest.hexdigest()
 
 
+def _stray_files(destination: Path, allowed: frozenset[str]) -> list[str]:
+    strays: list[str] = []
+    for path in sorted(destination.rglob("*")):
+        relative = path.relative_to(destination).as_posix()
+        if relative == _RECEIPT or relative in allowed:
+            continue
+        if path.is_symlink() or path.is_file():
+            strays.append(relative)
+    return strays
+
+
+def _tree_mismatch_detail(destination: Path, complete_layout: frozenset[str] | None) -> str:
+    recovery = "run install --force to replace the installation"
+    if complete_layout is None:
+        return recovery
+    strays = _stray_files(destination, complete_layout)
+    if not strays:
+        return recovery
+    shown = ", ".join(strays[:3])
+    if len(strays) > 3:
+        shown += f" and {len(strays) - 3} more"
+    return f"unexpected installed files: {shown}; {recovery}"
+
+
 def download(artifact: Artifact, destination: Path, allowed_hosts: frozenset[str]) -> None:
     """Stream an allowlisted HTTPS artifact to a private temporary file."""
     parsed = urlparse(artifact.url)
@@ -261,11 +285,12 @@ def install_geist(root: Path, lock: LockFile, dry_run: bool) -> None:
 def verify(root: Path, lock: LockFile, target: str) -> None:
     """Verify installed layouts and immutable receipts without network access."""
     cef = resolve_cef(lock, target)
+    geist_files = lock.geist_files + lock.geist_licenses
     checks = (
-        (root / "third_party" / "cef", cef, f"cef_binary_{lock.cef_version}_{target}", ("cmake/cef_macros.cmake", "tests/cefsimple")),
-        (root / "assets" / "fonts", lock.geist, f"geist-font-{lock.geist_commit}", lock.geist_files + lock.geist_licenses),
+        (root / "third_party" / "cef", cef, f"cef_binary_{lock.cef_version}_{target}", ("cmake/cef_macros.cmake", "tests/cefsimple"), None),
+        (root / "assets" / "fonts", lock.geist, f"geist-font-{lock.geist_commit}", geist_files, frozenset(geist_files)),
     )
-    for destination, artifact, layout, required_files in checks:
+    for destination, artifact, layout, required_files, complete_layout in checks:
         for required in required_files:
             required_path = destination / required
             if not required_path.exists():
@@ -278,7 +303,8 @@ def verify(root: Path, lock: LockFile, target: str) -> None:
             raise InstallError(f"{artifact.name} receipt does not match the dependency artifact")
         tree_sha256 = raw.get("tree_sha256")
         if not isinstance(tree_sha256, str) or tree_sha256 != _tree_sha256(destination):
-            raise InstallError(f"{artifact.name} installed files do not match the receipt")
+            detail = _tree_mismatch_detail(destination, complete_layout)
+            raise InstallError(f"{artifact.name} installed files do not match the receipt ({detail})")
         contract = install_contract_sha256(artifact, layout, required_files)
         if raw.get("contract_sha256") is None:
             _write_receipt(destination, Receipt(artifact.name, artifact.target, artifact.source, artifact.sha256, tree_sha256, contract))

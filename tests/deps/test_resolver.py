@@ -301,6 +301,28 @@ class ResolverTests(unittest.TestCase):
         with self.assertRaisesRegex(InstallError, "installed files"):
             verify(self.root, self.lock, "macosx64")
 
+    def test_verify_names_unexpected_installed_files(self) -> None:
+        self.install_fixture_dependencies()
+        nested = self.root / "assets" / "fonts" / "fonts" / "Geist-Regular.ttf"
+        nested.parent.mkdir()
+        nested.write_bytes(b"font")
+        with self.assertRaises(InstallError) as caught:
+            verify(self.root, self.lock, "macosx64")
+        message = str(caught.exception)
+        self.assertIn("geist installed files do not match the receipt", message)
+        self.assertIn("fonts/Geist-Regular.ttf", message)
+        self.assertIn("install --force", message)
+
+    def test_verify_suggests_force_reinstall_for_drifted_installed_files(self) -> None:
+        self.install_fixture_dependencies()
+        (self.root / "assets" / "fonts" / "Geist-Bold.ttf").write_bytes(b"drifted")
+        with self.assertRaises(InstallError) as caught:
+            verify(self.root, self.lock, "macosx64")
+        message = str(caught.exception)
+        self.assertIn("geist installed files do not match the receipt", message)
+        self.assertIn("install --force", message)
+        self.assertNotIn("unexpected installed files", message)
+
     def test_verify_ignores_safety_limit_and_unrelated_target_changes(self) -> None:
         self.install_fixture_dependencies()
         document = json.loads((self.root / "deps" / "dependencies.lock.json").read_text(encoding="utf-8"))
