@@ -67,9 +67,11 @@ if(ISLAND_SEARCH_STANDALONE)
 endif()
 
 add_library(island_search STATIC
+    cache/block_cache.cc
     crc32c.cc
     mem_sampler.cc
     memtable.cc
+    index/search_index.cc
     posting_codec.cc
     query_parser.cc
     ranker.cc
@@ -87,6 +89,13 @@ if(WIN32)
     target_link_libraries(island_search PUBLIC psapi)
 endif()
 
+# ---- Memory gate ---------------------------------------------------------
+# search_membench builds in both configurations: it needs only island_search
+# and the bench corpus generator, so unlike the test targets it is not confined
+# to the standalone tree. Registering it with add_test() puts the 32 MB ceiling
+# under `ctest` alongside the unit tests.
+add_subdirectory(bench)
+
 # ---- Tests (standalone only) --------------------------------------------------
 # In the browser build the same test sources are compiled by tests/
 # CMakeLists.txt behind ISLAND_ENABLE_SEARCH; defining them again here would
@@ -96,11 +105,13 @@ if(ISLAND_SEARCH_STANDALONE)
 
     add_executable(island_search_tests
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/benchmark_corpus_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/block_cache_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/byte_lru_cache_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/mem_sampler_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/memtable_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/query_parser_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/ranker_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/search_index_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/segment_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/tokenizer_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/varint_crc32c_test.cpp"
