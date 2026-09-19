@@ -20,7 +20,9 @@ the sidebar/palette sources are built and tested by the default suite automatica
 evidence itself is still not recorded here: the newest green full-matrix `Island CI` run
 (33511735871, commit `b939cd0`) predates these units — see
 [`docs/supported-platforms.md`](supported-platforms.md). Treat CI/package run evidence for the
-sidebar/palette code as outstanding, not as passing, until a green run covers the current tree.
+sidebar/palette code as outstanding, not as passing, until a green run covers the current tree. The evidence push landed as `e1ba0ed` on 2026-09-19;
+its workflow jobs were not started because of the account's GitHub Actions billing block, so the
+wait continues past the billing fix.
 
 Automated coverage that *is* in place and does not require a human:
 

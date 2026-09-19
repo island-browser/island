@@ -22,7 +22,10 @@ save on clean quit and restore at startup) have landed. Unit U9's locally comple
 CI/package workflow audit and the local-evidence refresh in
 [`docs/supported-platforms.md`](supported-platforms.md)) is done as of 2026-09-19; the green-run
 evidence U9 exists to record — `Island CI` and `Package unsigned candidates` over the current tree
-— is pending the next push to `main`. U10 (this manual pass) is still outstanding. Documented
+— was pushed as `e1ba0ed` on 2026-09-19, but every workflow job on it was **not started** by the
+account's GitHub Actions billing block ("recent account payments have failed or your spending limit
+needs to be increased"), so the green runs still do not exist and must follow the billing fix. U10
+(this manual pass) is still outstanding. Documented
 deviations: the command palette owns
 `Cmd/Ctrl+K` and the search palette moved to `Cmd/Ctrl+Shift+K`
 ([`docs/sidebar-palette-visual-acceptance.md`](sidebar-palette-visual-acceptance.md)); on macOS
@@ -169,7 +172,7 @@ When you run the checklist, attach results here per target:
 - Session restore round-trip: <screenshot>
 - Malformed session fallback: <screenshot or notes>
 - Invalid restored URL fallback: <screenshot or notes>
-- Split view interactions: <screenshots — pending U6; leave blank until split view lands>
+- Split view interactions: <screenshots — U6 landed; divider rows use the Move Split Divider menu items, per the documented no-drag deviation>
 - Command palette interactions: <screenshots>
 - Tab/space keyboard shortcuts: <evidence>
 - Space switcher interactions: <evidence>

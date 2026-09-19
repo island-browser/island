@@ -14,8 +14,10 @@ Island targets six desktop dependency/build targets:
 Evidence-over-claims posture: a green CI run is build/test evidence only. Do not infer app-run,
 smoke-test, or packaging success from it, and do not carry Phase 2-era claims forward to Phase 3
 code without re-verifying them (Phase 3 U9 owns that refresh; its locally completable part — the
-workflow audit and the local macOS arm64 facts below — is done as of 2026-09-19, and the CI-run
-refresh itself is pending the next push to `main`).
+workflow audit and the local macOS arm64 facts below — is done as of 2026-09-19; the refresh push
+happened the same day (`e1ba0ed` on `main`), but every workflow job was **not started** — GitHub
+reported "recent account payments have failed or your spending limit needs to be increased", so no
+run evidence exists yet and the next successful run must follow a billing fix).
 
 ## Implemented features vs. evidence
 
@@ -97,6 +99,8 @@ so it is build/test evidence for the Phase 2-era tree only. Phase 3 U9's locally
 is done as of 2026-09-19: the `Island CI` and `Package unsigned candidates` definitions were
 re-audited against the current tree and need no change (they trigger on every push to `main` with
 no path filters or caches, and the default suite builds every Phase 3 test target), so the next
-push will produce the refreshed evidence without configuration work. Until such a green run
-exists, cite no Phase 3-era native CI evidence for any target — the macOS arm64 row above is local
-evidence only.
+push will produce the refreshed evidence without configuration work. The refresh push landed as
+`e1ba0ed` on 2026-09-19; all `Island CI`, `Package unsigned candidates`, and Pages jobs on it were
+**not started** because of the account's GitHub Actions billing block, so no green run exists yet.
+Until a run started after the billing fix goes green, cite no Phase 3-era native CI evidence for
+any target — the macOS arm64 row above is local evidence only.
