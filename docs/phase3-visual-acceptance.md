@@ -18,8 +18,12 @@ reorder via the menu), U6 (split view: `Cmd/Ctrl+Shift+S` pairs the active tab w
 tab, both panes render side by side through the content slot's box layout, the divider adjusts via
 the Move Split Divider menu items and the `kMoveDividerLeft/Right` commands, closing either half or
 selecting a tab outside the pair restores the single view), U7 (command palette), and U8 (session
-save on clean quit and restore at startup) have landed. Unit U9 (refreshed CI/package evidence)
-and U10 (this manual pass) are still outstanding. Documented deviations: the command palette owns
+save on clean quit and restore at startup) have landed. Unit U9's locally completable work (the
+CI/package workflow audit and the local-evidence refresh in
+[`docs/supported-platforms.md`](supported-platforms.md)) is done as of 2026-09-19; the green-run
+evidence U9 exists to record — `Island CI` and `Package unsigned candidates` over the current tree
+— is pending the next push to `main`. U10 (this manual pass) is still outstanding. Documented
+deviations: the command palette owns
 `Cmd/Ctrl+K` and the search palette moved to `Cmd/Ctrl+Shift+K`
 ([`docs/sidebar-palette-visual-acceptance.md`](sidebar-palette-visual-acceptance.md)); on macOS
 `CefWindow::SetAccelerator` never dispatches (the NSMenu owns the command keys); the split divider
@@ -98,13 +102,16 @@ The following artifacts must be captured and attached to this file during a manu
       `ParseAndValidate` allow-list, relaunch and confirm those tabs fall back to the fixed local
       `data:` startup page rather than loading the disallowed URL — restored URLs are re-validated
       through the same path as manual entry.
-- [ ] **Split view interactions (PENDING U6 — split view is not implemented yet; only the
-      `Space::SetSplit` model seam exists, no UI. Leave unchecked until U6 lands):** Screenshots
-      showing:
-      - Two tabs side by side with a visible divider.
-      - The divider after being resized by drag and by keyboard (arrow keys).
+- [ ] **Split view interactions (U6 landed; drag remains a documented deviation — the pinned CEF
+      distribution exposes no mouse events on custom views, so divider rows use the Move Split
+      Divider menu items instead of drag):** Screenshots showing:
+      - Two tabs side by side with a visible divider (`Cmd/Ctrl+Shift+S` pairs the active tab
+        with its adjacent tab).
+      - The divider after being moved by the menu items (and by `Cmd/Ctrl+Shift+Left/Right` on
+        Windows/Linux).
       - Closing one half, confirming the other tab restores to full width.
-      - Rejection of split attempts across different spaces.
+      - The command layer's rejection of cross-space pairings (headless evidence already covers
+        this; the manual pass covers the visible behavior).
 - [ ] **Command palette interactions:** Screenshots or terminal notes showing:
       - The palette opens on Cmd/Ctrl+K as a lazily created overlay that is hidden, not destroyed,
         between uses.

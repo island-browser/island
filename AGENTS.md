@@ -9,9 +9,11 @@
   pairs the active tab with its adjacent tab; the divider is keyboard-adjustable), the command
   palette on `Cmd/Ctrl+K`, the search palette on `Cmd/Ctrl+Shift+K`, the hideable sidebar
   (`Cmd/Ctrl+B` everywhere, macOS hover-reveal bands), popup rejection, and shutdown through the
-  CEF close lifecycle. Phase 3 units U4/U5, U6, U7, and U8 have landed; U9 (CI/package evidence
-  refresh), U10 (manual/visual acceptance), and U11 (integration regression) are still
-  outstanding. Documented deviations: on macOS `CefWindow::SetAccelerator` never dispatches (the
+  CEF close lifecycle. Phase 3 units U4/U5, U6, U7, and U8 have landed; U9's locally completable
+  part is done (workflows audited, docs updated — the green CI/package runs land with the next
+  push), U11's clean-checkout regression is green locally (fresh configure/build, 242 default +
+  150 search + 361 combined ctest, pytest, smoke run), and U10 (manual/visual acceptance) remains
+  outstanding — it needs a human with display access per docs/phase3-visual-acceptance.md. Documented deviations: on macOS `CefWindow::SetAccelerator` never dispatches (the
   NSMenu owns the command keys), and the split divider is not drag-adjustable because the pinned
   CEF distribution exposes no mouse events on custom views — the divider moves through the menu
   items and `kMoveDividerLeft/Right` commands instead.
@@ -120,7 +122,7 @@ hand-maintained project instructions and take precedence over anything a nested 
 
 ### Search build (opt-in)
 
-The Verification commands above build and run the default suite only — **223 tests** on `main`
+The Verification commands above build and run the default suite only — **242 tests** on `main`
 as of 2026-09-19 (the count grows as units land; rerun `ctest -N` after adding tests). The
 Phase S0 search kernel under `src/search/` is guarded by `ISLAND_ENABLE_SEARCH`, which is declared
 `OFF`, so none of it is configured, compiled, or run by those commands.
@@ -134,7 +136,7 @@ cmake --build build-search
 ctest --test-dir build-search --output-on-failure
 ```
 
-That reports 148 tests (as of 2026-09-19). To build the browser and the search kernel together instead:
+That reports 150 tests (as of 2026-09-19). To build the browser and the search kernel together instead:
 
 ```bash
 cmake -B build-search-root -S . -DISLAND_ENABLE_SEARCH=ON
@@ -142,7 +144,7 @@ cmake --build build-search-root
 ctest --test-dir build-search-root --output-on-failure
 ```
 
-That reports 371 tests (223 + 148, as of 2026-09-19). The Python suites are separate from `ctest` entirely:
+That reports 361 tests on `main` (as of 2026-09-19; the combined target discovers a slightly different set than the sum of the standalone lanes). The Python suites are separate from `ctest` entirely:
 
 ```bash
 python3 -m pytest tests/deps tests/package tests/design

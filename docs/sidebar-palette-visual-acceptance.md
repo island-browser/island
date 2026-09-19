@@ -13,10 +13,14 @@ cannot be completed from a headless/automated session.
 No visual evidence has been captured yet. This file is the place to attach it once someone runs
 the checklist on real hardware with a display; the sign-off table stays empty until then. The
 CI/package confirmation U7 also asks for ("the existing native CI matrix and package checks still
-pass with U1–U6 landed") is likewise not recorded here: the newest green full-matrix `Island CI`
-run (33511735871, commit `b939cd0`) predates these units — see
-[`docs/supported-platforms.md`](supported-platforms.md). Treat CI/package evidence for the
-sidebar/palette code as outstanding, not as passing.
+pass with U1–U6 landed") has had its locally completable part done as of 2026-09-19: the workflow
+definitions were re-audited against the current tree and need no change — `Island CI` and
+`Package unsigned candidates` trigger on every push to `main` with no path filters or caches, so
+the sidebar/palette sources are built and tested by the default suite automatically. The run
+evidence itself is still not recorded here: the newest green full-matrix `Island CI` run
+(33511735871, commit `b939cd0`) predates these units — see
+[`docs/supported-platforms.md`](supported-platforms.md). Treat CI/package run evidence for the
+sidebar/palette code as outstanding, not as passing, until a green run covers the current tree.
 
 Automated coverage that *is* in place and does not require a human:
 
