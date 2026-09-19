@@ -57,7 +57,10 @@ class BrowserWindow : public CefClient,
                       public SpaceRenameOverlayHost,
                       public NavigationObserver {
   public:
-    static CefRefPtr<BrowserWindow> Create(std::string initial_url);
+    // |persist_session| stays false for the smoke run (a deterministic fixed
+    // page, never reading or overwriting the real session file) and the
+    // headless test seam (tests pin the fresh-install shape).
+    static CefRefPtr<BrowserWindow> Create(std::string initial_url, bool persist_session = true);
     // Test seam: constructs the window headless — no CefWindow, no chrome, no
     // CefBrowserView — so command dispatch, space/tab bookkeeping, and the
     // fallbacks below are exercisable without a CEF runtime. Production entry
@@ -80,6 +83,17 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool RenameSpace(std::size_t space_index, std::string name);
     // Moves the space at |from_index| to |to_index|; the active space follows.
     [[nodiscard]] bool MoveSpace(std::size_t from_index, std::size_t to_index);
+
+    // U6 split view. Both tabs must live in the active space (tabs from other
+    // spaces are rejected, never silently pulled in) and must be distinct;
+    // a successful call replaces any previous pairing. UnsplitActiveSpace
+    // clears the pairing; both reattach the chrome.
+    [[nodiscard]] bool SplitTabs(TabId first, TabId second);
+    [[nodiscard]] bool UnsplitActiveSpace();
+    // Nudges the split divider; the ratio clamps to
+    // [BrowserChrome::SplitRatioMin, SplitRatioMax]. False while closing.
+    [[nodiscard]] bool SetSplitRatio(double ratio);
+    [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
 
     // Observation seams for tests and palette snapshots. FindSpace returns
     // nullptr for unknown ids; ids are never derived from vector position.
@@ -208,9 +222,14 @@ class BrowserWindow : public CefClient,
         kSelectTab7Accelerator,
         kSelectTab8Accelerator,
         kSelectTab9Accelerator,
+        // U6 split view. On macOS these never dispatch — the NSMenu owns the
+        // command keys — but registration stays uniform across platforms.
+        kToggleSplitAccelerator,
+        kMoveDividerLeftAccelerator,
+        kMoveDividerRightAccelerator,
     };
 
-    explicit BrowserWindow(std::string initial_url);
+    explicit BrowserWindow(std::string initial_url, bool persist_session = true);
 
     [[nodiscard]] Space& active_space() noexcept { return spaces_[active_space_index_]; }
     [[nodiscard]] const Space& active_space() const noexcept {
@@ -221,6 +240,14 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] Tab* FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept;
     [[nodiscard]] Tab* active_tab() noexcept;
     [[nodiscard]] const Tab* active_tab() const noexcept;
+    // Creates the tab's CefBrowserView on first use (same creation path as
+    // kNewTab: the active space's request context and the tab's startup URL).
+    // False when headless; true when the tab already had a view. Only valid
+    // for tabs of the active space.
+    bool EnsureTabBrowserView(Tab& tab);
+    // Selecting a tab outside the current split pairing tears the split down,
+    // so the attached views always include the active tab's view.
+    void BreakSplitIfSelectionLeftPair(Space& space, TabId selected);
     // Detaches the projection from the current active tab before a mutation
     // changes which tab/space is active; Attach re-subscribes to the (possibly
     // new) active tab, pushes its snapshot through the address model and
@@ -290,6 +317,13 @@ class BrowserWindow : public CefClient,
     bool browser_was_created_ = false;
     bool closing_ = false;
     bool message_loop_quit_ = false;
+    // False for the smoke run and the headless test seam: the session file is
+    // neither read at startup nor written on clean quit.
+    bool persist_session_ = true;
+    // U6 split view: first pane's share of the content width. A window-level
+    // transient (the design calls a split a view arrangement, not persisted
+    // state; the pairing itself persists through the session file).
+    double split_ratio_ = BrowserChrome::SplitRatioDefault();
 
     IMPLEMENT_REFCOUNTING(BrowserWindow);
     DISALLOW_COPY_AND_ASSIGN(BrowserWindow);

@@ -52,36 +52,46 @@ The query mix is sampled from titles the run actually ingested. The corpus vocab
 from a hash, so hard-coded query terms would match nothing and the post-query checkpoint would
 measure an untouched index — which is exactly the memory the gate exists to observe.
 
-## Current result: the S0 budget is NOT met
+## Current result: improved ~2.7x, the S0 budget is still NOT met
 
-The design targets **≤ 32 MB delta at 100,000 documents**. Measured on macOS arm64:
+The design targets **≤ 32 MB delta at 100,000 documents**. Measured on macOS arm64 after the
+arena-backed MemTable and the streaming segment writer:
 
 | Documents | after ingest | after flush | delta (peak − baseline) | bytes/doc |
 |---:|---:|---:|---:|---:|
-| 10,000 | 11.6 MB | 18.8 MB | 18.2 MB | ~1,817 |
-| 25,000 | 26.1 MB | 42.7 MB | 42.1 MB | ~1,684 |
-| 50,000 | 50.3 MB | 80.9 MB | 80.6 MB | ~1,612 |
-| 100,000 | 97.3 MB | 159.7 MB | 159.7 MB | ~1,597 |
+| 100,000 | ~59 MB | ~60 MB | ~60 MB | ~604 |
 
-Growth is **linear and stable at roughly 1.6 KB per document**, against a budget that allows about
-320 B per document. The gate is therefore over by ~5×, and the 32 MB ceiling is currently met only
-up to roughly 20,000 documents.
+For reference, the pre-arena numbers this replaced: ~1.6 KB per document, delta ~160 MB.
 
-Two distinct contributors, visible in the checkpoint split:
+What changed:
 
-1. **The MemTable itself costs ~1 KB per document** (97 MB at 100k). Per document it holds two
-   `std::string`s, an `optional<std::string>` tag, and a `vector<TermFrequencyEntry>`, each with its
-   own allocation and its own growth slack; the per-term posting vectors add more. The stored bytes
-   (url + title) are on the order of 100 B per document, so most of this is container and allocator
-   overhead rather than data.
-2. **`Flush` adds a further ~60%** (97 MB → 160 MB). `EncodeSegment` materializes the entire segment
-   image in one `std::vector<std::uint8_t>` before writing, and the freed pages are not returned to
-   the OS, so the peak persists in RSS. The re-mapped segment's resident pages add to this.
+1. **MemTable document storage is arena-backed** (`DocumentArena`, fixed 1 MiB chunks): url/title/
+   tag bytes live in one append-only store with 48-byte offset records instead of two `std::string`
+   allocations plus a `vector<TermFrequencyEntry>` per document. Per-field term frequencies are no
+   longer retained at all -- the ranker re-tokenizes the stored text (it already did), so the only
+   cost of dropping them is ingest-time scratch. Fixed chunks also remove the vector-doubling
+   reallocation, whose transient old+new coexistence was itself a large RSS high-water.
+2. **`Flush` streams** (`WriteSegment`): a size pass computes the header's section lengths, then a
+   write pass streams per-record and per-term encodings through a 1 MiB buffer. The whole segment
+   image is never materialized; the write produces bytes identical to `EncodeSegment` (the reference
+   encoder, kept for format tests), and the flushed segment passes `Segment::Open` unchanged.
 
-Neither is a defect in the gate; the gate is doing its job by reporting them. Closing the budget is
-its own unit of work — plausible directions are arena-backed document storage instead of per-document
-`std::string`, `reserve()` on posting vectors to remove doubling slack, and a streaming segment writer
-that never holds the whole image in memory.
+Structural accounting at 100k documents (from a direct MemTable probe on the membench corpus):
+document text is 20.2 MB (202 B/doc), posting lists 11.6 MB (1.45 M DocIds at 8 B), records 4.8 MB,
+term dictionary ~0.5 MB -- about 41 MB structural, with the rest of the measured 60 MB in allocator
+churn and per-term vector slack.
+
+The remaining gap to 32 MB is dominated by two things, neither a quick fix:
+
+- **Raw text is 202 B/doc.** The 320 B/doc budget leaves ~118 B/doc for postings, records, the
+  dictionary, and all allocator overhead, so the gate cannot close on this corpus without
+  compressing or capping stored text (a store/ format change with a version bump).
+- **Postings are `uint64` per entry.** A `uint32` pool (DocIds are far below 2^32 in practice) or a
+  flush-time CSR rebuild would remove most of the ~12 MB posting cost plus its vector slack, at the
+  cost of type ripple through the codec and ranker seams.
+
+The gate stays **non-blocking** until a change actually brings the delta under 32 MB -- flip it in
+the same change, per the original contract above.
 
 ## CI
 

@@ -16,8 +16,10 @@ FetchContent_MakeAvailable(googletest)
 add_executable(island_tests
     address_bar_model_test.cpp
     address_policy_test.cpp
+    browser_window_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
+    command_palette_test.cpp
     design_tokens_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
@@ -31,13 +33,21 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
     "${CMAKE_SOURCE_DIR}/src/main/session_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/space_rename_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
 )
@@ -45,6 +55,13 @@ add_executable(island_tests
 target_compile_features(island_tests PRIVATE cxx_std_20)
 target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main)
+# browser_window.cc references the platform sidebar-hover seam (never called by
+# the headless tests, but the symbols must link), so mirror src/main's split.
+if(APPLE)
+    target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/sidebar_hover_mac.mm")
+else()
+    target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/sidebar_hover_stub.cc")
+endif()
 if(NOT APPLE)
     target_link_libraries(island_tests PRIVATE libcef_lib)
 endif()

@@ -4,21 +4,50 @@ Island targets six desktop dependency/build targets:
 
 | Target | Platform | Architecture | Evidence status |
 | --- | --- | --- | --- |
-| `macosarm64` | macOS | Apple Silicon arm64 | Locally built, tested 55/55, run, smoke-verified, and packaged. Also green on native CI. |
-| `macosx64` | macOS | Intel x64 | Native CI: configure/build/CTest (55/55) green (`Island CI` run 31336257036, commit `aca36ce`). Not yet locally run/smoke-verified/packaged. |
-| `windows64` | Windows | x64 | Native CI: configure/build/CTest (55/55) green (`Island CI` run 31336257036, commit `aca36ce`). Not yet locally run/smoke-verified/packaged. |
-| `windowsarm64` | Windows | ARM64 | Native CI: configure/build/CTest (55/55) green (`Island CI` run 31336257036, commit `aca36ce`). Not yet locally run/smoke-verified/packaged. |
-| `linux64` | Linux | x64 | Native CI: configure/build/CTest (55/55) green under Xvfb (`Island CI` run 31336257036, commit `aca36ce`). Not yet locally run/smoke-verified/packaged. |
-| `linuxarm64` | Linux | ARM64 | Native CI: configure/build/CTest (55/55) green under Xvfb (`Island CI` run 31336257036, commit `aca36ce`). Not yet locally run/smoke-verified/packaged. |
+| `macosarm64` | macOS | Apple Silicon arm64 | Locally built and tested at the current head (commit `c63641e`): 164/164 browser ctest (`ISLAND_ENABLE_SEARCH` off), 148/148 search-kernel ctest (`ISLAND_ENABLE_SEARCH` standalone build), 68 pytest (`tests/deps tests/package tests/design`). App-run, smoke, and packaging evidence on record predates Phase 3 and has not been re-verified against the current head; the Phase 3 manual acceptance pass (U10) is outstanding. Green on native CI, but the newest green full-matrix run (33511735871, commit `b939cd0`) predates Phase 3. |
+| `macosx64` | macOS | Intel x64 | Native CI: configure/build/CTest green at commit `b939cd0` (`Island CI` run 33511735871), which predates Phase 3. No Phase 3-era CI evidence and no local run/smoke/packaging evidence. |
+| `windows64` | Windows | x64 | Native CI: configure/build/CTest green at commit `b939cd0` (`Island CI` run 33511735871), which predates Phase 3. No Phase 3-era CI evidence and no local run/smoke/packaging evidence. |
+| `windowsarm64` | Windows | ARM64 | Native CI: configure/build/CTest green at commit `b939cd0` (`Island CI` run 33511735871), which predates Phase 3. No Phase 3-era CI evidence and no local run/smoke/packaging evidence. |
+| `linux64` | Linux | x64 | Native CI: configure/build/CTest green under Xvfb at commit `b939cd0` (`Island CI` run 33511735871), which predates Phase 3. No Phase 3-era CI evidence and no local run/smoke/packaging evidence. |
+| `linuxarm64` | Linux | ARM64 | Native CI: configure/build/CTest green under Xvfb at commit `b939cd0` (`Island CI` run 33511735871), which predates Phase 3. No Phase 3-era CI evidence and no local run/smoke/packaging evidence. |
 
-Packaging evidence (`package.yml`, unsigned candidates) is tracked separately and was not yet
-re-verified against `aca36ce` as of this writing; do not infer packaging success from the CI evidence
-above. Re-check `package.yml`'s latest run before citing packaging status for a target.
+Evidence-over-claims posture: a green CI run is build/test evidence only. Do not infer app-run,
+smoke-test, or packaging success from it, and do not carry Phase 2-era claims forward to Phase 3
+code without re-verifying them (Phase 3 U9 owns that refresh; it has not happened yet).
 
-Phase 1 application behavior is intentionally small: one native CEF window, one `CefBrowserView`, a
-fixed local data startup page, back/forward/reload commands, popup rejection, navigation snapshots,
-and remote debugging port `9222` configured. Browser chrome, tabs, spaces, persistence, command bar,
-settings, extensions, or additional CDP integration should not be documented as available.
+## Implemented features vs. evidence
+
+The following browser features are implemented on `main` at commit `c63641e` (Phase 3 units U4/U5,
+U7, U8, plus the earlier sidebar/palette units): a tab strip in the rail with New/Close Tab
+(`Cmd/Ctrl+T`, `Cmd/Ctrl+W`), previous/next (`Cmd/Ctrl+Shift+[`/`]`) and direct-index switching
+(`Cmd/Ctrl+1..9`); a space switcher with New/Close Space, rename (F2 accelerator and the macOS
+Browser menu "Rename Space…" through an overlay textfield) and reorder (menu "Move Space
+Left/Right" — there is no drag or hover affordance; that is deferred); the command palette on
+`Cmd/Ctrl+K` (open tabs of the active space, all spaces, and a go-to-URL row that submits through
+the same `AddressBarModel`/`ParseAndValidate` path as the rail's address control); the search
+palette on `Cmd/Ctrl+Shift+K` (five fixed providers); the hideable sidebar (`Cmd/Ctrl+B` toggle on
+every platform, macOS hover-reveal via the 12/16-DIP edge bands); and clean-quit session restore
+(`session.json` under the platform app-data directory, restored URLs re-validated, invalid ones
+falling back to the fixed startup page).
+
+Split view is **not** implemented: only the `Space::SetSplit` model seam exists, with no UI. Do not
+document split-view behavior as available.
+
+All of the above is backed by macOS arm64 local build/test evidence only. Windows/Linux chrome
+input paths go through the same accelerator registrations, but no native CI evidence covers
+Phase 3-era code on those targets yet and no local run evidence exists; the manual acceptance
+checklists (`tests/manual/`) have not been executed on any target.
+
+## Packaging evidence
+
+Packaging evidence is tracked separately and is currently *worse* than the CI rows above: the most
+recent `package.yml` run that actually executed (33513717574, on `main` after `b939cd0`) succeeded
+for `macosarm64`, `macosx64`, `linux64`, and `linuxarm64` but **failed** for `windows64` and
+`windowsarm64`, and the run after it (33635598552) was skipped. Treat packaging as unverified for
+the Windows targets and unverified for Phase 3-era code on every target, and re-check
+`package.yml`'s latest run before citing packaging status at all. Unsigned candidates only; stable
+public release remains blocked until signing and notarization verification are implemented (see
+`docs/release-process.md`).
 
 ## macOS local verification
 
@@ -45,12 +74,21 @@ verify there are no remaining `island_browser` helper processes. The macOS app b
 pgrep -fl island_browser || true
 ```
 
+The default suite reports **164 tests** (browser ctest with `ISLAND_ENABLE_SEARCH` off). The Phase
+S0 search kernel builds and tests separately (148 tests, still gated behind `ISLAND_ENABLE_SEARCH`
+— see the root `AGENTS.md`), and the Python suites report 68 tests:
+
+```bash
+python3 -m pytest tests/deps tests/package tests/design
+```
+
 ## Cross-platform verification
 
 `.github/workflows/ci.yml` defines native jobs for all six targets and restores/verifies cached CEF
 and Geist dependencies before configure, build, and CTest. Linux jobs run tests under `xvfb-run`
-(`CefInitialize` needs an X11 display even for tests that never show a window). As of commit
-`aca36ce`, all six targets pass configure/build/CTest on native GitHub Actions runners
-(`Island CI` run 31336257036) — treat this as build/test evidence only; local run, smoke-test, and
-packaging evidence for non-macOS-arm64 targets is still outstanding and should not be assumed from
-this alone.
+(`CefInitialize` needs an X11 display even for tests that never show a window). The newest green
+full-matrix run is `Island CI` run 33511735871 on `main` at commit `b939cd0` — that commit predates
+the Phase 3 tab/space/palette/session-restore units and the search/container work, so it is
+build/test evidence for the Phase 2-era tree only. Phase 3 U9 (refresh CI and package evidence for
+the current tree) is still outstanding; until it lands, cite no Phase 3-era native CI evidence for
+any non-macOS-arm64 target.

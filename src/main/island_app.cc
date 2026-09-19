@@ -20,7 +20,11 @@ void IslandApp::OnContextInitialized() {
     CEF_REQUIRE_UI_THREAD();
 
     if (browser_window_ == nullptr) {
-        browser_window_ = BrowserWindow::Create(std::string(startup_options_.initial_url()));
+        // The smoke run starts from its fixed page and never touches the
+        // session file, so it stays deterministic on any machine.
+        browser_window_ =
+            BrowserWindow::Create(std::string(startup_options_.initial_url()),
+                                  /*persist_session=*/!startup_options_.is_smoke_test());
         browser_window_->SetNavigationObserver(navigation_observer_);
         browser_window_->SetChromeObserver(chrome_observer_);
     }

@@ -62,10 +62,11 @@ class HoverSliverDelegate final : public CefPanelDelegate {
 
 }  // namespace
 
-CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
+CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url, bool persist_session) {
     CEF_REQUIRE_UI_THREAD();
 
-    CefRefPtr<BrowserWindow> browser_window(new BrowserWindow(std::move(initial_url)));
+    CefRefPtr<BrowserWindow> browser_window(
+        new BrowserWindow(std::move(initial_url), persist_session));
     CefWindow::CreateTopLevelWindow(browser_window);
     return browser_window;
 }
@@ -73,13 +74,15 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url) {
 CefRefPtr<BrowserWindow> BrowserWindow::CreateHeadlessForTest(std::string initial_url) {
     CEF_REQUIRE_UI_THREAD();
 
-    return CefRefPtr<BrowserWindow>(new BrowserWindow(std::move(initial_url)));
+    return CefRefPtr<BrowserWindow>(
+        new BrowserWindow(std::move(initial_url), /*persist_session=*/false));
 }
 
-BrowserWindow::BrowserWindow(std::string initial_url) : initial_url_(std::move(initial_url)) {
-    if (!RestoreSession()) {
+BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
+    : initial_url_(std::move(initial_url)), persist_session_(persist_session) {
+    if (!persist_session_ || !RestoreSession()) {
+        // CreateDefaultSpace already appends the space's single starting tab.
         spaces_.push_back(CreateDefaultSpace());
-        active_space().AppendTab(Tab{NextTabId()});
     }
     chrome_snapshot_.rail_bounds = {.x = 0,
                                     .y = 0,
@@ -247,6 +250,7 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             }
             DetachActiveTabObservers();
             space.SelectNextTab();
+            BreakSplitIfSelectionLeftPair(space, space.active_tab_id());
             AttachActiveTabObservers();
             return;
         }
@@ -257,9 +261,33 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             }
             DetachActiveTabObservers();
             space.SelectPreviousTab();
+            BreakSplitIfSelectionLeftPair(space, space.active_tab_id());
             AttachActiveTabObservers();
             return;
         }
+        case BrowserCommand::kToggleSplit: {
+            Space& space = active_space();
+            if (space.split().has_value()) {
+                static_cast<void>(UnsplitActiveSpace());
+                return;
+            }
+            if (space.tab_count() < 2) {
+                return;
+            }
+            // The "split with the adjacent tab" affordance: the right neighbor,
+            // or the left one when the active tab is the last in the space.
+            const std::size_t active_index = space.active_tab_index();
+            const std::size_t other_index =
+                active_index + 1 < space.tab_count() ? active_index + 1 : active_index - 1;
+            static_cast<void>(SplitTabs(space.active_tab_id(), space.tabs()[other_index].id()));
+            return;
+        }
+        case BrowserCommand::kMoveDividerLeft:
+            static_cast<void>(SetSplitRatio(split_ratio_ - BrowserChrome::SplitRatioStep()));
+            return;
+        case BrowserCommand::kMoveDividerRight:
+            static_cast<void>(SetSplitRatio(split_ratio_ + BrowserChrome::SplitRatioStep()));
+            return;
         case BrowserCommand::kNewSpace: {
             DetachActiveTabObservers();
             const std::size_t created_index = spaces_.size();
@@ -298,6 +326,7 @@ bool BrowserWindow::SelectActiveSpaceTabIndex(std::size_t index) {
     }
     DetachActiveTabObservers();
     space.SelectTabIndex(index);
+    BreakSplitIfSelectionLeftPair(space, space.active_tab_id());
     AttachActiveTabObservers();
     return true;
 }
@@ -383,6 +412,59 @@ const Space* BrowserWindow::FindSpace(SpaceId id) const noexcept {
         }
     }
     return nullptr;
+}
+
+bool BrowserWindow::SplitTabs(TabId first, TabId second) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || first == second) {
+        return false;
+    }
+    Space& space = active_space();
+    const std::optional<std::size_t> first_index = space.IndexOfTab(first);
+    const std::optional<std::size_t> second_index = space.IndexOfTab(second);
+    // Split view is scoped to the active space: a tab that lives in another
+    // space (or nowhere) is rejected rather than silently pulled in.
+    if (!first_index.has_value() || !second_index.has_value()) {
+        return false;
+    }
+    DetachActiveTabObservers();
+    static_cast<void>(space.SetSplit(SplitPairing{first, second}));
+    AttachActiveTabObservers();
+    return true;
+}
+
+bool BrowserWindow::UnsplitActiveSpace() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    Space& space = active_space();
+    if (!space.split().has_value()) {
+        return false;
+    }
+    space.ClearSplit();
+    AttachActiveTabObservers();
+    return true;
+}
+
+bool BrowserWindow::SetSplitRatio(double ratio) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    split_ratio_ =
+        std::clamp(ratio, BrowserChrome::SplitRatioMin(), BrowserChrome::SplitRatioMax());
+    if (chrome_ != nullptr) {
+        chrome_->SetSplitRatio(split_ratio_);
+    }
+    return true;
+}
+
+void BrowserWindow::BreakSplitIfSelectionLeftPair(Space& space, TabId selected) {
+    if (space.split().has_value() && space.split()->first != selected &&
+        space.split()->second != selected) {
+        space.ClearSplit();
+    }
 }
 
 void BrowserWindow::SelectTab(std::size_t index) {
@@ -709,6 +791,12 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
         window_->SetAccelerator(kSelectTab1Accelerator + position, '1' + position, false, true,
                                 false, true);
     }
+    // U6 split view: Cmd/Ctrl+Shift+S toggles the pair; the divider nudges via
+    // Shift+Cmd/Ctrl+Left/Right on platforms where SetAccelerator dispatches.
+    window_->SetAccelerator(kToggleSplitAccelerator, 'S', true, false, false, true);
+    window_->SetAccelerator(kMoveDividerLeftAccelerator, kVirtualKeyLeft, true, false, false, true);
+    window_->SetAccelerator(kMoveDividerRightAccelerator, kVirtualKeyRight, true, false, false,
+                            true);
 
     CreateHoverSliver();
     ApplySidebarState();
@@ -799,8 +887,11 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         // for cannot arise in practice.
         closing_ = true;
         // Clean quit: persist the session before any browser tears down, so
-        // the last-committed URLs are still in the navigation snapshots.
-        SaveSession();
+        // the last-committed URLs are still in the navigation snapshots. The
+        // smoke run never touches the session file.
+        if (persist_session_) {
+            SaveSession();
+        }
         for (Space& space : spaces_) {
             for (Tab& tab : space.tabs()) {
                 if (tab.browser() == nullptr ||
@@ -861,6 +952,15 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
             return true;
         case kPreviousTabAccelerator:
             ExecuteCommand(BrowserCommand::kPreviousTab);
+            return true;
+        case kToggleSplitAccelerator:
+            ExecuteCommand(BrowserCommand::kToggleSplit);
+            return true;
+        case kMoveDividerLeftAccelerator:
+            ExecuteCommand(BrowserCommand::kMoveDividerLeft);
+            return true;
+        case kMoveDividerRightAccelerator:
+            ExecuteCommand(BrowserCommand::kMoveDividerRight);
             return true;
         default:
             if (command_id >= kSelectTab1Accelerator && command_id <= kSelectTab9Accelerator) {
@@ -989,11 +1089,42 @@ void BrowserWindow::AttachActiveTabObservers() {
 
 void BrowserWindow::AttachActiveTabBrowserView() {
     CEF_REQUIRE_UI_THREAD();
-    const Tab* tab = active_tab();
-    if (chrome_ == nullptr || tab == nullptr || tab->browser_view() == nullptr) {
+    if (chrome_ == nullptr) {
+        return;
+    }
+    Space& space = active_space();
+    if (space.split().has_value()) {
+        Tab* first = space.FindTab(space.split()->first);
+        Tab* second = space.FindTab(space.split()->second);
+        // A restored split partner has no view until first shown; both panes
+        // are built on the same path as kNewTab before the split attaches.
+        if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
+            EnsureTabBrowserView(*second)) {
+            chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
+            return;
+        }
+    }
+    Tab* tab = active_tab();
+    if (tab == nullptr || !EnsureTabBrowserView(*tab)) {
         return;
     }
     chrome_->AttachBrowserView(tab->browser_view());
+}
+
+bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
+    if (tab.browser_view() != nullptr) {
+        return true;
+    }
+    if (chrome_ == nullptr) {
+        return false;
+    }
+    // Only valid for tabs of the active space: the view carries the space's
+    // request context and the tab's validated startup URL, matching kNewTab.
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+        this, CefString(StartupUrlForTab(tab)), CefBrowserSettings(), nullptr,
+        active_space().request_context(), this);
+    tab.SetBrowserView(browser_view);
+    return true;
 }
 
 void BrowserWindow::UpdateChromeCollections() {

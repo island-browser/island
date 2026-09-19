@@ -21,7 +21,9 @@ open build/src/main/island_browser.app
 ```
 
 The app should launch with multiple initial tabs and spaces visible in the chrome. If not, verify
-that Phase 3 implementation is complete before proceeding.
+that Phase 3 implementation is complete before proceeding. Note that a valid session file from a
+previous clean quit is restored at startup; for a deterministic fresh start, move
+`~/Library/Application Support/Island/session.json` (macOS path) away before launching.
 
 ## Layout and hierarchy — multi-tab and multi-space
 
@@ -78,12 +80,16 @@ that Phase 3 implementation is complete before proceeding.
 - [ ] **Switch to a different space:** Click on a space in the switcher. That space becomes active
       (active-state indicator moves to it). The tab strip updates to show the active space's tabs, and
       the content region shows that space's active tab.
-- [ ] **Rename a space:** Right-click (or long-press, or use a dedicated affordance) on a space in the
-      switcher and select rename, or double-click to edit in-place. Type a new name and confirm (Enter
-      or click elsewhere). The space name updates in the switcher, truncating if necessary.
-- [ ] **Reorder spaces:** Drag a space entry in the switcher to a new position, or use keyboard
-      shortcuts if defined (e.g., Cmd+Shift+>, Cmd+Shift+< or similar). The space moves in the list,
-      and the switcher updates. Verify the active space stays active during reorder.
+- [ ] **Rename a space:** Press F2 (cross-platform accelerator) on a focused space in the switcher,
+      or use the macOS Browser menu item "Rename Space…". A small overlay textfield appears:
+      Enter commits a non-empty trimmed name and updates the switcher entry (truncating if
+      necessary); Escape cancels and keeps the old name. Committing an empty or whitespace-only
+      name must not apply. Document whether duplicate typed names are allowed — generated default
+      names are unique, typed ones are not necessarily enforced unique.
+- [ ] **Reorder spaces:** Use the macOS Browser menu items "Move Space Left" / "Move Space Right".
+      The space moves in the switcher list and stays active during the move. There is no drag or
+      hover reorder affordance — drag reordering is deferred, not a bug. Document the exact menu
+      placement observed.
 - [ ] **Close a space:** Click a close affordance (× or delete button) on a space in the switcher.
       That space is deleted unconditionally (no confirmation per the Phase 3 design). If it was the
       active space and other spaces exist, a neighboring space becomes active. The tab strip updates
@@ -109,6 +115,10 @@ that Phase 3 implementation is complete before proceeding.
       spaces updates this indicator immediately.
 
 ## Split view
+
+> **Not implemented yet.** Phase 3 unit U6 (split view) has not landed — only the `Space::SetSplit`
+> model seam exists, with no UI. Leave this whole section unchecked until U6 lands; the rows are
+> retained as the acceptance contract for when it does.
 
 - [ ] **Enter split view — drag affordance:** In the active space, ensure it has at least two tabs.
       Drag one tab onto another tab in the strip. Both tabs should appear side by side in the content
@@ -136,44 +146,54 @@ that Phase 3 implementation is complete before proceeding.
 ## Command palette — open, search, activate, go to URL
 
 - [ ] **Open the palette:** Press Cmd+K (macOS) / Ctrl+K (Windows/Linux). An overlay should appear
-      listing tabs and spaces. Verify it opens immediately and a text input field is visible for
-      searching/typing.
-- [ ] **Palette input and fuzzy search:** Start typing a tab title or URL in the palette. Results
-      should filter and highlight matching entries in real-time, using fuzzy matching (e.g., typing
-      "gm" might match "gmail", "github", etc.). Verify results are sorted by relevance.
+      listing tabs and spaces. Verify it opens immediately, is created lazily on this first
+      invocation (hidden, not destroyed, when closed afterwards), and a text input field is visible
+      for searching/typing.
+- [ ] **Search palette separation:** Press Cmd/Ctrl+K and confirm the *command* palette (tabs,
+      spaces, go-to-URL) opens — not the search palette. The search palette lives on
+      Cmd/Ctrl+Shift+K per the recorded accelerator deviation (see
+      `docs/sidebar-palette-visual-acceptance.md`); on macOS the NSMenu owns both bindings. If
+      Cmd/Ctrl+K opens the search palette, record a failure.
+- [ ] **Palette input and filter:** Start typing a tab title or URL in the palette. Results should
+      filter matching entries in real time (fuzzy matching by title/URL). Document the exact
+      ordering you observe rather than assuming a specific ranking rule.
 - [ ] **Palette result composition:** In the palette results, verify:
       - Open tabs from the active space are listed with their title/URL and an active/inactive indicator.
+      - Tabs from other spaces do not appear as tab results — tab results cover the active space
+        only; other spaces appear as space entries instead.
       - All spaces are listed with their name and color mark.
-      - A "go to URL" affordance (input field or button) is available.
+      - A "go to URL" affordance (input field or row) is available.
 - [ ] **Activate a tab from the palette:** Search for a tab title or URL, then select the tab result
       (press Enter, click it, or arrow-key to it and press Enter). The palette should close and that
-      tab should become active in its space. If the tab is in a different space, the active space
-      should switch to that space's.
+      tab should become active, with the content region showing its page.
 - [ ] **Activate a space from the palette:** Search for or scroll to a space result, then select it.
       The palette should close and that space should become active. The tab strip updates to show the
       space's tabs, and the content shows the space's active tab.
 - [ ] **Go to URL — submit and validate:** In the palette, focus the "go to URL" affordance and type
       a valid URL (e.g., `https://example.com`). Press Enter. The palette should close and the active
-      tab should navigate to that URL through the same address-validation path as the rail's address
-      control (i.e., obey the same allow-list).
+      tab should navigate to that URL through the same `AddressBarModel`/`ParseAndValidate` path as
+      the rail's address control (i.e., obey the same allow-list — there is exactly one URL parser).
 - [ ] **Go to URL — rejection on invalid input:** In the palette's "go to URL" field, type an invalid
       URL (e.g., a relative path, `javascript:`, or a URL with embedded credentials). Press Enter.
-      Verify the URL is rejected without navigating, the palette stays open with the text intact, and a
-      validation message is shown (or announced). This confirms the palette uses the same validation as
-      the rail.
+      Verify the URL is rejected without navigating, the palette stays open with the typed text
+      intact, and a validation message is shown (or announced). This confirms the palette uses the
+      same validation as the rail.
 - [ ] **Close the palette — Escape:** Press Escape while the palette is open. Verify the palette closes
       without navigating or switching tabs/spaces. Focus should return to the point of invocation (e.g.,
       the active content area).
-- [ ] **Close the palette — blur/click outside:** Click outside the palette, or press Alt+Tab to switch
-      windows. The palette should close without side effects.
+- [ ] **Close the palette — click outside:** Click outside the palette. Document the observed
+      behavior — Escape is the specified close path, so record whether outside-click also closes and
+      whether it has side effects.
 - [ ] **Palette focus trap:** While the palette is open, verify Tab cycles only within the palette (input
       field, results list, go-to-URL affordance) and does not escape to the window's chrome. Pressing
       Escape should break the trap and return focus to the invocation point.
 - [ ] **Palette keyboard navigation:** Inside the palette, use arrow keys (up/down) to navigate the
-      results list, and Enter to activate the highlighted result. Verify navigation wraps if needed.
+      results list, and Enter to activate the highlighted result. Document whether navigation wraps
+      at the ends.
 - [ ] **Palette re-opening:** Close the palette (Escape or select a result). Press Cmd/Ctrl+K again to
-      re-open it. Verify it opens in a clean state with the search field cleared (or with previous
-      search preserved, depending on design choice). Document the behavior.
+      re-open it. The palette is created lazily once and hidden, not destroyed, between uses.
+      Document whether the re-opened palette shows a cleared search field or preserves the previous
+      search.
 
 ## Session restore — quit and relaunch
 
@@ -181,9 +201,10 @@ that Phase 3 implementation is complete before proceeding.
       and colors. In each space, create multiple tabs and navigate each to a different URL (or bookmark).
       Make the active space and tab something other than the first. Note the exact configuration
       (spaces, tabs, URLs, active selections).
-- [ ] **Clean quit:** Quit the app normally (Cmd+Q on macOS, or menu Quit, or close the window with
-      Cmd+W at the top level). Verify the app exits cleanly and leaves no dangling `island_browser`
-      helper processes: `pgrep -fl island_browser || true` should return nothing.
+- [ ] **Clean quit:** Quit the app normally (Cmd+Q on macOS, or the menu Quit item). Do not use
+      Cmd+W for this — it closes a tab in Phase 3. Verify the app exits cleanly and leaves no
+      dangling `island_browser` helper processes: `pgrep -fl island_browser || true` should return
+      nothing.
 - [ ] **Verify session file is written:** After quitting, check that a session file exists at the
       platform-appropriate location (macOS: `~/Library/Application Support/Island/session.json`). Verify
       it is valid JSON and contains the spaces/tabs/URLs you created.
@@ -204,9 +225,14 @@ that Phase 3 implementation is complete before proceeding.
       app. Verify it starts fresh with the default startup page, no errors or warnings that would
       confuse a user.
 - [ ] **Restored URL validation:** If the session file contains a URL that is no longer in the
-      allow-list (e.g., due to a policy change), verify that when the tab navigates to that URL, it is
-      rejected by the same validation path as manual entry, not force-loaded. The tab should show the
-      validation error, not navigate.
+      allow-list (e.g., due to a policy change), verify at relaunch that the persisted URL is
+      re-validated through the same `ParseAndValidate` path as manual entry and the tab falls back
+      to the fixed local `data:` startup page instead of loading the disallowed URL. Invalid
+      persisted URLs must never be force-loaded.
+- [ ] **Force-quit does not restore:** With the app running, force-kill it (e.g., `pkill
+      island_browser`). Relaunch. Verify the session is NOT restored — the app starts from the
+      fixed startup page — because `SessionStore::Save` fires only on the clean-quit CEF close path
+      (no periodic autosave, no crash hook).
 
 ## Theme and styling — light/dark, fonts, minimum bounds
 
@@ -252,14 +278,16 @@ that Phase 3 implementation is complete before proceeding.
         state ("active" or "inactive").
       - Space-switcher entries announce with their space name and active/inactive state.
       - Command palette results announce as a list or combobox with tab/space items and their state.
-      - The divider in split view announces as an adjustable splitter or similar.
+      - The divider in split view announces as an adjustable splitter or similar (pending U6 —
+        split view has no UI yet).
 - [ ] **Screen reader and announcements:** If a screen reader is available, navigate the entire chrome
       using only the screen reader's item-by-item navigation (e.g., rotor mode). Verify all interactive
       elements are discoverable and their state is announced (active/inactive, enabled/disabled, etc.).
 - [ ] **Keyboard-only operation:** Without touching the mouse, verify every feature can be accessed:
       - Create, close, switch, and reorder tabs (all via keyboard shortcuts or Tab + arrow keys).
       - Create, close, switch, rename, and reorder spaces (all via keyboard).
-      - Resize split-view divider (Tab to it, arrow keys to resize).
+      - Resize split-view divider (Tab to it, arrow keys to resize) — pending U6; split view has no
+        UI yet.
       - Open command palette, search, navigate, activate (all keyboard).
       - Navigation buttons and address field (already tested in Phase 2).
 

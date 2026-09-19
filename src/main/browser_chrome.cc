@@ -1,5 +1,6 @@
 #include "browser_chrome.h"
 
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -22,6 +23,14 @@ namespace {
 
 constexpr int kReturnKeyCode = 0x0D;
 constexpr int kEscapeKeyCode = 0x1B;
+
+// Flex weights run on a 0..100 budget: the first pane gets the ratio's share,
+// clamped so neither pane can fully collapse while the split is attached.
+int SplitFlexForRatio(double ratio) {
+    const double clamped =
+        std::clamp(ratio, BrowserChrome::SplitRatioMin(), BrowserChrome::SplitRatioMax());
+    return std::clamp(static_cast<int>(std::lround(clamped * 100.0)), 1, 99);
+}
 
 // Advances to the byte offset just past the UTF-8 code point starting at
 // |byte_index|; continuation bytes never start a new character, so truncation
@@ -525,8 +534,15 @@ CefRefPtr<CefPanel> BrowserChrome::sidebar() const {
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
     // The live projection: fixed regions from the contract, collection entries
     // from the snapshots the window last pushed, so the snapshot always matches
-    // the rows actually in the view tree.
-    return BrowserChrome::CollectionCountContract(tab_entries_, space_entries_);
+    // the rows actually in the view tree. An active split extends
+    // kBrowserContent with the divider and the second pane after the first.
+    ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract(tab_entries_, space_entries_);
+    if (split_view_ != nullptr) {
+        ChromeViewTreeNode& content = tree.children[1];
+        content.children.push_back({ChromeViewId::kSplitDivider, {}});
+        content.children.push_back({ChromeViewId::kBrowserView, {}});
+    }
+    return tree;
 }
 
 ChromeGeometrySnapshot BrowserChrome::view_bounds_snapshot() const {
@@ -615,11 +631,11 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         }
         views.row->AddChildView(views.favicon);
 
-        CefRefPtr<CollectionButtonDelegate> title_delegate = new CollectionButtonDelegate(
-            this, CollectionButtonAction::kActivateTab, index);
+        CefRefPtr<CollectionButtonDelegate> title_delegate =
+            new CollectionButtonDelegate(this, CollectionButtonAction::kActivateTab, index);
         tab_button_delegates_.push_back(title_delegate);
-        views.title = CefLabelButton::CreateLabelButton(title_delegate,
-                                                        TruncateCollectionTitle(entry.title));
+        views.title =
+            CefLabelButton::CreateLabelButton(title_delegate, TruncateCollectionTitle(entry.title));
         views.title->SetID(static_cast<int>(ChromeViewId::kTabStripEntryTitle));
         views.title->SetAccessibleName(TabEntryAccessibleName(entry));
         views.title->SetTooltipText(entry.title);
@@ -672,11 +688,11 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
         views.row->AddChildView(views.color_mark);
 
-        CefRefPtr<CollectionButtonDelegate> name_delegate = new CollectionButtonDelegate(
-            this, CollectionButtonAction::kActivateSpace, index);
+        CefRefPtr<CollectionButtonDelegate> name_delegate =
+            new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
         space_button_delegates_.push_back(name_delegate);
-        views.name = CefLabelButton::CreateLabelButton(name_delegate,
-                                                       TruncateCollectionTitle(entry.name));
+        views.name =
+            CefLabelButton::CreateLabelButton(name_delegate, TruncateCollectionTitle(entry.name));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
@@ -696,6 +712,14 @@ void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
     if (detached_ || browser_view == nullptr) {
         return;
     }
+    // Leaving split view tears the second pane and divider down even when the
+    // surviving view is the one already attached. The divider panel itself is
+    // kept for the next split, only removed from the view tree.
+    if (split_view_ != nullptr) {
+        browser_content_->RemoveChildView(split_view_);
+        split_view_ = nullptr;
+        browser_content_->RemoveChildView(split_divider_);
+    }
     if (browser_view_ != nullptr && browser_view->IsSame(browser_view_)) {
         return;
     }
@@ -708,6 +732,63 @@ void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
     if (browser_content_layout_ != nullptr) {
         browser_content_layout_->SetFlexForView(browser_view_, 1);
     }
+    browser_content_->Layout();
+}
+
+void BrowserChrome::AttachSplitBrowserViews(CefRefPtr<CefBrowserView> first,
+                                            CefRefPtr<CefBrowserView> second) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || first == nullptr || second == nullptr || first->IsSame(second)) {
+        return;
+    }
+    // Detach whatever single view is attached; a same-view single attach is the
+    // common toggle path, so no same-view short-circuit here. The divider panel
+    // is reused across splits, only moved in and out of the view tree.
+    if (split_view_ != nullptr) {
+        browser_content_->RemoveChildView(split_view_);
+        split_view_ = nullptr;
+    }
+    if (split_divider_ != nullptr) {
+        browser_content_->RemoveChildView(split_divider_);
+    }
+    if (browser_view_ != nullptr) {
+        browser_content_->RemoveChildView(browser_view_);
+    }
+    if (split_divider_ == nullptr) {
+        CefRefPtr<SurfacePanelDelegate> divider_delegate = new SurfacePanelDelegate(
+            this, SurfaceSlot::kHairline, CefSize(SplitDividerWidthDip(), 0),
+            CefSize(SplitDividerWidthDip(), 0), CefSize(SplitDividerWidthDip(), 0));
+        surface_delegates_.push_back(divider_delegate);
+        split_divider_ = CefPanel::CreatePanel(divider_delegate);
+        split_divider_->SetID(static_cast<int>(ChromeViewId::kSplitDivider));
+    }
+    browser_view_ = first;
+    split_view_ = second;
+    // Both panes announce as the browser view region; the divider sits between
+    // them in the live snapshot only.
+    browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
+    split_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
+    const int first_flex = SplitFlexForRatio(split_ratio_);
+    browser_content_->AddChildView(browser_view_);
+    browser_content_->AddChildView(split_divider_);
+    browser_content_->AddChildView(split_view_);
+    if (browser_content_layout_ != nullptr) {
+        browser_content_layout_->SetFlexForView(browser_view_, first_flex);
+        browser_content_layout_->SetFlexForView(split_divider_, 0);
+        browser_content_layout_->SetFlexForView(split_view_, 100 - first_flex);
+    }
+    browser_content_->Layout();
+}
+
+void BrowserChrome::SetSplitRatio(double ratio) {
+    CEF_REQUIRE_UI_THREAD();
+    split_ratio_ = std::clamp(ratio, SplitRatioMin(), SplitRatioMax());
+    if (split_view_ == nullptr || browser_content_layout_ == nullptr) {
+        return;
+    }
+    const int first_flex = SplitFlexForRatio(split_ratio_);
+    browser_content_layout_->SetFlexForView(browser_view_, first_flex);
+    browser_content_layout_->SetFlexForView(split_view_, 100 - first_flex);
     browser_content_->Layout();
 }
 
@@ -981,8 +1062,8 @@ void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
     const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
     const ArgbColor surface = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
-    for (std::size_t index = 0;
-         index < tab_entry_views_.size() && index < tab_entries_.size(); ++index) {
+    for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
+         ++index) {
         const TabStripEntrySnapshot& entry = tab_entries_[index];
         const TabEntryViews& views = tab_entry_views_[index];
         const ArgbColor row_fill = entry.active ? surface : rail;
@@ -991,8 +1072,8 @@ void BrowserChrome::ApplyCollectionTheme() {
         views.title->SetEnabledTextColors(tokens_.text.argb);
         views.close->SetEnabledTextColors(tokens_.text_secondary.argb);
     }
-    for (std::size_t index = 0;
-         index < space_entry_views_.size() && index < space_entries_.size(); ++index) {
+    for (std::size_t index = 0; index < space_entry_views_.size() && index < space_entries_.size();
+         ++index) {
         const SpaceSwitcherEntrySnapshot& entry = space_entries_[index];
         const SpaceEntryViews& views = space_entry_views_[index];
         views.row->SetBackgroundColor(entry.active ? surface.argb : rail.argb);

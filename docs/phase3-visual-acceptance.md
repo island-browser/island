@@ -12,6 +12,21 @@ No visual evidence has been captured yet. This file is the place to attach it on
 [`tests/manual/phase3_chrome_checklist.md`](../tests/manual/phase3_chrome_checklist.md) on real
 hardware with a display — that checklist cannot be completed from a headless/automated session.
 
+Where the implementation stands (as of 2026-09-19): Phase 3 units U4/U5 (tab strip and space
+switcher with live chrome projections, including space rename via F2 / the macOS Browser menu and
+reorder via the menu), U6 (split view: `Cmd/Ctrl+Shift+S` pairs the active tab with its adjacent
+tab, both panes render side by side through the content slot's box layout, the divider adjusts via
+the Move Split Divider menu items and the `kMoveDividerLeft/Right` commands, closing either half or
+selecting a tab outside the pair restores the single view), U7 (command palette), and U8 (session
+save on clean quit and restore at startup) have landed. Unit U9 (refreshed CI/package evidence)
+and U10 (this manual pass) are still outstanding. Documented deviations: the command palette owns
+`Cmd/Ctrl+K` and the search palette moved to `Cmd/Ctrl+Shift+K`
+([`docs/sidebar-palette-visual-acceptance.md`](sidebar-palette-visual-acceptance.md)); on macOS
+`CefWindow::SetAccelerator` never dispatches (the NSMenu owns the command keys); the split divider
+is not drag-adjustable because the pinned CEF distribution exposes no mouse events on custom
+views, so the manual checklist's drag rows become divider-keyboard-adjustment rows (arrow-free:
+use the menu items) on every platform.
+
 Automated coverage that *is* in place and does not require a human:
 
 - `tests/tab_test.cpp` — `TabId` uniqueness, tab add/remove/active-index semantics.
@@ -25,15 +40,26 @@ Automated coverage that *is* in place and does not require a human:
   current allow-list are rejected.
 - `tests/cef_address_parser_test.cpp` — URL allow/reject rules (already existed in Phase 2).
 - `tests/design_tokens_test.cpp` — light/dark token values.
-- `tests/browser_window_test.cpp` — planned in units U2/U4/U5/U6; not yet implemented.
-- `tests/command_palette_test.cpp` — planned in unit U7; not yet implemented.
+- `tests/browser_window_test.cpp` — landed 2026-09-19: wired into `tests/CMakeLists.txt`, 20
+  headless `BrowserWindowTest` cases passing. Covers tab/space command dispatch, direct-index and
+  space bookkeeping, fresh-install vs. restored-session shapes, and the headless overlay no-op
+  paths. The headless seam skips session persistence, so the cases are deterministic regardless of
+  any ambient session file.
+- `tests/command_palette_test.cpp` — landed 2026-09-19: wired into `tests/CMakeLists.txt`,
+  29 `CommandPaletteTest` cases passing (model, filter/projection, and selection behavior).
+- `tests/browser_window_test.cpp` split-view cases (U6, landed 2026-09-19) — ten headless
+  `BrowserWindowTest` cases covering `kToggleSplit` pairing (right neighbor, left fallback at the
+  end), `SplitTabs`/`UnsplitActiveSpace` rejection semantics (same id, unknown id, cross-space),
+  pair replacement, split clearing when either half closes or the selection leaves the pair,
+  per-space pairing isolation across switches, and `SetSplitRatio` clamping plus the divider
+  nudge commands.
 
 What those tests cannot verify: that the rendered tab strip and space switcher are visually
-correct, that the divider in split view is draggable on a real compositor, that focus order and
-screen-reader announcements work through the real accessibility tree for new tab/space entries, that
-dark-mode repaints correctly while the app runs, or that session restore actually reconstructs the
-window state as intended on a real quit/relaunch cycle. That gap is exactly what the manual checklist
-exists to close.
+correct, that focus order and screen-reader announcements work through the real accessibility tree
+for new tab/space entries, that dark-mode repaints correctly while the app runs, or that session
+restore actually reconstructs the window state as intended on a real quit/relaunch cycle. (The
+split-view divider clause is moot until U6 lands — there is no split-view UI to test.) That gap is
+exactly what the manual checklist exists to close.
 
 ## Evidence artifacts
 
@@ -62,29 +88,46 @@ The following artifacts must be captured and attached to this file during a manu
 
 - [ ] **Session restore round-trip:** Screenshots or terminal output confirming that after a normal
       quit and relaunch, the window state (spaces, tabs, active selections) is restored as expected.
+      Verify the file exists at `~/Library/Application Support/Island/session.json` (macOS) after
+      the quit, and that no restore happens after a force-quit — `SessionStore::Save` fires only on
+      the clean-quit CEF close path.
 - [ ] **Malformed session file fallback:** Screenshot or terminal output showing that when
       `session.json` is corrupted (e.g., truncated or invalid JSON), the app falls back to a fresh
       session without crashing.
-- [ ] **Split view interactions:** Screenshots showing:
+- [ ] **Invalid restored URL fallback:** With a session file whose tab URLs fail the current
+      `ParseAndValidate` allow-list, relaunch and confirm those tabs fall back to the fixed local
+      `data:` startup page rather than loading the disallowed URL — restored URLs are re-validated
+      through the same path as manual entry.
+- [ ] **Split view interactions (PENDING U6 — split view is not implemented yet; only the
+      `Space::SetSplit` model seam exists, no UI. Leave unchecked until U6 lands):** Screenshots
+      showing:
       - Two tabs side by side with a visible divider.
       - The divider after being resized by drag and by keyboard (arrow keys).
       - Closing one half, confirming the other tab restores to full width.
       - Rejection of split attempts across different spaces.
 - [ ] **Command palette interactions:** Screenshots or terminal notes showing:
-      - Palette opens on Cmd/Ctrl+K.
-      - Fuzzy search by tab title/URL returns matching tabs.
-      - Selecting a tab result switches to it.
-      - Selecting a space result switches the active space.
-      - "Go to URL" entry and submission through the same `AddressModel` validation path.
-      - Escape closes without navigating or switching.
-      - Focus trap: Tab cycles within the palette while it is open.
+      - The palette opens on Cmd/Ctrl+K as a lazily created overlay that is hidden, not destroyed,
+        between uses.
+      - Results list open tabs of the active space (fuzzy-filtered by title/URL), all spaces, and a
+        go-to-URL row.
+      - Selecting a tab result switches to it; selecting a space result switches the active space.
+      - "Go to URL" entry and submission through the same `AddressBarModel`/`ParseAndValidate`
+        validation path as the rail's address control.
+      - An invalid URL (relative path, `javascript:`, embedded credentials) is rejected without
+        navigating: the palette stays open with the typed text intact.
+      - Escape closes without navigating or switching and restores focus to the invocation point.
+      - Focus trap: Tab cycles within the palette rows while it is open.
 - [ ] **Tab/space keyboard shortcuts:** Evidence that:
       - Cmd/Ctrl+T creates a new tab.
       - Cmd/Ctrl+W closes the active tab.
       - Cmd/Ctrl+1..9 switch to direct tab indices.
       - Cmd/Ctrl+Shift+[ / ] switch to previous/next tab.
 - [ ] **Space switcher interactions:** Evidence that:
-      - New/close/rename/reorder operations work via chrome UI.
+      - New/close/rename/reorder operations work via the chrome UI: rename through the F2
+        accelerator or the macOS Browser menu "Rename Space…" (overlay textfield; Enter commits a
+        non-empty trimmed name, Escape cancels), reorder through the menu "Move Space Left/Right".
+        There is no hover or drag affordance for rename/reorder — that is deferred, not missing
+        evidence.
       - Closing the active space selects a defined neighbor.
       - Closing the last remaining space is handled without leaving the window in a broken state.
 - [ ] **Accessibility/focus order:** Confirmation that:
@@ -118,7 +161,8 @@ When you run the checklist, attach results here per target:
 #### Completion checkmarks
 - Session restore round-trip: <screenshot>
 - Malformed session fallback: <screenshot or notes>
-- Split view interactions: <screenshots>
+- Invalid restored URL fallback: <screenshot or notes>
+- Split view interactions: <screenshots — pending U6; leave blank until split view lands>
 - Command palette interactions: <screenshots>
 - Tab/space keyboard shortcuts: <evidence>
 - Space switcher interactions: <evidence>

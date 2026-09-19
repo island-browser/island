@@ -2,16 +2,31 @@
 
 ## Current state
 
-- Phase 1 is implemented on top of the Phase 0 infrastructure: the app opens one native CEF window
-  containing exactly one `CefBrowserView`, starts from deterministic local `data:` pages, exposes
-  shared `BrowserWindow`/`IslandApp`/runtime/navigation snapshot seams, supports back/forward/reload
-  commands and shortcuts, rejects popups, and shuts down through the CEF close lifecycle.
-- Read `docs/superpowers/specs/2026-08-08-island-browser-phase1-design.md`, then
-  `docs/superpowers/plans/2026-08-08-island-browser-phase1.md` before implementing anything. The
-  Phase 0 design and plan remain historical context only.
-- Implement only the current accepted phase. Phase 2+ work requires its own spec and plan; browser
-  chrome, tabs, spaces, persistence, command bar, settings, extensions, and expanded CDP/agentic
-  features are currently out of scope.
+- Phases 1–3 are landing unit-by-unit on top of the Phase 0 infrastructure: the app opens one
+  native CEF window with a `CefBrowserView` content slot, starts from deterministic local `data:`
+  pages (or a clean-quit-restored session), and supports back/forward/reload, tabs and spaces (tab
+  strip, space switcher, rename via F2/menu, reorder via menu), split view (`Cmd/Ctrl+Shift+S`
+  pairs the active tab with its adjacent tab; the divider is keyboard-adjustable), the command
+  palette on `Cmd/Ctrl+K`, the search palette on `Cmd/Ctrl+Shift+K`, the hideable sidebar
+  (`Cmd/Ctrl+B` everywhere, macOS hover-reveal bands), popup rejection, and shutdown through the
+  CEF close lifecycle. Phase 3 units U4/U5, U6, U7, and U8 have landed; U9 (CI/package evidence
+  refresh), U10 (manual/visual acceptance), and U11 (integration regression) are still
+  outstanding. Documented deviations: on macOS `CefWindow::SetAccelerator` never dispatches (the
+  NSMenu owns the command keys), and the split divider is not drag-adjustable because the pinned
+  CEF distribution exposes no mouse events on custom views — the divider moves through the menu
+  items and `kMoveDividerLeft/Right` commands instead.
+- Read `docs/superpowers/specs/2026-08-09-island-browser-phase3-design.md` and
+  `docs/superpowers/plans/2026-08-09-island-browser-phase3.md` (plus the 2026-08-12 sidebar/palette
+  spec and plan) before implementing anything. The Phase 0/1/2 design and plan documents remain
+  historical context only, and the "Phase 1 contract" section below describes Phase 1, not the
+  current feature set.
+- Every phase still requires its own accepted spec and plan, and only units of the currently
+  accepted plans may be implemented. Settings, extensions, sync, profiles/accounts, multiple
+  top-level `CefWindow`s, and expanded CDP/agentic integration remain out of scope (see each
+  design's non-goals).
+- The Phase S0 search kernel under `src/search/` stays gated behind `ISLAND_ENABLE_SEARCH`
+  (declared `OFF`), and the hybrid native/container build lane (`docker/`, `tests/container/`) is
+  present on `main`.
 
 ## Phase 1 contract
 
@@ -105,7 +120,8 @@ hand-maintained project instructions and take precedence over anything a nested 
 
 ### Search build (opt-in)
 
-The Verification commands above build and run the default suite only — **103 tests** on `main`. The
+The Verification commands above build and run the default suite only — **223 tests** on `main`
+as of 2026-09-19 (the count grows as units land; rerun `ctest -N` after adding tests). The
 Phase S0 search kernel under `src/search/` is guarded by `ISLAND_ENABLE_SEARCH`, which is declared
 `OFF`, so none of it is configured, compiled, or run by those commands.
 
@@ -118,7 +134,7 @@ cmake --build build-search
 ctest --test-dir build-search --output-on-failure
 ```
 
-That reports 84 tests. To build the browser and the search kernel together instead:
+That reports 148 tests (as of 2026-09-19). To build the browser and the search kernel together instead:
 
 ```bash
 cmake -B build-search-root -S . -DISLAND_ENABLE_SEARCH=ON
@@ -126,7 +142,7 @@ cmake --build build-search-root
 ctest --test-dir build-search-root --output-on-failure
 ```
 
-That reports 187 tests (103 + 84). The Python suites are separate from `ctest` entirely:
+That reports 371 tests (223 + 148, as of 2026-09-19). The Python suites are separate from `ctest` entirely:
 
 ```bash
 python3 -m pytest tests/deps tests/package tests/design

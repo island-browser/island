@@ -20,8 +20,15 @@ enum class BrowserCommand : std::uint8_t {
     kPreviousTab,
     kNewSpace,
     kCloseSpace,
+    // U6 split view. kToggleSplit pairs the active tab with its adjacent tab
+    // or tears the pair down; the divider commands nudge the flex ratio. Split
+    // view is scoped to one space, so the commands never name tabs from
+    // different spaces.
+    kToggleSplit,
+    kMoveDividerLeft,
+    kMoveDividerRight,
 };
 
-}
+}  // namespace island
 
 #endif

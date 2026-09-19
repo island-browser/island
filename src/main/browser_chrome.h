@@ -77,6 +77,10 @@ enum class ChromeViewId : int {
     kCommandPaletteResultName = 1036,
     kSpaceRenameOverlay = 1037,
     kSpaceRenameField = 1038,
+    // U6 split view: the divider between the two panes lives inside
+    // kBrowserContent between the two kBrowserView nodes, so the contract tree
+    // (single view) is unchanged and only the live snapshot grows these nodes.
+    kSplitDivider = 1039,
 };
 
 struct ChromeViewTreeNode {
@@ -388,8 +392,27 @@ class BrowserChrome final : public NavigationObserver {
     void SetSpaceSwitcherEntries(const std::vector<SpaceSwitcherEntrySnapshot>& entries);
     // Swaps the CefBrowserView living in the content slot when the active tab
     // or space changes. The previous view is detached, not destroyed; the new
-    // one takes the kBrowserView contract id.
+    // one takes the kBrowserView contract id. Leaving split view (if active)
+    // always tears the second pane and divider down first.
     void AttachBrowserView(CefRefPtr<CefBrowserView> browser_view);
+    // U6 split view: attaches both panes side by side with the divider between
+    // them. The first (active) view keeps the kBrowserView id; flex weights
+    // follow the current split ratio. Both views must be non-null and distinct.
+    void AttachSplitBrowserViews(CefRefPtr<CefBrowserView> first, CefRefPtr<CefBrowserView> second);
+    // Nudges the divider. Ratios outside [SplitRatioMin, SplitRatioMax] are
+    // clamped; the flex weights re-apply only while a split is attached.
+    void SetSplitRatio(double ratio);
+    [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
+    [[nodiscard]] bool split_active() const noexcept { return split_view_ != nullptr; }
+
+    // Split divider geometry. The divider is keyboard-adjustable through the
+    // kMoveDividerLeft/Right commands (drag is a documented deviation: the
+    // pinned CEF distribution exposes no mouse events on custom views).
+    [[nodiscard]] static constexpr double SplitRatioMin() { return 0.2; }
+    [[nodiscard]] static constexpr double SplitRatioMax() { return 0.8; }
+    [[nodiscard]] static constexpr double SplitRatioDefault() { return 0.5; }
+    [[nodiscard]] static constexpr double SplitRatioStep() { return 0.05; }
+    [[nodiscard]] static constexpr int SplitDividerWidthDip() { return 2; }
 
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
@@ -437,6 +460,10 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefBoxLayout> browser_content_layout_;
     CefRefPtr<CefBrowserView> browser_view_;
+    // U6 split view state; both stay null while a single view is attached.
+    CefRefPtr<CefBrowserView> split_view_;
+    CefRefPtr<CefPanel> split_divider_;
+    double split_ratio_ = SplitRatioDefault();
     CefRefPtr<CefPanel> navigation_row_;
     CefRefPtr<CefPanel> address_row_;
     CefRefPtr<CefPanel> spacer_;
