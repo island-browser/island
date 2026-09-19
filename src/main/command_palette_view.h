@@ -52,7 +52,8 @@ class CommandPaletteView final {
     // Shows the palette with fresh read-only snapshots of the open tabs of the
     // active space and the full space list, resets the draft query, and focuses
     // the query field.
-    void Show(std::vector<PaletteTabEntry> tabs, std::vector<PaletteSpaceEntry> spaces);
+    void Show(std::vector<PaletteTabEntry> tabs, std::vector<PaletteSpaceEntry> spaces,
+              std::vector<PaletteBookmarkEntry> bookmarks);
     // Hides the palette without acting on the highlighted row.
     void Hide();
     // Re-positions the overlay for the window's current bounds.

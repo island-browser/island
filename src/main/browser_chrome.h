@@ -81,6 +81,9 @@ enum class ChromeViewId : int {
     // kBrowserContent between the two kBrowserView nodes, so the contract tree
     // (single view) is unchanged and only the live snapshot grows these nodes.
     kSplitDivider = 1039,
+    // Welcome flow overlay (first-run import + appearance). Like the palettes,
+    // it lives on the CefWindow, not in the rail/root contract tree.
+    kWelcome = 1040,
 };
 
 struct ChromeViewTreeNode {

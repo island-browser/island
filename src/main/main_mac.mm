@@ -77,6 +77,10 @@
 - (void)toggleSplit:(id)sender;
 - (void)moveDividerLeft:(id)sender;
 - (void)moveDividerRight:(id)sender;
+- (void)showWelcome:(id)sender;
+- (void)useSystemTheme:(id)sender;
+- (void)useLightTheme:(id)sender;
+- (void)useDarkTheme:(id)sender;
 @end
 
 @implementation IslandMenuActions
@@ -161,6 +165,30 @@
 - (void)moveDividerRight:(id)sender {
     if (app_ != nullptr) {
         app_->ExecuteCommand(island::BrowserCommand::kMoveDividerRight);
+    }
+}
+
+- (void)showWelcome:(id)sender {
+    if (app_ != nullptr) {
+        app_->ShowWelcomeFlow();
+    }
+}
+
+- (void)useSystemTheme:(id)sender {
+    if (app_ != nullptr) {
+        app_->SetThemePreference(island::ThemePreference::kSystem);
+    }
+}
+
+- (void)useLightTheme:(id)sender {
+    if (app_ != nullptr) {
+        app_->SetThemePreference(island::ThemePreference::kLight);
+    }
+}
+
+- (void)useDarkTheme:(id)sender {
+    if (app_ != nullptr) {
+        app_->SetThemePreference(island::ThemePreference::kDark);
     }
 }
 
@@ -375,11 +403,30 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     NSMenuItem* move_divider_right_menu_item =
         AddBrowserMenuItem(browser_menu, menu_actions, @"Move Split Divider Right",
                            @selector(moveDividerRight:), @"", NSEventModifierFlagCommand, 0);
+    [browser_menu addItem:[NSMenuItem separatorItem]];
+    // The welcome flow reopens without resetting anything; the appearance
+    // entries write the preference and re-theme the window immediately.
+    NSMenuItem* welcome_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Show Welcome…", @selector(showWelcome:),
+                           @"", NSEventModifierFlagCommand, 0);
+    NSMenuItem* theme_system_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Appearance: System",
+                           @selector(useSystemTheme:), @"", NSEventModifierFlagCommand, 0);
+    NSMenuItem* theme_light_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Appearance: Light",
+                           @selector(useLightTheme:), @"", NSEventModifierFlagCommand, 0);
+    NSMenuItem* theme_dark_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Appearance: Dark",
+                           @selector(useDarkTheme:), @"", NSEventModifierFlagCommand, 0);
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
     [NSApp setMainMenu:main_menu];
 
+    [theme_dark_item release];
+    [theme_light_item release];
+    [theme_system_item release];
+    [welcome_menu_item release];
     [move_divider_right_menu_item release];
     [move_divider_left_menu_item release];
     [toggle_split_menu_item release];

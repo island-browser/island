@@ -33,7 +33,7 @@ browser chrome rely on them.
 ```design-tokens
 {
   "contract": "island-design-tokens",
-  "version": 1,
+  "version": 2,
   "accepted_design": "Ledger",
   "colors": {
     "light": {
@@ -105,7 +105,7 @@ browser chrome rely on them.
   "rules": {
     "accent_semantics": "accent only signifies an action or active state",
     "light_mode_text": "all readable light-mode text uses the text token",
-    "phase3_exclusions": "tabs, tab strip, spaces, split view, command palette, and session restore are Phase 3 concerns and do not exist in the shared design contract",
+    "shipped_features": "tabs and the tab strip, spaces and the space switcher, split view, the command palette, the search palette, session restore, and the welcome flow exist in the shipped build; the product site may present them and must keep the honesty rule — every depicted control runs in the current build",
     "no_recolor": "this unit formalized the existing shared tokens; it did not recolor them",
     "no_literal_imagery": "no photos, tropical colors, or generic AI gradients"
   }

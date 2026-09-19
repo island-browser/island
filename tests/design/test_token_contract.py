@@ -122,7 +122,7 @@ class TokenContractCompleteness(unittest.TestCase):
 
     def test_contract_identifies_the_accepted_design(self) -> None:
         self.assertEqual(self.contract["contract"], "island-design-tokens")
-        self.assertEqual(self.contract["version"], 1)
+        self.assertEqual(self.contract["version"], 2)
         self.assertEqual(self.contract["accepted_design"], "Ledger")
 
     def test_semantic_roles_cover_both_themes_exactly(self) -> None:
@@ -179,14 +179,25 @@ class TokenContractCompleteness(unittest.TestCase):
         self.assertEqual(accessibility["large_text_contrast_min"], 3.0)
         self.assertIn("accent", accessibility["focus_ring"])
 
-    def test_phase3_exclusion_rules_are_present(self) -> None:
-        phase3_rules = self.contract["rules"]["phase3_exclusions"]
-        self.assertTrue(phase3_rules)
-        values = phase3_rules if isinstance(phase3_rules, list) else [phase3_rules]
+    def test_shipped_feature_rules_are_present(self) -> None:
+        shipped = self.contract["rules"]["shipped_features"]
+        self.assertTrue(shipped)
+        values = shipped if isinstance(shipped, list) else [shipped]
         joined = " ".join(values).lower()
-        for forbidden in ("tabs", "spaces", "split", "command palette", "session restore"):
-            with self.subTest(feature=forbidden):
-                self.assertIn(forbidden, joined)
+        for feature in (
+            "tabs",
+            "spaces",
+            "split view",
+            "command palette",
+            "search palette",
+            "session restore",
+            "welcome flow",
+        ):
+            with self.subTest(feature=feature):
+                self.assertIn(feature, joined)
+        with self.subTest(rule="honesty"):
+            self.assertIn("honesty rule", joined)
+            self.assertIn("current build", joined)
 
 
 class SiteConsumerParity(unittest.TestCase):

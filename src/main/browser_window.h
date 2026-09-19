@@ -6,6 +6,8 @@
 #include <string_view>
 
 #include "active_tab_provider.h"
+#include "bookmark_import.h"
+#include "bookmark_store.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
@@ -16,11 +18,13 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "navigation_state.h"
+#include "prefs_store.h"
 #include "search_palette.h"
 #include "sidebar_state.h"
 #include "space.h"
 #include "space_rename_overlay.h"
 #include "tab.h"
+#include "welcome_flow.h"
 
 class CefBrowser;
 class CefBrowserView;
@@ -55,6 +59,7 @@ class BrowserWindow : public CefClient,
                       public SearchPaletteHost,
                       public CommandPaletteHost,
                       public SpaceRenameOverlayHost,
+                      public WelcomeFlowHost,
                       public NavigationObserver {
   public:
     // |persist_session| stays false for the smoke run (a deterministic fixed
@@ -94,6 +99,13 @@ class BrowserWindow : public CefClient,
     // [BrowserChrome::SplitRatioMin, SplitRatioMax]. False while closing.
     [[nodiscard]] bool SetSplitRatio(double ratio);
     [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
+
+    // Welcome flow (first-run import + appearance). ShowWelcomeFlow is a
+    // no-op without a window, like the palette seams.
+    void ShowWelcomeFlow();
+    // False while closing; a real change persists prefs and re-applies theme.
+    bool SetThemePreference(ThemePreference preference);
+    [[nodiscard]] ThemePreference theme_preference() const noexcept { return prefs_.theme; }
 
     // Observation seams for tests and palette snapshots. FindSpace returns
     // nullptr for unknown ids; ids are never derived from vector position.
@@ -152,6 +164,9 @@ class BrowserWindow : public CefClient,
 
     void OnSpaceRenameCommitted(std::string name) override;
     void OnSpaceRenameCancelled() override;
+
+    void OnWelcomeThemeChanged(ThemePreference preference) override;
+    void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
@@ -227,6 +242,9 @@ class BrowserWindow : public CefClient,
         kToggleSplitAccelerator,
         kMoveDividerLeftAccelerator,
         kMoveDividerRightAccelerator,
+        // Welcome flow: Escape dismisses ("just start browsing") while the
+        // overlay is visible and is otherwise untouched.
+        kWelcomeDismissAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url, bool persist_session = true);
@@ -248,6 +266,14 @@ class BrowserWindow : public CefClient,
     // Selecting a tab outside the current split pairing tears the split down,
     // so the attached views always include the active tab's view.
     void BreakSplitIfSelectionLeftPair(Space& space, TabId selected);
+    // The theme the window should run in right now: the stored preference when
+    // it forces a theme, else the OS theme classified from the window.
+    [[nodiscard]] ChromeTheme ResolvedChromeTheme() const;
+    // Persists prefs best-effort (logs via error code, never throws).
+    void SavePrefs() const;
+    // Navigates the active tab to a stored bookmark URL through the single
+    // address-validation path; a URL the allow-list rejects is a no-op.
+    void OpenBookmark(const PaletteBookmarkEntry& bookmark);
     // Detaches the projection from the current active tab before a mutation
     // changes which tab/space is active; Attach re-subscribes to the (possibly
     // new) active tab, pushes its snapshot through the address model and
@@ -324,6 +350,11 @@ class BrowserWindow : public CefClient,
     // transient (the design calls a split a view arrangement, not persisted
     // state; the pairing itself persists through the session file).
     double split_ratio_ = BrowserChrome::SplitRatioDefault();
+    // Welcome flow state. prefs_ keeps the fresh-install defaults in the
+    // headless/no-persistence shapes, which never touch the prefs file.
+    PrefsState prefs_;
+    BookmarkState bookmarks_;
+    std::unique_ptr<WelcomeFlow> welcome_;
 
     IMPLEMENT_REFCOUNTING(BrowserWindow);
     DISALLOW_COPY_AND_ASSIGN(BrowserWindow);

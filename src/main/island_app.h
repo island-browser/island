@@ -4,6 +4,7 @@
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "include/cef_app.h"
+#include "prefs_store.h"
 #include "startup_options.h"
 
 namespace island {
@@ -28,6 +29,9 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // no-op.
     void MoveSpaceLeft();
     void MoveSpaceRight();
+    // Welcome flow and appearance entries for the macOS menu.
+    void ShowWelcomeFlow();
+    void SetThemePreference(ThemePreference preference);
     void RequestClose();
     // Direct-index tab switch (Cmd/Ctrl+1..9) for the macOS menu; an
     // out-of-range index is a no-op.

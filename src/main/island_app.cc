@@ -38,6 +38,22 @@ void IslandApp::ExecuteCommand(BrowserCommand command) {
     }
 }
 
+void IslandApp::ShowWelcomeFlow() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowWelcomeFlow();
+    }
+}
+
+void IslandApp::SetThemePreference(ThemePreference preference) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(browser_window_->SetThemePreference(preference));
+    }
+}
+
 void IslandApp::BeginAddressEditing() {
     CEF_REQUIRE_UI_THREAD();
 

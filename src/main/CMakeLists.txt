@@ -4,6 +4,8 @@ add_library(island_browser_core STATIC
     address_bar_model.cc
     address_policy.cc
     app_resources.cc
+    bookmark_import.cc
+    bookmark_store.cc
     app_runtime.cc
     browser_chrome.cc
     browser_window.cc
@@ -14,6 +16,7 @@ add_library(island_browser_core STATIC
     icon_catalog.cc
     island_app.cc
     navigation_state.cc
+    prefs_store.cc
     search_palette.cc
     search_palette_model.cc
     search_provider.cc
@@ -22,6 +25,7 @@ add_library(island_browser_core STATIC
     space.cc
     space_rename_overlay.cc
     startup_options.cc
+    welcome_flow.cc
     tab.cc
 )
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
@@ -31,7 +35,7 @@ SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)
 
-    target_sources(island_browser_core PRIVATE macos/font_registry_mac.mm macos/sidebar_hover_mac.mm)
+    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm macos/font_registry_mac.mm macos/sidebar_hover_mac.mm)
     target_link_libraries(island_browser_core PRIVATE "-framework CoreFoundation" "-framework CoreText")
 
     set(CEF_TARGET island_browser)
@@ -96,13 +100,13 @@ if(APPLE)
         )
     endforeach()
 elseif(WIN32)
-    target_sources(island_browser_core PRIVATE windows/font_registry_win.cc sidebar_hover_stub.cc)
+    target_sources(island_browser_core PRIVATE windows/font_registry_win.cc bookmark_import_stub.cc sidebar_hover_stub.cc)
     target_link_libraries(island_browser_core PRIVATE gdi32)
     include("${CMAKE_SOURCE_DIR}/cmake/platform/windows.cmake")
     island_add_windows_browser_target()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Fontconfig REQUIRED)
-    target_sources(island_browser_core PRIVATE linux/font_registry_linux.cc sidebar_hover_stub.cc)
+    target_sources(island_browser_core PRIVATE linux/font_registry_linux.cc bookmark_import_stub.cc sidebar_hover_stub.cc)
     target_link_libraries(island_browser_core PRIVATE Fontconfig::Fontconfig)
     include("${CMAKE_SOURCE_DIR}/cmake/platform/linux.cmake")
     island_add_linux_browser(island_browser)

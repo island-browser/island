@@ -742,5 +742,21 @@ TEST(BrowserWindowTest, GivenRatiosWhenSetSplitRatioRunsThenTheyClampIntoTheUsab
     EXPECT_DOUBLE_EQ(window->split_ratio(), BrowserChrome::SplitRatioMax());
 }
 
+TEST(BrowserWindowTest, GivenTheHeadlessSeamWhenWelcomeAndThemeSeamsRunThenTheyAreInMemoryOnly) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_EQ(window->theme_preference(), ThemePreference::kSystem);
+
+    // No window exists headless, so every welcome seam is a defined no-op that
+    // only moves in-memory state; the prefs file is never read or written.
+    window->ShowWelcomeFlow();
+    window->OnWelcomeThemeChanged(ThemePreference::kDark);
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kDark);
+    window->OnWelcomeCompleted({});
+    window->ShowWelcomeFlow();
+    EXPECT_TRUE(window->SetThemePreference(ThemePreference::kLight));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kLight);
+    EXPECT_EQ(window->space_count(), 1U);
+}
+
 }  // namespace
 }  // namespace island

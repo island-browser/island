@@ -32,6 +32,7 @@ constexpr int kVirtualKeyLeft = 0x25;
 constexpr int kVirtualKeyRight = 0x27;
 constexpr int kVirtualKeyF2 = 0x71;
 constexpr int kVirtualKeyF5 = 0x74;
+constexpr int kVirtualKeyEscape = 0x1B;
 constexpr int kChromeWindowWidth = 1440;
 constexpr int kChromeWindowHeight = 900;
 constexpr int kMinimumWindowWidth = 800;
@@ -46,6 +47,20 @@ constexpr std::array<ArgbColor, 5> kSpaceColorPalette{
     ArgbColor{0xFF5B8DEF}, ArgbColor{0xFF34A853}, ArgbColor{0xFFFBBC05},
     ArgbColor{0xFFEA4335}, ArgbColor{0xFF9334E6},
 };
+
+// The per-user home root the import detection probes under (mirrors the
+// session/prefs path conventions: profile-relative on Windows, home-relative
+// elsewhere).
+std::filesystem::path UserBaseHome() {
+#if defined(_WIN32)
+    const char* const profile = std::getenv("USERPROFILE");
+    return profile != nullptr ? std::filesystem::path(profile) : std::filesystem::path(".");
+#else
+    const char* const home = std::getenv("HOME");
+    return home != nullptr && *home != '\0' ? std::filesystem::path(home)
+                                            : std::filesystem::path(".");
+#endif
+}
 
 // The edge sliver is a bare fill panel; it only needs a preferred size so the
 // overlay controller does not collapse it to nothing before SetBounds applies.
@@ -83,6 +98,13 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
     if (!persist_session_ || !RestoreSession()) {
         // CreateDefaultSpace already appends the space's single starting tab.
         spaces_.push_back(CreateDefaultSpace());
+    }
+    // Preferences and bookmarks share the session file's persistence rules:
+    // headless and smoke shapes keep fresh-install defaults and never read or
+    // write the files, so tests and smoke runs stay deterministic.
+    if (persist_session_) {
+        prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
+        bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
     }
     chrome_snapshot_.rail_bounds = {.x = 0,
                                     .y = 0,
@@ -739,8 +761,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
         return;
     }
 
-    const ChromeTheme theme =
-        ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground));
+    const ChromeTheme theme = ResolvedChromeTheme();
     const Tab* startup_tab = active_tab();
     CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
         this, CefString(startup_tab != nullptr ? StartupUrlForTab(*startup_tab) : initial_url_),
@@ -797,9 +818,17 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     window_->SetAccelerator(kMoveDividerLeftAccelerator, kVirtualKeyLeft, true, false, false, true);
     window_->SetAccelerator(kMoveDividerRightAccelerator, kVirtualKeyRight, true, false, false,
                             true);
+    window_->SetAccelerator(kWelcomeDismissAccelerator, kVirtualKeyEscape, false, false, false,
+                            true);
 
     CreateHoverSliver();
     ApplySidebarState();
+    // Fresh install: offer the import/appearance welcome once, without
+    // blocking browsing (Escape dismisses). The smoke run skips it so the
+    // smoke page stays the only surface.
+    if (persist_session_ && !prefs_.onboarding_completed) {
+        ShowWelcomeFlow();
+    }
     // The seam only observes; every chrome mutation it triggers is posted onto the
     // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
     // cannot create a refcount cycle, and OnWindowDestroyed uninstalls it.
@@ -864,8 +893,9 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
 void BrowserWindow::OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool) {
     CEF_REQUIRE_UI_THREAD();
     if (!closing_) {
-        ApplyTheme(window, ClassifyChromeTheme(window->GetThemeColor(CEF_ColorPrimaryBackground)),
-                   false);
+        // With a forced preference this re-asserts the same theme; with
+        // kSystem it re-classifies, so the chrome follows the OS.
+        ApplyTheme(window, ResolvedChromeTheme(), false);
     }
 }
 
@@ -962,6 +992,14 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
         case kMoveDividerRightAccelerator:
             ExecuteCommand(BrowserCommand::kMoveDividerRight);
             return true;
+        case kWelcomeDismissAccelerator: {
+            const bool consumed = welcome_ != nullptr && welcome_->visible();
+            if (consumed) {
+                // Escape on the welcome flow means "just start browsing".
+                OnWelcomeCompleted({});
+            }
+            return consumed;
+        }
         default:
             if (command_id >= kSelectTab1Accelerator && command_id <= kSelectTab9Accelerator) {
                 static_cast<void>(SelectActiveSpaceTabIndex(
@@ -1309,9 +1347,7 @@ void BrowserWindow::ShowSearchPalette() {
     if (search_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+Shift+K, then only shown and hidden.
         search_palette_ = std::make_unique<SearchPalette>(
-            *this, window_,
-            ChromeTokens::ForTheme(
-                ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground))));
+            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()));
     }
     search_palette_->Show();
 }
@@ -1324,10 +1360,7 @@ void BrowserWindow::ShowCommandPalette() {
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
-            *this, window_,
-            ChromeTokens::ForTheme(
-                ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground))),
-            &ParseAndValidate);
+            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()), &ParseAndValidate);
     }
     // Read-only snapshots taken at open time: the open tabs of the active space
     // (title/URL for matching, TabId for routing) and the whole space list.
@@ -1344,7 +1377,13 @@ void BrowserWindow::ShowCommandPalette() {
     for (const Space& space : spaces_) {
         spaces.push_back({.id = space.id(), .name = space.name()});
     }
-    command_palette_->Show(std::move(tabs), std::move(spaces));
+    std::vector<PaletteBookmarkEntry> bookmarks;
+    for (const BookmarkFolder& folder : bookmarks_.folders) {
+        for (const BookmarkItem& item : folder.items) {
+            bookmarks.push_back({.title = item.title, .url = item.url});
+        }
+    }
+    command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks));
 }
 
 void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
@@ -1363,6 +1402,9 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
         case PaletteEntryKind::kUrl:
             SubmitPaletteUrl(url_query, selection.address);
             break;
+        case PaletteEntryKind::kBookmark:
+            OpenBookmark(selection.bookmark);
+            break;
     }
     FocusBrowserView();
 }
@@ -1372,6 +1414,97 @@ void BrowserWindow::OnCommandPaletteDismissed() {
     // Escape restores focus to the invocation point, which is the browser view
     // by default.
     FocusBrowserView();
+}
+
+ChromeTheme BrowserWindow::ResolvedChromeTheme() const {
+    switch (prefs_.theme) {
+        case ThemePreference::kLight:
+            return ChromeTheme::kLight;
+        case ThemePreference::kDark:
+            return ChromeTheme::kDark;
+        case ThemePreference::kSystem:
+            break;
+    }
+    return window_ != nullptr
+               ? ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground))
+               : ChromeTheme::kLight;
+}
+
+void BrowserWindow::SavePrefs() const {
+    // Headless and smoke shapes keep fresh-install defaults and never write
+    // the prefs file, mirroring the session file rule.
+    if (!persist_session_) {
+        return;
+    }
+    static_cast<void>(PrefsStore::Save(PrefsStore::DefaultPrefsFilePath(), prefs_));
+}
+
+bool BrowserWindow::SetThemePreference(ThemePreference preference) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    prefs_.theme = preference;
+    SavePrefs();
+    if (window_ != nullptr) {
+        ApplyTheme(window_, ResolvedChromeTheme(), true);
+    }
+    return true;
+}
+
+void BrowserWindow::OnWelcomeThemeChanged(ThemePreference preference) {
+    CEF_REQUIRE_UI_THREAD();
+    static_cast<void>(SetThemePreference(preference));
+    if (welcome_ != nullptr) {
+        welcome_->ApplyTheme(ChromeTokens::ForTheme(ResolvedChromeTheme()));
+    }
+}
+
+void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources) {
+    CEF_REQUIRE_UI_THREAD();
+    std::size_t imported = 0;
+    for (const ImportSource source : sources) {
+        const std::optional<std::vector<BookmarkItem>> items =
+            ImportFromSource(source, UserBaseHome());
+        if (!items.has_value()) {
+            continue;
+        }
+        imported += BookmarkStore::MergeFolder(bookmarks_, "Imported", *items);
+    }
+    if (imported > 0) {
+        static_cast<void>(
+            BookmarkStore::Save(BookmarkStore::DefaultBookmarksFilePath(), bookmarks_));
+    }
+    prefs_.onboarding_completed = true;
+    SavePrefs();
+    if (welcome_ != nullptr) {
+        welcome_->Hide();
+    }
+    FocusBrowserView();
+}
+
+void BrowserWindow::ShowWelcomeFlow() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    if (welcome_ == nullptr) {
+        welcome_ = std::make_unique<WelcomeFlow>(
+            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()), prefs_.theme,
+            DetectInstalledSources(UserBaseHome()));
+    }
+    welcome_->Show();
+}
+
+void BrowserWindow::OpenBookmark(const PaletteBookmarkEntry& bookmark) {
+    CEF_REQUIRE_UI_THREAD();
+    // The same validation seam the address bar uses: a stored URL the current
+    // allow-list rejects is a no-op, never a force-load.
+    const ValidatedAddress address = ParseAndValidate(bookmark.url);
+    if (!address.is_valid()) {
+        return;
+    }
+    SubmitPaletteUrl(bookmark.url, address);
 }
 
 void BrowserWindow::ActivatePaletteTab(TabId id) {
@@ -1431,10 +1564,7 @@ void BrowserWindow::BeginSpaceRenaming() {
     }
     if (space_rename_overlay_ == nullptr) {
         space_rename_overlay_ = std::make_unique<SpaceRenameOverlay>(
-            *this, window_,
-            ChromeTokens::ForTheme(
-                ClassifyChromeTheme(window_->GetThemeColor(CEF_ColorPrimaryBackground))),
-            active_space().name());
+            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()), active_space().name());
     }
     space_rename_overlay_->Show();
 }

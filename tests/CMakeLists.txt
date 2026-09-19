@@ -16,6 +16,8 @@ FetchContent_MakeAvailable(googletest)
 add_executable(island_tests
     address_bar_model_test.cpp
     address_policy_test.cpp
+    bookmark_import_test.cpp
+    bookmark_store_test.cpp
     browser_window_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
@@ -23,6 +25,7 @@ add_executable(island_tests
     design_tokens_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
+    prefs_store_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
     session_store_test.cpp
@@ -30,9 +33,12 @@ add_executable(island_tests
     space_test.cpp
     startup_options_test.cpp
     tab_test.cpp
+
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/bookmark_import.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/bookmark_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
@@ -41,6 +47,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
@@ -48,6 +55,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space_rename_overlay.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/welcome_flow.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
 )
@@ -58,9 +66,11 @@ target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIB
 # browser_window.cc references the platform sidebar-hover seam (never called by
 # the headless tests, but the symbols must link), so mirror src/main's split.
 if(APPLE)
-    target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/sidebar_hover_mac.mm")
+    target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/sidebar_hover_mac.mm")
 else()
-    target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/sidebar_hover_stub.cc")
+    target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"
+                    "${CMAKE_SOURCE_DIR}/src/main/sidebar_hover_stub.cc")
 endif()
 if(NOT APPLE)
     target_link_libraries(island_tests PRIVATE libcef_lib)

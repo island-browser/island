@@ -56,6 +56,11 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
             return "Switch to space: " + entry.space.name;
         case PaletteEntryKind::kUrl:
             return "Go to URL: " + entry.url_query;
+        case PaletteEntryKind::kBookmark: {
+            const std::string& title =
+                entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
+            return "Open bookmark: " + title + ", URL " + entry.bookmark.url;
+        }
     }
     return "Palette result";
 }
@@ -71,6 +76,10 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
             return entry.space.name;
         case PaletteEntryKind::kUrl:
             return "Go to " + entry.url_query;
+        case PaletteEntryKind::kBookmark:
+            // An untitled bookmark falls back to its URL so the row is never
+            // blank.
+            return entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
     }
     return "";
 }
@@ -83,6 +92,8 @@ std::string PaletteRowTooltipText(const PaletteEntry& entry) {
             return "Switch space";
         case PaletteEntryKind::kUrl:
             return "Open the typed URL in the active tab";
+        case PaletteEntryKind::kBookmark:
+            return entry.bookmark.url;
     }
     return "";
 }
@@ -251,7 +262,8 @@ int CommandPaletteView::PreferredContentHeightDip() const {
 }
 
 void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
-                              std::vector<PaletteSpaceEntry> spaces) {
+                              std::vector<PaletteSpaceEntry> spaces,
+                              std::vector<PaletteBookmarkEntry> bookmarks) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || overlay_ == nullptr) {
         return;
@@ -259,6 +271,7 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     const std::size_t pool_size = tabs.size() + spaces.size() + 1;
     model_.SetTabs(std::move(tabs));
     model_.SetSpaces(std::move(spaces));
+    model_.SetBookmarks(std::move(bookmarks));
     // Worst case: every tab and every space matches plus the go-to-URL row
     // that a non-empty query appends.
     RebuildResultRows(pool_size);
