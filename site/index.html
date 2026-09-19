@@ -4,21 +4,43 @@
     <meta charset="utf-8">
     <script>document.documentElement.classList.add('js');</script>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Island is an open-source native desktop browser in development, built on CEF with a calm left rail for the current page.">
+    <title>Island — a calm native browser with tabs, spaces, and split view</title>
+    <meta name="description" content="Island is an open-source native desktop browser built on CEF: a quiet left rail with tabs, colored spaces, split view, a command palette, and session restore. Built in the open for macOS.">
+    <link rel="canonical" href="https://impelixx.github.io/island/">
     <meta name="theme-color" content="#F3F0E9">
+    <meta property="og:site_name" content="Island">
     <meta property="og:title" content="Island — a calm native browser">
-    <meta property="og:description" content="An open-source native browser, in development for macOS.">
+    <meta property="og:description" content="Tabs, spaces, split view, palettes, and session restore in a native CEF browser with a quiet left rail. Open source, built in the open.">
     <meta property="og:type" content="website">
+    <meta property="og:url" content="https://impelixx.github.io/island/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Island — a calm native browser">
+    <meta name="twitter:description" content="Tabs, spaces, split view, palettes, and session restore in a native CEF browser.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23168C99' d='M5 20.5c3.2-1.1 5.3-4.2 6.2-9.4 3.5 1.9 5.5 5 6 9.4 3.6-1 6.7-.5 9.8 1.8-4.7 4.3-13.7 5.3-22 1.1Z'/%3E%3C/svg%3E">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Island",
+      "applicationCategory": "WebBrowser",
+      "operatingSystem": "macOS",
+      "url": "https://impelixx.github.io/island/",
+      "description": "An open-source native desktop browser built on CEF with a quiet left rail: tabs, colored spaces, split view, a command palette, and session restore.",
+      "author": { "@type": "Organization", "name": "Island contributors" },
+      "codeRepository": "https://github.com/impelixx/island",
+      "softwareVersion": "Phase 3 (in development)"
+    }
+    </script>
     <link rel="stylesheet" href="assets/css/site.css">
-    <title>Island — a calm native browser</title>
 
-    <!-- Inline SVG sprite: the four locked Lucide glyphs used by the real chrome. -->
+    <!-- Inline SVG sprite: the Lucide glyphs used by the real chrome. -->
     <svg width="0" height="0" style="position:absolute" aria-hidden="true">
       <defs>
         <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></symbol>
         <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
         <symbol id="i-rotate-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
         <symbol id="i-globe-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       </defs>
     </svg>
   </head>
@@ -32,8 +54,9 @@
         <span>Island</span>
       </a>
       <nav aria-label="Primary navigation">
-        <a href="#rail">The rail</a>
-        <a href="#availability">Availability</a>
+        <a href="#features">Features</a>
+        <a href="#welcome">Welcome</a>
+        <a href="docs.html">Docs</a>
         <a href="privacy.html">Privacy</a>
       </nav>
       <a class="header-source" href="https://github.com/impelixx/island" aria-label="View Island source on GitHub">
@@ -44,29 +67,29 @@
     <main id="main">
       <section class="hero shell" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="mark mark-blue"></span> An open-source browser</p>
-          <h1 id="hero-title">A calm place to browse, one page at a time.</h1>
+          <p class="eyebrow"><span class="mark mark-blue"></span> An open-source native browser</p>
+          <h1 id="hero-title">A calm place for every page you keep open.</h1>
           <p class="lede">
-            Island is a native desktop browser in development. It puts a single quiet rail to the
-            left of the page: back, forward, reload, one address, and the page you're on.
+            Island is a native desktop browser built directly on CEF — no Electron, no web app
+            shell. One quiet rail holds your tabs, your spaces, and the page you're on; split view
+            and a command palette are one keystroke away.
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/impelixx/island">
               Follow the project <span aria-hidden="true">→</span>
             </a>
-            <a class="button button-text" href="#rail">
-              See the rail <span aria-hidden="true">↓</span>
+            <a class="button button-text" href="docs.html">
+              Read the docs <span aria-hidden="true">→</span>
             </a>
           </div>
-          <p class="availability"><span class="mark"></span>The desktop build is in development for macOS first. Other platforms are planned.</p>
+          <p class="availability"><span class="mark"></span>In development for macOS (Apple silicon). Windows and Linux are planned.</p>
         </div>
 
         <div class="hero-visual">
           <!--
-            Illustration of the running product's actual view tree (BrowserChrome::ViewTreeContract):
-            a 286px rail with a navigation row (Back, Forward), an address row
-            (Location, Address, Reload), a divider, and one active-page row,
-            beside a single browser canvas. Decorative; the copy describes the same.
+            Illustration of the running build's view tree: a 286px rail with a
+            tab strip, space switcher, navigation and address rows, beside a
+            split-view canvas. Decorative; the copy describes the same controls.
           -->
           <div class="browser" aria-hidden="true">
             <aside class="rail">
@@ -79,6 +102,25 @@
                 <span class="rail-address"><svg class="loc"><use href="#i-globe-2"/></svg><span class="fill">Island</span></span>
                 <span class="rail-reload"><svg><use href="#i-rotate-cw"/></svg></span>
               </div>
+              <div class="rail-tabs">
+                <span class="rail-tabs-label">Tabs</span>
+                <div class="rail-tab is-active">
+                  <span class="tab-favicon"><svg><use href="#i-globe-2"/></svg></span>
+                  <span class="tab-title">Island</span>
+                  <span class="tab-close">×</span>
+                </div>
+                <div class="rail-tab">
+                  <span class="tab-favicon"><svg><use href="#i-globe-2"/></svg></span>
+                  <span class="tab-title">Docs</span>
+                  <span class="tab-close">×</span>
+                </div>
+              </div>
+              <div class="rail-spaces">
+                <span class="rail-spaces-label">Spaces</span>
+                <div class="rail-space is-active"><span class="dot" style="background:var(--space-blue)"></span><span class="name">Focus</span></div>
+                <div class="rail-space"><span class="dot" style="background:var(--space-green)"></span><span class="name">Personal</span></div>
+                <div class="rail-space"><span class="dot" style="background:var(--space-coral)"></span><span class="name">Research</span></div>
+              </div>
               <hr class="rail-divider">
               <div class="active-page">
                 <span class="favicon"><svg><use href="#i-globe-2"/></svg></span>
@@ -87,15 +129,27 @@
               </div>
             </aside>
             <div class="canvas">
-              <div class="canvas-page">
-                <p class="page-title">Island Browser</p>
-                <p class="page-note">This is the local page the app opens with — no network request.</p>
+              <div class="canvas-split">
+                <div class="canvas-pane canvas-pane--wide">
+                  <div>
+                    <p class="pane-title">Island Browser</p>
+                    <p class="pane-note">The local page the app opens with.</p>
+                  </div>
+                </div>
+                <span class="canvas-divider"></span>
+                <div class="canvas-pane canvas-pane--wide">
+                  <div>
+                    <p class="pane-title">Docs</p>
+                    <p class="pane-note">Split view: two tabs, one space, side by side.</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
           <p class="hero-caption">
-            <strong>What runs today.</strong> The current macOS build opens one native window with the
-            rail shown here and a local starting page. It is a real foundation, not a finished browser.
+            <strong>What runs today.</strong> The macOS build in development opens one native window
+            with the rail, tabs, spaces, and split view shown here — a real foundation, not a
+            finished browser.
           </p>
         </div>
       </section>
@@ -104,25 +158,30 @@
         <p class="eyebrow">Why it's being built</p>
         <div>
           <h2 id="about-title">The browser chrome should get out of the way.</h2>
-          <p>Island keeps the interface small and legible so the page stays in front. Navigation, an address, and the current page live in one calm rail at the left edge — nothing more competes for your attention.</p>
+          <p>Island keeps the interface small and legible so the page stays in front. Everything it
+          adds — tabs, spaces, split view, palettes — lives in the same calm rail or behind one
+          keystroke, and every feature listed on this site runs in the current build.</p>
         </div>
       </section>
 
-      <section class="ledger shell" id="rail" aria-labelledby="rail-title">
+      <section class="ledger shell" id="features" aria-labelledby="features-title">
         <div class="section-heading reveal">
           <p class="eyebrow">The rail, today</p>
-          <h2 id="rail-title">What the current build actually has.</h2>
-          <p>These are the working pieces of the macOS build in development — not a roadmap and not a promise of what's next.</p>
+          <h2 id="features-title">What the current build actually has.</h2>
+          <p>Working pieces of the macOS build in development — not a roadmap and not a promise of
+          what's next.</p>
         </div>
 
         <div class="rail-list">
           <article class="lift reveal">
             <div class="lift-index">
               <span class="num" aria-hidden="true">01</span>
-              <h3>Back and forward</h3>
+              <h3>Tabs and spaces</h3>
             </div>
             <div class="lift-copy">
-              <p>Move backward and forward through the current page's history from the top of the rail. Keyboard shortcuts work too.</p>
+              <p>A tab strip and a space switcher live in the rail. Spaces are colored, named
+              contexts with their own tabs; rename with F2 or the menu, reorder from the menu, and
+              switch from the rail or the palette.</p>
               <span class="lift-spec">Working in the build</span>
             </div>
           </article>
@@ -130,10 +189,12 @@
           <article class="lift reveal">
             <div class="lift-index">
               <span class="num" aria-hidden="true">02</span>
-              <h3>One address</h3>
+              <h3>Split view</h3>
             </div>
             <div class="lift-copy">
-              <p>A single address field accepts a URL and takes you there. It validates what you type and keeps the current address in view when you're not editing it.</p>
+              <p>Pair any two tabs of a space side by side with a keyboard-adjustable divider.
+              Closing either half — or selecting a tab outside the pair — returns the survivor to
+              full width.</p>
               <span class="lift-spec">Working in the build</span>
             </div>
           </article>
@@ -141,10 +202,13 @@
           <article class="lift reveal">
             <div class="lift-index">
               <span class="num" aria-hidden="true">03</span>
-              <h3>Reload</h3>
+              <h3>Command and search palettes</h3>
             </div>
             <div class="lift-copy">
-              <p>Reload the current page from beside the address field, or with the usual keyboard shortcut.</p>
+              <p><kbd>Cmd</kbd>+<kbd>K</kbd> opens a keyboard-first palette listing open tabs,
+              spaces, and your bookmarks, with a go-to-URL affordance through the same validation
+              as the address bar. <kbd>Cmd</kbd>+<kbd>⇧</kbd>+<kbd>K</kbd> searches the web with
+              your pick of providers.</p>
               <span class="lift-spec">Working in the build</span>
             </div>
           </article>
@@ -152,13 +216,68 @@
           <article class="lift reveal">
             <div class="lift-index">
               <span class="num" aria-hidden="true">04</span>
-              <h3>The current page</h3>
+              <h3>Import from your browser</h3>
             </div>
             <div class="lift-copy">
-              <p>One row at the foot of the rail shows the page you're on, with an accent line marking it as active. Selecting it returns focus to the page.</p>
+              <p>The first-run welcome offers to bring bookmarks in from browsers already on your
+              machine — Chrome, Edge, Brave, and other Chromium-family browsers, plus Safari where
+              the system allows — and an appearance choice of System, Light, or Dark.</p>
               <span class="lift-spec">Working in the build</span>
             </div>
           </article>
+
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">05</span>
+              <h3>Session restore</h3>
+            </div>
+            <div class="lift-copy">
+              <p>Quit cleanly and Island rebuilds your spaces, tabs, and active selections on the
+              next launch — including split pairs. Restored URLs pass the same validation as
+              anything you type; nothing bypasses policy.</p>
+              <span class="lift-spec">Working in the build</span>
+            </div>
+          </article>
+
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">06</span>
+              <h3>Navigation and the address bar</h3>
+            </div>
+            <div class="lift-copy">
+              <p>Back, forward, and reload with the usual shortcuts; one address field that
+              validates what you type against a strict local allow-list before it ever loads.</p>
+              <span class="lift-spec">Working in the build</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="availability-block shell reveal" id="welcome" aria-labelledby="welcome-title">
+        <div class="section-heading">
+          <p class="eyebrow">First run</p>
+          <h2 id="welcome-title">A welcome that offers, never blocks.</h2>
+          <p>On a fresh install Island shows one card: pick how it looks, tick the browsers to
+          import from, and start browsing. Escape skips it — now and forever, or until you reopen
+          it from the menu.</p>
+        </div>
+        <div class="palette-mock reveal" aria-hidden="true">
+          <div class="welcome-mock">
+            <h3>Welcome to Island</h3>
+            <p class="welcome-lede">Choose how Island looks, and bring your bookmarks from the browser you were using.</p>
+            <div class="theme-row">
+              <span class="theme-choice is-active">System</span>
+              <span class="theme-choice">Light</span>
+              <span class="theme-choice">Dark</span>
+            </div>
+            <div class="import-row"><span class="check">[x]</span> Google Chrome</div>
+            <div class="import-row"><span class="check">[x]</span> Microsoft Edge</div>
+            <div class="import-row"><span class="check">[x]</span> Safari</div>
+            <div class="welcome-actions">
+              <span class="button button-primary">Import and start</span>
+              <span class="button button-text">Just start browsing</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -166,18 +285,22 @@
         <div class="section-heading">
           <p class="eyebrow">Availability</p>
           <h2 id="availability-title">Where you can run it.</h2>
-          <p>Honest platform status for the in-development build. Signed public releases are still to come.</p>
+          <p>Honest platform status for the in-development build. Signed public releases are still
+          to come.</p>
         </div>
         <div class="availability-grid">
           <article class="availability-item">
             <span class="status-chip status-chip--active">In development</span>
             <h3>macOS</h3>
-            <p>Island is being built and verified on macOS first. The current build runs on Apple silicon; broader macOS and notarized releases are still in progress.</p>
+            <p>Island is built and verified on Apple silicon. You can build it from source today —
+            the <a href="docs.html" style="text-decoration:underline;text-underline-offset:3px">quick start</a>
+            takes a few minutes.</p>
           </article>
           <article class="availability-item">
             <span class="status-chip status-chip--planned">Planned</span>
             <h3>Windows &amp; Linux</h3>
-            <p>Support for Windows and Linux is planned. Those builds still need platform verification before they're treated as available.</p>
+            <p>The code targets Windows and Linux (x64 and arm64) and CI builds search and packaging
+            on all six platforms, but native browser builds still need platform verification.</p>
           </article>
         </div>
       </section>
@@ -185,10 +308,17 @@
       <section class="open-source shell reveal" aria-labelledby="source-title">
         <p class="eyebrow">Open source</p>
         <h2 id="source-title">Built in the open.</h2>
-        <p>Island is being made in public. Follow the work, read the design notes, or contribute when the project is ready for you.</p>
-        <a class="button button-primary" href="https://github.com/impelixx/island">
-          Visit the repository <span aria-hidden="true">→</span>
-        </a>
+        <p>Island is made in public: phase specs, plans, and acceptance checklists live in the
+        repository next to the code. Read the docs, run the tests, or contribute when the project
+        is ready for you.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://github.com/impelixx/island">
+            Visit the repository <span aria-hidden="true">→</span>
+          </a>
+          <a class="button button-text" href="docs.html">
+            Quick start <span aria-hidden="true">→</span>
+          </a>
+        </div>
       </section>
     </main>
 
@@ -201,6 +331,7 @@
       </a>
       <p>Made openly. Browser software is in development.</p>
       <nav aria-label="Footer navigation">
+        <a href="docs.html">Docs</a>
         <a href="privacy.html">Privacy</a>
         <a href="https://github.com/impelixx/island">GitHub</a>
       </nav>
