@@ -7,18 +7,20 @@ namespace {
 
 constexpr int kRailWidth = 286;
 
-TEST(SidebarStateTest, GivenANewSidebarWhenInspectedThenItMatchesTheDefaultAndIsHidden) {
+TEST(SidebarStateTest, GivenANewSidebarWhenInspectedThenItMatchesTheDefaultAndIsRevealed) {
     const SidebarState state;
 
     EXPECT_EQ(state.pinned(), kSidebarRevealedByDefault);
-    EXPECT_FALSE(state.revealed());
+    EXPECT_TRUE(state.revealed());
     EXPECT_FALSE(state.hover_revealed());
-    EXPECT_EQ(state.RailWidthDip(kRailWidth), 0);
-    EXPECT_TRUE(state.sliver_visible());
+    EXPECT_EQ(state.RailWidthDip(kRailWidth), kRailWidth);
+    EXPECT_FALSE(state.sliver_visible());
 }
 
 TEST(SidebarStateTest, GivenAHiddenSidebarWhenToggledThenItRevealsAtFullRailWidth) {
-    SidebarState state;
+    // The unpinned construction starts hidden, like a user-hidden rail.
+    SidebarState state(/*pinned=*/false);
+    ASSERT_FALSE(state.revealed());
 
     state.Toggle();
 
@@ -34,7 +36,7 @@ TEST(SidebarStateTest, GivenAHiddenSidebarWhenToggledThenItRevealsAtFullRailWidt
 }
 
 TEST(SidebarStateTest, GivenTheEdgeBandWhenEnteredThenHoverReveals) {
-    SidebarState state;
+    SidebarState state(/*pinned=*/false);
 
     state.OnPointerMoved(kHoverRevealBandDip, kRailWidth);
     EXPECT_FALSE(state.revealed());
@@ -46,7 +48,7 @@ TEST(SidebarStateTest, GivenTheEdgeBandWhenEnteredThenHoverReveals) {
 }
 
 TEST(SidebarStateTest, GivenAHoverRevealWhenThePointerLeavesTheGraceBandThenItHides) {
-    SidebarState state;
+    SidebarState state(/*pinned=*/false);
     state.OnPointerMoved(0, kRailWidth);
     ASSERT_TRUE(state.revealed());
 
@@ -58,7 +60,7 @@ TEST(SidebarStateTest, GivenAHoverRevealWhenThePointerLeavesTheGraceBandThenItHi
 }
 
 TEST(SidebarStateTest, GivenRepeatedHoverMovesWhenAppliedThenTheStateIsIdempotent) {
-    SidebarState state;
+    SidebarState state(/*pinned=*/false);
 
     for (int repeat = 0; repeat < 5; ++repeat) {
         state.OnPointerMoved(3, kRailWidth);
@@ -72,7 +74,6 @@ TEST(SidebarStateTest, GivenRepeatedHoverMovesWhenAppliedThenTheStateIsIdempoten
 
 TEST(SidebarStateTest, GivenAPinnedSidebarWhenHoveredAnywhereThenTheToggleStateWins) {
     SidebarState state;
-    state.Toggle();
     ASSERT_TRUE(state.pinned());
 
     state.OnPointerMoved(900, kRailWidth);
@@ -82,7 +83,7 @@ TEST(SidebarStateTest, GivenAPinnedSidebarWhenHoveredAnywhereThenTheToggleStateW
 }
 
 TEST(SidebarStateTest, GivenAHoverRevealWhenToggledOffThenTheHoverRevealIsClearedToo) {
-    SidebarState state;
+    SidebarState state(/*pinned=*/false);
     state.OnPointerMoved(0, kRailWidth);
     ASSERT_TRUE(state.hover_revealed());
 
@@ -96,7 +97,7 @@ TEST(SidebarStateTest, GivenAHoverRevealWhenToggledOffThenTheHoverRevealIsCleare
 }
 
 TEST(SidebarStateTest, GivenAHoverRevealWhenThePointerLeavesTheWindowThenItHides) {
-    SidebarState state;
+    SidebarState state(/*pinned=*/false);
     state.OnPointerMoved(0, kRailWidth);
     ASSERT_TRUE(state.revealed());
 

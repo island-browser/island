@@ -52,12 +52,34 @@ bool PlatformCanReadSafari() { return false; }
 std::filesystem::path SourceBookmarksPath(const SourcePaths& source,
                                           const std::filesystem::path& base_home) {
 #if defined(_WIN32)
-    return base_home / source.windows_path;
+    const std::filesystem::path primary = base_home / source.windows_path;
 #elif defined(__APPLE__)
-    return base_home / source.macos_path;
+    const std::filesystem::path primary = base_home / source.macos_path;
 #else
-    return base_home / source.linux_path;
+    const std::filesystem::path primary = base_home / source.linux_path;
 #endif
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(primary, ec)) {
+        return primary;
+    }
+    // Many setups keep bookmarks in a non-Default profile ("Profile 1", …):
+    // fall back to any profile's Bookmarks file under the browser's user-data
+    // root (the primary path's parent directory minus its last segment).
+    const std::filesystem::path user_data = primary.parent_path().parent_path();
+    if (!std::filesystem::is_directory(user_data, ec)) {
+        return primary;
+    }
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(user_data, ec)) {
+        if (ec) {
+            break;
+        }
+        const std::filesystem::path candidate = entry.path() / "Bookmarks";
+        if (std::filesystem::is_regular_file(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return primary;
 }
 
 // Chromium stores URL entries as {"type":"url","name":...,"url":...} nested in

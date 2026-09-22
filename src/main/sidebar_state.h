@@ -5,10 +5,11 @@
 
 namespace island {
 
-// The sidebar is hidden by default on every platform. Cmd/Ctrl+B is the
-// keyboard path everywhere; hover-reveal is a macOS-only enhancement layered on
-// top of it, so the hidden default is always escapable without a pointer.
-inline constexpr bool kSidebarRevealedByDefault = false;
+// The sidebar is revealed by default: the rail is the product's primary
+// surface (tabs, address, spaces) and a first run with a 2-DIP sliver reads as
+// an empty window. Hiding stays one Cmd/Ctrl+B away everywhere, and
+// hover-reveal is the macOS-only enhancement layered on top.
+inline constexpr bool kSidebarRevealedByDefault = true;
 
 // Width of the always-visible edge marker while the rail is hidden. The spec
 // allows 1-2 DIP; 2 matches the ActivePageIndicator accent thickness so the two

@@ -70,6 +70,7 @@ class WelcomeFlow final {
     void BuildViews();
     void HandleButtonPressed(int view_id);
     void UpdateImportButtonState();
+    [[nodiscard]] bool AnyCheckedAvailableSource() const;
     [[nodiscard]] int PreferredContentHeightDip() const;
     void UpdateBounds();
     void ApplySurfaceColors();
