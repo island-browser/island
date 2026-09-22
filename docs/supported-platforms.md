@@ -104,3 +104,13 @@ push will produce the refreshed evidence without configuration work. The refresh
 **not started** because of the account's GitHub Actions billing block, so no green run exists yet.
 Until a run started after the billing fix goes green, cite no Phase 3-era native CI evidence for
 any target — the macOS arm64 row above is local evidence only.
+
+Local macOS arm64 packaging evidence (2026-09-22, this machine): the full `Package unsigned
+candidates` recipe for `macosarm64` was reproduced locally on the current tree — Release
+configure/build (242/242 ctest with `-C Release`), then `scripts/package.py` produced
+`island_browser-0.3.0-local.1-macosarm64.zip`, verified by the workflow's own recipe (SHA256SUMS
+digest match, `build-metadata.json` exactly `{format: zip, notarized: false,
+publicReleaseEligible: false, signed: false, target: macosarm64}`), and the extracted app launched
+with `--island-smoke-test` (smoke page rendered, clean quit, no leftover processes). Zip entries
+carry 0755 modes for the main and helper binaries; extraction must preserve them (Info-ZIP
+`unzip` and macOS Archive Utility do; Python `zipfile.extractall` does not).

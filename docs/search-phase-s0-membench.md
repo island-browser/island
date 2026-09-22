@@ -61,6 +61,10 @@ arena-backed MemTable and the streaming segment writer:
 |---:|---:|---:|---:|---:|
 | 100,000 | ~59 MB | ~60 MB | ~60 MB | ~604 |
 
+Re-verified 2026-09-22 on the current tree (`result=fail`, delta_bytes 61,112,464 at the 32 MB
+ceiling) — the recorded gap stands; the gate remains non-blocking until the store/codec changes
+named above land.
+
 For reference, the pre-arena numbers this replaced: ~1.6 KB per document, delta ~160 MB.
 
 What changed:
