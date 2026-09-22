@@ -114,3 +114,9 @@ publicReleaseEligible: false, signed: false, target: macosarm64}`), and the extr
 with `--island-smoke-test` (smoke page rendered, clean quit, no leftover processes). Zip entries
 carry 0755 modes for the main and helper binaries; extraction must preserve them (Info-ZIP
 `unzip` and macOS Archive Utility do; Python `zipfile.extractall` does not).
+
+Clean-checkout contract re-verified 2026-09-22 from a true fresh clone (no vendored
+`third_party/` or `assets/`): `scripts/setup_deps.sh` performed the real CEF and Geist downloads
+("Dependencies ready"), `deps.py verify` passed, a fresh configure/build produced 0 errors, and
+the full suite ran green there — 242/242 ctest, pytest 70 passed + 89 subtests, plus a
+`--island-smoke-test` launch of that clone's app with a clean quit.
