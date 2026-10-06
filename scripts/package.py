@@ -243,6 +243,24 @@ def archive_name(version: str, target: Target) -> str:
     return f"island_browser-{version}-{target.value}{layout(target).archive_suffix}"
 
 
+def installer_name(version: str, target: Target) -> str:
+    """The installer scripts/installers.py writes beside the archive: a drag-to-Applications disk
+    image (macOS), a Debian package (Linux), or a per-user setup program (Windows)."""
+    match target:
+        case Target.MACOS_X64 | Target.MACOS_ARM64:
+            return f"island_browser-{version}-{target.value}.dmg"
+        case Target.LINUX_X64 | Target.LINUX_ARM64:
+            return f"island_browser-{version}-{target.value}.deb"
+        case Target.WINDOWS_X64 | Target.WINDOWS_ARM64:
+            return f"island_browser-{version}-{target.value}-setup.exe"
+    assert_never(target)
+
+
+def release_files(version: str) -> list[str]:
+    """Every per-target file a release carries: one archive and one installer per target."""
+    return sorted(name for target in Target for name in (archive_name(version, target), installer_name(version, target)))
+
+
 def package(arguments: Arguments) -> Path:
     selected = layout(arguments.target)
     source = validate(arguments, selected)

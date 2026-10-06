@@ -13,6 +13,8 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 ASSEMBLER = REPOSITORY / "scripts" / "release_assets.py"
 TARGETS = {"macosx64": ".zip", "macosarm64": ".zip", "windows64": ".zip", "windowsarm64": ".zip",
            "linux64": ".tar.gz", "linuxarm64": ".tar.gz"}
+INSTALLERS = {"macosx64": ".dmg", "macosarm64": ".dmg", "windows64": "-setup.exe",
+              "windowsarm64": "-setup.exe", "linux64": ".deb", "linuxarm64": ".deb"}
 
 
 @final
@@ -35,18 +37,23 @@ class ReleaseAssetsTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def _stage(self, version: str, targets: dict[str, str] = TARGETS) -> dict[str, str]:
+    def _stage(self, version: str, targets: dict[str, str] = TARGETS, installers: bool = True) -> dict[str, str]:
         """Lays out artifacts like `gh run download`: one directory per artifact, each holding an
-        archive and the single-line SHA256SUMS.txt that scripts/package.py writes."""
+        archive and an installer and the SHA256SUMS.txt written beside them."""
         digests: dict[str, str] = {}
         for target, suffix in targets.items():
             directory = self.staging / f"unsigned-candidate-{version}-{target}"
             directory.mkdir(parents=True)
-            name = f"island_browser-{version}-{target}{suffix}"
-            data = f"archive for {target}\n".encode()
-            (directory / name).write_bytes(data)
-            digests[name] = hashlib.sha256(data).hexdigest()
-            (directory / "SHA256SUMS.txt").write_text(f"{digests[name]}  {name}\n", encoding="utf-8")
+            names = [f"island_browser-{version}-{target}{suffix}"]
+            if installers:
+                names.append(f"island_browser-{version}-{target}{INSTALLERS[target]}")
+            lines = ""
+            for name in names:
+                data = f"{name} contents\n".encode()
+                (directory / name).write_bytes(data)
+                digests[name] = hashlib.sha256(data).hexdigest()
+                lines += f"{digests[name]}  {name}\n"
+            (directory / "SHA256SUMS.txt").write_text(lines, encoding="utf-8")
         return digests
 
     def _run(self, version: str) -> subprocess.CompletedProcess[str]:
@@ -54,7 +61,7 @@ class ReleaseAssetsTests(unittest.TestCase):
                                "--version", version, "--output", str(self.output)],
                               capture_output=True, text=True, check=False)
 
-    def test_assembles_six_archives_and_a_combined_checksum_file(self) -> None:
+    def test_assembles_archives_installers_and_a_combined_checksum_file(self) -> None:
         for version in ("0.4.0", "0.4.0-nightly.17", "0.5.0-beta.1-nightly.3"):
             with self.subTest(version=version):
                 self._use(version)
@@ -76,6 +83,15 @@ class ReleaseAssetsTests(unittest.TestCase):
         result = self._run("0.4.0")
         self.assertEqual(result.returncode, 1)
         self.assertIn("island_browser-0.4.0-windowsarm64.zip", result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_requires_an_installer_per_target(self) -> None:
+        self._stage("0.5.0", installers=False)
+        result = self._run("0.5.0")
+        self.assertEqual(result.returncode, 1)
+        for name in ("macosarm64.dmg", "macosx64.dmg", "linux64.deb", "linuxarm64.deb",
+                     "windows64-setup.exe", "windowsarm64-setup.exe"):
+            self.assertIn(f"island_browser-0.5.0-{name}", result.stderr)
         self.assertFalse(self.output.exists())
 
     def test_rejects_a_checksum_mismatch(self) -> None:
