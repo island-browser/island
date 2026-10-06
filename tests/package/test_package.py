@@ -32,7 +32,7 @@ class PackageTests(unittest.TestCase):
         _ = self.temporary.cleanup()
 
     def test_packages_each_supported_layout_with_metadata_and_checksum(self) -> None:
-        for target in ("macosarm64", "windows64", "linux64", "linuxarm64"):
+        for target in ("macosarm64", "windows64", "windowsarm64", "linux64", "linuxarm64"):
             with self.subTest(target=target):
                 self.fixture.stage(target)
                 result = self._run(target)
@@ -69,6 +69,17 @@ class PackageTests(unittest.TestCase):
                 self.assertIn('"publicReleaseEligible":false', metadata)
                 checksum = (self.output / "SHA256SUMS.txt").read_text(encoding="utf-8")
                 self.assertEqual(checksum, f"{hashlib.sha256(artifact.read_bytes()).hexdigest()}  {artifact.name}\n")
+
+    def test_requires_the_dxc_dlls_only_on_windows_x64(self) -> None:
+        # CEF's arm64 Windows distribution ships no dxcompiler.dll / dxil.dll.
+        self.fixture.stage("windowsarm64")
+        self.assertFalse((self.build / "src/main/Release/dxcompiler.dll").exists())
+        _ = self._run("windowsarm64")
+        self.fixture.stage("windows64")
+        _ = (self.build / "src/main/Release/dxcompiler.dll").unlink()
+        result = self._run("windows64", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("dxcompiler.dll", result.stderr)
 
     def test_rejects_missing_runtime_before_writing_artifact(self) -> None:
         self.fixture.stage("windows64")

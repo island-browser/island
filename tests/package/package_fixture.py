@@ -37,7 +37,9 @@ class PackageFixture:
         for name in ("icudtl.dat", "resources.pak", "chrome_100_percent.pak", "chrome_200_percent.pak", "locales/en-US.pak"):
             self.write(root / name)
         if target.startswith("windows"):
-            for name in ("libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "libEGL.dll", "libGLESv2.dll", "v8_context_snapshot.bin", "vk_swiftshader.dll", "vulkan-1.dll"):
+            # The arm64 CEF distribution has no DirectX shader compiler DLLs.
+            dxc = ("dxcompiler.dll", "dxil.dll") if target == "windows64" else ()
+            for name in ("libcef.dll", "chrome_elf.dll", "d3dcompiler_47.dll", *dxc, "libEGL.dll", "libGLESv2.dll", "v8_context_snapshot.bin", "vk_swiftshader.dll", "vulkan-1.dll"):
                 self.write_binary(root / name, target)
             self.write(root / "vk_swiftshader_icd.json")
             if sandbox:
