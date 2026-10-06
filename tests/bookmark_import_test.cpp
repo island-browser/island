@@ -22,6 +22,18 @@ void WriteFile(const std::filesystem::path& path, const std::string& content) {
     out << content;
 }
 
+// The Chrome profile location DetectInstalledSources/ImportFromSource probe
+// on this host, relative to the home directory.
+std::filesystem::path ChromeBookmarksPath() {
+#if defined(_WIN32)
+    return "AppData/Local/Google/Chrome/User Data/Default/Bookmarks";
+#elif defined(__APPLE__)
+    return "Library/Application Support/Google/Chrome/Default/Bookmarks";
+#else
+    return ".config/google-chrome/Default/Bookmarks";
+#endif
+}
+
 TEST(BookmarkImportTest, GivenAChromiumBookmarksFileWhenParsedThenUrlEntriesAppearInOrder) {
     const std::string fixture = R"({
         "roots": {
@@ -94,8 +106,7 @@ TEST(BookmarkImportTest, GivenTheEntryCapWhenParsedThenTheListStopsAtTheLimit) {
 TEST(BookmarkImportTest, GivenInstalledBrowsersWhenDetectedThenOnlyReadableOnesAreAvailable) {
     const std::filesystem::path home = TempHome("detect");
     // Chrome (Chromium-family path) and nothing else.
-    WriteFile(home / "Library/Application Support/Google/Chrome/Default/Bookmarks",
-              R"({"roots": {"bookmark_bar": {"children": []}}})");
+    WriteFile(home / ChromeBookmarksPath(), R"({"roots": {"bookmark_bar": {"children": []}}})");
 
     const std::vector<ImportSourceInfo> sources = DetectInstalledSources(home);
     ASSERT_FALSE(sources.empty());
@@ -114,7 +125,7 @@ TEST(BookmarkImportTest, GivenInstalledBrowsersWhenDetectedThenOnlyReadableOnesA
 
 TEST(BookmarkImportTest, GivenAnImportableSourceWhenImportedThenItsBookmarksAreReturned) {
     const std::filesystem::path home = TempHome("import");
-    WriteFile(home / "Library/Application Support/Google/Chrome/Default/Bookmarks",
+    WriteFile(home / ChromeBookmarksPath(),
               R"({"roots": {"bookmark_bar": {"children": [
                   {"type": "url", "name": "Docs", "url": "https://example.com/docs"}
               ]}}})");

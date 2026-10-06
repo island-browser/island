@@ -31,6 +31,8 @@ enum class SessionError : std::uint8_t {
 struct TabState {
     TabId id;
     std::string url;
+    // Optional in the file (absent = false), so older sessions still load.
+    bool pinned = false;
 
     bool operator==(const TabState&) const = default;
 };

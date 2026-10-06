@@ -42,6 +42,32 @@ TEST(PrefsStoreTest, GivenARoundTripWhenSavedAndLoadedThenTheStateSurvives) {
     }
 }
 
+TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional) {
+    PrefsState state;
+    state.agent_command = "npx -y \"my agent\" --acp";
+    state.agent_panel_open = true;
+    state.keybindings = {{"new_tab", "Mod+Shift+T"}, {"close_tab", ""}};
+    const std::filesystem::path path = TempPath("agent.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state, state);
+
+    // Files written before the agent keys existed still load.
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
+    const PrefsLoadResult legacy = PrefsStore::Load(path);
+    EXPECT_EQ(legacy.error, PrefsError::kNone);
+    EXPECT_TRUE(legacy.state.agent_command.empty());
+    EXPECT_FALSE(legacy.state.agent_panel_open);
+
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","agent_command":7})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","keybindings":{"a":1}})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
 TEST(PrefsStoreTest, GivenCorruptJsonWhenLoadedThenParseErrorAndDefaults) {
     const std::filesystem::path path = TempPath("corrupt.json");
     WriteFile(path, "{ not json");

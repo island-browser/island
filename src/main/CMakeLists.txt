@@ -1,11 +1,15 @@
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 
 add_library(island_browser_core STATIC
+    ${ISLAND_LOCAL_PAGE_SOURCES}
     address_bar_model.cc
+    agent_navigation.cc
+    local_page.cc
     address_policy.cc
     app_resources.cc
     bookmark_import.cc
     bookmark_store.cc
+    browser_import.cc
     app_runtime.cc
     browser_chrome.cc
     browser_window.cc
@@ -13,8 +17,10 @@ add_library(island_browser_core STATIC
     command_palette.cc
     command_palette_view.cc
     design_tokens.cc
+    devtools_bridge.cc
     icon_catalog.cc
     island_app.cc
+    keymap.cc
     navigation_state.cc
     prefs_store.cc
     search_palette.cc
@@ -26,11 +32,13 @@ add_library(island_browser_core STATIC
     space_rename_overlay.cc
     startup_options.cc
     welcome_flow.cc
+    window_agent_host.cc
     tab.cc
 )
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
+target_link_libraries(island_browser_core PUBLIC island_agent)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)
@@ -113,3 +121,14 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
     message(FATAL_ERROR "src/main requires a supported Island desktop host.")
 endif()
+
+# The stdio MCP bridge sits beside the browser binary (Contents/MacOS in the
+# app bundle) so ACP agents without MCP-over-HTTP can reach the browser tools.
+add_dependencies(island_browser island_mcp_bridge)
+add_custom_command(
+    TARGET island_browser
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:island_mcp_bridge>"
+            "$<TARGET_FILE_DIR:island_browser>"
+    VERBATIM
+)

@@ -76,6 +76,25 @@ TEST(SessionStore, SaveThenLoadRoundTripsASimpleSession) {
     EXPECT_EQ(result.state, original);
 }
 
+TEST(SessionStore, RoundTripsPinnedTabsAndLoadsSessionsWithoutThePinnedKey) {
+    SessionState original = BuildSampleState();
+    original.spaces[0].tabs[0].pinned = true;
+    const auto path = std::filesystem::temp_directory_path() / "island_test_pinned.json";
+    ASSERT_EQ(SessionStore::Save(path, original), SessionError::kNone);
+    LoadResult result = SessionStore::Load(path);
+    EXPECT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state, original);
+    EXPECT_TRUE(result.state.spaces[0].tabs[0].pinned);
+    EXPECT_FALSE(result.state.spaces[0].tabs[1].pinned);
+
+    // A wrong type is a schema error, never a silent default.
+    WriteFile(path,
+              R"({"version":1,"active_space_id":1,"spaces":[{"id":1,"name":"A","color_argb":1,)"
+              R"("tabs":[{"id":1,"url":"https://a.test/","pinned":"yes"}]}]})");
+    EXPECT_EQ(SessionStore::Load(path).error, SessionError::kSchemaError);
+    std::filesystem::remove(path);
+}
+
 TEST(SessionStore, RoundTripsDefaultEmptySession) {
     // Given: a fresh default session (zero spaces, zero tabs)
     SessionState empty = SessionState::Default();

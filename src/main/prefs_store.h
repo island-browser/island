@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace island {
 
@@ -20,6 +22,15 @@ struct PrefsState {
     int version = kCurrentSchemaVersion;
     bool onboarding_completed = false;
     ThemePreference theme = ThemePreference::kSystem;
+    // The ACP agent the sidebar panel runs (a shell command line). Optional in
+    // the file; empty means "use the built-in default". Added without a schema
+    // bump because older files simply lack the keys.
+    std::string agent_command;
+    // Whether the agent panel was open at the last clean quit.
+    bool agent_panel_open = false;
+    // Keyboard shortcut overrides: {action id, binding} pairs that differ
+    // from the built-in keymap (an empty binding unbinds). Optional key.
+    std::vector<std::pair<std::string, std::string>> keybindings;
 
     bool operator==(const PrefsState&) const = default;
 };

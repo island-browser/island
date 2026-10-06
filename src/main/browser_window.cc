@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,27 +11,33 @@
 #include <utility>
 
 #include "app_resources.h"
+#include "browser_import.h"
 #include "cef_address_parser.h"
 #include "design_tokens.h"
+#include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
+#include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_color_ids.h"
 #include "include/cef_frame.h"
+#include "include/cef_image.h"
+#include "include/cef_parser.h"
+#include "include/cef_task.h"
+#include "include/cef_values.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_fill_layout.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
+#include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "session_store.h"
+#include "window_agent_host.h"
 
 namespace island {
 namespace {
 
-constexpr int kVirtualKeyLeft = 0x25;
-constexpr int kVirtualKeyRight = 0x27;
-constexpr int kVirtualKeyF2 = 0x71;
 constexpr int kVirtualKeyF5 = 0x74;
 constexpr int kVirtualKeyEscape = 0x1B;
 constexpr int kChromeWindowWidth = 1440;
@@ -60,6 +67,47 @@ std::filesystem::path UserBaseHome() {
     return home != nullptr && *home != '\0' ? std::filesystem::path(home)
                                             : std::filesystem::path(".");
 #endif
+}
+
+std::string CssColor(ArgbColor color) {
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string css = "#";
+    for (int shift = 20; shift >= 0; shift -= 4) {
+        css += kHex[(color.argb >> static_cast<unsigned>(shift)) & 0xFU];
+    }
+    return css;
+}
+
+std::string TrimmedCopy(std::string_view text) {
+    const std::size_t first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    const std::size_t last = text.find_last_not_of(" \t\r\n");
+    return std::string(text.substr(first, last - first + 1));
+}
+
+bool IsWebUrl(std::string_view url) {
+    return url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0;
+}
+
+// The stdio MCP bridge ships next to the browser binary; agents without MCP
+// over HTTP launch it. Empty when it is not there.
+std::string McpBridgePath() {
+    std::error_code error;
+    const std::filesystem::path binary = CurrentRuntimeBinaryPath();
+#if defined(_WIN32)
+    const std::filesystem::path bridge = binary.parent_path() / "island_mcp_bridge.exe";
+#else
+    const std::filesystem::path bridge = binary.parent_path() / "island_mcp_bridge";
+#endif
+    return std::filesystem::is_regular_file(bridge, error) ? bridge.string() : std::string();
+}
+
+void RunAgentTask(std::function<void()> task) {
+    if (task) {
+        task();
+    }
 }
 
 // The edge sliver is a bare fill panel; it only needs a preferred size so the
@@ -94,7 +142,9 @@ CefRefPtr<BrowserWindow> BrowserWindow::CreateHeadlessForTest(std::string initia
 }
 
 BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
-    : initial_url_(std::move(initial_url)), persist_session_(persist_session) {
+    : initial_url_(std::move(initial_url)),
+      persist_session_(persist_session),
+      address_validator_(&ParseAndValidate) {
     if (!persist_session_ || !RestoreSession()) {
         // CreateDefaultSpace already appends the space's single starting tab.
         spaces_.push_back(CreateDefaultSpace());
@@ -106,6 +156,7 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
         bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
     }
+    keymap_ = Keymap::WithOverrides(prefs_.keybindings);
     chrome_snapshot_.rail_bounds = {.x = 0,
                                     .y = 0,
                                     .width = sidebar_state_.RailWidthDip(
@@ -122,6 +173,8 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         tab->navigation_state().SetObserver(this);
     }
 }
+
+BrowserWindow::~BrowserWindow() = default;
 
 Space BrowserWindow::CreateDefaultSpace() {
     Space space{SpaceId{NextSpaceId()}, std::string(kDefaultSpaceName), kDefaultSpaceColor};
@@ -164,6 +217,7 @@ bool BrowserWindow::RestoreSession() {
             if (address.is_valid()) {
                 tab.SetStartupUrl(address.url);
             }
+            tab.SetPinned(tab_state.pinned);
             space.AppendTab(std::move(tab));
         }
         if (space_state.active_tab_id.has_value()) {
@@ -199,7 +253,8 @@ void BrowserWindow::SaveSession() const {
         space_state.name = space.name();
         space_state.color_argb = space.color().argb;
         for (const Tab& tab : space.tabs()) {
-            space_state.tabs.push_back(TabState{tab.id(), tab.navigation_state().snapshot().url});
+            space_state.tabs.push_back(
+                TabState{tab.id(), tab.navigation_state().snapshot().url, tab.pinned()});
         }
         space_state.active_tab_id =
             space.has_active_tab() ? std::optional<TabId>(space.active_tab_id()) : std::nullopt;
@@ -240,23 +295,9 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             }
             return;
         }
-        case BrowserCommand::kNewTab: {
-            Space& space = active_space();
-            DetachActiveTabObservers();
-            space.AppendTab(Tab{NextTabId()});
-            Tab* appended = active_tab();
-            if (chrome_ != nullptr && appended != nullptr) {
-                // Same creation path as OnWindowCreated's first view: the
-                // space's request context and the tab's startup URL (the fixed
-                // local data startup page unless session restore set one).
-                CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-                    this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
-                    space.request_context(), this);
-                appended->SetBrowserView(browser_view);
-            }
-            AttachActiveTabObservers();
+        case BrowserCommand::kNewTab:
+            AppendTabToActiveSpace({});
             return;
-        }
         case BrowserCommand::kCloseTab: {
             const Space& space = active_space();
             if (!space.has_active_tab()) {
@@ -310,6 +351,14 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
         case BrowserCommand::kMoveDividerRight:
             static_cast<void>(SetSplitRatio(split_ratio_ + BrowserChrome::SplitRatioStep()));
             return;
+        case BrowserCommand::kTogglePinTab: {
+            const Space& space = active_space();
+            if (space.has_active_tab()) {
+                const std::size_t index = space.active_tab_index();
+                static_cast<void>(SetActiveSpaceTabPinned(index, !space.tabs()[index].pinned()));
+            }
+            return;
+        }
         case BrowserCommand::kNewSpace: {
             DetachActiveTabObservers();
             const std::size_t created_index = spaces_.size();
@@ -331,6 +380,841 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             CloseSpaceBrowsers(removed);
             return;
         }
+    }
+}
+
+void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
+    Space& space = active_space();
+    DetachActiveTabObservers();
+    Tab tab{NextTabId()};
+    tab.SetStartupUrl(std::move(startup_url));
+    space.AppendTab(std::move(tab));
+    Tab* appended = active_tab();
+    if (chrome_ != nullptr && appended != nullptr) {
+        // Same creation path as OnWindowCreated's first view: the space's
+        // request context and the tab's startup URL (the fixed local data
+        // startup page unless session restore or an agent set one).
+        CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+            this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
+            space.request_context(), this);
+        appended->SetBrowserView(browser_view);
+    }
+    AttachActiveTabObservers();
+}
+
+bool BrowserWindow::OpenNewTab(std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    std::string url;
+    if (!text.empty()) {
+        const std::optional<std::string> resolved =
+            ResolveAgentNavigation(text, address_validator_);
+        if (!resolved.has_value()) {
+            return false;
+        }
+        url = *resolved;
+    }
+    AppendTabToActiveSpace(std::move(url));
+    return true;
+}
+
+bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    Space& space = active_space();
+    if (index.has_value() && *index >= space.tab_count()) {
+        return false;
+    }
+    if (!index.has_value() && !space.has_active_tab()) {
+        return false;
+    }
+    const std::optional<std::string> url = ResolveAgentNavigation(text, address_validator_);
+    if (!url.has_value()) {
+        return false;
+    }
+    Tab& tab = space.tabs()[index.value_or(space.active_tab_index())];
+    if (index.value_or(space.active_tab_index()) == space.active_tab_index()) {
+        // The active tab goes through the address model so the rail shows the
+        // committed URL exactly as for typed navigation.
+        address_bar_model_.SetEditText(*url);
+        static_cast<void>(address_bar_model_.Submit(ValidatedAddress{.url = *url}));
+        if (chrome_ != nullptr) {
+            chrome_->OnAddressChanged(address_bar_model_.snapshot());
+        }
+    }
+    if (tab.browser() != nullptr && tab.browser()->GetMainFrame() != nullptr) {
+        tab.browser()->GetMainFrame()->LoadURL(*url);
+    } else {
+        tab.SetStartupUrl(*url);
+    }
+    return true;
+}
+
+CefRefPtr<CefBrowser> BrowserWindow::BrowserForTab(std::optional<std::size_t> index) const {
+    if (closing_) {
+        return nullptr;
+    }
+    const Space& space = active_space();
+    if (index.has_value()) {
+        return *index < space.tab_count() ? space.tabs()[*index].browser() : nullptr;
+    }
+    const Tab* tab = active_tab();
+    return tab != nullptr ? tab->browser() : nullptr;
+}
+
+bool BrowserWindow::CreateSpace(std::string_view name) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    ExecuteCommand(BrowserCommand::kNewSpace);
+    if (!name.empty()) {
+        static_cast<void>(RenameSpace(active_space_index_, std::string(name)));
+    }
+    return true;
+}
+
+bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
+    CEF_REQUIRE_UI_THREAD();
+    Space& space = active_space();
+    if (closing_ || index >= space.tab_count()) {
+        return false;
+    }
+    if (!space.SetTabPinned(space.tabs()[index].id(), pinned)) {
+        return false;
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
+std::string BrowserWindow::ResolvedAgentCommand() const {
+    const char* const configured = std::getenv("ISLAND_AGENT_COMMAND");
+    if (configured != nullptr && *configured != '\0') {
+        return configured;
+    }
+    if (!prefs_.agent_command.empty()) {
+        return prefs_.agent_command;
+    }
+    return std::string(kDefaultAgentCommand);
+}
+
+agent::AgentSessionConfig BrowserWindow::AgentConfig(std::string command) const {
+    agent::AgentSessionConfig config;
+    config.command = command.empty() ? ResolvedAgentCommand() : std::move(command);
+    config.cwd = UserBaseHome();
+    const agent::AgentEndpoint* endpoint =
+        agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
+    if (endpoint != nullptr && endpoint->running()) {
+        config.mcp_servers.push_back({.name = "island-browser",
+                                      .url = endpoint->url(),
+                                      .bearer_token = endpoint->token(),
+                                      .bridge_command = McpBridgePath()});
+    }
+    return config;
+}
+
+void BrowserWindow::EnsureAgentSession() {
+    if (agent_session_ != nullptr) {
+        return;
+    }
+    // Process output is hopped onto the UI thread; the session drops tasks
+    // that arrive after it was destroyed.
+    agent_session_ = std::make_unique<agent::AgentSession>(
+        [](std::function<void()> task) {
+            CefPostTask(TID_UI,
+                        CefCreateClosureTask(base::BindOnce(&RunAgentTask, std::move(task))));
+        },
+        [this] { ScheduleLocalPagesRender(); });
+    agent_session_->Configure(AgentConfig({}));
+}
+
+bool BrowserWindow::agent_panel_open() const noexcept {
+    return chrome_ != nullptr && chrome_->agent_panel_open();
+}
+
+void BrowserWindow::ToggleAgentPanel() { SetAgentPanelOpen(!agent_panel_open()); }
+
+void BrowserWindow::SetAgentPanelOpen(bool open) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    if (open && agent_panel_ == nullptr) {
+        EnsureAgentSession();
+        agent_panel_ = std::make_unique<LocalPage>(LocalPageKind::kAgent, *this);
+        chrome_->SetAgentPanelView(agent_panel_->view());
+    }
+    chrome_->SetAgentPanelOpen(open);
+    ApplySidebarState();
+    PublishChromeSnapshot();
+    if (prefs_.agent_panel_open != open) {
+        prefs_.agent_panel_open = open;
+        SavePrefs();
+    }
+    if (open) {
+        ScheduleLocalPagesRender();
+        agent_panel_->Focus();
+    } else {
+        FocusBrowserView();
+    }
+}
+
+std::string BrowserWindow::ActiveTabAgentContext() const {
+    const Tab* tab = active_tab();
+    if (tab == nullptr) {
+        return {};
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    if (!IsWebUrl(nav.url)) {
+        return {};
+    }
+    return "The user is looking at the tab \"" + nav.page_title + "\" (" + nav.url +
+           ") in the Island browser. Use the island-browser tools (page_read, page_snapshot, "
+           "page_click, page_type, browser_*) to see and act on the browser.";
+}
+
+std::string BrowserWindow::AgentPanelStateJson() const {
+    json::Value theme = ThemeJson();
+    json::Value context = json::Value::Null();
+    if (const Tab* tab = active_tab(); tab != nullptr) {
+        const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+        if (IsWebUrl(nav.url)) {
+            context = json::Value::MakeObject()
+                          .Set("title", json::Value::String(nav.page_title))
+                          .Set("url", json::Value::String(nav.url));
+        }
+    }
+    const agent::AgentEndpoint* endpoint =
+        agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
+    json::Value state =
+        json::Value::MakeObject()
+            .Set("theme", std::move(theme))
+            .Set("context", std::move(context))
+            .Set("endpoint",
+                 json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
+                                                                                : std::string()));
+    if (agent_session_ != nullptr) {
+        std::optional<json::Value> session = json::Parse(agent_session_->StateJson());
+        if (session.has_value()) {
+            state.Set("session", std::move(*session));
+        }
+    }
+    return json::Serialize(state);
+}
+
+void BrowserWindow::ScheduleLocalPagesRender() {
+    if ((agent_panel_ == nullptr && !internal_page_.has_value()) || agent_panel_render_scheduled_ ||
+        closing_) {
+        return;
+    }
+    agent_panel_render_scheduled_ = true;
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(&BrowserWindow::FlushLocalPagesRender,
+                                                           CefRefPtr<BrowserWindow>(this))),
+                       30);
+}
+
+void BrowserWindow::FlushLocalPagesRender() {
+    agent_panel_render_scheduled_ = false;
+    if (closing_) {
+        return;
+    }
+    if (agent_panel_ != nullptr) {
+        agent_panel_->Render(AgentPanelStateJson());
+    }
+    if (internal_page_ == LocalPageKind::kSettings && settings_page_ != nullptr) {
+        settings_page_->Render(SettingsStateJson());
+        settings_message_.clear();
+    } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
+        overview_page_->Render(TabOverviewStateJson());
+    }
+}
+
+void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& message) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    switch (kind) {
+        case LocalPageKind::kAgent:
+            HandleAgentPageMessage(message);
+            return;
+        case LocalPageKind::kSettings:
+            HandleSettingsMessage(message);
+            return;
+        case LocalPageKind::kTabOverview:
+            HandleOverviewMessage(message);
+            return;
+    }
+}
+
+json::Value BrowserWindow::ThemeJson() const {
+    const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
+    return json::Value::MakeObject()
+        .Set("bg", json::Value::String(CssColor(tokens.background)))
+        .Set("surface", json::Value::String(CssColor(tokens.surface)))
+        .Set("surface_2", json::Value::String(CssColor(tokens.surface_secondary)))
+        .Set("text", json::Value::String(CssColor(tokens.text)))
+        .Set("text_2", json::Value::String(CssColor(tokens.text_secondary)))
+        .Set("border", json::Value::String(CssColor(tokens.border)))
+        .Set("accent", json::Value::String(CssColor(tokens.accent)))
+        .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
+}
+
+LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
+    switch (kind) {
+        case LocalPageKind::kSettings:
+            return settings_page_.get();
+        case LocalPageKind::kTabOverview:
+            return overview_page_.get();
+        case LocalPageKind::kAgent:
+            return nullptr;
+    }
+    return nullptr;
+}
+
+void BrowserWindow::ToggleTabOverview() { ToggleInternalPage(LocalPageKind::kTabOverview); }
+
+void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettings); }
+
+void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent) {
+        return;
+    }
+    if (internal_page_ == kind) {
+        HideInternalPage();
+        return;
+    }
+    std::unique_ptr<LocalPage>& page =
+        kind == LocalPageKind::kSettings ? settings_page_ : overview_page_;
+    if (page == nullptr) {
+        page = std::make_unique<LocalPage>(kind, *this);
+    }
+    internal_page_ = kind;
+    chrome_->AttachBrowserView(page->view());
+    FlushLocalPagesRender();
+    page->Focus();
+}
+
+void BrowserWindow::HideInternalPage() {
+    if (!internal_page_.has_value()) {
+        return;
+    }
+    internal_page_.reset();
+    AttachActiveTabBrowserView();
+    FocusBrowserView();
+}
+
+std::string BrowserWindow::SettingsStateJson() const {
+#if defined(__APPLE__)
+    const std::string platform = "mac";
+#elif defined(_WIN32)
+    const std::string platform = "windows";
+#else
+    const std::string platform = "linux";
+#endif
+    using json::Value;
+    const char* const env_command = std::getenv("ISLAND_AGENT_COMMAND");
+    Value agent =
+        Value::MakeObject()
+            .Set("command", Value::String(prefs_.agent_command))
+            .Set("default_command", Value::String(std::string(kDefaultAgentCommand)))
+            .Set("env_override", Value::Bool(env_command != nullptr && *env_command != '\0'));
+
+    Value endpoint = Value::MakeObject().Set("running", Value::Bool(false));
+    const agent::AgentEndpoint* live = agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
+    if (live != nullptr && live->running()) {
+        // The snippet MCP clients paste: the HTTP transport with the bearer
+        // token for this launch.
+        const std::string config =
+            "{\n  \"mcpServers\": {\n    \"island\": {\n      \"type\": \"http\",\n"
+            "      \"url\": \"" +
+            live->url() +
+            "\",\n      \"headers\": {\n"
+            "        \"Authorization\": \"Bearer " +
+            live->token() + "\"\n      }\n    }\n  }\n}";
+        endpoint.Set("running", Value::Bool(true))
+            .Set("url", Value::String(live->url()))
+            .Set("config_json", Value::String(config))
+            .Set("bridge_path", Value::String(McpBridgePath()));
+    }
+
+    Value shortcuts = Value::MakeArray();
+    std::vector<KeyAction> conflicted;
+    for (const auto& [first, second] : keymap_.Conflicts()) {
+        conflicted.push_back(first);
+        conflicted.push_back(second);
+    }
+    for (const KeyActionInfo& info : KeyActions()) {
+        const std::optional<KeyBinding> binding = keymap_.Binding(info.action);
+        const std::optional<KeyBinding> fallback = ParseKeyBinding(info.default_binding);
+        shortcuts.Push(
+            Value::MakeObject()
+                .Set("id", Value::String(std::string(info.id)))
+                .Set("label", Value::String(std::string(info.label)))
+                .Set("binding", Value::String(binding ? FormatKeyBinding(*binding) : ""))
+                .Set("default_binding", Value::String(fallback ? FormatKeyBinding(*fallback) : ""))
+                .Set("conflict", Value::Bool(std::find(conflicted.begin(), conflicted.end(),
+                                                       info.action) != conflicted.end())));
+    }
+
+    Value sources = Value::MakeArray();
+    for (const ImportSourceInfo& source : DetectInstalledSources(UserBaseHome())) {
+        sources.Push(Value::MakeObject()
+                         .Set("id", Value::String(std::string(ImportSourceId(source.id))))
+                         .Set("name", Value::String(source.display_name))
+                         .Set("available", Value::Bool(source.available))
+                         .Set("description", Value::String(ImportSourceDescription(source)))
+                         .Set("action",
+                              Value::String(source.id == ImportSource::kArc ? "Import spaces"
+                                                                            : "Import bookmarks")));
+    }
+
+    Value about_rows = Value::MakeArray();
+    auto row = [&about_rows](std::string label, std::string value) {
+        about_rows.Push(Value::MakeArray()
+                            .Push(Value::String(std::move(label)))
+                            .Push(Value::String(std::move(value))));
+    };
+    row("Version", "0.4.0");
+    row("Preferences", PrefsStore::DefaultPrefsFilePath().string());
+    row("Session", SessionStore::DefaultSessionFilePath().string());
+    row("Agent endpoint file", agent::DefaultDiscoveryFilePath().string());
+
+    const std::string_view theme_pref = prefs_.theme == ThemePreference::kLight  ? "light"
+                                        : prefs_.theme == ThemePreference::kDark ? "dark"
+                                                                                 : "system";
+    Value settings = Value::MakeObject()
+                         .Set("theme_pref", Value::String(std::string(theme_pref)))
+                         .Set("platform", Value::String(platform))
+                         .Set("agent", std::move(agent))
+                         .Set("endpoint", std::move(endpoint))
+                         .Set("shortcuts", std::move(shortcuts))
+                         .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
+                         .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
+                         .Set("message", Value::String(settings_message_));
+    return json::Serialize(
+        Value::MakeObject().Set("theme", ThemeJson()).Set("settings", std::move(settings)));
+}
+
+namespace {
+
+// A tab's favicon as a PNG data URL for the overview page, or "".
+std::string FaviconDataUrl(const CefRefPtr<CefImage>& favicon) {
+    if (favicon == nullptr || favicon->IsEmpty()) {
+        return {};
+    }
+    int width = 0;
+    int height = 0;
+    CefRefPtr<CefBinaryValue> png = favicon->GetAsPNG(1.0F, true, width, height);
+    if (png == nullptr || png->GetSize() == 0) {
+        return {};
+    }
+    std::string bytes(png->GetSize(), '\0');
+    png->GetData(bytes.data(), bytes.size(), 0);
+    return "data:image/png;base64," + CefBase64Encode(bytes.data(), bytes.size()).ToString();
+}
+
+}  // namespace
+
+std::string BrowserWindow::TabOverviewStateJson() const {
+    using json::Value;
+    Value spaces = Value::MakeArray();
+    for (std::size_t space_index = 0; space_index < spaces_.size(); ++space_index) {
+        const Space& space = spaces_[space_index];
+        Value tabs = Value::MakeArray();
+        for (std::size_t tab_index = 0; tab_index < space.tab_count(); ++tab_index) {
+            const Tab& tab = space.tabs()[tab_index];
+            const NavigationSnapshot& nav = tab.navigation_state().snapshot();
+            tabs.Push(
+                Value::MakeObject()
+                    .Set("index", Value::Int(static_cast<std::int64_t>(tab_index)))
+                    .Set("title", Value::String(nav.page_title.empty() ? std::string("New Tab")
+                                                                       : nav.page_title))
+                    .Set("url", Value::String(nav.url.empty() ? tab.startup_url() : nav.url))
+                    .Set("active", Value::Bool(space.has_active_tab() &&
+                                               space.active_tab_index() == tab_index))
+                    .Set("pinned", Value::Bool(tab.pinned()))
+                    .Set("favicon", Value::String(FaviconDataUrl(tab.favicon()))));
+        }
+        spaces.Push(Value::MakeObject()
+                        .Set("index", Value::Int(static_cast<std::int64_t>(space_index)))
+                        .Set("name", Value::String(space.name()))
+                        .Set("color", Value::String(CssColor(space.color())))
+                        .Set("active", Value::Bool(space_index == active_space_index_))
+                        .Set("tabs", std::move(tabs)));
+    }
+    return json::Serialize(
+        Value::MakeObject()
+            .Set("theme", ThemeJson())
+            .Set("overview", Value::MakeObject().Set("spaces", std::move(spaces))));
+}
+
+void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
+    const std::string_view type = message.StringOr("type", "");
+    if (type == "ready") {
+        FlushLocalPagesRender();
+        return;
+    }
+    if (type == "close") {
+        HideInternalPage();
+        return;
+    }
+    if (type == "set_theme") {
+        ThemePreference preference = ThemePreference::kSystem;
+        if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
+            static_cast<void>(SetThemePreference(preference));
+        }
+    } else if (type == "set_agent_command") {
+        prefs_.agent_command = TrimmedCopy(message.StringOr("command", ""));
+        SavePrefs();
+        if (agent_session_ != nullptr) {
+            agent_session_->Configure(AgentConfig({}));
+        }
+    } else if (type == "open_agent") {
+        SetAgentPanelOpen(true);
+    } else if (type == "set_binding" || type == "reset_binding") {
+        const std::optional<KeyAction> action = KeyActionFromId(message.StringOr("action", ""));
+        if (!action.has_value()) {
+            return;
+        }
+        if (type == "reset_binding") {
+            static_cast<void>(ResetKeyBinding(*action));
+        } else {
+            const std::string_view text = message.StringOr("binding", "");
+            if (text.empty()) {
+                static_cast<void>(SetKeyBinding(*action, std::nullopt));
+            } else if (const std::optional<KeyBinding> binding = ParseKeyBinding(text)) {
+                static_cast<void>(SetKeyBinding(*action, binding));
+            } else {
+                settings_message_ = "That shortcut needs Ctrl/Cmd or Alt.";
+            }
+        }
+    } else if (type == "reset_shortcuts") {
+        ResetKeymap();
+        settings_message_ = "Shortcuts reset to defaults.";
+    } else if (type == "import") {
+        settings_message_ = ImportFromBrowser(message.StringOr("source", ""));
+    }
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::HandleOverviewMessage(const json::Value& message) {
+    const std::string_view type = message.StringOr("type", "");
+    const auto index = [&message](std::string_view key) {
+        const std::int64_t value = message.IntOr(key, -1);
+        return value < 0 ? std::numeric_limits<std::size_t>::max()
+                         : static_cast<std::size_t>(value);
+    };
+    if (type == "ready") {
+        FlushLocalPagesRender();
+        return;
+    }
+    if (type == "close") {
+        HideInternalPage();
+        return;
+    }
+    if (type == "activate") {
+        static_cast<void>(ActivateTabAt(index("space"), index("tab")));
+        return;
+    }
+    if (type == "new_tab") {
+        if (SelectSpaceIndex(index("space"))) {
+            HideInternalPage();
+            ExecuteCommand(BrowserCommand::kNewTab);
+            if (chrome_ != nullptr) {
+                chrome_->BeginAddressEditing();
+            }
+        }
+        return;
+    }
+    if (type == "close_tab") {
+        static_cast<void>(CloseTabAt(index("space"), index("tab")));
+    } else if (type == "pin") {
+        static_cast<void>(
+            SetTabPinnedAt(index("space"), index("tab"), message.BoolOr("pinned", true)));
+    } else if (type == "reorder") {
+        static_cast<void>(MoveTabWithinSpace(index("space"), index("from"), index("to")));
+    } else if (type == "move_tab") {
+        static_cast<void>(MoveTabToSpace(index("from_space"), index("tab"), index("to_space")));
+    }
+    ScheduleLocalPagesRender();
+}
+
+bool BrowserWindow::ActivateTabAt(std::size_t space, std::size_t tab) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space >= spaces_.size() || tab >= spaces_[space].tab_count()) {
+        return false;
+    }
+    if (!SelectSpaceIndex(space) || !SelectActiveSpaceTabIndex(tab)) {
+        return false;
+    }
+    HideInternalPage();
+    return true;
+}
+
+bool BrowserWindow::CloseTabAt(std::size_t space_index, std::size_t tab) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_index >= spaces_.size() || tab >= spaces_[space_index].tab_count()) {
+        return false;
+    }
+    keep_internal_page_ = true;
+    bool closed = true;
+    if (space_index == active_space_index_) {
+        closed = CloseActiveSpaceTabIndex(tab);
+    } else if (spaces_[space_index].tab_count() == 1) {
+        // The space's last tab: the space goes with it, like in the rail.
+        Space removed = RemoveSpaceAtIndex(space_index);
+        AttachActiveTabObservers();
+        CloseSpaceBrowsers(removed);
+    } else {
+        Space& space = spaces_[space_index];
+        std::optional<Tab> removed = space.RemoveTab(space.tabs()[tab].id());
+        if (removed.has_value() && removed->browser() != nullptr) {
+            removed->browser()->GetHost()->CloseBrowser(true);
+        }
+        UpdateChromeCollections();
+    }
+    keep_internal_page_ = false;
+    return closed;
+}
+
+bool BrowserWindow::SetTabPinnedAt(std::size_t space_index, std::size_t tab, bool pinned) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_index >= spaces_.size() || tab >= spaces_[space_index].tab_count()) {
+        return false;
+    }
+    Space& space = spaces_[space_index];
+    if (!space.SetTabPinned(space.tabs()[tab].id(), pinned)) {
+        return false;
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
+bool BrowserWindow::MoveTabWithinSpace(std::size_t space_index, std::size_t from, std::size_t to) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_index >= spaces_.size()) {
+        return false;
+    }
+    Space& space = spaces_[space_index];
+    if (from >= space.tab_count() || to >= space.tab_count()) {
+        return false;
+    }
+    const std::size_t pinned = space.pinned_count();
+    const bool is_pinned = space.tabs()[from].pinned();
+    const std::size_t lowest = is_pinned ? 0 : pinned;
+    const std::size_t highest = is_pinned ? pinned - 1 : space.tab_count() - 1;
+    if (!space.MoveTab(from, std::clamp(to, lowest, highest))) {
+        return false;
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
+bool BrowserWindow::MoveTabToSpace(std::size_t from_space, std::size_t tab, std::size_t to_space) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || from_space >= spaces_.size() || to_space >= spaces_.size() ||
+        from_space == to_space || tab >= spaces_[from_space].tab_count()) {
+        return false;
+    }
+    const Tab& source = spaces_[from_space].tabs()[tab];
+    const std::string url = source.navigation_state().snapshot().url.empty()
+                                ? source.startup_url()
+                                : source.navigation_state().snapshot().url;
+    const bool pinned = source.pinned();
+    const SpaceId target_id = spaces_[to_space].id();
+
+    // Open the copy first (the target space keeps its identity across the
+    // close, which may remove the source space and shift indices).
+    Tab moved{NextTabId()};
+    const ValidatedAddress address = address_validator_(url);
+    if (address.is_valid()) {
+        moved.SetStartupUrl(address.url);
+    }
+    moved.SetPinned(pinned);
+    for (std::size_t index = 0; index < spaces_.size(); ++index) {
+        if (spaces_[index].id() != target_id) {
+            continue;
+        }
+        Space& target = spaces_[index];
+        const TabId moved_id = moved.id();
+        const std::optional<TabId> previously_active =
+            target.has_active_tab() ? std::optional<TabId>(target.active_tab_id()) : std::nullopt;
+        target.AppendTab(std::move(moved));
+        // Keep the target space's selection; the moved tab joins its group.
+        if (previously_active.has_value()) {
+            static_cast<void>(target.SelectTab(*previously_active));
+        }
+        if (pinned) {
+            static_cast<void>(target.SetTabPinned(moved_id, false));
+            static_cast<void>(target.SetTabPinned(moved_id, true));
+        }
+        break;
+    }
+    return CloseTabAt(from_space, tab);
+}
+
+std::size_t BrowserWindow::AddImportedSpaces(const std::vector<ImportedSpace>& imported,
+                                             std::size_t* tab_count) {
+    CEF_REQUIRE_UI_THREAD();
+    std::size_t added = 0;
+    for (const ImportedSpace& source : imported) {
+        Space space{SpaceId{NextSpaceId()}, source.name,
+                    source.color_argb.has_value()
+                        ? ArgbColor{*source.color_argb}
+                        : kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]};
+        for (const BookmarkItem& item : source.pinned_tabs) {
+            // Imported URLs pass the same allow-list as typed addresses.
+            const ValidatedAddress address = address_validator_(item.url);
+            if (!address.is_valid()) {
+                continue;
+            }
+            Tab tab{NextTabId()};
+            tab.SetStartupUrl(address.url);
+            tab.SetPinned(true);
+            space.AppendTab(std::move(tab));
+        }
+        if (space.tab_count() == 0) {
+            continue;  // a space needs at least one tab
+        }
+        static_cast<void>(space.SelectTabIndex(0));
+        if (tab_count != nullptr) {
+            *tab_count += space.tab_count();
+        }
+        spaces_.push_back(std::move(space));
+        ++added;
+    }
+    if (added > 0) {
+        UpdateChromeCollections();
+    }
+    return added;
+}
+
+std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::optional<ImportSource> source = ImportSourceFromId(source_id);
+    if (!source.has_value() || closing_) {
+        return "Unknown import source.";
+    }
+    if (*source == ImportSource::kArc) {
+        const std::optional<std::vector<ImportedSpace>> spaces = ImportArcSpaces(UserBaseHome());
+        if (!spaces.has_value()) {
+            return "Could not read Arc's sidebar file.";
+        }
+        std::size_t tabs = 0;
+        const std::size_t added = AddImportedSpaces(*spaces, &tabs);
+        if (added == 0) {
+            return "Arc had no pinned tabs to bring over.";
+        }
+        return "Imported " + std::to_string(added) + (added == 1 ? " space" : " spaces") +
+               " with " + std::to_string(tabs) + " pinned tabs from Arc.";
+    }
+    const std::optional<std::vector<BookmarkItem>> items =
+        ImportFromSource(*source, UserBaseHome());
+    std::string name(source_id);
+    for (const ImportSourceInfo& info : DetectInstalledSources(UserBaseHome())) {
+        if (info.id == *source) {
+            name = info.display_name;
+        }
+    }
+    if (!items.has_value()) {
+        return "Could not read " + name + " bookmarks.";
+    }
+    const std::size_t added =
+        BookmarkStore::MergeFolder(bookmarks_, "Imported from " + name, *items);
+    if (persist_session_ && added > 0) {
+        static_cast<void>(
+            BookmarkStore::Save(BookmarkStore::DefaultBookmarksFilePath(), bookmarks_));
+    }
+    return added == 0 ? "No new bookmarks in " + name + "."
+                      : "Imported " + std::to_string(added) + " bookmarks from " + name +
+                            ". Find them in the command palette.";
+}
+
+bool BrowserWindow::ResetKeyBinding(KeyAction action) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    keymap_.ResetToDefault(action);
+    prefs_.keybindings = keymap_.Overrides();
+    SavePrefs();
+    ApplyKeymap();
+    return true;
+}
+
+void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    const std::string_view type = message.StringOr("type", "");
+    if (type == "ready") {
+        FlushLocalPagesRender();
+        return;
+    }
+    if (type == "open_url") {
+        static_cast<void>(OpenNewTab(message.StringOr("url", "")));
+        return;
+    }
+    if (type == "close_panel") {
+        SetAgentPanelOpen(false);
+        return;
+    }
+    EnsureAgentSession();
+    if (type == "send") {
+        const std::string context =
+            message.BoolOr("include_context", true) ? ActiveTabAgentContext() : std::string();
+        static_cast<void>(agent_session_->Send(std::string(message.StringOr("text", "")), context));
+    } else if (type == "cancel") {
+        agent_session_->Cancel();
+    } else if (type == "permission") {
+        const json::Value* option = message.FindMember("option_id");
+        agent_session_->ResolvePermission(message.IntOr("request_id", -1),
+                                          option != nullptr && option->IsString()
+                                              ? std::optional<std::string>(option->string_val)
+                                              : std::nullopt);
+    } else if (type == "new_chat") {
+        agent_session_->NewChat();
+    } else if (type == "start") {
+        const std::string command = TrimmedCopy(message.StringOr("command", ""));
+        if (command != prefs_.agent_command) {
+            prefs_.agent_command = command;
+            SavePrefs();
+        }
+        static_cast<void>(agent_session_->Start(AgentConfig(command)));
+    }
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::CloseAgentPanelAndSession() {
+    internal_page_.reset();
+    for (std::unique_ptr<LocalPage>* page : {&agent_panel_, &settings_page_, &overview_page_}) {
+        if (*page != nullptr) {
+            (*page)->Close();
+            page->reset();
+        }
+    }
+    agent_session_.reset();
+}
+
+void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
+    static_cast<void>(SetActiveSpaceTabPinned(index, pinned));
+}
+
+ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
+    return ChromeTokens::ForTheme(theme).TintedForSpace(active_space().color(), theme);
+}
+
+void BrowserWindow::ShutdownAgentHost() {
+    if (agent_host_ != nullptr) {
+        agent_host_->Shutdown();
     }
 }
 
@@ -592,6 +1476,12 @@ void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
 
 void BrowserWindow::FocusBrowserView() {
     CEF_REQUIRE_UI_THREAD();
+    if (internal_page_.has_value()) {
+        if (LocalPage* page = InternalPageFor(*internal_page_); page != nullptr) {
+            page->Focus();
+            return;
+        }
+    }
     const Tab* tab = active_tab();
     if (!closing_ && tab != nullptr && tab->browser_view() != nullptr) {
         tab->browser_view()->RequestFocus();
@@ -619,6 +1509,7 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
         UpdateChromeCollections();
     }
     PublishChromeSnapshot();
+    ScheduleLocalPagesRender();
     if (navigation_observer_ != nullptr) {
         navigation_observer_->OnNavigationChanged(snapshot);
     }
@@ -654,6 +1545,57 @@ void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString
     UpdateWindowTitle();
 }
 
+namespace {
+
+class FaviconDownload final : public CefDownloadImageCallback {
+  public:
+    FaviconDownload(CefRefPtr<BrowserWindow> window, TabId tab)
+        : window_(std::move(window)), tab_(tab) {}
+
+    void OnDownloadImageFinished(const CefString&, int, CefRefPtr<CefImage> image) override {
+        if (image != nullptr && !image->IsEmpty()) {
+            window_->OnFaviconDownloaded(tab_, image);
+        }
+    }
+
+  private:
+    CefRefPtr<BrowserWindow> window_;
+    TabId tab_;
+
+    IMPLEMENT_REFCOUNTING(FaviconDownload);
+};
+
+}  // namespace
+
+void BrowserWindow::OnFaviconURLChange(CefRefPtr<CefBrowser> browser,
+                                       const std::vector<CefString>& icon_urls) {
+    CEF_REQUIRE_UI_THREAD();
+    const Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || owner == nullptr || icon_urls.empty()) {
+        return;
+    }
+    // 16 DIP at up to 2x; the page's first declared icon wins.
+    browser->GetHost()->DownloadImage(icon_urls.front(), /*is_favicon=*/true,
+                                      /*max_image_size=*/32, /*bypass_cache=*/false,
+                                      new FaviconDownload(this, owner->id()));
+}
+
+void BrowserWindow::OnFaviconDownloaded(TabId tab_id, CefRefPtr<CefImage> image) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    for (Space& space : spaces_) {
+        if (Tab* tab = space.FindTab(tab_id); tab != nullptr) {
+            tab->SetFavicon(image);
+            if (&space == &active_space()) {
+                UpdateChromeCollections();
+            }
+            return;
+        }
+    }
+}
+
 bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int, const CefString&,
                                   const CefString&, WindowOpenDisposition, bool,
                                   const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
@@ -681,6 +1623,10 @@ bool BrowserWindow::DoClose(CefRefPtr<CefBrowser>) {
 
 void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
+
+    if (agent_host_ != nullptr) {
+        agent_host_->OnBrowserClosed(browser);
+    }
 
     Tab* owner = FindTabByBrowser(browser);
     if (owner != nullptr) {
@@ -771,7 +1717,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
         tab->SetBrowserView(browser_view);
     }
     window_->SetToFillLayout();
-    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view, ChromeTokens::ForTheme(theme),
+    chrome_ = std::make_unique<BrowserChrome>(*this, browser_view, ResolvedTokens(theme),
                                               icon_resource_root);
     chrome_->OnNavigationChanged(tab != nullptr ? tab->navigation_state().snapshot()
                                                 : NavigationSnapshot{});
@@ -785,41 +1731,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     window_->Activate();
     browser_view->RequestFocus();
 
-    window_->SetAccelerator(kBackAccelerator, kVirtualKeyLeft, false, false, true, true);
-    window_->SetAccelerator(kForwardAccelerator, kVirtualKeyRight, false, false, true, true);
-    window_->SetAccelerator(kReloadAccelerator, kVirtualKeyF5, false, false, false, true);
-    window_->SetAccelerator(kReloadWithControlAccelerator, 'R', false, true, false, true);
-#if defined(OS_WIN) || defined(OS_LINUX)
-    window_->SetAccelerator(kFocusAddressAccelerator, 'L', false, true, false, true);
-#endif
-    // ctrl_pressed maps to Cmd on macOS and Ctrl elsewhere; high_priority so the
-    // palette opens while web content holds focus. Cmd/Ctrl+Shift+K keeps the
-    // search palette: the Phase 3 design fixes plain Cmd/Ctrl+K on the command
-    // palette.
-    window_->SetAccelerator(kOpenPaletteAccelerator, 'K', false, true, false, true);
-    window_->SetAccelerator(kOpenSearchPaletteAccelerator, 'K', true, true, false, true);
-    window_->SetAccelerator(kToggleSidebarAccelerator, 'B', false, true, false, true);
-    window_->SetAccelerator(kRenameSpaceAccelerator, kVirtualKeyF2, false, false, false, true);
-    // Phase 3 tab commands (Cmd/Ctrl+T, Cmd/Ctrl+W, Cmd/Ctrl+Shift+[/],
-    // Cmd/Ctrl+1..9). On macOS these never dispatch — the NSMenu key
-    // equivalents in main_mac.mm own them — but registration stays uniform so
-    // every platform declares its bindings in one place.
-    window_->SetAccelerator(kNewTabAccelerator, 'T', false, true, false, true);
-    window_->SetAccelerator(kCloseTabAccelerator, 'W', false, true, false, true);
-    window_->SetAccelerator(kNextTabAccelerator, ']', true, true, false, true);
-    window_->SetAccelerator(kPreviousTabAccelerator, '[', true, true, false, true);
-    for (int position = 0; position < 9; ++position) {
-        window_->SetAccelerator(kSelectTab1Accelerator + position, '1' + position, false, true,
-                                false, true);
-    }
-    // U6 split view: Cmd/Ctrl+Shift+S toggles the pair; the divider nudges via
-    // Shift+Cmd/Ctrl+Left/Right on platforms where SetAccelerator dispatches.
-    window_->SetAccelerator(kToggleSplitAccelerator, 'S', true, false, false, true);
-    window_->SetAccelerator(kMoveDividerLeftAccelerator, kVirtualKeyLeft, true, false, false, true);
-    window_->SetAccelerator(kMoveDividerRightAccelerator, kVirtualKeyRight, true, false, false,
-                            true);
-    window_->SetAccelerator(kWelcomeDismissAccelerator, kVirtualKeyEscape, false, false, false,
-                            true);
+    ApplyKeymap();
 
     CreateHoverSliver();
     ApplySidebarState();
@@ -828,6 +1740,15 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     // smoke page stays the only surface.
     if (persist_session_ && !prefs_.onboarding_completed) {
         ShowWelcomeFlow();
+    }
+    // AI-agent tools over MCP on 127.0.0.1. The smoke run stays offline and
+    // deterministic, so only persisted windows serve them.
+    if (persist_session_) {
+        agent_host_ = std::make_unique<WindowAgentHost>(*this);
+        static_cast<void>(agent_host_->StartEndpoint(agent::DefaultDiscoveryFilePath()));
+        if (prefs_.agent_panel_open) {
+            SetAgentPanelOpen(true);
+        }
     }
     // The seam only observes; every chrome mutation it triggers is posted onto the
     // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
@@ -847,6 +1768,8 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     CEF_REQUIRE_UI_THREAD();
 
     closing_ = true;
+    ShutdownAgentHost();
+    CloseAgentPanelAndSession();
     DetachChromeAndObservers();
     window_ = nullptr;
 
@@ -862,6 +1785,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         return;
     }
 
+    window_width_dip_ = new_bounds.width;
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
@@ -916,6 +1840,10 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         // carry no unload handlers, so the cancel path TryCloseBrowser allows
         // for cannot arise in practice.
         closing_ = true;
+        // No agent tool call may touch the model once teardown starts, and the
+        // panel's browser closes alongside the tab browsers.
+        ShutdownAgentHost();
+        CloseAgentPanelAndSession();
         // Clean quit: persist the session before any browser tears down, so
         // the last-committed URLs are still in the navigation snapshots. The
         // smoke run never touches the session file.
@@ -941,56 +1869,14 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
 bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
     CEF_REQUIRE_UI_THREAD();
 
+    if (command_id >= kKeymapAcceleratorBase &&
+        command_id < kKeymapAcceleratorBase + static_cast<int>(kKeyActionCount)) {
+        RunKeyAction(static_cast<KeyAction>(command_id - kKeymapAcceleratorBase));
+        return true;
+    }
     switch (command_id) {
-        case kBackAccelerator:
-            ExecuteCommand(BrowserCommand::kBack);
-            return true;
-        case kForwardAccelerator:
-            ExecuteCommand(BrowserCommand::kForward);
-            return true;
         case kReloadAccelerator:
-        case kReloadWithControlAccelerator:
             ExecuteCommand(BrowserCommand::kReload);
-            return true;
-        case kFocusAddressAccelerator:
-            if (chrome_ != nullptr) {
-                chrome_->BeginAddressEditing();
-            } else {
-                BeginAddressEditing();
-            }
-            return true;
-        case kOpenPaletteAccelerator:
-            ShowCommandPalette();
-            return true;
-        case kOpenSearchPaletteAccelerator:
-            ShowSearchPalette();
-            return true;
-        case kToggleSidebarAccelerator:
-            ToggleSidebar();
-            return true;
-        case kRenameSpaceAccelerator:
-            BeginSpaceRenaming();
-            return true;
-        case kNewTabAccelerator:
-            ExecuteCommand(BrowserCommand::kNewTab);
-            return true;
-        case kCloseTabAccelerator:
-            ExecuteCommand(BrowserCommand::kCloseTab);
-            return true;
-        case kNextTabAccelerator:
-            ExecuteCommand(BrowserCommand::kNextTab);
-            return true;
-        case kPreviousTabAccelerator:
-            ExecuteCommand(BrowserCommand::kPreviousTab);
-            return true;
-        case kToggleSplitAccelerator:
-            ExecuteCommand(BrowserCommand::kToggleSplit);
-            return true;
-        case kMoveDividerLeftAccelerator:
-            ExecuteCommand(BrowserCommand::kMoveDividerLeft);
-            return true;
-        case kMoveDividerRightAccelerator:
-            ExecuteCommand(BrowserCommand::kMoveDividerRight);
             return true;
         case kWelcomeDismissAccelerator: {
             const bool consumed = welcome_ != nullptr && welcome_->visible();
@@ -1008,6 +1894,129 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
             }
             return false;
     }
+}
+
+void BrowserWindow::ApplyKeymap() {
+    CEF_REQUIRE_UI_THREAD();
+    if (window_ == nullptr || closing_) {
+        return;
+    }
+    window_->RemoveAllAccelerators();
+    // ctrl_pressed maps to Cmd on macOS and Ctrl elsewhere; high_priority so
+    // shortcuts work while web content holds focus. On macOS these never
+    // dispatch (the NSMenu key equivalents in main_mac.mm own the keys), but
+    // registration stays uniform so every platform declares its bindings here.
+    for (const KeyActionInfo& info : KeyActions()) {
+        const std::optional<KeyBinding> binding = keymap_.Binding(info.action);
+        if (!binding.has_value()) {
+            continue;
+        }
+        window_->SetAccelerator(kKeymapAcceleratorBase + static_cast<int>(info.action),
+                                binding->key_code, binding->shift, binding->primary, binding->alt,
+                                true);
+    }
+    // Fixed bindings: F5 reloads, Cmd/Ctrl+1..9 select tabs, and Escape
+    // dismisses the welcome flow while it is visible.
+    window_->SetAccelerator(kReloadAccelerator, kVirtualKeyF5, false, false, false, true);
+    for (int position = 0; position < 9; ++position) {
+        window_->SetAccelerator(kSelectTab1Accelerator + position, '1' + position, false, true,
+                                false, true);
+    }
+    window_->SetAccelerator(kWelcomeDismissAccelerator, kVirtualKeyEscape, false, false, false,
+                            true);
+}
+
+void BrowserWindow::RunKeyAction(KeyAction action) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    switch (action) {
+        case KeyAction::kBack:
+            ExecuteCommand(BrowserCommand::kBack);
+            return;
+        case KeyAction::kForward:
+            ExecuteCommand(BrowserCommand::kForward);
+            return;
+        case KeyAction::kReload:
+            ExecuteCommand(BrowserCommand::kReload);
+            return;
+        case KeyAction::kFocusAddress:
+            if (chrome_ != nullptr) {
+                chrome_->BeginAddressEditing();
+            } else {
+                BeginAddressEditing();
+            }
+            return;
+        case KeyAction::kCommandPalette:
+            ShowCommandPalette();
+            return;
+        case KeyAction::kSearchPalette:
+            ShowSearchPalette();
+            return;
+        case KeyAction::kToggleSidebar:
+            ToggleSidebar();
+            return;
+        case KeyAction::kNewTab:
+            ExecuteCommand(BrowserCommand::kNewTab);
+            return;
+        case KeyAction::kCloseTab:
+            ExecuteCommand(BrowserCommand::kCloseTab);
+            return;
+        case KeyAction::kNextTab:
+            ExecuteCommand(BrowserCommand::kNextTab);
+            return;
+        case KeyAction::kPreviousTab:
+            ExecuteCommand(BrowserCommand::kPreviousTab);
+            return;
+        case KeyAction::kNewSpace:
+            ExecuteCommand(BrowserCommand::kNewSpace);
+            return;
+        case KeyAction::kRenameSpace:
+            BeginSpaceRenaming();
+            return;
+        case KeyAction::kToggleSplit:
+            ExecuteCommand(BrowserCommand::kToggleSplit);
+            return;
+        case KeyAction::kMoveDividerLeft:
+            ExecuteCommand(BrowserCommand::kMoveDividerLeft);
+            return;
+        case KeyAction::kMoveDividerRight:
+            ExecuteCommand(BrowserCommand::kMoveDividerRight);
+            return;
+        case KeyAction::kTogglePinTab:
+            ExecuteCommand(BrowserCommand::kTogglePinTab);
+            return;
+        case KeyAction::kToggleAgentPanel:
+            ToggleAgentPanel();
+            return;
+        case KeyAction::kTabOverview:
+            ToggleInternalPage(LocalPageKind::kTabOverview);
+            return;
+        case KeyAction::kSettings:
+            ToggleInternalPage(LocalPageKind::kSettings);
+            return;
+    }
+}
+
+bool BrowserWindow::SetKeyBinding(KeyAction action, std::optional<KeyBinding> binding) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    keymap_.SetBinding(action, binding);
+    prefs_.keybindings = keymap_.Overrides();
+    SavePrefs();
+    ApplyKeymap();
+    return true;
+}
+
+void BrowserWindow::ResetKeymap() {
+    CEF_REQUIRE_UI_THREAD();
+    keymap_ = Keymap::Defaults();
+    prefs_.keybindings.clear();
+    SavePrefs();
+    ApplyKeymap();
 }
 
 void BrowserWindow::OnBrowserCreated(CefRefPtr<CefBrowserView> browser_view,
@@ -1130,6 +2139,16 @@ void BrowserWindow::AttachActiveTabBrowserView() {
     if (chrome_ == nullptr) {
         return;
     }
+    if (internal_page_.has_value()) {
+        // An overview action mutating tabs keeps the overview on screen; any
+        // other selection change returns to the page content.
+        LocalPage* page = InternalPageFor(*internal_page_);
+        if (keep_internal_page_ && page != nullptr) {
+            chrome_->AttachBrowserView(page->view());
+            return;
+        }
+        internal_page_.reset();
+    }
     Space& space = active_space();
     if (space.split().has_value()) {
         Tab* first = space.FindTab(space.split()->first);
@@ -1176,7 +2195,9 @@ void BrowserWindow::UpdateChromeCollections() {
     for (const Tab& tab : active_space().tabs()) {
         const std::string& page_title = tab.navigation_state().snapshot().page_title;
         tabs.push_back({.title = page_title.empty() ? "Island" : page_title,
-                        .active = active != nullptr && tab.id() == active->id()});
+                        .active = active != nullptr && tab.id() == active->id(),
+                        .pinned = tab.pinned(),
+                        .favicon = tab.favicon()});
     }
     std::vector<SpaceSwitcherEntrySnapshot> spaces;
     spaces.reserve(spaces_.size());
@@ -1190,6 +2211,12 @@ void BrowserWindow::UpdateChromeCollections() {
     }
     chrome_->SetTabStripEntries(tabs);
     chrome_->SetSpaceSwitcherEntries(spaces);
+    ScheduleLocalPagesRender();
+    // Arc-style space theming: a switch to a differently colored space
+    // re-tints the whole chrome.
+    if (window_ != nullptr && tinted_space_color_ != active_space().color().argb) {
+        ApplyTheme(window_, ResolvedChromeTheme(), false);
+    }
 }
 
 void BrowserWindow::CloseSpaceBrowsers(Space& space) {
@@ -1222,7 +2249,8 @@ Space BrowserWindow::RemoveSpaceAtIndex(std::size_t index) {
 }
 
 void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views) {
-    const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+    const ChromeTokens tokens = ResolvedTokens(theme);
+    tinted_space_color_ = active_space().color().argb;
     window->SetThemeColor(CEF_ColorPrimaryBackground, tokens.background.argb);
     window->SetThemeColor(CEF_ColorPrimaryForeground, tokens.text.argb);
     window->SetThemeColor(CEF_ColorSecondaryForeground, tokens.text_secondary.argb);
@@ -1245,6 +2273,7 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     chrome_snapshot_.theme = theme;
     ApplySidebarState();
     PublishChromeSnapshot();
+    ScheduleLocalPagesRender();
 }
 
 void BrowserWindow::PublishChromeSnapshot() {
@@ -1346,8 +2375,8 @@ void BrowserWindow::ShowSearchPalette() {
     }
     if (search_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+Shift+K, then only shown and hidden.
-        search_palette_ = std::make_unique<SearchPalette>(
-            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()));
+        search_palette_ =
+            std::make_unique<SearchPalette>(*this, window_, ResolvedTokens(ResolvedChromeTheme()));
     }
     search_palette_->Show();
 }
@@ -1360,7 +2389,7 @@ void BrowserWindow::ShowCommandPalette() {
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
-            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()), &ParseAndValidate);
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate);
     }
     // Read-only snapshots taken at open time: the open tabs of the active space
     // (title/URL for matching, TabId for routing) and the whole space list.
@@ -1456,7 +2485,7 @@ void BrowserWindow::OnWelcomeThemeChanged(ThemePreference preference) {
     CEF_REQUIRE_UI_THREAD();
     static_cast<void>(SetThemePreference(preference));
     if (welcome_ != nullptr) {
-        welcome_->ApplyTheme(ChromeTokens::ForTheme(ResolvedChromeTheme()));
+        welcome_->ApplyTheme(ResolvedTokens(ResolvedChromeTheme()));
     }
 }
 
@@ -1464,6 +2493,11 @@ void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources)
     CEF_REQUIRE_UI_THREAD();
     std::size_t imported = 0;
     for (const ImportSource source : sources) {
+        if (source == ImportSource::kArc) {
+            // Arc's spaces come over as spaces, not bookmarks.
+            static_cast<void>(ImportFromBrowser(ImportSourceId(source)));
+            continue;
+        }
         const std::optional<std::vector<BookmarkItem>> items =
             ImportFromSource(source, UserBaseHome());
         if (!items.has_value()) {
@@ -1489,9 +2523,9 @@ void BrowserWindow::ShowWelcomeFlow() {
         return;
     }
     if (welcome_ == nullptr) {
-        welcome_ = std::make_unique<WelcomeFlow>(
-            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()), prefs_.theme,
-            DetectInstalledSources(UserBaseHome()));
+        welcome_ =
+            std::make_unique<WelcomeFlow>(*this, window_, ResolvedTokens(ResolvedChromeTheme()),
+                                          prefs_.theme, DetectInstalledSources(UserBaseHome()));
     }
     welcome_->Show();
 }
@@ -1564,7 +2598,7 @@ void BrowserWindow::BeginSpaceRenaming() {
     }
     if (space_rename_overlay_ == nullptr) {
         space_rename_overlay_ = std::make_unique<SpaceRenameOverlay>(
-            *this, window_, ChromeTokens::ForTheme(ResolvedChromeTheme()), active_space().name());
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), active_space().name());
     }
     space_rename_overlay_->Show();
 }
@@ -1625,7 +2659,7 @@ void BrowserWindow::CreateHoverSliver() {
     }
     hover_sliver_ = CefPanel::CreatePanel(new HoverSliverDelegate());
     hover_sliver_->SetID(static_cast<int>(ChromeViewId::kHoverSliver));
-    hover_sliver_->SetBackgroundColor(ChromeTokens::ForTheme(chrome_snapshot_.theme).accent.argb);
+    hover_sliver_->SetBackgroundColor(ResolvedTokens(chrome_snapshot_.theme).accent.argb);
     // can_activate is false: a 2-DIP edge marker must never take keyboard focus.
     hover_sliver_overlay_ =
         window_->AddOverlayView(hover_sliver_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/false);
@@ -1647,18 +2681,23 @@ void BrowserWindow::ApplySidebarState() {
         hover_sliver_overlay_->SetBounds(CefRect(0, 0, kHoverSliverWidthDip, window_size.height));
     }
     if (hover_sliver_ != nullptr) {
-        hover_sliver_->SetBackgroundColor(
-            ChromeTokens::ForTheme(chrome_snapshot_.theme).accent.argb);
+        hover_sliver_->SetBackgroundColor(ResolvedTokens(chrome_snapshot_.theme).accent.argb);
     }
     // Keep the published snapshot's rail/content split in step with the reveal
     // state so observers never read a stale 286 DIP rail.
-    const int window_width =
-        chrome_snapshot_.rail_bounds.width + chrome_snapshot_.content_bounds.width;
+    const int window_width = window_width_dip_;
     const int rail_width = sidebar_state_.RailWidthDip(
         std::min(ChromeTokens::ForTheme(chrome_snapshot_.theme).rail_width_dip, window_width));
+    // The open agent panel takes its column out of the published content
+    // width exactly like BrowserChrome::LayoutForBounds does.
+    const int panel_width =
+        agent_panel_open()
+            ? std::clamp(window_width - rail_width - BrowserChrome::MinimumBrowserContentWidthDip(),
+                         0, BrowserChrome::AgentPanelWidthDip())
+            : 0;
     chrome_snapshot_.rail_bounds.width = rail_width;
     chrome_snapshot_.content_bounds.x = rail_width;
-    chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width);
+    chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
 }
 
 void BrowserWindow::UninstallHoverSeam() {

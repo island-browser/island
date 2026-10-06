@@ -24,6 +24,18 @@ std::string_view IconFilename(ChromeIcon icon) {
             return "reload";
         case ChromeIcon::kLocation:
             return "globe-2";
+        case ChromeIcon::kPlus:
+            return "plus";
+        case ChromeIcon::kSparkles:
+            return "sparkles";
+        case ChromeIcon::kPin:
+            return "pin";
+        case ChromeIcon::kClose:
+            return "x";
+        case ChromeIcon::kGrid:
+            return "layout-grid";
+        case ChromeIcon::kSettings:
+            return "settings";
     }
     return {};
 }

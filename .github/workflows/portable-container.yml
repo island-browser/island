@@ -1,10 +1,8 @@
 name: Portable container tests
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
+  # Automatic triggers are paused: builds and tests run locally to save
+  # GitHub Actions minutes. Restore the triggers from git history to re-enable.
   workflow_dispatch:
 
 permissions:

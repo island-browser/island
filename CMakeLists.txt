@@ -70,9 +70,9 @@ endif()
 
 file(READ "${ISLAND_ICON_MANIFEST}" _island_icon_manifest_json)
 string(JSON _island_icon_output_count LENGTH "${_island_icon_manifest_json}" outputs)
-if(NOT _island_icon_output_count EQUAL 96)
+if(NOT _island_icon_output_count EQUAL 240)
     message(FATAL_ERROR
-        "Island icon manifest must declare exactly 96 PNG resources; found ${_island_icon_output_count}.\n"
+        "Island icon manifest must declare exactly 240 PNG resources; found ${_island_icon_output_count}.\n"
         "Run tools/icon_pipeline/run.sh verify to diagnose committed icon resources.")
 endif()
 
@@ -117,7 +117,28 @@ option(ISLAND_ENABLE_SEARCH "Build Island search index modules" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 
+# Embed the built-in pages (src/main/pages/*.html) as byte arrays (string
+# literals hit MSVC's length limit). Reconfigures when a page changes.
+set(ISLAND_LOCAL_PAGE_SOURCES)
+foreach(_island_page IN ITEMS "agent.html:AgentPageHtml" "settings.html:SettingsPageHtml"
+                              "tab_overview.html:TabOverviewPageHtml")
+    string(REPLACE ":" ";" _island_page "${_island_page}")
+    list(GET _island_page 0 ISLAND_PAGE_FILE)
+    list(GET _island_page 1 ISLAND_PAGE_FUNCTION)
+    set(_island_page_html "${CMAKE_SOURCE_DIR}/src/main/pages/${ISLAND_PAGE_FILE}")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_island_page_html}")
+    file(READ "${_island_page_html}" _island_page_hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ISLAND_PAGE_BYTES "${_island_page_hex}")
+    set(_island_page_cc "${CMAKE_BINARY_DIR}/generated/local_page_html_${ISLAND_PAGE_FUNCTION}.cc")
+    configure_file("${CMAKE_SOURCE_DIR}/cmake/local_page_html.cc.in" "${_island_page_cc}" @ONLY)
+    list(APPEND ISLAND_LOCAL_PAGE_SOURCES "${_island_page_cc}")
+endforeach()
+
 add_subdirectory(tests)
+
+# The AI-agent kernel (MCP tools endpoint, ACP client) is CEF-free and always
+# built; src/main links it.
+add_subdirectory(src/agent)
 
 # Guarded Search S0 hook: the on-device search kernel is pure C++20 and never
 # links CEF. Default OFF keeps the Phase 0-3 flow byte-for-byte unchanged.

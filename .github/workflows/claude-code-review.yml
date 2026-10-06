@@ -1,14 +1,9 @@
 name: Claude Code Review
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
+  # Automatic triggers are paused: builds and tests run locally to save
+  # GitHub Actions minutes. Restore the triggers from git history to re-enable.
+  workflow_dispatch:
 
 jobs:
   claude-review:

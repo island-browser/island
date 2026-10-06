@@ -21,10 +21,12 @@
 #include "chrome_snapshot.h"
 #include "design_tokens.h"
 #include "icon_catalog.h"
+#include "include/cef_image.h"
 #include "navigation_state.h"
 #include "sidebar_state.h"
 
 class CefBoxLayout;
+class CefView;
 class CefBrowserView;
 class CefButton;
 class CefLabelButton;
@@ -84,6 +86,18 @@ enum class ChromeViewId : int {
     // Welcome flow overlay (first-run import + appearance). Like the palettes,
     // it lives on the CefWindow, not in the rail/root contract tree.
     kWelcome = 1040,
+    // The agent panel column at the right edge of the root (ACP chat). It is
+    // a contract node with zero width while the panel is closed; the panel's
+    // own CefBrowserView inside it is not a contract node.
+    kAgentPanel = 1041,
+    // Arc-style rail regions: the "New Tab" row above the tab list, and the
+    // footer under the space bar holding the agent toggle and New Space.
+    kRailNewTab = 1042,
+    kRailFooter = 1043,
+    kRailAgentButton = 1044,
+    kRailNewSpaceButton = 1045,
+    kRailTabsButton = 1046,
+    kRailSettingsButton = 1047,
 };
 
 struct ChromeViewTreeNode {
@@ -100,6 +114,11 @@ struct ChromeViewTreeNode {
 struct TabStripEntrySnapshot {
     std::string title;
     bool active = false;
+    // Pinned tabs form the top group of the list; their trailing affordance
+    // unpins instead of closing.
+    bool pinned = false;
+    // The page's favicon once downloaded; null shows the globe fallback.
+    CefRefPtr<CefImage> favicon;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -121,6 +140,8 @@ struct ChromeGeometrySnapshot {
     DipRect rail_bounds;
     DipRect browser_content_bounds;
     DipRect browser_view_bounds;
+    // Zero width (at the right edge) while the agent panel is closed.
+    DipRect agent_panel_bounds;
 
     bool operator==(const ChromeGeometrySnapshot&) const = default;
 };
@@ -139,6 +160,7 @@ enum class CollectionButtonAction : std::uint8_t {
     kActivateTab,
     kCloseTab,
     kActivateSpace,
+    kUnpinTab,
 };
 
 class BrowserChromeHost {
@@ -155,6 +177,11 @@ class BrowserChromeHost {
     virtual void CancelAddressEditing() = 0;
     virtual void SubmitAddressDraft(std::string_view draft) = 0;
     virtual void FocusBrowserView() = 0;
+    // Arc-style rail affordances.
+    virtual void SetTabPinned(std::size_t index, bool pinned) = 0;
+    virtual void ToggleAgentPanel() = 0;
+    virtual void ToggleTabOverview() = 0;
+    virtual void ToggleSettings() = 0;
 };
 
 class BrowserChrome final : public NavigationObserver {
@@ -197,6 +224,11 @@ class BrowserChrome final : public NavigationObserver {
     // CEF cannot round or clip the CefBrowserView, so the floating read comes from
     // this rectangular inset, not from a corner radius.
     [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 12; }
+
+    // The agent panel column: a fixed 380 DIP that yields to the page, so the
+    // browser content never drops below MinimumBrowserContentWidthDip.
+    [[nodiscard]] static constexpr int AgentPanelWidthDip() { return 380; }
+    [[nodiscard]] static constexpr int MinimumBrowserContentWidthDip() { return 320; }
 
     enum class SurfaceSlot : std::uint8_t {
         kRoot,
@@ -276,14 +308,28 @@ class BrowserChrome final : public NavigationObserver {
         DipRect root_bounds, const ChromeTokens& tokens) noexcept {
         return LayoutForBounds(root_bounds, tokens, /*sidebar_revealed=*/true);
     }
-    // The hidden sidebar occupies 0 DIP of layout width; the rail stays in the
-    // view tree, so the contract shape is unchanged and only the content
-    // x-offset moves. This is the single layout path for both states.
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_revealed) noexcept {
+        return LayoutForBounds(root_bounds, tokens, sidebar_revealed,
+                               /*agent_panel_open=*/false);
+    }
+    // The hidden sidebar occupies 0 DIP of layout width; the rail stays in the
+    // view tree, so the contract shape is unchanged and only the content
+    // x-offset moves. This is the single layout path for both states.
+    // The open agent panel takes its column from the right edge before the
+    // content gutter applies; closed, it is a zero-width rect at that edge.
+    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
+                                                                const ChromeTokens& tokens,
+                                                                bool sidebar_revealed,
+                                                                bool agent_panel_open) noexcept {
         const int rail_width =
             sidebar_revealed ? std::min(tokens.rail_width_dip, root_bounds.width) : 0;
+        const int panel_width =
+            agent_panel_open
+                ? std::clamp(root_bounds.width - rail_width - MinimumBrowserContentWidthDip(), 0,
+                             AgentPanelWidthDip())
+                : 0;
         const DipRect rail_bounds = {
             .x = root_bounds.x,
             .y = root_bounds.y,
@@ -295,7 +341,7 @@ class BrowserChrome final : public NavigationObserver {
         // very narrow windows.
         const int pad = BrowserContentPaddingDip();
         const int content_x = root_bounds.x + rail_width;
-        const int content_width = std::max(0, root_bounds.width - rail_width);
+        const int content_width = std::max(0, root_bounds.width - rail_width - panel_width);
         const DipRect browser_content_bounds = {
             .x = content_x,
             .y = root_bounds.y,
@@ -310,11 +356,18 @@ class BrowserChrome final : public NavigationObserver {
             .width = inset_width,
             .height = inset_height,
         };
+        const DipRect agent_panel_bounds = {
+            .x = content_x + content_width,
+            .y = root_bounds.y,
+            .width = panel_width,
+            .height = root_bounds.height,
+        };
         return {
             .root_bounds = root_bounds,
             .rail_bounds = rail_bounds,
             .browser_content_bounds = browser_content_bounds,
             .browser_view_bounds = browser_view_bounds,
+            .agent_panel_bounds = agent_panel_bounds,
         };
     }
     // The fixed rail regions keep their Phase 2 shape; the collection regions
@@ -331,15 +384,22 @@ class BrowserChrome final : public NavigationObserver {
                      {ChromeViewId::kAddress, {}},
                      {ChromeViewId::kReload, {}}}},
                    {ChromeViewId::kValidationMessage, {}},
+                   {ChromeViewId::kRailNewTab, {}},
                    {ChromeViewId::kTabStrip, {}},
                    {ChromeViewId::kSpacer, {}},
-                   {ChromeViewId::kSpaceSwitcher, {}},
                    {ChromeViewId::kDivider, {}},
+                   {ChromeViewId::kSpaceSwitcher, {}},
+                   {ChromeViewId::kRailFooter,
+                    {{ChromeViewId::kRailAgentButton, {}},
+                     {ChromeViewId::kRailTabsButton, {}},
+                     {ChromeViewId::kRailSettingsButton, {}},
+                     {ChromeViewId::kRailNewSpaceButton, {}}}},
                    {ChromeViewId::kActivePage,
                     {{ChromeViewId::kActivePageFallbackFavicon, {}},
                      {ChromeViewId::kActiveTab, {}},
                      {ChromeViewId::kActivePageIndicator, {}}}}}},
-                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}}}};
+                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
+                 {ChromeViewId::kAgentPanel, {}}}};
     }
 
     // Projects the collection regions the way U4/U5 wire them at runtime: one
@@ -385,6 +445,8 @@ class BrowserChrome final : public NavigationObserver {
     // matching the Phase 2 rail requirement for keyboard-focusable entries.
     [[nodiscard]] static std::string TabEntryAccessibleName(const TabStripEntrySnapshot& entry);
     [[nodiscard]] static std::string TabCloseAccessibleName(const TabStripEntrySnapshot& entry);
+    // Inactive space pills show only an initial; the active one shows the name.
+    [[nodiscard]] static std::string SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry);
     [[nodiscard]] static std::string SpaceEntryAccessibleName(
         const SpaceSwitcherEntrySnapshot& entry);
 
@@ -417,6 +479,14 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr double SplitRatioStep() { return 0.05; }
     [[nodiscard]] static constexpr int SplitDividerWidthDip() { return 2; }
 
+    // Arc-style rail metrics: compact 34 DIP tab rows, 30 DIP space pills.
+    [[nodiscard]] static constexpr int TabRowHeightDip() { return 34; }
+    [[nodiscard]] static constexpr int SpacePillHeightDip() { return 30; }
+    // The tab list scrolls inside the rail; its rows stop short of the rail's
+    // right inset by this gutter so a classic scrollbar never forces a
+    // horizontal one.
+    [[nodiscard]] static constexpr int TabListScrollGutterDip() { return 10; }
+
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
     void ApplyTheme(ChromeTokens tokens);
@@ -424,6 +494,11 @@ class BrowserChrome final : public NavigationObserver {
     // the rail is never removed from the tree.
     void SetSidebarRevealed(bool revealed);
     [[nodiscard]] bool sidebar_revealed() const noexcept { return sidebar_revealed_; }
+    // Hosts the agent panel's view in the kAgentPanel column (once) and opens
+    // or closes the column.
+    void SetAgentPanelView(CefRefPtr<CefView> view);
+    void SetAgentPanelOpen(bool open);
+    [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
     void BeginAddressEditing();
     void Detach();
 
@@ -444,6 +519,8 @@ class BrowserChrome final : public NavigationObserver {
 
     void HandleButtonPressed(ChromeViewId view_id);
     void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
+    void UpdateTabStripPreferredSize();
+    void ApplyRailButtonTheme();
     bool HandleAddressKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void HandleAddressUserAction(CefRefPtr<CefTextfield> textfield);
     void HandleAddressFocus();
@@ -462,6 +539,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefBoxLayout> browser_content_layout_;
+    CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<CefView> agent_panel_view_;
+    bool agent_panel_open_ = false;
     CefRefPtr<CefBrowserView> browser_view_;
     // U6 split view state; both stay null while a single view is attached.
     CefRefPtr<CefBrowserView> split_view_;
@@ -479,7 +559,15 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
+    CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
+    CefRefPtr<CefView> tab_list_scroll_;
     CefRefPtr<CefPanel> space_switcher_;
+    CefRefPtr<CefLabelButton> new_tab_button_;
+    CefRefPtr<CefPanel> rail_footer_;
+    CefRefPtr<CefLabelButton> agent_button_;
+    CefRefPtr<CefLabelButton> new_space_button_;
+    CefRefPtr<CefLabelButton> tabs_button_;
+    CefRefPtr<CefLabelButton> settings_button_;
     // Per-entry runtime views, index-aligned with tab_entries_/space_entries_.
     struct TabEntryViews {
         CefRefPtr<CefPanel> row;

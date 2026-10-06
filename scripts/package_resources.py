@@ -46,8 +46,8 @@ def validate_runtime_resources(resources: Path) -> tuple[Path, ...]:
     except json.JSONDecodeError as error:
         raise ResourceValidationError(f"invalid icon manifest: {manifest_path}") from error
     outputs = manifest.get("outputs")
-    if not isinstance(outputs, list) or len(outputs) != 96:
-        raise ResourceValidationError("icon manifest must declare exactly 96 PNG resources")
+    if not isinstance(outputs, list) or len(outputs) != 240:
+        raise ResourceValidationError("icon manifest must declare exactly 240 PNG resources")
 
     icon_root = manifest_path.parent
     resolved_icon_root = icon_root.resolve()

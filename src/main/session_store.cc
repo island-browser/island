@@ -40,6 +40,10 @@ void WriteTabState(json::Writer& w, const TabState& tab) {
     w.Uint64Value(tab.id.value);
     w.Key("url");
     w.StringValue(tab.url);
+    if (tab.pinned) {
+        w.Key("pinned");
+        w.BoolValue(true);
+    }
     w.EndObject();
 }
 
@@ -181,6 +185,12 @@ LoadResult ParseSessionState(const json::Value& root) {
             TabState tab_state;
             tab_state.id = TabId{static_cast<std::uint64_t>(tab_val.FindMember("id")->int_val)};
             tab_state.url = tab_val.FindMember("url")->string_val;
+            if (const json::Value* pinned = tab_val.FindMember("pinned")) {
+                if (pinned->type != json::Type::kBool) {
+                    return {SessionState::Default(), SessionError::kSchemaError};
+                }
+                tab_state.pinned = pinned->bool_val;
+            }
             space_state.tabs.push_back(std::move(tab_state));
         }
 

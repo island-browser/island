@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -12,6 +13,8 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 #include "island_app.h"
+#include "keymap.h"
+#include "prefs_store.h"
 #include "startup_options.h"
 
 @interface IslandApplication : NSApplication <CefAppProtocol> {
@@ -64,6 +67,10 @@
 - (void)openSearchPalette:(id)sender;
 - (void)openCommandPalette:(id)sender;
 - (void)toggleSidebar:(id)sender;
+- (void)toggleAgentPanel:(id)sender;
+- (void)togglePinTab:(id)sender;
+- (void)openSettings:(id)sender;
+- (void)openTabOverview:(id)sender;
 - (void)newTab:(id)sender;
 - (void)closeTab:(id)sender;
 - (void)selectNextTab:(id)sender;
@@ -198,6 +205,30 @@
     }
 }
 
+- (void)toggleAgentPanel:(id)sender {
+    if (app_ != nullptr) {
+        app_->ToggleAgentPanel();
+    }
+}
+
+- (void)openSettings:(id)sender {
+    if (app_ != nullptr) {
+        app_->ToggleSettings();
+    }
+}
+
+- (void)openTabOverview:(id)sender {
+    if (app_ != nullptr) {
+        app_->ToggleTabOverview();
+    }
+}
+
+- (void)togglePinTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kTogglePinTab);
+    }
+}
+
 - (void)newTab:(id)sender {
     if (app_ != nullptr) {
         app_->ExecuteCommand(island::BrowserCommand::kNewTab);
@@ -286,7 +317,35 @@ NSMenuItem* AddBrowserMenuItem(NSMenu* menu, IslandMenuActions* menu_actions, NS
     return item;
 }
 
+// Applies the user's keymap (prefs overrides on the defaults) to a menu item:
+// NSMenu owns the command keys on macOS, so Settings edits land here on the
+// next launch. An unbound action keeps its menu entry without a key.
+void ApplyKeyBinding(NSMenuItem* item, island::KeyAction action, const island::Keymap& keymap) {
+    const std::optional<island::KeyBinding> binding = keymap.Binding(action);
+    const std::optional<island::MacKeyEquivalent> equivalent =
+        binding.has_value() ? island::ToMacKeyEquivalent(*binding) : std::nullopt;
+    if (!equivalent.has_value()) {
+        [item setKeyEquivalent:@""];
+        [item setKeyEquivalentModifierMask:0];
+        return;
+    }
+    NSEventModifierFlags mask = 0;
+    if (equivalent->command) {
+        mask |= NSEventModifierFlagCommand;
+    }
+    if (equivalent->shift) {
+        mask |= NSEventModifierFlagShift;
+    }
+    if (equivalent->option) {
+        mask |= NSEventModifierFlagOption;
+    }
+    [item setKeyEquivalent:[NSString stringWithUTF8String:equivalent->key.c_str()]];
+    [item setKeyEquivalentModifierMask:mask];
+}
+
 void InstallMainMenu(IslandMenuActions* menu_actions) {
+    const island::Keymap keymap = island::Keymap::WithOverrides(
+        island::PrefsStore::Load(island::PrefsStore::DefaultPrefsFilePath()).state.keybindings);
     NSMenu* main_menu = [[NSMenu alloc] init];
     NSMenuItem* application_menu_item = [[NSMenuItem alloc] init];
     NSMenu* application_menu = [[NSMenu alloc] init];
@@ -294,6 +353,10 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
                                                             action:@selector(terminate:)
                                                      keyEquivalent:@"q"];
     [quit_menu_item setTarget:NSApp];
+    NSMenuItem* settings_menu_item =
+        AddBrowserMenuItem(application_menu, menu_actions, @"Settings…", @selector(openSettings:),
+                           @",", NSEventModifierFlagCommand, 0);
+    [application_menu addItem:[NSMenuItem separatorItem]];
     [application_menu addItem:quit_menu_item];
     [application_menu_item setSubmenu:application_menu];
     [main_menu addItem:application_menu_item];
@@ -342,6 +405,15 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
         AddBrowserMenuItem(browser_menu, menu_actions, @"Search", @selector(openSearchPalette:),
                            @"k", NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
     [browser_menu addItem:toggle_sidebar_menu_item];
+    NSMenuItem* toggle_agent_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Toggle Agent",
+                           @selector(toggleAgentPanel:), @"j", NSEventModifierFlagCommand, 0);
+    NSMenuItem* pin_tab_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"Pin or Unpin Tab",
+                           @selector(togglePinTab:), @"d", NSEventModifierFlagCommand, 0);
+    NSMenuItem* tab_overview_menu_item =
+        AddBrowserMenuItem(browser_menu, menu_actions, @"All Tabs", @selector(openTabOverview:),
+                           @"a", NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
     [browser_menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* new_tab_menu_item =
@@ -421,7 +493,34 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
+    // Every configurable shortcut follows the keymap.
+    ApplyKeyBinding(back_menu_item, island::KeyAction::kBack, keymap);
+    ApplyKeyBinding(forward_menu_item, island::KeyAction::kForward, keymap);
+    ApplyKeyBinding(reload_menu_item, island::KeyAction::kReload, keymap);
+    ApplyKeyBinding(focus_address_menu_item, island::KeyAction::kFocusAddress, keymap);
+    ApplyKeyBinding(command_palette_menu_item, island::KeyAction::kCommandPalette, keymap);
+    ApplyKeyBinding(search_menu_item, island::KeyAction::kSearchPalette, keymap);
+    ApplyKeyBinding(toggle_sidebar_menu_item, island::KeyAction::kToggleSidebar, keymap);
+    ApplyKeyBinding(toggle_agent_menu_item, island::KeyAction::kToggleAgentPanel, keymap);
+    ApplyKeyBinding(pin_tab_menu_item, island::KeyAction::kTogglePinTab, keymap);
+    ApplyKeyBinding(tab_overview_menu_item, island::KeyAction::kTabOverview, keymap);
+    ApplyKeyBinding(settings_menu_item, island::KeyAction::kSettings, keymap);
+    ApplyKeyBinding(new_tab_menu_item, island::KeyAction::kNewTab, keymap);
+    ApplyKeyBinding(close_tab_menu_item, island::KeyAction::kCloseTab, keymap);
+    ApplyKeyBinding(previous_tab_menu_item, island::KeyAction::kPreviousTab, keymap);
+    ApplyKeyBinding(next_tab_menu_item, island::KeyAction::kNextTab, keymap);
+    ApplyKeyBinding(new_space_menu_item, island::KeyAction::kNewSpace, keymap);
+    ApplyKeyBinding(rename_space_menu_item, island::KeyAction::kRenameSpace, keymap);
+    ApplyKeyBinding(toggle_split_menu_item, island::KeyAction::kToggleSplit, keymap);
+    ApplyKeyBinding(move_divider_left_menu_item, island::KeyAction::kMoveDividerLeft, keymap);
+    ApplyKeyBinding(move_divider_right_menu_item, island::KeyAction::kMoveDividerRight, keymap);
+
     [NSApp setMainMenu:main_menu];
+
+    [settings_menu_item release];
+    [toggle_agent_menu_item release];
+    [pin_tab_menu_item release];
+    [tab_overview_menu_item release];
 
     [theme_dark_item release];
     [theme_light_item release];

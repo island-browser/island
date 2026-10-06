@@ -10,11 +10,10 @@
 
 namespace island {
 
-// Browsers the welcome flow can import from. The Chromium family shares one
+// Browsers Island can import from. The Chromium family shares one
 // `Bookmarks` JSON schema; Safari is a macOS plist read behind the platform
-// seam. Firefox is deliberately absent: its bookmarks live in a SQLite
-// database this project cannot read without a new dependency, and the welcome
-// flow never fakes an import it cannot perform.
+// seam; Firefox bookmarks come from its compressed JSON backups (no SQLite);
+// Arc contributes spaces and pinned tabs (browser_import.h).
 enum class ImportSource : std::uint8_t {
     kChrome,
     kEdge,
@@ -23,7 +22,13 @@ enum class ImportSource : std::uint8_t {
     kVivaldi,
     kOpera,
     kSafari,
+    kFirefox,
+    kArc,
 };
+
+// Stable ids for Settings ("chrome", "firefox", "arc", ...), and back.
+[[nodiscard]] std::string_view ImportSourceId(ImportSource source) noexcept;
+[[nodiscard]] std::optional<ImportSource> ImportSourceFromId(std::string_view id) noexcept;
 
 struct ImportSourceInfo {
     ImportSource id;
@@ -38,6 +43,8 @@ struct ImportSourceInfo {
 // Probes the well-known bookmark locations under |base_home| (the user's home
 // directory or a test fixture). Reads no file contents.
 std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path& base_home);
+// A one-line description of what importing the source brings over.
+[[nodiscard]] std::string ImportSourceDescription(const ImportSourceInfo& info);
 
 // Parses the shared Chromium `Bookmarks` JSON (roots.bookmark_bar / other /
 // synced, recursive `type:"url"` nodes). Keeps traversal order, drops entries

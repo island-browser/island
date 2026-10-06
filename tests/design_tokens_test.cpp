@@ -16,6 +16,36 @@ class RecordingChromeObserver final : public ChromeObserver {
     ChromeSnapshot latest_snapshot;
 };
 
+TEST(ChromeTokens, MixesAndMeasuresContrastLikeWcag) {
+    EXPECT_EQ(MixColor({0xFF000000U}, {0xFFFFFFFFU}, 0.0).argb, 0xFF000000U);
+    EXPECT_EQ(MixColor({0xFF000000U}, {0xFFFFFFFFU}, 1.0).argb, 0xFFFFFFFFU);
+    EXPECT_EQ(MixColor({0xFF000000U}, {0xFFFFFFFFU}, 0.5).argb, 0xFF808080U);
+    EXPECT_NEAR(ContrastRatio({0xFF000000U}, {0xFFFFFFFFU}), 21.0, 0.01);
+    EXPECT_NEAR(ContrastRatio({0xFF777777U}, {0xFF777777U}), 1.0, 1e-9);
+}
+
+TEST(ChromeTokens, SpaceTintKeepsTextReadableAndTheAccentVisible) {
+    // The window's space palette plus deliberately hard cases (pale yellow,
+    // near-white, near-black).
+    const ArgbColor spaces[] = {{0xFF5B8DEFU}, {0xFF34A853U}, {0xFFFBBC05U}, {0xFFEA4335U},
+                                {0xFF9334E6U}, {0xFFFFF7AEU}, {0xFFFAFAFAU}, {0xFF111111U}};
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens base = ChromeTokens::ForTheme(theme);
+        for (const ArgbColor space : spaces) {
+            const ChromeTokens tinted = base.TintedForSpace(space, theme);
+            SCOPED_TRACE(testing::Message()
+                         << std::hex << space.argb << " dark=" << (theme == ChromeTheme::kDark));
+            EXPECT_GE(ContrastRatio(tinted.text, tinted.surface_secondary), 4.5);
+            EXPECT_GE(ContrastRatio(tinted.text, tinted.background), 4.5);
+            EXPECT_GE(ContrastRatio(tinted.text, tinted.surface), 4.5);
+            EXPECT_GE(ContrastRatio(tinted.accent, tinted.surface), 3.0);
+            EXPECT_EQ(tinted.text, base.text);
+            EXPECT_EQ(tinted.rail_width_dip, base.rail_width_dip);
+            EXPECT_NE(tinted.surface_secondary, base.surface_secondary);
+        }
+    }
+}
+
 TEST(ChromeTokens, ProvidesTheExactLightSemanticValues) {
     const ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
 

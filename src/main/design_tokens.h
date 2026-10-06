@@ -42,8 +42,22 @@ struct ChromeTokens {
 
     [[nodiscard]] static ChromeTokens ForTheme(ChromeTheme theme) noexcept;
 
+    // Arc-style space theming, applied at runtime on top of the contract
+    // tokens: the canvas, rail, and hairlines take a soft wash of the active
+    // space's color, and the accent becomes that color, darkened (light) or
+    // lightened (dark) until it keeps 3:1 contrast against the surface. Text
+    // tokens never change, and the wash is light enough to keep body text at
+    // WCAG AA on the rail.
+    [[nodiscard]] ChromeTokens TintedForSpace(ArgbColor space_color,
+                                              ChromeTheme theme) const noexcept;
+
     bool operator==(const ChromeTokens&) const = default;
 };
+
+// Linear blend of two opaque colors; `amount` 0 keeps `from`, 1 gives `to`.
+[[nodiscard]] ArgbColor MixColor(ArgbColor from, ArgbColor to, double amount) noexcept;
+// WCAG 2.x contrast ratio between two opaque colors (1..21).
+[[nodiscard]] double ContrastRatio(ArgbColor a, ArgbColor b) noexcept;
 
 }  // namespace island
 

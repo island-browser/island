@@ -1,8 +1,8 @@
 name: Dependency check
 
 on:
-  schedule:
-    - cron: '17 4 * * 1'
+  # Automatic triggers are paused: builds and tests run locally to save
+  # GitHub Actions minutes. Restore the triggers from git history to re-enable.
   workflow_dispatch:
 
 permissions:
