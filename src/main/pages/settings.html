@@ -6,95 +6,110 @@
 <title>Settings</title>
 <style>
 :root {
-  --bg: #F3F0E9; --surface: #FFFEFB; --surface-2: #ECE9E2; --text: #18303A; --text-2: #687A7D;
-  --border: #D8D8D0; --accent: #168C99; --accent-text: #FFFFFF; --danger: #C2412D;
-  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
-  --shadow: 0 1px 2px rgba(16, 32, 40, .05), 0 8px 24px rgba(16, 32, 40, .05);
+  --bg: #FAFAFA; --surface: #FFFFFF; --surface-2: #F2F2F2; --text: #0A0A0A; --text-2: #666666;
+  --border: #E5E5E5; --accent: #0068D6; --accent-text: #FFFFFF; --danger: #CD2B31; --success: #18794E;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .05);
+  --radius: 10px; --radius-sm: 6px;
   --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   color-scheme: light;
 }
-:root[data-theme="dark"] { color-scheme: dark; --danger: #F07A63;
-  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25); }
+:root[data-theme="dark"] { color-scheme: dark; --danger: #FF6369; --success: #4CC38A;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.35); }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
-body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--font);
+body { background: var(--bg); color: var(--text); font: 13.5px/1.55 var(--font);
   -webkit-font-smoothing: antialiased; }
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
-.page { max-width: 760px; margin: 0 auto; padding: 36px 28px 64px; }
-.top { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
-.top h1 { margin: 0; font-size: 26px; letter-spacing: -.02em; flex: 1; }
-.close { width: 34px; height: 34px; border-radius: 10px; border: 0; background: transparent;
-  color: var(--text-2); display: grid; place-items: center; }
+.page { max-width: 760px; margin: 0 auto; padding: 32px 28px 64px; }
+.top { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.top h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.03em; flex: 1; }
+.close { width: 32px; height: 32px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-2); display: grid; place-items: center;
+  transition: background .16s, color .16s; }
 .close:hover { background: var(--surface-2); color: var(--text); }
-nav { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
-nav a { color: var(--text-2); text-decoration: none; font-size: 13px; padding: 5px 10px;
-  border-radius: 8px; }
+nav { display: flex; gap: 2px; flex-wrap: wrap; margin: 0 0 22px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--border); }
+nav a { color: var(--text-2); text-decoration: none; font-size: 13px; padding: 4px 10px;
+  border-radius: var(--radius-sm); transition: background .16s, color .16s; }
 nav a:hover { background: var(--surface-2); color: var(--text); }
-section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-  box-shadow: var(--shadow); padding: 18px 20px; margin-bottom: 16px; }
-section h2 { margin: 0 0 4px; font-size: 15px; letter-spacing: -.01em; }
-section > p.lead { margin: 0 0 14px; color: var(--text-2); font-size: 13px; }
-.row { display: flex; align-items: center; gap: 12px; padding: 10px 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 18px 20px; margin-bottom: 14px; }
+section h2 { margin: 0 0 2px; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+section > p.lead { margin: 0 0 12px; color: var(--text-2); font-size: 13px; }
+.row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
 .row:first-of-type { border-top: 0; }
 .row .label { flex: 1; min-width: 0; }
 .row .label small { display: block; color: var(--text-2); font-size: 12px; }
-.segmented { display: inline-flex; background: var(--surface-2); border-radius: 10px; padding: 3px; }
-.segmented button { border: 0; background: transparent; padding: 5px 14px; border-radius: 8px;
-  font-size: 13px; color: var(--text-2); }
+.segmented { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px; }
+.segmented button { border: 0; background: transparent; padding: 4px 12px; border-radius: 4px;
+  font-size: 12.5px; color: var(--text-2); transition: color .16s; }
+.segmented button:hover { color: var(--text); }
 .segmented button[aria-pressed="true"] { background: var(--surface); color: var(--text);
-  box-shadow: 0 1px 2px rgba(0,0,0,.08); font-weight: 500; }
-.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 9px;
-  padding: 6px 12px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+  box-shadow: 0 0 0 1px var(--border), 0 1px 2px rgba(0,0,0,.06); font-weight: 500; }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
+  padding: 5px 12px; font-size: 12.5px; font-weight: 500; white-space: nowrap;
+  transition: background .16s, border-color .16s, opacity .16s; }
 .btn:hover { background: var(--surface-2); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
+.btn.primary:hover { background: var(--text); opacity: .88; }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--text-2); }
 .btn.quiet:hover { color: var(--text); background: var(--surface-2); }
-.btn:disabled { opacity: .45; cursor: default; }
-input.field { width: 100%; font: 13px var(--mono); background: var(--bg); border: 1px solid var(--border);
-  border-radius: 9px; padding: 8px 10px; }
+.btn:disabled { opacity: .4; cursor: default; }
+input.field { width: 100%; font: 12.5px var(--mono); background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 7px 10px; transition: border-color .16s; }
+input.field:focus { border-color: var(--text-2); outline: none; }
+input.field::placeholder { color: var(--text-2); }
 .inline { display: flex; gap: 8px; align-items: center; }
 .inline input { flex: 1; }
-pre.code { margin: 8px 0 0; background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; font: 12px/1.55 var(--mono); overflow-x: auto; white-space: pre; }
+pre.code { margin: 10px 0 0; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 12px 14px; font: 12px/1.6 var(--mono); overflow-x: auto; white-space: pre; }
 .note { color: var(--text-2); font-size: 12px; margin-top: 8px; }
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-2); }
-.dot.on { background: #2EA66B; }
-.keys { display: flex; flex-direction: column; }
-.key-row { display: flex; align-items: center; gap: 10px; padding: 7px 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.note code, .lead code { font: 11.5px var(--mono); background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0 4px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font: 11px/1.4 var(--mono); color: var(--text-2); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
+.dot.on { background: var(--success); }
+.keys { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.key-row { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border-top: 1px solid var(--border); }
 .key-row:first-child { border-top: 0; }
-.key-row .name { flex: 1; font-size: 13.5px; }
-.chip { min-width: 96px; text-align: center; border: 1px solid var(--border); background: var(--bg);
-  border-radius: 8px; padding: 4px 10px; font: 12.5px var(--mono); }
-.chip:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.key-row:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.key-row .name { flex: 1; font-size: 13px; }
+.chip { min-width: 96px; text-align: center; border: 1px solid var(--border); border-bottom-width: 2px;
+  background: var(--surface); border-radius: var(--radius-sm); padding: 2px 10px; font: 12px var(--mono);
+  transition: border-color .16s; }
+.chip:hover { border-color: var(--text-2); }
 .chip.recording { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.chip.unbound { color: var(--text-2); font-family: var(--font); }
+.chip.unbound { color: var(--text-2); font-family: var(--font); border-style: dashed; border-bottom-width: 1px; }
 .chip.conflict { border-color: var(--danger); color: var(--danger); }
 .key-row .changed { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.filter { margin-bottom: 8px; }
+.filter { margin-bottom: 10px; }
 .sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
-.source { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex;
-  flex-direction: column; gap: 8px; background: var(--bg); }
+.source { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; display: flex;
+  flex-direction: column; gap: 8px; background: var(--surface); transition: border-color .16s; }
+.source:hover { border-color: var(--text-2); }
 .source .head { display: flex; align-items: center; gap: 8px; font-weight: 500; }
-.source .badge { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
-  color: #fff; font-size: 12px; font-weight: 600; flex: none; }
+.source .badge { width: 22px; height: 22px; border-radius: var(--radius-sm); display: grid; place-items: center;
+  color: #fff; font: 600 11px var(--mono); flex: none; }
 .source small { color: var(--text-2); font-size: 12px; }
 .source .btn { margin-top: auto; }
 input.field.filter { font-family: var(--font); font-size: 13px; }
 .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--text);
-  color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; box-shadow: var(--shadow);
+  color: var(--surface); padding: 7px 14px; border-radius: var(--radius-sm); font-size: 12.5px; box-shadow: var(--shadow);
   animation: rise .2s cubic-bezier(.16, 1, .3, 1); }
 @keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
-dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
-dt { color: var(--text-2); }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
+dt { color: var(--text-2); font: 11px/1.8 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+#updates input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
+#updates .status { font: 12px/1.5 var(--mono); }
+#updates .status.error { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -107,7 +122,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   </div>
   <nav aria-label="Sections">
     <a href="#appearance">Appearance</a><a href="#agent">Agent &amp; tools</a>
-    <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#about">About</a>
+    <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
   <section id="appearance">
@@ -158,6 +173,26 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     <h2>Import from another browser</h2>
     <p class="lead">Bring your bookmarks over, or recreate your Arc spaces and pinned tabs. Nothing leaves this computer.</p>
     <div class="sources" id="sources"></div>
+  </section>
+
+  <section id="updates">
+    <h2>Updates</h2>
+    <p class="lead">Island checks its GitHub releases for new versions. Every download is checked against its published SHA-256 checksum before it is installed.</p>
+    <div class="row">
+      <div class="label">Island <span id="update-current"></span><small class="status" id="update-status" role="status" aria-live="polite"></small></div>
+      <button class="btn quiet" id="update-notes" hidden>Release notes</button>
+      <button class="btn" id="update-check">Check for updates</button>
+      <button class="btn primary" id="update-install" hidden>Download and install</button>
+    </div>
+    <div class="row">
+      <label class="label" for="update-auto">Check automatically<small>Once a day, shortly after Island starts.</small></label>
+      <input type="checkbox" id="update-auto">
+    </div>
+    <div class="row">
+      <label class="label" for="update-pre">Include pre-releases<small>Also offer test versions such as 0.5.0-beta.1.</small></label>
+      <input type="checkbox" id="update-pre">
+    </div>
+    <p class="note" id="update-note" hidden></p>
   </section>
 
   <section id="about">
@@ -302,6 +337,40 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  function renderUpdate() {
+    var u = state.settings.update;
+    if (!u) return;
+    var status = u.status || "idle";
+    $("update-current").textContent = u.current_version || "";
+    var text = "";
+    if (u.disabled_by_env) text = "Updates are turned off by ISLAND_DISABLE_UPDATES.";
+    else if (status === "checking") text = "Checking for updates\u2026";
+    else if (status === "up_to_date") text = "Island is up to date.";
+    else if (status === "unavailable") text = "No update information is available right now.";
+    else if (status === "available") text = "Island " + u.latest_version + " is available.";
+    else if (status === "downloading") text = "Downloading Island " + u.latest_version +
+        (u.progress >= 0 ? "\u2026 " + u.progress + "%" : "\u2026");
+    else if (status === "ready") text = "Island " + u.latest_version + " is ready. Restart Island to finish updating.";
+    else if (status === "error") text = u.error || "Something went wrong.";
+    else text = u.last_check > 0 ? "Last checked " + new Date(u.last_check * 1000).toLocaleString() + "." : "";
+    $("update-status").textContent = text;
+    $("update-status").className = "status" + (status === "error" ? " error" : "");
+    var busy = status === "checking" || status === "downloading";
+    $("update-check").disabled = busy || status === "ready" || !!u.disabled_by_env;
+    $("update-notes").hidden = !u.release_url;
+    var install = $("update-install");
+    var offer = status === "available" || status === "downloading" || status === "ready";
+    install.hidden = !offer || !u.can_install;
+    install.disabled = status === "downloading";
+    install.textContent = status === "ready" ? "Restart to update"
+      : status === "downloading" ? "Downloading\u2026" : "Download and install";
+    $("update-auto").checked = !!u.auto_check;
+    $("update-pre").checked = !!u.include_prereleases;
+    var note = u.notice || (offer && !u.can_install ? u.install_blocked_reason : "");
+    $("update-note").textContent = note || "";
+    $("update-note").hidden = !note;
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
@@ -323,6 +392,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("mac-note").hidden = !isMac();
     renderShortcuts();
     renderSources();
+    renderUpdate();
     var about = $("about-list");
     about.textContent = "";
     ((s.about || {}).rows || []).forEach(function (row) {
@@ -347,6 +417,18 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   $("reset-keys").addEventListener("click", function () { recording = null; post({ type: "reset_shortcuts" }); });
   $("key-filter").addEventListener("input", renderShortcuts);
   $("close").addEventListener("click", function () { post({ type: "close" }); });
+  $("update-check").addEventListener("click", function () { post({ type: "check_updates" }); });
+  $("update-notes").addEventListener("click", function () { post({ type: "open_release_notes" }); });
+  $("update-install").addEventListener("click", function () {
+    var u = (state.settings && state.settings.update) || {};
+    post({ type: u.status === "ready" ? "restart_to_update" : "install_update" });
+  });
+  $("update-auto").addEventListener("change", function () {
+    post({ type: "set_update_pref", key: "auto_check", value: $("update-auto").checked });
+  });
+  $("update-pre").addEventListener("change", function () {
+    post({ type: "set_update_pref", key: "include_prereleases", value: $("update-pre").checked });
+  });
   Array.prototype.forEach.call(document.querySelectorAll("nav a"), function (link) {
     link.addEventListener("click", function (event) {
       event.preventDefault();

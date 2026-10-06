@@ -7,14 +7,15 @@
 
 Drift guard for the design-token contract. `DESIGN.md` holds the single machine-readable token
 source — a fenced ```design-tokens``` JSON block. This suite proves that block is complete and
-well formed, that `site/assets/css/site.css` resolves to exactly those values, and that the pinned
-assertions in `tests/design_tokens_test.cpp` still agree with it.
+well formed and that the pinned assertions in `tests/design_tokens_test.cpp` still agree with it.
+The product site's CSS parity check lives in the site repository
+(`island-browser/site`, `tests/test_token_parity.py`) and reads this contract.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `test_token_contract.py` | Contract completeness plus CSS and native parity checks |
+| `test_token_contract.py` | Contract completeness plus native parity checks |
 
 ## For AI Agents
 
@@ -26,7 +27,7 @@ assertions in `tests/design_tokens_test.cpp` still agree with it.
 - Native parity is deliberately covered in two weaker layers rather than by parsing Markdown from
   C++; that trade-off is documented in the module docstring. Preserve it.
 - Changing a token means updating `DESIGN.md`, `src/main/design_tokens.cc`,
-  `tests/design_tokens_test.cpp`, and `site/assets/css/site.css` together.
+  `tests/design_tokens_test.cpp`, and the site repository's `assets/css/site.css` together.
 
 ### Testing Requirements
 
@@ -40,7 +41,6 @@ This is the "Run design token drift guard" step of the `portable` job in `.githu
 
 ### Internal
 
-- `DESIGN.md`, `src/main/design_tokens.{h,cc}`, `tests/design_tokens_test.cpp`,
-  `site/assets/css/site.css`
+- `DESIGN.md`, `src/main/design_tokens.{h,cc}`, `tests/design_tokens_test.cpp`
 
 <!-- MANUAL: -->

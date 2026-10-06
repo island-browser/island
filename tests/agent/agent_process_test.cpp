@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <mutex>
+#include <string>
 
 namespace island::agent {
 namespace {
@@ -86,11 +87,14 @@ TEST(AgentProcessTest, ChildInheritsOnlyStdio) {
     Collector collector;
     AgentProcess process;
     std::string error;
-    ASSERT_TRUE(process.Start({"/bin/sh", "-c",
-                               "for f in 3 4 5 6 7 8 9 10 11 12 13 14 15; do "
-                               "if ( : >&$f ) 2>/dev/null; then echo open:$f; fi; done; "
-                               "echo done"},
-                              {}, collector.OnLine(), collector.OnExit(), &error))
+    // Probe with `test -e /dev/fd/N`, not a redirection: bash (macOS /bin/sh)
+    // saves the redirected stdout on descriptor 10 first, so `: >&10` would
+    // succeed on the shell's own copy and report a leak that is not there.
+    const std::string probe = "for f in 3 4 5 6 7 8 9 10 11 12 13 14 15 " +
+                              std::to_string(leaky[0]) + " " + std::to_string(leaky[1]) +
+                              "; do if [ -e /dev/fd/$f ]; then echo open:$f; fi; done; echo done";
+    ASSERT_TRUE(process.Start({"/bin/sh", "-c", probe}, {}, collector.OnLine(), collector.OnExit(),
+                              &error))
         << error;
     ASSERT_TRUE(collector.WaitExit());
     ::close(leaky[0]);

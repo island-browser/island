@@ -29,6 +29,7 @@
 #include "space.h"
 #include "space_rename_overlay.h"
 #include "tab.h"
+#include "updater.h"
 #include "welcome_flow.h"
 
 class CefBrowser;
@@ -167,6 +168,19 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool MoveTabToSpace(std::size_t from_space, std::size_t tab,
                                       std::size_t to_space);
     bool ResetKeyBinding(KeyAction action);
+
+    // In-browser updates (Settings > Updates). CheckForUpdates starts a
+    // GitHub Releases check unless ISLAND_DISABLE_UPDATES is set; the
+    // automatic one runs ~10 s after a persisted (non-smoke) window opens, at
+    // most once per 24 h. RestartToUpdate launches the verified update's
+    // apply script and closes the window so it can run.
+    bool CheckForUpdates();
+    void RestartToUpdate();
+    [[nodiscard]] const update::Updater& updater() const noexcept { return *updater_; }
+    // Replaces the updater (the constructor installs the CefURLRequest one;
+    // tests inject an install location and a fake fetcher).
+    void ConfigureUpdater(update::Updater::Config config,
+                          std::unique_ptr<update::UpdateFetcher> fetcher);
 
     // Runs one Settings import ("chrome", "firefox", "arc", ...) and returns
     // the notice the page shows.
@@ -377,6 +391,12 @@ class BrowserWindow : public CefClient,
     void HandleAgentPageMessage(const json::Value& message);
     void HandleSettingsMessage(const json::Value& message);
     void HandleOverviewMessage(const json::Value& message);
+    // Settings > Updates: the page's update messages, the state it renders,
+    // the deferred startup check, and the updater's change notifications.
+    [[nodiscard]] bool HandleUpdateMessage(std::string_view type, const json::Value& message);
+    [[nodiscard]] json::Value UpdateStateJson() const;
+    void RunStartupUpdateCheck();
+    void OnUpdaterChanged();
     void HideInternalPage();
     [[nodiscard]] LocalPage* InternalPageFor(LocalPageKind kind) const;
     [[nodiscard]] json::Value ThemeJson() const;
@@ -469,6 +489,7 @@ class BrowserWindow : public CefClient,
     // A one-shot notice for the Settings page (import results, errors).
     std::string settings_message_;
     std::unique_ptr<agent::AgentSession> agent_session_;
+    std::unique_ptr<update::Updater> updater_;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).

@@ -2,15 +2,23 @@
 // BrowserWindow. The CEF view types must be complete before browser_window.h.
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "browser_window.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
+#include "island_version.h"
 #include "json_util.h"
 #include "keymap.h"
+#include "sha256.h"
+#include "updater.h"
 
 namespace island {
 namespace {
@@ -181,6 +189,125 @@ TEST(BrowserWindowPagesTest, ArcSpacesImportAsPinnedSpaces) {
     EXPECT_TRUE(work.tabs()[0].pinned());
     EXPECT_EQ(window->active_space_index(), 0U);  // importing never steals focus
     EXPECT_EQ(window->ImportFromBrowser("netscape"), "Unknown import source.");
+}
+
+// Answers updater requests from canned bodies keyed by a URL substring.
+class CannedFetcher final : public update::UpdateFetcher {
+  public:
+    explicit CannedFetcher(std::vector<std::pair<std::string, std::string>> bodies)
+        : bodies_(std::move(bodies)) {}
+    void Start(update::FetchRequest request, Progress, Done done) override {
+        update::FetchResult result;
+        for (const auto& [needle, body] : bodies_) {
+            if (request.url.find(needle) == std::string::npos) continue;
+            result.ok = true;
+            result.http_status = 200;
+            result.size = static_cast<std::int64_t>(body.size());
+            result.sha256_hex = Sha256::HexOf(body);
+            if (request.destination.empty()) {
+                result.body = body;
+            } else {
+                std::ofstream(request.destination, std::ios::binary) << body;
+            }
+            break;
+        }
+        if (!result.ok) result.http_status = 404;
+        done(std::move(result));
+    }
+    void Cancel() override {}
+
+  private:
+    std::vector<std::pair<std::string, std::string>> bodies_;
+};
+
+Value UpdateState(const BrowserWindow& window) {
+    const std::optional<Value> state = json::Parse(window.SettingsStateJson());
+    const Value* settings = state.has_value() ? state->FindMember("settings") : nullptr;
+    const Value* update = settings != nullptr ? settings->FindMember("update") : nullptr;
+    return update != nullptr ? *update : Value::MakeObject();
+}
+
+void SendSettings(BrowserWindow& window, std::string_view json_text) {
+    const std::optional<Value> message = json::Parse(json_text);
+    ASSERT_TRUE(message.has_value()) << json_text;
+    window.OnLocalPageMessage(LocalPageKind::kSettings, *message);
+}
+
+TEST(BrowserWindowPagesTest, SettingsUpdatesStateAndPreferences) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    Value update = UpdateState(*window);
+    EXPECT_EQ(update.StringOr("status", ""), "idle");
+    EXPECT_EQ(update.StringOr("current_version", ""), ISLAND_VERSION_STRING);
+    EXPECT_TRUE(update.BoolOr("auto_check", false));
+    EXPECT_FALSE(update.BoolOr("include_prereleases", true));
+    // The test binary runs from a build tree, which never installs updates.
+    EXPECT_FALSE(update.BoolOr("can_install", true));
+
+    SendSettings(*window, R"({"type":"set_update_pref","key":"auto_check","value":false})");
+    SendSettings(*window, R"({"type":"set_update_pref","key":"include_prereleases","value":true})");
+    SendSettings(*window, R"({"type":"set_update_pref","key":"bogus","value":true})");
+    SendSettings(*window, R"({"type":"set_update_pref","key":"auto_check","value":"yes"})");
+    update = UpdateState(*window);
+    EXPECT_FALSE(update.BoolOr("auto_check", true));
+    EXPECT_TRUE(update.BoolOr("include_prereleases", false));
+}
+
+TEST(BrowserWindowPagesTest, SettingsUpdateMessagesCheckDownloadAndOpenNotes) {
+    const std::filesystem::path base =
+        std::filesystem::temp_directory_path() /
+        ("island_window_update_" + std::to_string(update::CurrentProcessId()));
+    std::error_code error;
+    std::filesystem::remove_all(base, error);
+    std::filesystem::create_directories(base / "island", error);
+
+    const std::string archive = "release archive";
+    const std::string name = update::ArchiveName("99.0.0", "linux64");
+    const std::string url = "https://github.com/island-browser/island/releases/download/v99.0.0/";
+    const std::string releases =
+        R"j([{"tag_name":"nightly","draft":false,"prerelease":true,"assets":[]},)j"
+        R"j({"tag_name":"v99.0.0","name":"Island 99.0.0 (unsigned)","draft":false,)j"
+        R"j("prerelease":true,"html_url":"https://github.com/island-browser/island/releases/tag/v99.0.0",)j"
+        R"j("assets":[{"name":")j" +
+        name + R"j(","size":)j" + std::to_string(archive.size()) +
+        R"j(,"browser_download_url":")j" + url + name +
+        R"j("},{"name":"SHA256SUMS.txt","size":100,"browser_download_url":")j" + url +
+        R"j(SHA256SUMS.txt"}]}])j";
+
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    update::Updater::Config config;
+    config.current_version = ISLAND_VERSION_STRING;
+    config.target = "linux64";
+    config.install.support = update::InstallSupport::kSupported;
+    config.install.platform = update::Platform::kLinux;
+    config.install.install_root = base / "island";
+    config.install.executable_name = "island_browser";
+    config.install.staging_dir = base / ".island.island-update";
+    window->ConfigureUpdater(
+        config, std::make_unique<CannedFetcher>(std::vector<std::pair<std::string, std::string>>{
+                    {"api.github.com/repos/island-browser/island/releases", releases},
+                    {"SHA256SUMS.txt", Sha256::HexOf(archive) + "  " + name + "\n"},
+                    {name, archive}}));
+
+    SendSettings(*window, R"({"type":"check_updates"})");
+    Value update = UpdateState(*window);
+    EXPECT_EQ(update.StringOr("status", ""), "available");
+    EXPECT_EQ(update.StringOr("latest_version", ""), "99.0.0");
+    EXPECT_EQ(update.StringOr("release_url", ""),
+              "https://github.com/island-browser/island/releases/tag/v99.0.0");
+    EXPECT_TRUE(update.BoolOr("can_install", false));
+
+    SendSettings(*window, R"({"type":"install_update"})");
+    update = UpdateState(*window);
+    EXPECT_EQ(update.StringOr("status", ""), "ready");
+    EXPECT_TRUE(std::filesystem::exists(config.install.staging_dir / name));
+
+    // Release notes open the updater's own URL in a new tab; the page cannot
+    // supply one.
+    SendSettings(*window, R"({"type":"open_release_notes","url":"https://evil.example/"})");
+    ASSERT_EQ(SpaceAt(*window, 0).tab_count(), 2U);
+    EXPECT_EQ(SpaceAt(*window, 0).tabs()[1].startup_url(),
+              "https://github.com/island-browser/island/releases/tag/v99.0.0");
+    std::filesystem::remove_all(base, error);
 }
 
 }  // namespace

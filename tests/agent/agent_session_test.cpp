@@ -174,6 +174,11 @@ TEST(AgentSessionTest, LaunchArgvUsesTheLoginShellOrSplitsTheCommand) {
     EXPECT_EQ(argv[1], "-lc");
     EXPECT_EQ(argv[2], "exec npx -y \"@scope/agent acp\"");
 #endif
+    // Unbalanced quotes never reach a shell or a process.
+    config.command = "\"unbalanced";
+    EXPECT_TRUE(AgentSession::LaunchArgv(config).empty());
+    config.use_login_shell = false;
+    EXPECT_TRUE(AgentSession::LaunchArgv(config).empty());
 }
 
 }  // namespace

@@ -37,7 +37,10 @@ platform executable links.
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
 | `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
 | `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping |
-| `prefs_store.{h,cc}` | Preferences JSON (theme, agent command, agent panel state, shortcut overrides) |
+| `prefs_store.{h,cc}` | Preferences JSON (theme, agent command, agent panel state, shortcut overrides, update checks) |
+| `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
+| `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
+| `cef_update_fetcher.{h,cc}` | `UpdateFetcher` over `CefURLRequest` (manual, allow-listed redirects; capped, hashed streaming) |
 | `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers, Safari, Firefox (`.jsonlz4` bookmark backups) and Arc (spaces + pinned tabs) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
@@ -66,6 +69,10 @@ platform executable links.
 - Adding a `.cc` here usually means editing **two** lists: the `island_browser_core` sources in
   `CMakeLists.txt`, and the explicit source list of the matching test target in
   `tests/CMakeLists.txt`.
+- The updater policy (`updater.cc`, `sha256.cc`) is CEF-free like the stores above; only
+  `cef_update_fetcher.cc` and the `BrowserWindow` glue touch CEF. The startup check is deferred and
+  skipped for the smoke run (`persist_session` false) and under `ISLAND_DISABLE_UPDATES=1`, so
+  startup stays offline. Release-contract details live in the comment at the top of `updater.h`.
 - Currently **not** compiled into any target: `session_store.cc`. (PR #27 is in flight to add it to
   both `island_browser_core` and `island_tests`; until it merges, that file has never been
   compiled.) `space.cc` and `tab.cc` *are* in `island_browser_core` as of commit `043aa34`, and

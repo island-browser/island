@@ -101,9 +101,9 @@ architecture does not match the host when a native match is required.
 | `portable-container.yml` | Runs portable validation in the locked `portable-tests` image on PRs. |
 | `linux-container.yml` | Runs the x64 native container build lane; arm64 only on an actual native arm64 runner. QEMU preflight may be non-blocking and is explicitly non-authoritative. |
 
-Existing native workflows (`ci.yml`, `package.yml`, `nightly.yml`, `release.yml`,
-`dependency-check.yml`, `pages.yml`) are untouched and remain the source of truth for native
-builds, packages, releases, dependency reports, and site deployment. Container lanes are additive
+Existing native workflows (`ci.yml`, `package.yml`, `build-release.yml`, `release.yml`,
+`dependency-check.yml`) are untouched and remain the source of truth for native
+builds, packages, releases, and dependency reports (the site deploys from its own repository). Container lanes are additive
 and never replace native evidence.
 
 ## Security

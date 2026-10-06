@@ -70,6 +70,9 @@ class AgentSession {
     // Everything the panel renders, as one JSON object.
     [[nodiscard]] std::string StateJson() const;
 
+    // The argv that starts the agent: the command wrapped in the login shell
+    // (POSIX, by default) or split into words. Empty when the command is
+    // blank or its quotes do not balance.
     [[nodiscard]] static std::vector<std::string> LaunchArgv(const AgentSessionConfig& config);
 
   private:

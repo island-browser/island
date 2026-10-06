@@ -50,14 +50,18 @@ AgentSession::~AgentSession() {
 }
 
 std::vector<std::string> AgentSession::LaunchArgv(const AgentSessionConfig& config) {
+    std::vector<std::string> argv = SplitCommandLine(config.command);
 #if !defined(_WIN32)
-    if (config.use_login_shell) {
+    // A command the splitter rejects (unbalanced quotes) would fail in the
+    // shell too; refusing it here keeps the clear parse error and starts no
+    // process.
+    if (config.use_login_shell && !argv.empty()) {
         const char* shell = std::getenv("SHELL");
         const std::string shell_path = shell != nullptr && *shell != '\0' ? shell : "/bin/sh";
         return {shell_path, "-lc", "exec " + config.command};
     }
 #endif
-    return SplitCommandLine(config.command);
+    return argv;
 }
 
 bool AgentSession::Start(AgentSessionConfig config) {

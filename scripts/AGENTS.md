@@ -15,8 +15,8 @@ Every non-CMake entrypoint: vendoring the binary dependencies and packaging unsi
 | `setup_deps.ps1` | Windows PowerShell equivalent |
 | `deps.py` | CLI over the `deps/` package: resolve, install, `verify` |
 | `package.py` | Builds a per-target unsigned artifact; `uv run`-compatible PEP 723 header, stdlib only |
-| `version.py` | Version tooling over the root `VERSION` file: `show`, `bump major\|minor\|patch\|pre\|release [--pre LABEL]` (rotates `CHANGELOG.md`), `sync` (site markers, `site/changelog.html`, Windows manifest), `check [--tag vX.Y.Z]`; stdlib only |
-| `site_set_domain.py` | Rewrites the site's canonical/SEO URLs to a new domain |
+| `version.py` | Version tooling over the root `VERSION` file: `show`, `bump major\|minor\|patch\|pre\|release [--pre LABEL]` (rotates `CHANGELOG.md`), `sync` (Windows manifest), `check [--tag vX.Y.Z]`, `notes [VERSION\|vVERSION\|Unreleased]` (prints that `CHANGELOG.md` section; the release body); `REPO_URL` is the one place the GitHub repository URL is written; the site repository's build imports `read_version`, `check`, `render_changelog_html` and the changelog markers, so keep them stable; stdlib only |
+| `release_assets.py` | Used by `build-release.yml`: verifies the six downloaded per-target archives against their own checksum lines, requires exactly one per target, and writes them plus a combined `SHA256SUMS.txt` (`<sha256>  <file name>` per line, sorted, LF) for the GitHub release; imports `Target`/`archive_name`/`SEMVER` from `package.py`; stdlib only |
 | `package_resources.py` | Declares the font/icon files staged into a packaged artifact and their digests |
 
 That table is the complete contents of this directory on `main`. A hybrid native/container build
@@ -42,8 +42,12 @@ modules until they land.
 bash -n scripts/setup_deps.sh
 ./scripts/setup_deps.sh --dry-run
 python3 scripts/deps.py verify
-python3 -m pytest tests/package tests/deps
+python3 -m pytest tests/package tests/deps tests/version
 ```
+
+- The archive name `island_browser-<version>-<target>.<zip|tar.gz>` (`package.archive_name`) and
+  the combined `SHA256SUMS.txt` format are a published contract: GitHub release assets and the
+  in-browser updater depend on them. Change them only together with the updater.
 
 ### Common Patterns
 

@@ -37,6 +37,7 @@ add_executable(island_tests
     space_test.cpp
     startup_options_test.cpp
     tab_test.cpp
+    updater_test.cpp
     window_agent_host_test.cpp
 
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
@@ -51,6 +52,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/cef_update_fetcher.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
@@ -63,12 +65,14 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
     "${CMAKE_SOURCE_DIR}/src/main/session_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/sha256.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space_rename_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/welcome_flow.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/updater.cc"
     "${CMAKE_SOURCE_DIR}/src/main/window_agent_host.cc"
 )
 

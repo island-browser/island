@@ -1,6 +1,7 @@
 """Tests for scripts/version.py: SemVer parsing and bumping, CHANGELOG rotation,
-the Markdown subset rendered into site/changelog.html, and the repository's
-own consistency (VERSION, CHANGELOG.md, and the site agree)."""
+the Markdown subset the site build renders into changelog.html, and the
+repository's own consistency (VERSION, CHANGELOG.md, and the derived files
+agree)."""
 
 from __future__ import annotations
 
@@ -39,15 +40,6 @@ Intro.
 [Unreleased]: https://github.com/island-browser/island/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/island-browser/island/releases/tag/v0.1.0
 """
-
-SITE_PAGE = """<html><head><script type="application/ld+json">{"softwareVersion": "0.0.1"}</script></head>
-<body><span data-island-version>0.0.1</span>
-<!-- changelog:start -->
-stale
-<!-- changelog:end -->
-</body></html>
-"""
-
 
 def run(root: Path, *argv: str) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
@@ -135,8 +127,6 @@ class CommandTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         (self.root / "VERSION").write_text("0.1.0\n", encoding="utf-8")
         (self.root / "CHANGELOG.md").write_text(CHANGELOG, encoding="utf-8")
-        (self.root / "site").mkdir()
-        (self.root / "site" / "changelog.html").write_text(SITE_PAGE, encoding="utf-8")
         manifest = self.root / "src/main/windows/island_browser.exe.manifest"
         manifest.parent.mkdir(parents=True)
         manifest.write_text('<assemblyIdentity name="I" version="0.0.1.0" type="win32" />\n',
@@ -148,14 +138,9 @@ class CommandTests(unittest.TestCase):
     def test_check_reports_stale_files_until_sync(self) -> None:
         code, _, err = run(self.root, "check")
         self.assertEqual(code, 1)
-        self.assertIn("site/changelog.html is out of date", err)
         self.assertIn("island_browser.exe.manifest is out of date", err)
         self.assertEqual(run(self.root, "sync")[0], 0)
         self.assertEqual(run(self.root, "check")[0], 0)
-        page = (self.root / "site" / "changelog.html").read_text(encoding="utf-8")
-        self.assertIn('<span data-island-version>0.1.0</span>', page)
-        self.assertIn('"softwareVersion": "0.1.0"', page)
-        self.assertNotIn("stale", page)
         self.assertIn('version="0.1.0.0"',
                       (self.root / "src/main/windows/island_browser.exe.manifest").read_text())
 
@@ -174,8 +159,8 @@ class CommandTests(unittest.TestCase):
         self.assertEqual((self.root / "VERSION").read_text(encoding="utf-8"), "0.2.0\n")
         self.assertIn("## [0.2.0] - 2026-04-04",
                       (self.root / "CHANGELOG.md").read_text(encoding="utf-8"))
-        self.assertIn('id="v0.2.0"',
-                      (self.root / "site" / "changelog.html").read_text(encoding="utf-8"))
+        self.assertIn('version="0.2.0.0"',
+                      (self.root / "src/main/windows/island_browser.exe.manifest").read_text())
         self.assertEqual(run(self.root, "check")[0], 0)
         # Nothing new to release: refused without touching VERSION.
         self.assertEqual(run(self.root, "bump", "patch")[0], 2)
@@ -187,6 +172,28 @@ class CommandTests(unittest.TestCase):
         self.assertIn("- A new thing", version.parse_changelog(
             (self.root / "CHANGELOG.md").read_text(encoding="utf-8"))[0][0].body[-1])
         self.assertEqual(run(self.root, "check")[0], 0)
+
+    def test_notes_prints_one_section(self) -> None:
+        code, out, _ = run(self.root, "notes")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "### Added\n\n- First.\n")
+        self.assertEqual(run(self.root, "notes", "v0.1.0")[1], out)
+        self.assertEqual(run(self.root, "notes", "0.1.0")[1], out)
+        code, out, _ = run(self.root, "notes", "Unreleased")
+        self.assertEqual((code, out), (0, "### Added\n\n- A new thing with `code`.\n"))
+        self.assertEqual(run(self.root, "notes", "unreleased")[1], out)
+        self.assertNotIn("[Unreleased]:", out)
+
+    def test_notes_rejects_missing_or_invalid_versions(self) -> None:
+        code, out, err = run(self.root, "notes", "0.9.0")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("no '## [0.9.0]' section", err)
+        self.assertEqual(run(self.root, "notes", "latest")[0], 2)
+
+    def test_notes_of_an_empty_section_is_empty(self) -> None:
+        (self.root / "CHANGELOG.md").write_text(CHANGELOG.replace(
+            "### Added\n\n- A new thing with `code`.\n\n", ""), encoding="utf-8")
+        self.assertEqual(run(self.root, "notes", "Unreleased"), (0, "", ""))
 
     def test_invalid_version_file(self) -> None:
         (self.root / "VERSION").write_text("one\n", encoding="utf-8")

@@ -68,6 +68,34 @@ TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
 }
 
+TEST(PrefsStoreTest, GivenUpdatePrefsWhenSavedThenTheyRoundTripAndStayOptional) {
+    PrefsState state;
+    state.auto_check_updates = false;
+    state.include_prereleases = true;
+    state.last_update_check = 1'800'000'000;
+    const std::filesystem::path path = TempPath("updates.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state, state);
+
+    // Older files lack the keys: automatic checks on, stable releases only.
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
+    const PrefsLoadResult legacy = PrefsStore::Load(path);
+    EXPECT_EQ(legacy.error, PrefsError::kNone);
+    EXPECT_TRUE(legacy.state.auto_check_updates);
+    EXPECT_FALSE(legacy.state.include_prereleases);
+    EXPECT_EQ(legacy.state.last_update_check, 0);
+
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","auto_check_updates":1})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    WriteFile(
+        path,
+        R"({"version":1,"onboarding_completed":true,"theme":"dark","last_update_check":"x"})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
 TEST(PrefsStoreTest, GivenCorruptJsonWhenLoadedThenParseErrorAndDefaults) {
     const std::filesystem::path path = TempPath("corrupt.json");
     WriteFile(path, "{ not json");

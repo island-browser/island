@@ -1,0 +1,338 @@
+name: Build and publish unsigned prereleases
+
+# On every push to main that changes what ships, build, test, and package all six
+# targets (package.yml), then publish GitHub *prereleases*. Nothing here makes a
+# stable release: release.yml stays the only path to one, and it is blocked until
+# signing and notarization exist. Publishing needs all six targets to succeed.
+#
+# Release contract (the in-browser updater relies on it):
+# - `v<VERSION>`: created once per VERSION, the first time a build of the commit
+#   tagged v<VERSION> succeeds (or of the commit that bumped VERSION, when the
+#   tag does not exist yet; the release creates it). Prerelease, titled
+#   "Island <VERSION> (unsigned)", body = that version's CHANGELOG.md section.
+#   Never replaced afterwards.
+# - `nightly`: one rolling prerelease, deleted and recreated on every successful
+#   build so its tag moves to the built commit. It only moves forward along main.
+# - Package version: <VERSION> for a build that creates v<VERSION>; otherwise
+#   <VERSION>-nightly.<run number>. Each release carries the six archives
+#   island_browser-<version>-<target>.<zip|tar.gz> and one SHA256SUMS.txt with a
+#   "<sha256>  <file name>" line per archive (scripts/release_assets.py).
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src/**
+      - cmake/**
+      - CMakeLists.txt
+      - deps/**
+      - resources/**
+      - tests/**
+      - VERSION
+      - scripts/deps.py
+      - scripts/package.py
+      - scripts/package_resources.py
+      - scripts/release_assets.py
+      - .github/workflows/build-release.yml
+      - .github/workflows/package.yml
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: >-
+          Commit SHA or tag on main to build (empty: the dispatched branch head). Pass
+          v<VERSION> to publish a version whose tag predates its first successful build.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve commit and package version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      base_version: ${{ steps.resolve.outputs.base_version }}
+      version: ${{ steps.resolve.outputs.version }}
+      version_release: ${{ steps.resolve.outputs.version_release }}
+    steps:
+      - name: Check out history and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - id: resolve
+        name: Decide what this run publishes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          ref="${REQUESTED:-$GITHUB_SHA}"
+          if ! [[ "$ref" =~ ^[0-9A-Za-z][0-9A-Za-z._/-]*$ ]]; then
+            echo "::error::commit must be a SHA or a tag name, got '$ref'."
+            exit 1
+          fi
+          if ! sha="$(git rev-parse -q --verify "${ref}^{commit}")"; then
+            echo "::error::$ref does not name a commit."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main."
+            exit 1
+          fi
+          if ! base="$(git show "$sha:VERSION" 2>/dev/null | tr -d '[:space:]')" || [ -z "$base" ]; then
+            echo "::error::$sha has no VERSION file; only commits from 0.4.0 on can be released."
+            exit 1
+          fi
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if ! [[ "$base" =~ $semver ]]; then
+            echo "::error::VERSION at $sha is not SemVer: '$base'."
+            exit 1
+          fi
+          # present / absent; any other API failure stops the run instead of guessing.
+          if err="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$base" --silent 2>&1)"; then
+            release=present
+          elif [[ "$err" == *"HTTP 404"* ]]; then
+            release=absent
+          else
+            echo "$err" >&2
+            exit 1
+          fi
+          tag_sha="$(git rev-parse -q --verify "refs/tags/v$base^{commit}" || true)"
+          if [ "$release" = absent ] && { [ -z "$tag_sha" ] || [ "$tag_sha" = "$sha" ]; }; then
+            version_release=true
+            version="$base"
+          else
+            version_release=false
+            version="$base-nightly.$GITHUB_RUN_NUMBER"
+            if [ "$release" = absent ]; then
+              echo "::warning::v$base is tagged at $tag_sha, not $sha, and has no release yet. Dispatch this workflow with commit=v$base to publish it."
+            fi
+          fi
+          {
+            echo "sha=$sha"
+            echo "base_version=$base"
+            echo "version=$version"
+            echo "version_release=$version_release"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build plan"
+            echo
+            echo "- Commit: \`$sha\`"
+            echo "- VERSION: \`$base\` (release v$base: $release)"
+            echo "- Package version: \`$version\`"
+            echo "- Creates the v$base prerelease: $version_release"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Package
+    needs: resolve
+    # Nightly builds share one group, so a newer push cancels an older build.
+    # A build that creates v<VERSION> gets its own group and is never cancelled
+    # by later pushes.
+    concurrency:
+      group: >-
+        build-release-${{ github.ref }}-${{ needs.resolve.outputs.version_release == 'true'
+        && needs.resolve.outputs.sha || 'nightly' }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    uses: ./.github/workflows/package.yml
+    with:
+      commit_sha: ${{ needs.resolve.outputs.sha }}
+      version: ${{ needs.resolve.outputs.version }}
+
+  publish-version:
+    name: Publish the v<VERSION> prerelease
+    needs: [resolve, build]
+    if: github.ref == 'refs/heads/main' && needs.resolve.outputs.version_release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: publish-version-${{ needs.resolve.outputs.base_version }}
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.resolve.outputs.sha }}
+      BASE_VERSION: ${{ needs.resolve.outputs.base_version }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      # Tooling (scripts/) comes from the workflow's commit; the notes come from the
+      # built commit's CHANGELOG.md.
+      - name: Check out history and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Download and assemble the six archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern "unsigned-candidate-${VERSION}-*" --dir staging
+          python3 scripts/release_assets.py --staging staging --version "$VERSION" --output release-dist
+          (cd release-dist && sha256sum -c SHA256SUMS.txt)
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          git show "$SHA:CHANGELOG.md" > candidate/CHANGELOG.md
+          {
+            # A pre-release VERSION has no section of its own; use Unreleased then.
+            if ! python3 scripts/version.py --root candidate notes "$BASE_VERSION"; then
+              python3 scripts/version.py --root candidate notes Unreleased
+            fi
+            cat <<EOF
+
+          ---
+
+          **Unsigned prerelease.** These archives are not code-signed or notarized
+          (\`build-metadata.json\`: \`signed: false\`, \`notarized: false\`,
+          \`publicReleaseEligible: false\`). macOS Gatekeeper will refuse to open the app until you
+          allow it in System Settings > Privacy & Security (or run
+          \`xattr -dr com.apple.quarantine island_browser.app\`); Windows SmartScreen may warn.
+          Verify each download against \`SHA256SUMS.txt\`.
+
+          Built from \`${SHA}\` by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}.
+          EOF
+          } > notes.md
+          cat notes.md
+      - name: Create the prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$BASE_VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::$tag already has a release; leaving it untouched."
+            exit 0
+          fi
+          # version-tag.yml may have pushed the tag since the resolve job looked.
+          git fetch --force --tags origin
+          tag_sha="$(git rev-parse -q --verify "refs/tags/$tag^{commit}" || true)"
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$SHA" ]; then
+            echo "::error::$tag points at $tag_sha, but these archives were built from $SHA."
+            exit 1
+          fi
+          gh release create "$tag" release-dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "Island $BASE_VERSION (unsigned)" \
+            --prerelease \
+            --notes-file notes.md
+          echo "Published ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+
+  publish-nightly:
+    name: Publish the nightly prerelease
+    needs: [resolve, build]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: publish-nightly
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHA: ${{ needs.resolve.outputs.sha }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Check out history and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Download and assemble the six archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern "unsigned-candidate-${VERSION}-*" --dir staging
+          python3 scripts/release_assets.py --staging staging --version "$VERSION" --output release-dist
+          (cd release-dist && sha256sum -c SHA256SUMS.txt)
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          git show "$SHA:CHANGELOG.md" > candidate/CHANGELOG.md
+          unreleased="$(python3 scripts/version.py --root candidate notes Unreleased || true)"
+          previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$SHA" 2>/dev/null || true)"
+          {
+            echo "Rolling unsigned build of \`main\` at \`$SHA\`, package version \`$VERSION\`."
+            echo
+            if [ -n "$unreleased" ]; then
+              echo "## Unreleased changes"
+              echo
+              echo "$unreleased"
+              echo
+            fi
+            if [ -n "$previous" ]; then
+              echo "## Commits since $previous"
+              echo
+              log="$(git log --first-parent --format='- %h %s' -n 100 "$previous..$SHA")"
+              echo "${log:-- None: this is the $previous commit.}"
+            else
+              echo "## Recent commits"
+              echo
+              git log --first-parent --format='- %h %s' -n 30 "$SHA"
+            fi
+            cat <<EOF
+
+          ---
+
+          **Unsigned prerelease.** These archives are not code-signed or notarized
+          (\`build-metadata.json\`: \`signed: false\`, \`notarized: false\`,
+          \`publicReleaseEligible: false\`). macOS Gatekeeper will refuse to open the app until you
+          allow it in System Settings > Privacy & Security (or run
+          \`xattr -dr com.apple.quarantine island_browser.app\`); Windows SmartScreen may warn.
+          Verify each download against \`SHA256SUMS.txt\`.
+
+          Built from \`${SHA}\` by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}.
+          EOF
+          } > notes.md
+          cat notes.md
+      - name: Move the nightly prerelease to this commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(git rev-parse -q --verify 'refs/tags/nightly^{commit}' || true)"
+          if [ -n "$current" ] && [ "$current" != "$SHA" ] \
+              && git merge-base --is-ancestor "$SHA" "$current"; then
+            echo "::notice::nightly already points at $current, which is newer than $SHA; leaving it."
+            exit 0
+          fi
+          # Delete and recreate (the pattern the old nightly.yml used): the release API
+          # then creates the tag at $SHA. The release is briefly absent in between.
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          elif [ -n "$current" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly"
+          fi
+          gh release create nightly release-dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "Island $VERSION (nightly, unsigned)" \
+            --prerelease \
+            --notes-file notes.md
+          tagged="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq '.object.sha')"
+          if [ "$tagged" != "$SHA" ]; then
+            echo "::error::the nightly tag points at $tagged after publishing, not $SHA."
+            exit 1
+          fi
+          echo "Published ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/nightly" >> "$GITHUB_STEP_SUMMARY"

@@ -226,10 +226,15 @@ def _architecture(executable: Path) -> Architecture:
     return Architecture.UNKNOWN
 
 
+def archive_name(version: str, target: Target) -> str:
+    """The archive file name; release assets and the in-browser updater rely on this shape."""
+    return f"island_browser-{version}-{target.value}{layout(target).archive_suffix}"
+
+
 def package(arguments: Arguments) -> Path:
     selected = layout(arguments.target)
     source = validate(arguments, selected)
-    name = f"island_browser-{arguments.version}-{arguments.target.value}{selected.archive_suffix}"
+    name = archive_name(arguments.version, arguments.target)
     artifact = arguments.output_dir / name
     metadata: BuildMetadata = {"format": selected.archive_suffix.removeprefix("."), "notarized": False, "publicReleaseEligible": False, "signed": False, "target": arguments.target.value, "version": arguments.version}
     _ = arguments.output_dir.mkdir(parents=True, exist_ok=True)

@@ -31,6 +31,12 @@ struct PrefsState {
     // Keyboard shortcut overrides: {action id, binding} pairs that differ
     // from the built-in keymap (an empty binding unbinds). Optional key.
     std::vector<std::pair<std::string, std::string>> keybindings;
+    // In-browser updater (optional keys). Check GitHub Releases at startup
+    // at most once a day; the time of the last check in unix seconds (0 =
+    // never); and whether SemVer pre-releases (0.5.0-beta.1) are offered.
+    bool auto_check_updates = true;
+    std::int64_t last_update_check = 0;
+    bool include_prereleases = false;
 
     bool operator==(const PrefsState&) const = default;
 };

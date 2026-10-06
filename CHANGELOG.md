@@ -7,17 +7,42 @@ All notable changes to Island are recorded here. The format follows
 
 The version lives in the `VERSION` file. Bump it with
 `python3 scripts/version.py bump minor` (or `major` / `patch`), which moves the
-Unreleased notes under the new version and refreshes the site. Merging a
+Unreleased notes under the new version. Merging a
 version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 0.4.0 were never tagged; their entries are reconstructed from the git history.
 
 ## [Unreleased]
 
+### Added
+
+- Automatic builds: every push to `main` that changes the app builds, tests, and packages all
+  six targets and publishes them as unsigned GitHub prereleases — a rolling `nightly`, plus a
+  `vX.Y.Z` prerelease with the changelog notes the first time a version builds. Each release
+  carries the six archives and one `SHA256SUMS.txt`.
+- `scripts/version.py notes` prints one version's changelog section.
+- In-browser updates (Settings > Updates): checks the GitHub releases of `island-browser/island`
+  shortly after startup (at most once a day, `ISLAND_DISABLE_UPDATES=1` to turn off) or on demand,
+  downloads the platform archive, verifies it against `SHA256SUMS.txt`, and installs it on
+  "Restart to update" with a backup and automatic rollback. SemVer pre-releases are opt-in; build
+  trees and read-only installs only report new versions.
+
 ### Changed
 
+- The product site moved to its own repository,
+  [island-browser/site](https://github.com/island-browser/site), and is served at
+  https://island-browser.github.io/site/. It reads the version and these notes from this
+  repository when it builds; `scripts/version.py sync` no longer touches site pages.
 - New "Graphite" design language across the browser: neutral near-black and white surfaces,
   1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the
   space tint is now a faint cast on the sidebar instead of a colored wash.
+
+### Fixed
+
+- An agent command with unbalanced quotes is refused with "check its quotes" instead of being
+  handed to the login shell.
+- Native builds on every target again: a GCC `-Werror` warning in the command palette, an MSVC
+  parse error in a JSON test, the Windows arm64 runner's Visual Studio generator, and a macOS-only
+  false positive in the agent descriptor-leak test.
 
 ## [0.4.0] - 2026-10-06
 
