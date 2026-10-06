@@ -12,6 +12,7 @@
 #include "include/views/cef_button_delegate.h"
 #include "include/views/cef_label_button.h"
 #include "include/views/cef_panel.h"
+#include "include/views/cef_scroll_view.h"
 #include "include/views/cef_textfield.h"
 #include "include/views/cef_textfield_delegate.h"
 #include "include/wrapper/cef_closure_task.h"
@@ -113,6 +114,14 @@ CefBoxLayoutSettings CollectionLayout(const ChromeTokens& tokens) {
     return settings;
 }
 
+// The tab list packs rows tighter than the generic collection cadence so the
+// active row reads as one raised card in a calm column (Arc's rhythm).
+CefBoxLayoutSettings TabListLayout(const ChromeTokens& tokens) {
+    CefBoxLayoutSettings settings = CollectionLayout(tokens);
+    settings.between_child_spacing = tokens.spacing_1_dip / 2;
+    return settings;
+}
+
 std::string AddressErrorMessage(const std::optional<AddressError>& error) {
     if (!error.has_value()) {
         return "";
@@ -182,6 +191,8 @@ class BrowserChrome::SurfacePanelDelegate final : public CefPanelDelegate {
         minimum_size_.width = width;
         maximum_size_.width = width;
     }
+
+    void SetPreferredSize(CefSize size) { preferred_size_ = size; }
 
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
     CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
@@ -365,7 +376,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     rail_delegate_ = rail_delegate;
     sidebar_ = CefPanel::CreatePanel(rail_delegate);
     sidebar_->SetID(static_cast<int>(ChromeViewId::kRail));
-    sidebar_->SetToBoxLayout(RailLayout(tokens_));
+    CefRefPtr<CefBoxLayout> rail_layout = sidebar_->SetToBoxLayout(RailLayout(tokens_));
 
     CefRefPtr<SurfacePanelDelegate> navigation_row_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail);
@@ -439,18 +450,38 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     validation_message_->SetVisible(false);
     sidebar_->AddChildView(validation_message_);
 
-    CefRefPtr<SurfacePanelDelegate> tab_strip_delegate =
-        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
-    surface_delegates_.push_back(tab_strip_delegate);
-    tab_strip_ = CefPanel::CreatePanel(tab_strip_delegate);
-    tab_strip_->SetID(static_cast<int>(ChromeViewId::kTabStrip));
-    tab_strip_->SetToBoxLayout(CollectionLayout(tokens_));
-    sidebar_->AddChildView(tab_strip_);
+    // Arc-style "New Tab" row: a quiet full-width affordance above the list.
+    new_tab_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "New Tab");
+    new_tab_button_->SetID(static_cast<int>(ChromeViewId::kRailNewTab));
+    new_tab_button_->SetAccessibleName("New Tab");
+    new_tab_button_->SetTooltipText("New Tab");
+    new_tab_button_->SetFocusable(true);
+    new_tab_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    new_tab_button_->SetMinimumSize(CefSize(0, TabRowHeightDip()));
+    sidebar_->AddChildView(new_tab_button_);
 
-    // The spacer stays in its contract position between the two collection regions.
-    // It carries no flex and zero preferred size, so it is inert: the rail sections
-    // top-align and the divider + active-page card sit at the top of the lower group,
-    // with the open tinted rail below the card reading as intentional negative space.
+    // The tab list scrolls inside the rail so a long list never pushes the
+    // space bar and footer out of the window. The scroll view is a layout
+    // wrapper only: kTabStrip stays the rail's contract child.
+    tab_strip_delegate_ = new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(tab_strip_delegate_);
+    tab_strip_ = CefPanel::CreatePanel(tab_strip_delegate_);
+    tab_strip_->SetID(static_cast<int>(ChromeViewId::kTabStrip));
+    tab_strip_->SetToBoxLayout(TabListLayout(tokens_));
+    CefRefPtr<SurfacePanelDelegate> tab_list_scroll_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail, CefSize(0, 0), CefSize(0, 0));
+    surface_delegates_.push_back(tab_list_scroll_delegate);
+    CefRefPtr<CefScrollView> tab_list_scroll =
+        CefScrollView::CreateScrollView(tab_list_scroll_delegate);
+    tab_list_scroll->SetContentView(tab_strip_);
+    tab_list_scroll_ = tab_list_scroll;
+    sidebar_->AddChildView(tab_list_scroll);
+    rail_layout->SetFlexForView(tab_list_scroll, 1);
+    UpdateTabStripPreferredSize();
+
+    // The spacer keeps its contract slot but is inert: the scrolling tab list
+    // takes the flex, so the bottom group (divider, space bar, footer) always
+    // sits at the bottom of the rail.
     CefRefPtr<SurfacePanelDelegate> spacer_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail);
     surface_delegates_.push_back(spacer_delegate);
@@ -459,22 +490,55 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     spacer_ = spacer;
     sidebar_->AddChildView(spacer);
 
-    CefRefPtr<SurfacePanelDelegate> space_switcher_delegate =
-        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
-    surface_delegates_.push_back(space_switcher_delegate);
-    space_switcher_ = CefPanel::CreatePanel(space_switcher_delegate);
-    space_switcher_->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcher));
-    space_switcher_->SetToBoxLayout(CollectionLayout(tokens_));
-    sidebar_->AddChildView(space_switcher_);
-
-    // The hairline divider and the active-page pill sit at the TOP of the lower group,
-    // immediately after the (empty) collections, so the current page reads as a compact
-    // card near the top instead of being pinned to the far bottom.
     CefRefPtr<CefPanel> divider = CefPanel::CreatePanel(
         new PanelDelegate(CefSize(tokens_.rail_width_dip, DividerHeight(tokens_))));
     divider->SetID(static_cast<int>(ChromeViewId::kDivider));
     divider_ = divider;
     sidebar_->AddChildView(divider);
+
+    // The space bar: one horizontal row of pills, Arc's bottom switcher.
+    CefRefPtr<SurfacePanelDelegate> space_switcher_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(space_switcher_delegate);
+    space_switcher_ = CefPanel::CreatePanel(space_switcher_delegate);
+    space_switcher_->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcher));
+    {
+        CefBoxLayoutSettings settings = CollectionLayout(tokens_);
+        settings.horizontal = static_cast<int>(true);
+        settings.between_child_spacing = tokens_.spacing_1_dip + 2;
+        settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        space_switcher_->SetToBoxLayout(settings);
+    }
+    sidebar_->AddChildView(space_switcher_);
+
+    // Footer: the agent toggle on the left, New Space on the right.
+    CefRefPtr<SurfacePanelDelegate> footer_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(footer_delegate);
+    rail_footer_ = CefPanel::CreatePanel(footer_delegate);
+    rail_footer_->SetID(static_cast<int>(ChromeViewId::kRailFooter));
+    CefBoxLayoutSettings footer_settings;
+    footer_settings.horizontal = static_cast<int>(true);
+    footer_settings.between_child_spacing = tokens_.spacing_2_dip;
+    footer_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    CefRefPtr<CefBoxLayout> footer_layout = rail_footer_->SetToBoxLayout(footer_settings);
+    agent_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Agent");
+    agent_button_->SetID(static_cast<int>(ChromeViewId::kRailAgentButton));
+    agent_button_->SetAccessibleName("Agent panel");
+    agent_button_->SetTooltipText("Ask the agent (Ctrl/Cmd+J)");
+    agent_button_->SetFocusable(true);
+    agent_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    agent_button_->SetMinimumSize(CefSize(0, TabRowHeightDip()));
+    rail_footer_->AddChildView(agent_button_);
+    footer_layout->SetFlexForView(agent_button_, 1);
+    new_space_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    new_space_button_->SetID(static_cast<int>(ChromeViewId::kRailNewSpaceButton));
+    new_space_button_->SetAccessibleName("New Space");
+    new_space_button_->SetTooltipText("New Space");
+    new_space_button_->SetFocusable(true);
+    new_space_button_->SetMinimumSize(CefSize(TabRowHeightDip(), TabRowHeightDip()));
+    rail_footer_->AddChildView(new_space_button_);
+    sidebar_->AddChildView(rail_footer_);
 
     // The active-page card is a compact pill: a bounded single-row height so it reads
     // as a raised chip against the tinted rail, not a full-height stretched row.
@@ -509,6 +573,10 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         new PanelDelegate(CefSize(ActivePageIndicatorWidthDip(), control_height)));
     active_page_indicator_->SetID(static_cast<int>(ChromeViewId::kActivePageIndicator));
     active_page_->AddChildView(active_page_indicator_);
+    // Arc's sidebar has no separate current-page card: the active tab row is
+    // the raised card. The node keeps its contract slot (and its accessible
+    // focus target) but takes no space in the rail.
+    active_page_->SetVisible(false);
     sidebar_->AddChildView(active_page_);
 
     browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
@@ -621,6 +689,36 @@ std::string BrowserChrome::SpaceEntryAccessibleName(const SpaceSwitcherEntrySnap
     return "Space: " + entry.name + (entry.active ? ", active" : ", inactive");
 }
 
+std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry) {
+    if (entry.active) {
+        return TruncateCollectionTitle(entry.name);
+    }
+    if (entry.name.empty()) {
+        return "?";
+    }
+    // The first character (a whole UTF-8 sequence), upper-cased when ASCII.
+    std::string initial = entry.name.substr(0, AdvanceUtf8Character(entry.name, 0));
+    if (initial.size() == 1 && initial[0] >= 'a' && initial[0] <= 'z') {
+        initial[0] = static_cast<char>(initial[0] - 'a' + 'A');
+    }
+    return initial;
+}
+
+void BrowserChrome::UpdateTabStripPreferredSize() {
+    const int count = static_cast<int>(tab_entries_.size());
+    const int spacing = TabListLayout(tokens_).between_child_spacing;
+    const int height = count == 0 ? 0 : count * TabRowHeightDip() + (count - 1) * spacing;
+    const int width =
+        std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
+    if (tab_strip_delegate_ != nullptr) {
+        tab_strip_delegate_->SetPreferredSize(CefSize(width, height));
+    }
+    if (tab_strip_ != nullptr) {
+        tab_strip_->SetSize(CefSize(width, height));
+        tab_strip_->Layout();
+    }
+}
+
 void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {
@@ -634,23 +732,34 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     tab_entries_ = entries;
     tab_strip_->RemoveAllChildViews();
 
-    const int control_height = ControlHeight(tokens_);
+    const int row_height = TabRowHeightDip();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
         icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> close_icon =
+        icon_catalog_.Load(ChromeIcon::kClose, ChromeIconTone::kSecondary, ChromeIconSize::k13);
+    const std::optional<CefRefPtr<CefImage>> pin_icon =
+        icon_catalog_.Load(ChromeIcon::kPin, ChromeIconTone::kSecondary, ChromeIconSize::k13);
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const TabStripEntrySnapshot& entry = entries[index];
         TabEntryViews views;
-        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, control_height)));
+        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, row_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kTabStripEntry));
-        CefRefPtr<CefBoxLayout> row_layout = views.row->SetToBoxLayout(HorizontalLayout(tokens_));
+        CefBoxLayoutSettings row_settings;
+        row_settings.horizontal = static_cast<int>(true);
+        row_settings.between_child_spacing = tokens_.spacing_1_dip;
+        row_settings.inside_border_horizontal_spacing = tokens_.spacing_1_dip;
+        row_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        CefRefPtr<CefBoxLayout> row_layout = views.row->SetToBoxLayout(row_settings);
 
         views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
-        views.favicon->SetAccessibleName("Tab favicon placeholder");
-        views.favicon->SetTooltipText("Tab favicon placeholder");
+        views.favicon->SetAccessibleName(entry.favicon != nullptr ? "Tab favicon"
+                                                                  : "Tab favicon placeholder");
         views.favicon->SetFocusable(false);
-        views.favicon->SetMinimumSize(CefSize(control_height, control_height));
-        if (fallback_icon.has_value()) {
+        views.favicon->SetMinimumSize(CefSize(row_height - 6, row_height - 6));
+        if (entry.favicon != nullptr) {
+            views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
+        } else if (fallback_icon.has_value()) {
             views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
         }
         views.row->AddChildView(views.favicon);
@@ -664,24 +773,42 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.title->SetAccessibleName(TabEntryAccessibleName(entry));
         views.title->SetTooltipText(entry.title);
         views.title->SetFocusable(true);
-        views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, control_height));
+        views.title->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+        views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, row_height));
+        views.title->SetFontList(entry.active ? "Geist, Medium 13px" : "Geist, 13px");
         views.row->AddChildView(views.title);
         row_layout->SetFlexForView(views.title, 1);
 
-        CefRefPtr<CollectionButtonDelegate> close_delegate =
-            new CollectionButtonDelegate(this, CollectionButtonAction::kCloseTab, index);
+        // Regular tabs close; pinned tabs unpin (Arc keeps pinned tabs until
+        // they are explicitly released).
+        CefRefPtr<CollectionButtonDelegate> close_delegate = new CollectionButtonDelegate(
+            this,
+            entry.pinned ? CollectionButtonAction::kUnpinTab : CollectionButtonAction::kCloseTab,
+            index);
         tab_button_delegates_.push_back(close_delegate);
-        views.close = CefLabelButton::CreateLabelButton(close_delegate, "\xC3\x97");
+        views.close = CefLabelButton::CreateLabelButton(close_delegate, "");
         views.close->SetID(static_cast<int>(ChromeViewId::kTabStripEntryClose));
-        views.close->SetAccessibleName(TabCloseAccessibleName(entry));
-        views.close->SetTooltipText("Close tab");
+        views.close->SetAccessibleName(entry.pinned ? "Unpin tab: " + entry.title
+                                                    : TabCloseAccessibleName(entry));
+        views.close->SetTooltipText(entry.pinned ? "Unpin tab" : "Close tab");
         views.close->SetFocusable(true);
-        views.close->SetMinimumSize(CefSize(control_height, control_height));
+        views.close->SetMinimumSize(CefSize(row_height - 6, row_height - 6));
+        const std::optional<CefRefPtr<CefImage>>& trailing = entry.pinned ? pin_icon : close_icon;
+        if (trailing.has_value()) {
+            views.close->SetImage(CEF_BUTTON_STATE_NORMAL, *trailing);
+        } else {
+            views.close->SetText(entry.pinned ? "-" : "\xC3\x97");
+        }
         views.row->AddChildView(views.close);
+
+        for (const CefRefPtr<CefLabelButton>& button : {views.favicon, views.title, views.close}) {
+            button->SetInkDropEnabled(true);
+        }
 
         tab_entry_views_.push_back(views);
         tab_strip_->AddChildView(views.row);
     }
+    UpdateTabStripPreferredSize();
     ApplyCollectionTheme();
 }
 
@@ -699,36 +826,43 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     space_entries_ = entries;
     space_switcher_->RemoveAllChildViews();
 
-    const int control_height = ControlHeight(tokens_);
+    const int pill_height = SpacePillHeightDip();
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         SpaceEntryViews views;
-        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, control_height)));
+        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, pill_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry));
-        CefRefPtr<CefBoxLayout> row_layout = views.row->SetToBoxLayout(HorizontalLayout(tokens_));
+        CefBoxLayoutSettings pill_settings;
+        pill_settings.horizontal = static_cast<int>(true);
+        pill_settings.between_child_spacing = tokens_.spacing_1_dip;
+        pill_settings.inside_border_horizontal_spacing = tokens_.spacing_2_dip;
+        pill_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        views.row->SetToBoxLayout(pill_settings);
 
-        views.color_mark = CefPanel::CreatePanel(
-            new PanelDelegate(CefSize(tokens_.spacing_3_dip, tokens_.spacing_3_dip)));
+        // The color mark is the space's dot; a larger dot marks the active one.
+        const int dot = entry.active ? tokens_.spacing_3_dip - 2 : tokens_.spacing_2_dip + 1;
+        views.color_mark = CefPanel::CreatePanel(new PanelDelegate(CefSize(dot, dot)));
         views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
         views.row->AddChildView(views.color_mark);
 
         CefRefPtr<CollectionButtonDelegate> name_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
         space_button_delegates_.push_back(name_delegate);
-        views.name =
-            CefLabelButton::CreateLabelButton(name_delegate, TruncateCollectionTitle(entry.name));
+        views.name = CefLabelButton::CreateLabelButton(name_delegate, SpacePillLabel(entry));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
         views.name->SetFocusable(true);
-        views.name->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, control_height));
+        views.name->SetInkDropEnabled(true);
+        views.name->SetFontList(entry.active ? "Geist, Medium 12px" : "Geist, 12px");
+        views.name->SetMinimumSize(CefSize(pill_height - 6, pill_height - 6));
         views.row->AddChildView(views.name);
-        row_layout->SetFlexForView(views.name, 1);
 
         space_entry_views_.push_back(views);
         space_switcher_->AddChildView(views.row);
     }
     ApplyCollectionTheme();
+    sidebar_->Layout();
 }
 
 void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
@@ -876,6 +1010,7 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     }
     agent_panel_open_ = open;
     agent_panel_->SetVisible(open);
+    ApplyRailButtonTheme();
     root_delegate_->SetAgentPanelOpen(open);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
@@ -940,6 +1075,17 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
         case ChromeViewId::kActiveTab:
             host_->FocusBrowserView();
             return;
+        case ChromeViewId::kRailNewTab:
+            // Arc's New Tab drops straight into the address field.
+            host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
+            BeginAddressEditing();
+            return;
+        case ChromeViewId::kRailAgentButton:
+            host_->ToggleAgentPanel();
+            return;
+        case ChromeViewId::kRailNewSpaceButton:
+            host_->ExecuteBrowserCommand(BrowserCommand::kNewSpace);
+            return;
         default:
             return;
     }
@@ -960,6 +1106,9 @@ void BrowserChrome::HandleCollectionButtonPressed(CollectionButtonAction action,
             return;
         case CollectionButtonAction::kActivateSpace:
             host_->SelectSpace(index);
+            return;
+        case CollectionButtonAction::kUnpinTab:
+            host_->SetTabPinned(index, false);
             return;
     }
 }
@@ -1054,7 +1203,9 @@ void BrowserChrome::ApplyControlTheme() {
     navigation_row_->SetBackgroundColor(rail.argb);
     address_row_->SetBackgroundColor(rail.argb);
     tab_strip_->SetBackgroundColor(rail.argb);
+    tab_list_scroll_->SetBackgroundColor(rail.argb);
     space_switcher_->SetBackgroundColor(rail.argb);
+    rail_footer_->SetBackgroundColor(rail.argb);
     spacer_->SetBackgroundColor(rail.argb);
     divider_->SetBackgroundColor(hairline.argb);
     // The address unit is one raised surface pill: the location glyph, field, and
@@ -1103,7 +1254,43 @@ void BrowserChrome::ApplyControlTheme() {
         address_location_icon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
         active_page_fallback_favicon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
     }
+    for (const CefRefPtr<CefLabelButton>& button :
+         {back_button_, forward_button_, reload_button_}) {
+        button->SetInkDropEnabled(true);
+    }
+    ApplyRailButtonTheme();
     ApplyCollectionTheme();
+}
+
+void BrowserChrome::ApplyRailButtonTheme() {
+    CEF_REQUIRE_UI_THREAD();
+    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
+    const ArgbColor surface = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
+    const std::optional<CefRefPtr<CefImage>> plus =
+        icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> sparkles =
+        icon_catalog_.Load(ChromeIcon::kSparkles,
+                           agent_panel_open_ ? ChromeIconTone::kAccent : ChromeIconTone::kSecondary,
+                           ChromeIconSize::k16);
+    for (const CefRefPtr<CefLabelButton>& button :
+         {new_tab_button_, agent_button_, new_space_button_}) {
+        button->SetInkDropEnabled(true);
+        button->SetFontList("Geist, 13px");
+        button->SetEnabledTextColors(tokens_.text_secondary.argb);
+        button->SetBackgroundColor(rail.argb);
+    }
+    if (plus.has_value()) {
+        new_tab_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
+        new_space_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
+    }
+    if (sparkles.has_value()) {
+        agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *sparkles);
+    }
+    // The agent toggle lifts to the surface (and takes the accent) while the
+    // panel is open, like an active tab.
+    agent_button_->SetBackgroundColor(agent_panel_open_ ? surface.argb : rail.argb);
+    agent_button_->SetEnabledTextColors(agent_panel_open_ ? tokens_.accent.argb
+                                                          : tokens_.text_secondary.argb);
 }
 
 // Entry rows tint like the rail when inactive and lift to the active-page
@@ -1119,9 +1306,14 @@ void BrowserChrome::ApplyCollectionTheme() {
          ++index) {
         const TabStripEntrySnapshot& entry = tab_entries_[index];
         const TabEntryViews& views = tab_entry_views_[index];
-        const ArgbColor row_fill = entry.active ? surface : rail;
+        // Active rows are the raised surface card; pinned rows sit on a half
+        // step toward it so the pinned group reads as its own tray.
+        const ArgbColor row_fill =
+            entry.active ? surface : (entry.pinned ? MixColor(rail, surface, 0.45) : rail);
         views.row->SetBackgroundColor(row_fill.argb);
         views.favicon->SetBackgroundColor(row_fill.argb);
+        views.title->SetBackgroundColor(row_fill.argb);
+        views.close->SetBackgroundColor(row_fill.argb);
         views.title->SetEnabledTextColors(tokens_.text.argb);
         views.close->SetEnabledTextColors(tokens_.text_secondary.argb);
     }
@@ -1130,8 +1322,10 @@ void BrowserChrome::ApplyCollectionTheme() {
         const SpaceSwitcherEntrySnapshot& entry = space_entries_[index];
         const SpaceEntryViews& views = space_entry_views_[index];
         views.row->SetBackgroundColor(entry.active ? surface.argb : rail.argb);
+        views.name->SetBackgroundColor(entry.active ? surface.argb : rail.argb);
         views.color_mark->SetBackgroundColor(entry.color.argb);
-        views.name->SetEnabledTextColors(tokens_.text.argb);
+        views.name->SetEnabledTextColors(entry.active ? tokens_.text.argb
+                                                      : tokens_.text_secondary.argb);
     }
 }
 

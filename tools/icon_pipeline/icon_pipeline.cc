@@ -29,7 +29,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr std::string_view kLockHash = "adead0ce6ad40d033a2bf882b961ef8fe87608e51135eca4ffe518512396ed4b";
+constexpr std::string_view kLockHash = "a656a5ad585c46e0f23432a136a43599796344dfe14d01c0d91d9c8bc78d4652";
 constexpr std::array<int, 4> kDips = {13, 15, 16, 17};
 constexpr std::array<int, 2> kScales = {1, 2};
 
@@ -44,14 +44,22 @@ struct Tone {
     std::string_view hex;
 };
 
-constexpr std::array<Icon, 4> kIcons = {{{"chevron-left", "chevron-left.svg",
+constexpr std::array<Icon, 8> kIcons = {{{"chevron-left", "chevron-left.svg",
                                            "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"},
                                           {"chevron-right", "chevron-right.svg",
                                            "2758143d7b2434e4aa7307dfd34405c87909ff4052f21b5f3f40d45224b4f19b"},
                                           {"reload", "rotate-cw.svg",
                                            "ddcfe6d87240475946935e77411cd4d15a06f3d28a9b921bafed224ebe953668"},
                                           {"globe-2", "globe-2.svg",
-                                           "72ca6996d7032013268f46e9bcf360652136eb0f75465e3c98687fef784bbd41"}}};
+                                           "72ca6996d7032013268f46e9bcf360652136eb0f75465e3c98687fef784bbd41"},
+                                          {"plus", "plus.svg",
+                                           "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"},
+                                          {"sparkles", "sparkles.svg",
+                                           "f5499f33f09d7158151e9bd2ec0faf79ff8fb57292f84fdd7286d96d0f0424d8"},
+                                          {"pin", "pin.svg",
+                                           "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7"},
+                                          {"x", "x.svg",
+                                           "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117"}}};
 constexpr std::array<Tone, 3> kTones = {
     {{"text", "18303a"}, {"secondary", "687a7d"}, {"accent", "168c99"}}};
 

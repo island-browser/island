@@ -65,6 +65,7 @@
 - (void)openCommandPalette:(id)sender;
 - (void)toggleSidebar:(id)sender;
 - (void)toggleAgentPanel:(id)sender;
+- (void)togglePinTab:(id)sender;
 - (void)newTab:(id)sender;
 - (void)closeTab:(id)sender;
 - (void)selectNextTab:(id)sender;
@@ -202,6 +203,12 @@
 - (void)toggleAgentPanel:(id)sender {
     if (app_ != nullptr) {
         app_->ToggleAgentPanel();
+    }
+}
+
+- (void)togglePinTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kTogglePinTab);
     }
 }
 
@@ -351,6 +358,8 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [browser_menu addItem:toggle_sidebar_menu_item];
     AddBrowserMenuItem(browser_menu, menu_actions, @"Toggle Agent", @selector(toggleAgentPanel:),
                        @"j", NSEventModifierFlagCommand, 0);
+    AddBrowserMenuItem(browser_menu, menu_actions, @"Pin or Unpin Tab", @selector(togglePinTab:),
+                       @"d", NSEventModifierFlagCommand, 0);
     [browser_menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* new_tab_menu_item =

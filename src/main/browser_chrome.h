@@ -21,6 +21,7 @@
 #include "chrome_snapshot.h"
 #include "design_tokens.h"
 #include "icon_catalog.h"
+#include "include/cef_image.h"
 #include "navigation_state.h"
 #include "sidebar_state.h"
 
@@ -89,6 +90,12 @@ enum class ChromeViewId : int {
     // a contract node with zero width while the panel is closed; the panel's
     // own CefBrowserView inside it is not a contract node.
     kAgentPanel = 1041,
+    // Arc-style rail regions: the "New Tab" row above the tab list, and the
+    // footer under the space bar holding the agent toggle and New Space.
+    kRailNewTab = 1042,
+    kRailFooter = 1043,
+    kRailAgentButton = 1044,
+    kRailNewSpaceButton = 1045,
 };
 
 struct ChromeViewTreeNode {
@@ -105,6 +112,11 @@ struct ChromeViewTreeNode {
 struct TabStripEntrySnapshot {
     std::string title;
     bool active = false;
+    // Pinned tabs form the top group of the list; their trailing affordance
+    // unpins instead of closing.
+    bool pinned = false;
+    // The page's favicon once downloaded; null shows the globe fallback.
+    CefRefPtr<CefImage> favicon;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -146,6 +158,7 @@ enum class CollectionButtonAction : std::uint8_t {
     kActivateTab,
     kCloseTab,
     kActivateSpace,
+    kUnpinTab,
 };
 
 class BrowserChromeHost {
@@ -162,6 +175,9 @@ class BrowserChromeHost {
     virtual void CancelAddressEditing() = 0;
     virtual void SubmitAddressDraft(std::string_view draft) = 0;
     virtual void FocusBrowserView() = 0;
+    // Arc-style rail affordances.
+    virtual void SetTabPinned(std::size_t index, bool pinned) = 0;
+    virtual void ToggleAgentPanel() = 0;
 };
 
 class BrowserChrome final : public NavigationObserver {
@@ -355,25 +371,29 @@ class BrowserChrome final : public NavigationObserver {
     // wires no real tab/space data yet. Per-entry structure is asserted
     // through CollectionCountContract below, not by absolute rail index.
     [[nodiscard]] static ChromeViewTreeNode ViewTreeContract() {
-        return {ChromeViewId::kRoot,
-                {{ChromeViewId::kRail,
-                  {{ChromeViewId::kNavigationRow,
-                    {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
-                   {ChromeViewId::kAddressRow,
-                    {{ChromeViewId::kAddressLocationIcon, {}},
-                     {ChromeViewId::kAddress, {}},
-                     {ChromeViewId::kReload, {}}}},
-                   {ChromeViewId::kValidationMessage, {}},
-                   {ChromeViewId::kTabStrip, {}},
-                   {ChromeViewId::kSpacer, {}},
-                   {ChromeViewId::kSpaceSwitcher, {}},
-                   {ChromeViewId::kDivider, {}},
-                   {ChromeViewId::kActivePage,
-                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
-                     {ChromeViewId::kActiveTab, {}},
-                     {ChromeViewId::kActivePageIndicator, {}}}}}},
-                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
-                 {ChromeViewId::kAgentPanel, {}}}};
+        return {
+            ChromeViewId::kRoot,
+            {{ChromeViewId::kRail,
+              {{ChromeViewId::kNavigationRow,
+                {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
+               {ChromeViewId::kAddressRow,
+                {{ChromeViewId::kAddressLocationIcon, {}},
+                 {ChromeViewId::kAddress, {}},
+                 {ChromeViewId::kReload, {}}}},
+               {ChromeViewId::kValidationMessage, {}},
+               {ChromeViewId::kRailNewTab, {}},
+               {ChromeViewId::kTabStrip, {}},
+               {ChromeViewId::kSpacer, {}},
+               {ChromeViewId::kDivider, {}},
+               {ChromeViewId::kSpaceSwitcher, {}},
+               {ChromeViewId::kRailFooter,
+                {{ChromeViewId::kRailAgentButton, {}}, {ChromeViewId::kRailNewSpaceButton, {}}}},
+               {ChromeViewId::kActivePage,
+                {{ChromeViewId::kActivePageFallbackFavicon, {}},
+                 {ChromeViewId::kActiveTab, {}},
+                 {ChromeViewId::kActivePageIndicator, {}}}}}},
+             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
+             {ChromeViewId::kAgentPanel, {}}}};
     }
 
     // Projects the collection regions the way U4/U5 wire them at runtime: one
@@ -419,6 +439,8 @@ class BrowserChrome final : public NavigationObserver {
     // matching the Phase 2 rail requirement for keyboard-focusable entries.
     [[nodiscard]] static std::string TabEntryAccessibleName(const TabStripEntrySnapshot& entry);
     [[nodiscard]] static std::string TabCloseAccessibleName(const TabStripEntrySnapshot& entry);
+    // Inactive space pills show only an initial; the active one shows the name.
+    [[nodiscard]] static std::string SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry);
     [[nodiscard]] static std::string SpaceEntryAccessibleName(
         const SpaceSwitcherEntrySnapshot& entry);
 
@@ -450,6 +472,14 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr double SplitRatioDefault() { return 0.5; }
     [[nodiscard]] static constexpr double SplitRatioStep() { return 0.05; }
     [[nodiscard]] static constexpr int SplitDividerWidthDip() { return 2; }
+
+    // Arc-style rail metrics: compact 34 DIP tab rows, 30 DIP space pills.
+    [[nodiscard]] static constexpr int TabRowHeightDip() { return 34; }
+    [[nodiscard]] static constexpr int SpacePillHeightDip() { return 30; }
+    // The tab list scrolls inside the rail; its rows stop short of the rail's
+    // right inset by this gutter so a classic scrollbar never forces a
+    // horizontal one.
+    [[nodiscard]] static constexpr int TabListScrollGutterDip() { return 10; }
 
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
@@ -483,6 +513,8 @@ class BrowserChrome final : public NavigationObserver {
 
     void HandleButtonPressed(ChromeViewId view_id);
     void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
+    void UpdateTabStripPreferredSize();
+    void ApplyRailButtonTheme();
     bool HandleAddressKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void HandleAddressUserAction(CefRefPtr<CefTextfield> textfield);
     void HandleAddressFocus();
@@ -521,7 +553,13 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
+    CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
+    CefRefPtr<CefView> tab_list_scroll_;
     CefRefPtr<CefPanel> space_switcher_;
+    CefRefPtr<CefLabelButton> new_tab_button_;
+    CefRefPtr<CefPanel> rail_footer_;
+    CefRefPtr<CefLabelButton> agent_button_;
+    CefRefPtr<CefLabelButton> new_space_button_;
     // Per-entry runtime views, index-aligned with tab_entries_/space_entries_.
     struct TabEntryViews {
         CefRefPtr<CefPanel> row;

@@ -129,7 +129,7 @@ class BrowserWindow : public CefClient,
 
     // The ACP agent panel (Cmd/Ctrl+J): opens/closes the right-hand column,
     // creating the panel and its session on first use. No-op without chrome.
-    void ToggleAgentPanel();
+    void ToggleAgentPanel() override;
     void SetAgentPanelOpen(bool open);
     [[nodiscard]] bool agent_panel_open() const noexcept;
     // The agent command the panel launches: ISLAND_AGENT_COMMAND, else the
@@ -190,6 +190,7 @@ class BrowserWindow : public CefClient,
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
+    void SetTabPinned(std::size_t index, bool pinned) override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
 
     [[nodiscard]] CefRefPtr<CefBrowser> ActiveBrowser() override;
@@ -214,6 +215,10 @@ class BrowserWindow : public CefClient,
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                          const CefString& url) override;
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override;
+    void OnFaviconURLChange(CefRefPtr<CefBrowser> browser,
+                            const std::vector<CefString>& icon_urls) override;
+    // Delivered by the favicon download started in OnFaviconURLChange.
+    void OnFaviconDownloaded(TabId tab, CefRefPtr<CefImage> image);
 
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
                        const CefString& target_url, const CefString& target_frame_name,
@@ -285,6 +290,7 @@ class BrowserWindow : public CefClient,
         // overlay is visible and is otherwise untouched.
         kWelcomeDismissAccelerator,
         kToggleAgentPanelAccelerator,
+        kTogglePinTabAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url, bool persist_session = true);
@@ -311,6 +317,9 @@ class BrowserWindow : public CefClient,
     // The theme the window should run in right now: the stored preference when
     // it forces a theme, else the OS theme classified from the window.
     [[nodiscard]] ChromeTheme ResolvedChromeTheme() const;
+    // The contract tokens for `theme`, washed with the active space's color
+    // (Arc-style space theming).
+    [[nodiscard]] ChromeTokens ResolvedTokens(ChromeTheme theme) const;
     // Persists prefs best-effort (logs via error code, never throws).
     void SavePrefs() const;
     // Navigates the active tab to a stored bookmark URL through the single
@@ -420,6 +429,9 @@ class BrowserWindow : public CefClient,
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).
     int window_width_dip_ = 1440;
+    // The space color the chrome is currently tinted with; a space switch
+    // re-tints when it changes.
+    std::optional<std::uint32_t> tinted_space_color_;
 
     IMPLEMENT_REFCOUNTING(BrowserWindow);
     DISALLOW_COPY_AND_ASSIGN(BrowserWindow);

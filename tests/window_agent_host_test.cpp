@@ -164,6 +164,18 @@ TEST(WindowAgentHostTest, PinnedTabsGroupAtTheFront) {
     WindowAgentHost host(*window);
     const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
     EXPECT_TRUE(tabs.FindMember("tabs")->array_val[0].BoolOr("pinned", false));
+
+    // The agent tool and the Cmd/Ctrl+D command reach the same model.
+    EXPECT_FALSE(
+        Call(host, "browser_pin_tab",
+             Value::MakeObject().Set("tab", Value::Int(0)).Set("pinned", Value::Bool(false)))
+            .is_error);
+    EXPECT_EQ(ActiveSpace(*window).pinned_count(), 0U);
+    window->ExecuteCommand(BrowserCommand::kTogglePinTab);
+    EXPECT_EQ(ActiveSpace(*window).pinned_count(), 1U);
+    EXPECT_TRUE(ActiveSpace(*window).tabs()[0].pinned());
+    window->ExecuteCommand(BrowserCommand::kTogglePinTab);
+    EXPECT_EQ(ActiveSpace(*window).pinned_count(), 0U);
 }
 
 }  // namespace

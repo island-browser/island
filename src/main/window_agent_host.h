@@ -48,6 +48,7 @@ class WindowAgentHost final : public agent::AgentBrowserHost {
     agent::HostStatus Navigate(std::optional<std::size_t> tab, std::string_view url) override;
     agent::HostStatus ActivateTab(std::size_t tab) override;
     agent::HostStatus CloseTab(std::size_t tab) override;
+    agent::HostStatus PinTab(std::size_t tab, bool pinned) override;
     agent::HostStatus SwitchSpace(std::size_t space) override;
     agent::HostStatus NewSpace(std::string_view name) override;
     agent::HostStatus RunAction(agent::AgentBrowserAction action) override;

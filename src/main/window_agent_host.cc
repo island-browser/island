@@ -136,6 +136,11 @@ agent::HostStatus WindowAgentHost::CloseTab(std::size_t tab) {
                      "No tab at index " + std::to_string(tab) + ".");
 }
 
+agent::HostStatus WindowAgentHost::PinTab(std::size_t tab, bool pinned) {
+    return StatusFor(window_->SetActiveSpaceTabPinned(tab, pinned),
+                     "No tab at index " + std::to_string(tab) + ".");
+}
+
 agent::HostStatus WindowAgentHost::SwitchSpace(std::size_t space) {
     return StatusFor(window_->SelectSpaceIndex(space),
                      "No space at index " + std::to_string(space) + ".");

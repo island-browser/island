@@ -375,6 +375,13 @@ BrowserToolbox::BrowserToolbox(AgentBrowserHost& host) : host_(host) {
         false);
     add("browser_activate_tab", "Activate tab", "Make a tab of the active space the visible tab.",
         Schema(Props().Set("tab", TabProp()), {"tab"}), false);
+    add("browser_pin_tab", "Pin tab",
+        "Pin a tab to the top of the active space's sidebar list (or unpin it with "
+        "pinned=false). Pinned tabs persist across restarts.",
+        Schema(Props()
+                   .Set("tab", TabProp())
+                   .Set("pinned", Prop("boolean", "true to pin (default), false to unpin."))),
+        false);
     add("browser_close_tab", "Close tab", "Close a tab of the active space.",
         Schema(Props().Set("tab", TabProp()), {"tab"}), false);
     add("browser_back", "Go back", "Go back in the active tab's history.", Schema(Props()), false);
@@ -530,6 +537,21 @@ void BrowserToolbox::Call(std::string_view name, const json::Value& raw_argument
         } else {
             done(StatusResult(host_.CloseTab(*tab_arg.tab), "Tab closed."));
         }
+        return;
+    }
+    if (name == "browser_pin_tab") {
+        std::optional<std::size_t> tab = tab_arg.tab;
+        if (!tab) {
+            for (const AgentTabInfo& info : host_.ListTabs()) {
+                if (info.active) tab = info.index;
+            }
+        }
+        if (!tab) {
+            done(ToolResult::Error("There is no tab to pin."));
+            return;
+        }
+        const bool pinned = arguments.BoolOr("pinned", true);
+        done(StatusResult(host_.PinTab(*tab, pinned), pinned ? "Tab pinned." : "Tab unpinned."));
         return;
     }
     if (name == "browser_switch_space") {

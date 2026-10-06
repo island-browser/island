@@ -78,6 +78,7 @@ class AgentBrowserHost {
     virtual HostStatus Navigate(std::optional<std::size_t> tab, std::string_view url) = 0;
     virtual HostStatus ActivateTab(std::size_t tab) = 0;
     virtual HostStatus CloseTab(std::size_t tab) = 0;
+    virtual HostStatus PinTab(std::size_t tab, bool pinned) = 0;
     virtual HostStatus SwitchSpace(std::size_t space) = 0;
     virtual HostStatus NewSpace(std::string_view name) = 0;
     virtual HostStatus RunAction(AgentBrowserAction action) = 0;

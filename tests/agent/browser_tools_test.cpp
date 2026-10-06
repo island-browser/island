@@ -91,8 +91,14 @@ TEST(BrowserToolsTest, WindowToolsDispatchToHost) {
         CallTool(toolbox, "browser_switch_space", Value::MakeObject().Set("space", Value::Int(1)))
             .is_error);
     EXPECT_FALSE(CallTool(toolbox, "browser_back").is_error);
+    EXPECT_FALSE(CallTool(toolbox, "browser_pin_tab").is_error);
+    EXPECT_FALSE(
+        CallTool(toolbox, "browser_pin_tab",
+                 Value::MakeObject().Set("tab", Value::Int(1)).Set("pinned", Value::Bool(false)))
+            .is_error);
     EXPECT_EQ(host.calls, (std::vector<std::string>{"open:example.com", "navigate:1:https://a.test",
-                                                    "activate:1", "space:1", "action:0"}));
+                                                    "activate:1", "space:1", "action:0", "pin:0:1",
+                                                    "pin:1:0"}));
 }
 
 TEST(BrowserToolsTest, ArgumentErrorsAreToolErrorsNotCrashes) {

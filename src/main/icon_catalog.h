@@ -13,6 +13,11 @@ enum class ChromeIcon {
     kForward,
     kReload,
     kLocation,
+    // Arc-style rail affordances.
+    kPlus,
+    kSparkles,
+    kPin,
+    kClose,
 };
 
 enum class ChromeIconTone {

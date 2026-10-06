@@ -52,6 +52,10 @@ class FakeBrowserHost : public AgentBrowserHost {
         calls.push_back("close:" + std::to_string(tab));
         return HostStatus::Ok();
     }
+    HostStatus PinTab(std::size_t tab, bool pinned) override {
+        calls.push_back("pin:" + std::to_string(tab) + ":" + (pinned ? "1" : "0"));
+        return HostStatus::Ok();
+    }
     HostStatus SwitchSpace(std::size_t space) override {
         calls.push_back("space:" + std::to_string(space));
         return HostStatus::Ok();

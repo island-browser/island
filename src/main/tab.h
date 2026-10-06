@@ -2,8 +2,10 @@
 #define ISLAND_TAB_H_
 
 #include <string>
+#include <utility>
 
 #include "include/cef_browser.h"
+#include "include/cef_image.h"
 #include "include/views/cef_browser_view.h"
 #include "navigation_state.h"
 #include "tab_id.h"
@@ -43,6 +45,10 @@ class Tab {
     void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
     [[nodiscard]] bool pinned() const noexcept { return pinned_; }
 
+    // The page's downloaded favicon (null until one arrives).
+    void SetFavicon(CefRefPtr<CefImage> favicon) { favicon_ = std::move(favicon); }
+    [[nodiscard]] CefRefPtr<CefImage> favicon() const noexcept { return favicon_; }
+
     // U2: Caller-built CEF browser seam. The tab's CefBrowserView is created and owned
     // externally (by BrowserWindow); the tab holds raw CefRefPtr references to the view and
     // its underlying CefBrowser. Callers SetBrowserView after BrowserWindow creates the view;
@@ -61,6 +67,7 @@ class Tab {
 
     CefRefPtr<CefBrowserView> browser_view_;
     CefRefPtr<CefBrowser> browser_;
+    CefRefPtr<CefImage> favicon_;
 };
 
 }  // namespace island

@@ -294,6 +294,40 @@ TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenTheTreeIsInspectedThenNone
     ASSERT_EQ(tree.children.size(), 3U);
 }
 
+TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNewTabAndAFooter) {
+    const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
+    const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
+    ASSERT_NE(rail, nullptr);
+    std::vector<ChromeViewId> order;
+    for (const ChromeViewTreeNode& child : rail->children) {
+        order.push_back(child.id);
+    }
+    // Top to bottom: navigation, address, New Tab, the tab list, then the
+    // bottom group (divider, space bar, footer); the current-page card stays
+    // last and collapsed.
+    EXPECT_EQ(order, (std::vector<ChromeViewId>{
+                         ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
+                         ChromeViewId::kValidationMessage, ChromeViewId::kRailNewTab,
+                         ChromeViewId::kTabStrip, ChromeViewId::kSpacer, ChromeViewId::kDivider,
+                         ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailFooter,
+                         ChromeViewId::kActivePage}));
+    const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
+    ASSERT_NE(footer, nullptr);
+    ASSERT_EQ(footer->children.size(), 2U);
+    EXPECT_EQ(footer->children[0].id, ChromeViewId::kRailAgentButton);
+    EXPECT_EQ(footer->children[1].id, ChromeViewId::kRailNewSpaceButton);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kRailNewTab), 1042);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kRailNewSpaceButton), 1045);
+}
+
+TEST(BrowserChromeContractTest, GivenSpacePillsWhenLabeledThenOnlyTheActiveOneShowsItsName) {
+    EXPECT_EQ(BrowserChrome::SpacePillLabel({.name = "research", .active = false}), "R");
+    EXPECT_EQ(BrowserChrome::SpacePillLabel({.name = "Research", .active = true}), "Research");
+    EXPECT_EQ(BrowserChrome::SpacePillLabel({.name = "\xC3\xA9t\xC3\xA9", .active = false}),
+              "\xC3\xA9");
+    EXPECT_EQ(BrowserChrome::SpacePillLabel({.name = "", .active = false}), "?");
+}
+
 TEST(BrowserChromeContractTest, GivenAnOpenAgentPanelWhenLaidOutThenItTakesTheRightColumn) {
     ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
     const DipRect root = {.x = 0, .y = 0, .width = 1440, .height = 900};

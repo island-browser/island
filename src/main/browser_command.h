@@ -27,6 +27,8 @@ enum class BrowserCommand : std::uint8_t {
     kToggleSplit,
     kMoveDividerLeft,
     kMoveDividerRight,
+    // Arc-style pinned tabs: pins or unpins the active tab.
+    kTogglePinTab,
 };
 
 }  // namespace island
