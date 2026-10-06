@@ -59,7 +59,9 @@ Unit W5 of the Phase S0 plan. Built only behind `ISLAND_ENABLE_SEARCH`; see `../
 - **`Flush` releases the segment before writing.** Windows refuses to rename over a file with a live
   mapping. `segment_boundary_` must drop to 0 together with `segment_`, so the MemTable answers every
   id while nothing is mapped. A failed write re-maps the previous file, which the atomic rename left
-  intact. POSIX permits the rename either way, so the Windows failure itself is unverified locally.
+  intact. POSIX permits the rename either way, so `ASecondFlushReplacesTheMappedSegmentFile` reproduces
+  the original failure only on Windows. It passes there on windows64 and windowsarm64 (search.yml run
+  37470780227).
 - **Privacy refusals parse the URL the way WHATWG does.** First strip C0 controls and spaces at both
   ends and skip tabs and newlines. Then read the scheme. For the special schemes, skip any run of `/`
   or `\` and read the authority; for any other scheme, read an authority only after `//`. The

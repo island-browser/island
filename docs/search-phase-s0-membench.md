@@ -78,23 +78,25 @@ measure an untouched index — which is exactly the memory the gate exists to ob
 ## Current result: the S0 budget is NOT met
 
 The design targets **≤ 32 MB delta at 100,000 documents**. Per-platform results, default seed,
-Release build:
+Release build, from `search.yml` run
+[37470780227](https://github.com/island-browser/island/actions/runs/37470780227) on 2026-10-06
+(`after ingest` and `after flush` are absolute RSS; MB = 10^6 bytes):
 
-| Platform | Sampler | after ingest | after flush | delta (peak − baseline) | bytes/doc | Measured |
-|---|---|---:|---:|---:|---:|---|
-| macOS arm64 | `resident_size` | ~58 MB | ~84 MB | **~84 MB** (84,279,296–84,983,808 over 3 runs) | ~845 | 2026-10-06, local |
-| macOS x64 | `resident_size` | — | — | pending | — | needs a `search.yml` run |
-| Linux x64 | `statm` resident | — | — | pending | — | needs a `search.yml` run |
-| Linux arm64 | `statm` resident | — | — | pending | — | needs a `search.yml` run |
-| Windows x64 | `WorkingSetSize` | — | — | pending | — | needs a `search.yml` run |
-| Windows arm64 | `WorkingSetSize` | — | — | pending | — | needs a `search.yml` run |
+| Target | Sampler | after ingest | after flush | delta (peak − baseline) | bytes/doc |
+|---|---|---:|---:|---:|---:|
+| macosarm64 | `resident_size` | 53.4 MB | 79.6 MB | **78.9 MB** (78,888,960) | 789 |
+| macosx64 | `resident_size` | 54.9 MB | 79.7 MB | **79.7 MB** (79,749,120) | 797 |
+| linux64 | `statm` resident | 50.3 MB | 75.3 MB | **71.5 MB** (71,512,064) | 715 |
+| linuxarm64 | `statm` resident | 49.7 MB | 74.7 MB | **71.3 MB** (71,315,456) | 713 |
+| windows64 | `WorkingSetSize` | 49.2 MB | 74.2 MB | **71.6 MB** (71,598,080) | 716 |
+| windowsarm64 | `WorkingSetSize` | 69.9 MB | 95.0 MB | **92.2 MB** (92,246,016) | 922 |
 
-Only macOS arm64 has been measured on a machine available to this change. The workflow runs on
-`workflow_dispatch` only. Each run prints the gate line for all six targets and uploads it as
-`ci-logs/membench-<target>.log`. Fill in the pending rows from the first such run rather than
-extrapolating from macOS.
+Every target reports `result=fail`, 2.1–2.9x over the ceiling. On every target, flush adds about 25
+MB, which is the mapped segment's resident pages. A local macOS arm64 run on the same day measured a
+slightly higher delta: 84.3–85.0 MB over 3 runs. The windowsarm64 ingest high-water is about 20 MB
+above the other targets. This run does not explain why; it is a lead for whoever works on the budget.
 
-The macOS arm64 delta rose from ~60 MB to ~84 MB on 2026-10-06. The kernel did not change; the
+The macOS delta rose from ~60 MB to ~79–85 MB on 2026-10-06. The kernel did not change; the
 sampler did. The extra ~24 MB is the mapped segment's resident pages after `Flush`, which
 `phys_footprint` never counted (compare `after flush` with `after ingest`). The earlier ~60 MB figure
 (re-verified 2026-09-22, `delta_bytes` 61,112,464) is therefore an under-count, not a regression
@@ -119,7 +121,7 @@ Structural accounting at 100k documents (from a direct MemTable probe on the mem
 document text is 20.2 MB (202 B/doc), posting lists 11.6 MB (1.45 M DocIds at 8 B), records 4.8 MB,
 term dictionary ~0.5 MB -- about 41 MB structural, with the rest of the ~58 MB measured after
 ingest in allocator churn and per-term vector slack. Flush then adds the mapped segment's resident
-pages (~26 MB on macOS arm64).
+pages (~25 MB on every target).
 
 The remaining gap to 32 MB is dominated by two things, neither a quick fix:
 

@@ -14,8 +14,8 @@ Unit W6 of the Phase S0 plan. Built only behind `ISLAND_ENABLE_SEARCH`; see `../
 
 **The gate currently reports a failure**, and that is the honest state of the kernel rather than a
 defect in the benchmark. The design targets a 32 MB RSS delta at 100,000 documents; the measured delta
-is about 84 MB on macOS arm64. The other platforms have not been measured yet. Per-platform numbers
-and the contributors are recorded in `docs/search-phase-s0-membench.md`.
+is 71–92 MB across the six CI targets (2026-10-06). Per-platform numbers and the contributors are
+recorded in `docs/search-phase-s0-membench.md`.
 
 ## Key Files
 

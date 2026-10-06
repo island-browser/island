@@ -78,7 +78,7 @@ jobs:
         shell: bash
         # Only the budget verdict is non-blocking. The S0 design targets a
         # 32 MB RSS delta at 100k documents and the kernel currently measures
-        # about 2.6x that on macOS arm64, so exit 1 (over the ceiling) is downgraded to a
+        # 2.1-2.9x that across the six targets, so exit 1 (over the ceiling) is downgraded to a
         # warning: a blocking budget would make every pull request red for a
         # reason unrelated to its own changes. Everything else fails the job --
         # a missing binary, bad arguments or a failed index operation (2), or
