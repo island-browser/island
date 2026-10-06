@@ -100,6 +100,11 @@ def macos_nested_code(app: Path) -> list[Path]:
         items.extend(sorted((framework / "Libraries").glob("*.dylib")))
         items.append(framework)
     items.extend(sorted(frameworks.glob("*.app")))
+    # Extra executables beside the main one (island_mcp_bridge); the main executable is signed
+    # with the bundle. arm64 links ad-hoc sign them already, x86_64 links leave them unsigned.
+    executable = app.stem
+    items.extend(sorted(path for path in (app / "Contents" / "MacOS").glob("*")
+                        if path.is_file() and path.name != executable))
     items.append(app)
     return items
 
