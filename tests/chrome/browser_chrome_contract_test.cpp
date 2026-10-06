@@ -313,9 +313,11 @@ TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNewTabAndAF
                          ChromeViewId::kActivePage}));
     const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
     ASSERT_NE(footer, nullptr);
-    ASSERT_EQ(footer->children.size(), 2U);
+    ASSERT_EQ(footer->children.size(), 4U);
     EXPECT_EQ(footer->children[0].id, ChromeViewId::kRailAgentButton);
-    EXPECT_EQ(footer->children[1].id, ChromeViewId::kRailNewSpaceButton);
+    EXPECT_EQ(footer->children[1].id, ChromeViewId::kRailTabsButton);
+    EXPECT_EQ(footer->children[2].id, ChromeViewId::kRailSettingsButton);
+    EXPECT_EQ(footer->children[3].id, ChromeViewId::kRailNewSpaceButton);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailNewTab), 1042);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailNewSpaceButton), 1045);
 }

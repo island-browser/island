@@ -18,6 +18,8 @@ enum class ChromeIcon {
     kSparkles,
     kPin,
     kClose,
+    kGrid,
+    kSettings,
 };
 
 enum class ChromeIconTone {

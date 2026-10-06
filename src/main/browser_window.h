@@ -7,12 +7,12 @@
 
 #include "active_tab_provider.h"
 #include "agent_navigation.h"
-#include "agent_panel.h"
 #include "agent_session.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
+#include "browser_import.h"
 #include "chrome_snapshot.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
@@ -20,6 +20,8 @@
 #include "include/internal/cef_types.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
+#include "keymap.h"
+#include "local_page.h"
 #include "navigation_state.h"
 #include "prefs_store.h"
 #include "search_palette.h"
@@ -65,7 +67,7 @@ class BrowserWindow : public CefClient,
                       public CommandPaletteHost,
                       public SpaceRenameOverlayHost,
                       public WelcomeFlowHost,
-                      public AgentPanelDelegate,
+                      public LocalPageDelegate,
                       public NavigationObserver {
   public:
     // |persist_session| stays false for the smoke run (a deterministic fixed
@@ -137,7 +139,50 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] std::string ResolvedAgentCommand() const;
     static constexpr std::string_view kDefaultAgentCommand =
         "npx -y @zed-industries/claude-code-acp";
-    void OnAgentPanelMessage(const json::Value& message) override;
+    void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) override;
+
+    // Built-in pages shown in the content area (Settings, the all-tabs
+    // overview). Toggling the shown page hides it; selecting any tab hides it
+    // too. No-op without chrome.
+    void ToggleTabOverview() override;
+    void ToggleSettings() override;
+    void ToggleInternalPage(LocalPageKind kind);
+    [[nodiscard]] std::optional<LocalPageKind> internal_page() const noexcept {
+        return internal_page_;
+    }
+    // The state the pages render, exposed for tests.
+    [[nodiscard]] std::string SettingsStateJson() const;
+    [[nodiscard]] std::string TabOverviewStateJson() const;
+
+    // All-tabs overview operations, addressed by space and tab position.
+    // Each returns false for out-of-range positions or while closing.
+    [[nodiscard]] bool ActivateTabAt(std::size_t space, std::size_t tab);
+    [[nodiscard]] bool CloseTabAt(std::size_t space, std::size_t tab);
+    [[nodiscard]] bool SetTabPinnedAt(std::size_t space, std::size_t tab, bool pinned);
+    // Reorders within a space; the target is clamped into the tab's group
+    // (pinned or regular) so the pinned tray stays contiguous.
+    [[nodiscard]] bool MoveTabWithinSpace(std::size_t space, std::size_t from, std::size_t to);
+    // Spaces keep separate browsing contexts, so moving a tab reopens its URL
+    // in the target space and closes the original.
+    [[nodiscard]] bool MoveTabToSpace(std::size_t from_space, std::size_t tab,
+                                      std::size_t to_space);
+    bool ResetKeyBinding(KeyAction action);
+
+    // Runs one Settings import ("chrome", "firefox", "arc", ...) and returns
+    // the notice the page shows.
+    [[nodiscard]] std::string ImportFromBrowser(std::string_view source_id);
+    // Appends Arc-style spaces of pinned tabs (URLs validated); spaces with
+    // no allowed URL are skipped. Returns the number of spaces added.
+    std::size_t AddImportedSpaces(const std::vector<ImportedSpace>& imported,
+                                  std::size_t* tab_count = nullptr);
+
+    // Keyboard shortcuts: the keymap (defaults + prefs overrides) becomes the
+    // window's accelerators. SetKeyBinding persists and re-applies at once;
+    // std::nullopt unbinds.
+    void RunKeyAction(KeyAction action);
+    [[nodiscard]] const Keymap& keymap() const noexcept { return keymap_; }
+    bool SetKeyBinding(KeyAction action, std::optional<KeyBinding> binding);
+    void ResetKeymap();
 
     // Welcome flow (first-run import + appearance). ShowWelcomeFlow is a
     // no-op without a window, like the palette seams.
@@ -256,22 +301,10 @@ class BrowserWindow : public CefClient,
     void OnFocus(CefRefPtr<CefView> view) override;
 
   private:
+    // Fixed accelerators; every configurable shortcut is registered from the
+    // keymap at kKeymapAcceleratorBase + its KeyAction value.
     enum AcceleratorId {
-        kBackAccelerator = 1,
-        kForwardAccelerator,
-        kReloadAccelerator,
-        kReloadWithControlAccelerator,
-        kFocusAddressAccelerator,
-        kOpenPaletteAccelerator,
-        kToggleSidebarAccelerator,
-        // Phase 3 tab commands. The direct-index block is contiguous so
-        // OnAccelerator can range-check the nine tab positions.
-        kNewTabAccelerator,
-        kCloseTabAccelerator,
-        kNextTabAccelerator,
-        kPreviousTabAccelerator,
-        kOpenSearchPaletteAccelerator,
-        kRenameSpaceAccelerator,
+        kReloadAccelerator = 1,  // F5
         kSelectTab1Accelerator,
         kSelectTab2Accelerator,
         kSelectTab3Accelerator,
@@ -281,16 +314,10 @@ class BrowserWindow : public CefClient,
         kSelectTab7Accelerator,
         kSelectTab8Accelerator,
         kSelectTab9Accelerator,
-        // U6 split view. On macOS these never dispatch — the NSMenu owns the
-        // command keys — but registration stays uniform across platforms.
-        kToggleSplitAccelerator,
-        kMoveDividerLeftAccelerator,
-        kMoveDividerRightAccelerator,
         // Welcome flow: Escape dismisses ("just start browsing") while the
         // overlay is visible and is otherwise untouched.
         kWelcomeDismissAccelerator,
-        kToggleAgentPanelAccelerator,
-        kTogglePinTabAccelerator,
+        kKeymapAcceleratorBase = 100,
     };
 
     explicit BrowserWindow(std::string initial_url, bool persist_session = true);
@@ -339,13 +366,21 @@ class BrowserWindow : public CefClient,
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     void AppendTabToActiveSpace(std::string startup_url);
     void ShutdownAgentHost();
+    void ApplyKeymap();
     void EnsureAgentSession();
     [[nodiscard]] agent::AgentSessionConfig AgentConfig(std::string command) const;
     [[nodiscard]] std::string AgentPanelStateJson() const;
     [[nodiscard]] std::string ActiveTabAgentContext() const;
     // Coalesces panel re-renders (streaming chunks arrive in bursts).
-    void ScheduleAgentPanelRender();
-    void FlushAgentPanelRender();
+    void ScheduleLocalPagesRender();
+    void FlushLocalPagesRender();
+    void HandleAgentPageMessage(const json::Value& message);
+    void HandleSettingsMessage(const json::Value& message);
+    void HandleOverviewMessage(const json::Value& message);
+    void HideInternalPage();
+    [[nodiscard]] LocalPage* InternalPageFor(LocalPageKind kind) const;
+    [[nodiscard]] json::Value ThemeJson() const;
+
     void CloseAgentPanelAndSession();
     // Session restore: rebuilds spaces, tabs, active selections, and split
     // pairings from the session file. Returns false and leaves the model in
@@ -416,6 +451,7 @@ class BrowserWindow : public CefClient,
     // Welcome flow state. prefs_ keeps the fresh-install defaults in the
     // headless/no-persistence shapes, which never touch the prefs file.
     PrefsState prefs_;
+    Keymap keymap_ = Keymap::Defaults();
     BookmarkState bookmarks_;
     std::unique_ptr<WelcomeFlow> welcome_;
     // Agent integration: the MCP tools endpoint and its DevTools bridge.
@@ -423,7 +459,15 @@ class BrowserWindow : public CefClient,
     std::unique_ptr<WindowAgentHost> agent_host_;
     AddressValidator address_validator_;
     // The sidebar agent: its panel view and the ACP session behind it.
-    std::unique_ptr<AgentPanel> agent_panel_;
+    std::unique_ptr<LocalPage> agent_panel_;
+    std::unique_ptr<LocalPage> settings_page_;
+    std::unique_ptr<LocalPage> overview_page_;
+    std::optional<LocalPageKind> internal_page_;
+    // Set while an overview action mutates tabs, so the re-attach that
+    // follows keeps the overview on screen instead of the active tab.
+    bool keep_internal_page_ = false;
+    // A one-shot notice for the Settings page (import results, errors).
+    std::string settings_message_;
     std::unique_ptr<agent::AgentSession> agent_session_;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is

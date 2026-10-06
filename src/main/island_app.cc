@@ -118,6 +118,22 @@ void IslandApp::ToggleAgentPanel() {
     }
 }
 
+void IslandApp::ToggleSettings() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ToggleSettings();
+    }
+}
+
+void IslandApp::ToggleTabOverview() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ToggleTabOverview();
+    }
+}
+
 void IslandApp::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
 

@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace island {
 
@@ -26,6 +28,9 @@ struct PrefsState {
     std::string agent_command;
     // Whether the agent panel was open at the last clean quit.
     bool agent_panel_open = false;
+    // Keyboard shortcut overrides: {action id, binding} pairs that differ
+    // from the built-in keymap (an empty binding unbinds). Optional key.
+    std::vector<std::pair<std::string, std::string>> keybindings;
 
     bool operator==(const PrefsState&) const = default;
 };

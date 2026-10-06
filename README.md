@@ -18,6 +18,21 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
 - Public stable release is blocked until signing and notarization verification exist.
 - Static Pages/site visual QA is pending because Chrome was unavailable during review.
 
+## Features at a glance
+
+- Arc-style sidebar tinted by each space's color, pinned tabs, compact address field, floating
+  page card, command palette (`Cmd/Ctrl+K`) and search palette (`Cmd/Ctrl+Shift+K`).
+- **All tabs** (`Cmd/Ctrl+Shift+A`): every space's tabs as searchable cards; arrow keys, Enter,
+  Delete, `P` to pin, drag a card onto another space to move it.
+- **Settings** (`Cmd/Ctrl+,`): theme, agent command, MCP client config, keyboard shortcuts (click a
+  shortcut and press new keys; conflicts are flagged), and import.
+- **Import** from Chrome-family browsers, Safari and Firefox (bookmarks), and Arc (spaces with their
+  colors and pinned tabs). Nothing leaves the computer.
+- **AI agents**: an Agent Client Protocol agent runs in the sidebar (`Cmd/Ctrl+J`), and Island
+  serves browser tools over MCP at `http://127.0.0.1:9223/mcp` (bearer token in
+  `agent-endpoint.json`, or the `island_mcp_bridge` stdio bridge). Settings shows a ready-to-paste
+  `mcpServers` config.
+
 ## Dependencies
 
 CEF 150 and Geist are pinned in `deps/dependencies.lock.json` and installed outside git:

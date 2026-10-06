@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>All tabs</title>
+<style>
+:root {
+  --bg: #F3F0E9; --surface: #FFFEFB; --surface-2: #ECE9E2; --text: #18303A; --text-2: #687A7D;
+  --border: #D8D8D0; --accent: #168C99; --accent-text: #FFFFFF;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --shadow: 0 1px 2px rgba(16, 32, 40, .05), 0 8px 22px rgba(16, 32, 40, .06);
+  --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 22px rgba(0,0,0,.28); }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.bar { position: sticky; top: 0; z-index: 2; background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(12px); padding: 22px 28px 14px; display: flex; gap: 12px; align-items: center; }
+.search { flex: 1; display: flex; align-items: center; gap: 10px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; padding: 0 14px; box-shadow: var(--shadow); }
+.search:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.search svg { color: var(--text-2); flex: none; }
+.search input { flex: 1; border: 0; outline: none; background: transparent; padding: 12px 0; font-size: 15px; }
+.count { color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+.icon-btn { width: 36px; height: 36px; border-radius: 10px; border: 0; background: transparent;
+  color: var(--text-2); display: grid; place-items: center; flex: none; }
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+main { padding: 4px 28px 48px; }
+.space { margin-bottom: 26px; border-radius: 16px; transition: background .16s; padding: 6px; margin-left: -6px; margin-right: -6px; }
+.space.drop { background: var(--accent-soft); outline: 2px dashed color-mix(in srgb, var(--accent) 50%, transparent); }
+.space-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 10px; }
+.space-head .swatch { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+.space-head h2 { margin: 0; font-size: 14px; letter-spacing: -.01em; }
+.space-head .meta { color: var(--text-2); font-size: 12px; }
+.space-head .current { font-size: 11px; color: var(--accent); background: var(--accent-soft);
+  padding: 1px 7px; border-radius: 999px; }
+.space-head .spacer { flex: 1; }
+.add { border: 1px solid var(--border); background: var(--surface); border-radius: 9px; padding: 4px 10px;
+  font-size: 12.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 6px; }
+.add:hover { color: var(--text); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.card { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 12px 12px 10px; min-height: 92px; display: flex; flex-direction: column; gap: 8px;
+  cursor: pointer; transition: border-color .16s, transform .16s, box-shadow .16s; text-align: left; }
+.card:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); box-shadow: var(--shadow);
+  transform: translateY(-1px); }
+.card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.card.active::before { content: ""; position: absolute; left: -1px; top: 14px; bottom: 14px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--accent); }
+.card.dragging { opacity: .45; }
+.card .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fav { width: 18px; height: 18px; border-radius: 5px; flex: none; display: grid; place-items: center;
+  background: var(--surface-2); color: var(--text-2); font-size: 10px; font-weight: 600; overflow: hidden; }
+.fav img { width: 16px; height: 16px; }
+.host { color: var(--text-2); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.title { font-size: 13.5px; font-weight: 500; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.tools { position: absolute; top: 8px; right: 8px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.card:hover .tools, .card.selected .tools, .card:focus-within .tools { opacity: 1; }
+.tool { width: 26px; height: 26px; border: 0; border-radius: 8px; background: var(--surface);
+  color: var(--text-2); display: grid; place-items: center; }
+.tool:hover { background: var(--surface-2); color: var(--text); }
+.tool[aria-pressed="true"] { color: var(--accent); }
+.badge { position: absolute; bottom: 8px; right: 10px; color: var(--accent); }
+.empty { text-align: center; color: var(--text-2); padding: 60px 0; }
+.hint { color: var(--text-2); font-size: 12px; text-align: center; padding-top: 6px; }
+kbd { font: 11px var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 5px;
+  padding: 0 4px; background: var(--surface); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <label class="search">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input id="query" placeholder="Search tabs in every space" aria-label="Search tabs" autocomplete="off" spellcheck="false">
+    <span class="count" id="count"></span>
+  </label>
+  <button class="icon-btn" id="close" title="Close (Esc)" aria-label="Close all tabs view">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+  </button>
+</div>
+<main id="spaces" aria-live="polite"></main>
+<div class="hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&larr;</kbd><kbd>&rarr;</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>Del</kbd> close tab &middot; <kbd>P</kbd> pin &middot; drag a tab onto another space to move it</div>
+<script>
+"use strict";
+(function () {
+  var PREFIX = "\u0001island:";
+  var state = { spaces: [] };
+  var selected = null;  // {space, tab}
+  var visible = [];     // flat list of {space, tab, node} in display order
+  var dragging = null;
+  var query = document.getElementById("query");
+  var container = document.getElementById("spaces");
+
+  function post(message) { console.log(PREFIX + JSON.stringify(message)); }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+  function svg(path, size) {
+    var s = size || 14;
+    return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';
+  }
+  var PIN = '<path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>';
+  var CLOSE = '<path d="M18 6L6 18M6 6l12 12"/>';
+  var PLUS = '<path d="M12 5v14M5 12h14"/>';
+
+  function host(url) {
+    var match = /^https?:\/\/([^\/?#]+)/.exec(url || "");
+    return match ? match[1].replace(/^www\./, "") : (url || "");
+  }
+  function matches(tab, needle) {
+    if (!needle) return true;
+    return (tab.title + " " + tab.url).toLowerCase().indexOf(needle) >= 0;
+  }
+
+  function card(space, tab) {
+    var node = el("div", "card");
+    node.tabIndex = -1;
+    node.setAttribute("role", "button");
+    node.setAttribute("aria-label", tab.title + (tab.active && space.active ? ", current tab" : "") + ", in " + space.name);
+    if (tab.active && space.active) node.classList.add("active");
+    node.draggable = true;
+    var top = el("div", "top");
+    var fav = el("span", "fav");
+    if (tab.favicon) {
+      var img = document.createElement("img");
+      img.src = tab.favicon;
+      img.alt = "";
+      fav.appendChild(img);
+    } else {
+      fav.textContent = (host(tab.url).charAt(0) || "?").toUpperCase();
+    }
+    top.appendChild(fav);
+    top.appendChild(el("span", "host", host(tab.url)));
+    node.appendChild(top);
+    node.appendChild(el("div", "title", tab.title || "New Tab"));
+    var tools = el("div", "tools");
+    var pin = el("button", "tool");
+    pin.innerHTML = svg(PIN);
+    pin.title = tab.pinned ? "Unpin" : "Pin";
+    pin.setAttribute("aria-pressed", tab.pinned ? "true" : "false");
+    pin.addEventListener("click", function (event) {
+      event.stopPropagation();
+      post({ type: "pin", space: space.index, tab: tab.index, pinned: !tab.pinned });
+    });
+    var close = el("button", "tool");
+    close.innerHTML = svg(CLOSE);
+    close.title = "Close tab";
+    close.addEventListener("click", function (event) {
+      event.stopPropagation();
+      post({ type: "close_tab", space: space.index, tab: tab.index });
+    });
+    tools.appendChild(pin);
+    tools.appendChild(close);
+    node.appendChild(tools);
+    if (tab.pinned) {
+      var badge = el("span", "badge");
+      badge.innerHTML = svg(PIN, 12);
+      badge.title = "Pinned";
+      node.appendChild(badge);
+    }
+    node.addEventListener("click", function () { post({ type: "activate", space: space.index, tab: tab.index }); });
+    node.addEventListener("dragstart", function (event) {
+      dragging = { space: space.index, tab: tab.index };
+      node.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", tab.url || "");
+    });
+    node.addEventListener("dragend", function () {
+      dragging = null;
+      node.classList.remove("dragging");
+      Array.prototype.forEach.call(document.querySelectorAll(".space.drop"), function (s) { s.classList.remove("drop"); });
+    });
+    // Dropping onto a card of the same space reorders to that position.
+    node.addEventListener("dragover", function (event) {
+      if (dragging && dragging.space === space.index && dragging.tab !== tab.index) event.preventDefault();
+    });
+    node.addEventListener("drop", function (event) {
+      if (!dragging || dragging.space !== space.index || dragging.tab === tab.index) return;
+      event.preventDefault();
+      event.stopPropagation();
+      post({ type: "reorder", space: space.index, from: dragging.tab, to: tab.index });
+    });
+    return node;
+  }
+
+  function render() {
+    var needle = query.value.trim().toLowerCase();
+    container.textContent = "";
+    visible = [];
+    var total = 0, shown = 0;
+    (state.spaces || []).forEach(function (space) {
+      total += space.tabs.length;
+      var tabs = space.tabs.filter(function (tab) { return matches(tab, needle); });
+      if (needle && !tabs.length) return;
+      shown += tabs.length;
+      var section = el("section", "space");
+      var head = el("div", "space-head");
+      var swatch = el("span", "swatch");
+      swatch.style.background = space.color;
+      head.appendChild(swatch);
+      head.appendChild(el("h2", "", space.name));
+      head.appendChild(el("span", "meta", space.tabs.length + (space.tabs.length === 1 ? " tab" : " tabs")));
+      if (space.active) head.appendChild(el("span", "current", "Current"));
+      head.appendChild(el("span", "spacer"));
+      var add = el("button", "add");
+      add.innerHTML = svg(PLUS, 12);
+      add.appendChild(document.createTextNode("New tab"));
+      add.addEventListener("click", function () { post({ type: "new_tab", space: space.index }); });
+      head.appendChild(add);
+      section.appendChild(head);
+      var grid = el("div", "grid");
+      tabs.forEach(function (tab) {
+        var node = card(space, tab);
+        grid.appendChild(node);
+        visible.push({ space: space.index, tab: tab.index, node: node });
+      });
+      section.appendChild(grid);
+      section.addEventListener("dragover", function (event) {
+        if (dragging && dragging.space !== space.index) { event.preventDefault(); section.classList.add("drop"); }
+      });
+      section.addEventListener("dragleave", function (event) {
+        if (!section.contains(event.relatedTarget)) section.classList.remove("drop");
+      });
+      section.addEventListener("drop", function (event) {
+        section.classList.remove("drop");
+        if (!dragging || dragging.space === space.index) return;
+        event.preventDefault();
+        post({ type: "move_tab", from_space: dragging.space, tab: dragging.tab, to_space: space.index });
+      });
+      container.appendChild(section);
+    });
+    document.getElementById("count").textContent = needle ? shown + " of " + total : total + (total === 1 ? " tab" : " tabs");
+    if (!visible.length) container.appendChild(el("div", "empty", needle ? "No tabs match \u201c" + query.value.trim() + "\u201d." : "No tabs yet."));
+    // Keep the selection on the same tab when possible, else the first match.
+    var keep = selected && visible.filter(function (v) { return v.space === selected.space && v.tab === selected.tab; })[0];
+    select(keep || visible[0] || null, false);
+  }
+
+  function select(entry, scroll) {
+    Array.prototype.forEach.call(document.querySelectorAll(".card.selected"), function (n) { n.classList.remove("selected"); });
+    selected = entry ? { space: entry.space, tab: entry.tab } : null;
+    if (entry) {
+      entry.node.classList.add("selected");
+      if (scroll) entry.node.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function currentIndex() {
+    if (!selected) return -1;
+    for (var i = 0; i < visible.length; i++) {
+      if (visible[i].space === selected.space && visible[i].tab === selected.tab) return i;
+    }
+    return -1;
+  }
+
+  function columns() {
+    if (visible.length < 2) return 1;
+    var firstTop = visible[0].node.getBoundingClientRect().top;
+    var count = 0;
+    for (var i = 0; i < visible.length && visible[i].space === visible[0].space; i++) {
+      if (Math.abs(visible[i].node.getBoundingClientRect().top - firstTop) < 2) count++;
+    }
+    return Math.max(1, count);
+  }
+
+  document.addEventListener("keydown", function (event) {
+    var index = currentIndex();
+    var inSearch = document.activeElement === query;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (query.value) { query.value = ""; render(); } else post({ type: "close" });
+      return;
+    }
+    if (event.key === "Enter" && selected) {
+      event.preventDefault();
+      post({ type: "activate", space: selected.space, tab: selected.tab });
+      return;
+    }
+    var step = 0;
+    if (event.key === "ArrowRight" && !inSearch) step = 1;
+    else if (event.key === "ArrowLeft" && !inSearch) step = -1;
+    else if (event.key === "ArrowDown") step = columns();
+    else if (event.key === "ArrowUp") step = -columns();
+    if (step && visible.length) {
+      event.preventDefault();
+      var next = Math.min(visible.length - 1, Math.max(0, (index < 0 ? 0 : index) + step));
+      select(visible[next], true);
+      return;
+    }
+    if (!inSearch && selected && (event.key === "Delete" || event.key === "Backspace")) {
+      event.preventDefault();
+      post({ type: "close_tab", space: selected.space, tab: selected.tab });
+      return;
+    }
+    if (!inSearch && selected && (event.key === "p" || event.key === "P")) {
+      var entry = visible[index];
+      var space = state.spaces.filter(function (s) { return s.index === entry.space; })[0];
+      var tab = space && space.tabs.filter(function (t) { return t.index === entry.tab; })[0];
+      if (tab) post({ type: "pin", space: entry.space, tab: entry.tab, pinned: !tab.pinned });
+      return;
+    }
+    // Any printable key starts a search.
+    if (!inSearch && event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      query.focus();
+    }
+  });
+  query.addEventListener("input", render);
+  document.getElementById("close").addEventListener("click", function () { post({ type: "close" }); });
+
+  function applyTheme(theme) {
+    if (!theme) return;
+    var root = document.documentElement;
+    ["bg", "surface", "surface-2", "text", "text-2", "border", "accent"].forEach(function (key) {
+      var value = theme[key.replace("-", "_")];
+      if (value) root.style.setProperty("--" + key, value);
+    });
+    root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+  }
+
+  window.islandRender = function (next) {
+    if (next.theme) applyTheme(next.theme);
+    if (next.overview) {
+      state = next.overview;
+      if (!selected) {
+        var active = (state.spaces || []).filter(function (s) { return s.active; })[0];
+        var tab = active && active.tabs.filter(function (t) { return t.active; })[0];
+        if (tab) selected = { space: active.index, tab: tab.index };
+      }
+    }
+    render();
+  };
+  window.islandFocus = function () { query.focus(); query.select(); };
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

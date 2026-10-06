@@ -1,8 +1,7 @@
-#include "agent_panel.h"
+#include "local_page.h"
 
 #include <utility>
 
-#include "agent_panel_html.h"
 #include "include/cef_browser.h"
 #include "include/cef_client.h"
 #include "include/cef_frame.h"
@@ -10,17 +9,19 @@
 #include "include/cef_request.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/wrapper/cef_helpers.h"
+#include "local_pages_html.h"
 
 namespace island {
 
-class AgentPanel::Client final : public CefClient,
-                                 public CefDisplayHandler,
-                                 public CefLifeSpanHandler,
-                                 public CefLoadHandler,
-                                 public CefRequestHandler,
-                                 public CefBrowserViewDelegate {
+class LocalPage::Client final : public CefClient,
+                                public CefDisplayHandler,
+                                public CefLifeSpanHandler,
+                                public CefLoadHandler,
+                                public CefRequestHandler,
+                                public CefBrowserViewDelegate {
   public:
-    explicit Client(AgentPanelDelegate* delegate) : delegate_(delegate), page_url_(PageUrl()) {}
+    Client(LocalPageKind kind, LocalPageDelegate* delegate)
+        : kind_(kind), delegate_(delegate), page_url_(PageUrl(kind)) {}
 
     void Detach() { delegate_ = nullptr; }
 
@@ -33,9 +34,8 @@ class AgentPanel::Client final : public CefClient,
         Execute(RenderScript(state_json));
     }
 
-    void FocusInput() {
-        if (browser_ != nullptr && loaded_)
-            Execute("window.islandFocusInput && islandFocusInput()");
+    void Focus() {
+        if (browser_ != nullptr && loaded_) Execute("window.islandFocus && window.islandFocus()");
     }
 
     void CloseBrowser() {
@@ -54,7 +54,7 @@ class AgentPanel::Client final : public CefClient,
         CEF_REQUIRE_UI_THREAD();
         std::optional<json::Value> decoded = DecodeMessage(message.ToString());
         if (!decoded) return false;  // ordinary console output keeps logging
-        if (delegate_ != nullptr) delegate_->OnAgentPanelMessage(*decoded);
+        if (delegate_ != nullptr) delegate_->OnLocalPageMessage(kind_, *decoded);
         return true;
     }
 
@@ -105,12 +105,13 @@ class AgentPanel::Client final : public CefClient,
     void ForwardLink(const std::string& url) {
         if (delegate_ == nullptr) return;
         if (url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0) return;
-        delegate_->OnAgentPanelMessage(json::Value::MakeObject()
-                                           .Set("type", json::Value::String("open_url"))
-                                           .Set("url", json::Value::String(url)));
+        delegate_->OnLocalPageMessage(kind_, json::Value::MakeObject()
+                                                 .Set("type", json::Value::String("open_url"))
+                                                 .Set("url", json::Value::String(url)));
     }
 
-    AgentPanelDelegate* delegate_;
+    LocalPageKind kind_;
+    LocalPageDelegate* delegate_;
     std::string page_url_;
     CefRefPtr<CefBrowser> browser_;
     bool loaded_ = false;
@@ -119,25 +120,26 @@ class AgentPanel::Client final : public CefClient,
     IMPLEMENT_REFCOUNTING(Client);
 };
 
-AgentPanel::AgentPanel(AgentPanelDelegate& delegate) : client_(new Client(&delegate)) {
+LocalPage::LocalPage(LocalPageKind kind, LocalPageDelegate& delegate)
+    : kind_(kind), client_(new Client(kind, &delegate)) {
     CEF_REQUIRE_UI_THREAD();
     CefBrowserSettings settings;
-    view_ =
-        CefBrowserView::CreateBrowserView(client_, PageUrl(), settings, nullptr, nullptr, client_);
+    view_ = CefBrowserView::CreateBrowserView(client_, PageUrl(kind), settings, nullptr, nullptr,
+                                              client_);
 }
 
-AgentPanel::~AgentPanel() { Close(); }
+LocalPage::~LocalPage() { Close(); }
 
-void AgentPanel::Render(const std::string& state_json) {
+void LocalPage::Render(const std::string& state_json) {
     if (client_ != nullptr) client_->Render(state_json);
 }
 
-void AgentPanel::FocusInput() {
+void LocalPage::Focus() {
     if (view_ != nullptr) view_->RequestFocus();
-    if (client_ != nullptr) client_->FocusInput();
+    if (client_ != nullptr) client_->Focus();
 }
 
-void AgentPanel::Close() {
+void LocalPage::Close() {
     if (client_ == nullptr) return;
     client_->Detach();
     client_->CloseBrowser();
@@ -145,13 +147,13 @@ void AgentPanel::Close() {
     view_ = nullptr;
 }
 
-std::string AgentPanel::PageUrl() {
-    const std::string_view html = AgentPanelHtml();
+std::string LocalPage::PageUrl(LocalPageKind kind) {
+    const std::string_view html = LocalPageHtml(kind);
     return "data:text/html;charset=utf-8;base64," +
            CefBase64Encode(html.data(), html.size()).ToString();
 }
 
-std::optional<json::Value> AgentPanel::DecodeMessage(std::string_view console_text) {
+std::optional<json::Value> LocalPage::DecodeMessage(std::string_view console_text) {
     if (console_text.substr(0, kMessagePrefix.size()) != kMessagePrefix) return std::nullopt;
     std::optional<json::Value> message = json::Parse(console_text.substr(kMessagePrefix.size()));
     if (!message || !message->IsObject() || message->StringOr("type", "").empty()) {
@@ -160,7 +162,7 @@ std::optional<json::Value> AgentPanel::DecodeMessage(std::string_view console_te
     return message;
 }
 
-std::string AgentPanel::RenderScript(std::string_view state_json) {
+std::string LocalPage::RenderScript(std::string_view state_json) {
     // JSON is a JavaScript expression; escape the two line separators older
     // parsers reject inside string literals so any agent text is safe.
     std::string safe;

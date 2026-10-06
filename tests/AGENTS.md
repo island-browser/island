@@ -27,6 +27,10 @@ Two independent test systems live side by side here:
 | `space_test.cpp` | `Space`, ordering, active selection, `SplitPairing` |
 | `startup_options_test.cpp` | Command-line parsing |
 | `tab_test.cpp` | Move-only `Tab` model |
+| `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
+| `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
+| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut seams of `BrowserWindow` |
+| `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `session_store_test.cpp` | Session JSON round-trip — **not currently listed in `CMakeLists.txt`**, so it has never run (PR #27 in flight) |
 
 ## Test targets

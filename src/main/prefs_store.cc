@@ -38,6 +38,17 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         }
         state.agent_command = command->string_val;
     }
+    if (const json::Value* bindings = root.FindMember("keybindings")) {
+        if (!bindings->IsObject()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        for (const auto& [action, binding] : bindings->object_val) {
+            if (!binding.IsString()) {
+                return Fail(PrefsError::kSchemaError);
+            }
+            state.keybindings.emplace_back(action, binding.string_val);
+        }
+    }
     if (const json::Value* open = root.FindMember("agent_panel_open")) {
         if (open->type != json::Type::kBool) {
             return Fail(PrefsError::kSchemaError);
@@ -64,6 +75,15 @@ std::string SerializeToJson(const PrefsState& state) {
     }
     w.Key("agent_panel_open");
     w.BoolValue(state.agent_panel_open);
+    if (!state.keybindings.empty()) {
+        w.Key("keybindings");
+        w.StartObject();
+        for (const auto& [action, binding] : state.keybindings) {
+            w.Key(action);
+            w.StringValue(binding);
+        }
+        w.EndObject();
+    }
     w.EndObject();
     oss << '\n';
     return oss.str();

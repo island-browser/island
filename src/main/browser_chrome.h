@@ -96,6 +96,8 @@ enum class ChromeViewId : int {
     kRailFooter = 1043,
     kRailAgentButton = 1044,
     kRailNewSpaceButton = 1045,
+    kRailTabsButton = 1046,
+    kRailSettingsButton = 1047,
 };
 
 struct ChromeViewTreeNode {
@@ -178,6 +180,8 @@ class BrowserChromeHost {
     // Arc-style rail affordances.
     virtual void SetTabPinned(std::size_t index, bool pinned) = 0;
     virtual void ToggleAgentPanel() = 0;
+    virtual void ToggleTabOverview() = 0;
+    virtual void ToggleSettings() = 0;
 };
 
 class BrowserChrome final : public NavigationObserver {
@@ -371,29 +375,31 @@ class BrowserChrome final : public NavigationObserver {
     // wires no real tab/space data yet. Per-entry structure is asserted
     // through CollectionCountContract below, not by absolute rail index.
     [[nodiscard]] static ChromeViewTreeNode ViewTreeContract() {
-        return {
-            ChromeViewId::kRoot,
-            {{ChromeViewId::kRail,
-              {{ChromeViewId::kNavigationRow,
-                {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
-               {ChromeViewId::kAddressRow,
-                {{ChromeViewId::kAddressLocationIcon, {}},
-                 {ChromeViewId::kAddress, {}},
-                 {ChromeViewId::kReload, {}}}},
-               {ChromeViewId::kValidationMessage, {}},
-               {ChromeViewId::kRailNewTab, {}},
-               {ChromeViewId::kTabStrip, {}},
-               {ChromeViewId::kSpacer, {}},
-               {ChromeViewId::kDivider, {}},
-               {ChromeViewId::kSpaceSwitcher, {}},
-               {ChromeViewId::kRailFooter,
-                {{ChromeViewId::kRailAgentButton, {}}, {ChromeViewId::kRailNewSpaceButton, {}}}},
-               {ChromeViewId::kActivePage,
-                {{ChromeViewId::kActivePageFallbackFavicon, {}},
-                 {ChromeViewId::kActiveTab, {}},
-                 {ChromeViewId::kActivePageIndicator, {}}}}}},
-             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
-             {ChromeViewId::kAgentPanel, {}}}};
+        return {ChromeViewId::kRoot,
+                {{ChromeViewId::kRail,
+                  {{ChromeViewId::kNavigationRow,
+                    {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
+                   {ChromeViewId::kAddressRow,
+                    {{ChromeViewId::kAddressLocationIcon, {}},
+                     {ChromeViewId::kAddress, {}},
+                     {ChromeViewId::kReload, {}}}},
+                   {ChromeViewId::kValidationMessage, {}},
+                   {ChromeViewId::kRailNewTab, {}},
+                   {ChromeViewId::kTabStrip, {}},
+                   {ChromeViewId::kSpacer, {}},
+                   {ChromeViewId::kDivider, {}},
+                   {ChromeViewId::kSpaceSwitcher, {}},
+                   {ChromeViewId::kRailFooter,
+                    {{ChromeViewId::kRailAgentButton, {}},
+                     {ChromeViewId::kRailTabsButton, {}},
+                     {ChromeViewId::kRailSettingsButton, {}},
+                     {ChromeViewId::kRailNewSpaceButton, {}}}},
+                   {ChromeViewId::kActivePage,
+                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
+                     {ChromeViewId::kActiveTab, {}},
+                     {ChromeViewId::kActivePageIndicator, {}}}}}},
+                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
+                 {ChromeViewId::kAgentPanel, {}}}};
     }
 
     // Projects the collection regions the way U4/U5 wire them at runtime: one
@@ -560,6 +566,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> rail_footer_;
     CefRefPtr<CefLabelButton> agent_button_;
     CefRefPtr<CefLabelButton> new_space_button_;
+    CefRefPtr<CefLabelButton> tabs_button_;
+    CefRefPtr<CefLabelButton> settings_button_;
     // Per-entry runtime views, index-aligned with tab_entries_/space_entries_.
     struct TabEntryViews {
         CefRefPtr<CefPanel> row;

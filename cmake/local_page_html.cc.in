@@ -1,0 +1,16 @@
+// Generated from src/main/pages/@ISLAND_PAGE_FILE@ by the root CMakeLists.txt.
+// Do not edit; edit the HTML and reconfigure.
+#include "local_pages_html.h"
+
+namespace island {
+namespace {
+
+constexpr unsigned char kPageBytes[] = {@ISLAND_PAGE_BYTES@};
+
+}  // namespace
+
+std::string_view @ISLAND_PAGE_FUNCTION@() noexcept {
+    return {reinterpret_cast<const char*>(kPageBytes), sizeof(kPageBytes)};
+}
+
+}  // namespace island

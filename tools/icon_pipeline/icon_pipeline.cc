@@ -29,7 +29,8 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr std::string_view kLockHash = "a656a5ad585c46e0f23432a136a43599796344dfe14d01c0d91d9c8bc78d4652";
+constexpr std::string_view kLockHash =
+    "b1bd792383eb448d9bdfffee585fc25b861381b8d1db4b0372409b024e2542a5";
 constexpr std::array<int, 4> kDips = {13, 15, 16, 17};
 constexpr std::array<int, 2> kScales = {1, 2};
 
@@ -44,22 +45,23 @@ struct Tone {
     std::string_view hex;
 };
 
-constexpr std::array<Icon, 8> kIcons = {{{"chevron-left", "chevron-left.svg",
-                                           "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"},
-                                          {"chevron-right", "chevron-right.svg",
-                                           "2758143d7b2434e4aa7307dfd34405c87909ff4052f21b5f3f40d45224b4f19b"},
-                                          {"reload", "rotate-cw.svg",
-                                           "ddcfe6d87240475946935e77411cd4d15a06f3d28a9b921bafed224ebe953668"},
-                                          {"globe-2", "globe-2.svg",
-                                           "72ca6996d7032013268f46e9bcf360652136eb0f75465e3c98687fef784bbd41"},
-                                          {"plus", "plus.svg",
-                                           "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"},
-                                          {"sparkles", "sparkles.svg",
-                                           "f5499f33f09d7158151e9bd2ec0faf79ff8fb57292f84fdd7286d96d0f0424d8"},
-                                          {"pin", "pin.svg",
-                                           "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7"},
-                                          {"x", "x.svg",
-                                           "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117"}}};
+constexpr std::array<Icon, 10> kIcons = {
+    {{"chevron-left", "chevron-left.svg",
+      "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"},
+     {"chevron-right", "chevron-right.svg",
+      "2758143d7b2434e4aa7307dfd34405c87909ff4052f21b5f3f40d45224b4f19b"},
+     {"reload", "rotate-cw.svg",
+      "ddcfe6d87240475946935e77411cd4d15a06f3d28a9b921bafed224ebe953668"},
+     {"globe-2", "globe-2.svg", "72ca6996d7032013268f46e9bcf360652136eb0f75465e3c98687fef784bbd41"},
+     {"plus", "plus.svg", "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"},
+     {"sparkles", "sparkles.svg",
+      "f5499f33f09d7158151e9bd2ec0faf79ff8fb57292f84fdd7286d96d0f0424d8"},
+     {"pin", "pin.svg", "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7"},
+     {"x", "x.svg", "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117"},
+     {"layout-grid", "layout-grid.svg",
+      "b8903f61d09b1d75e55c71158277d26570962f69c2099446a251871e0a2d6678"},
+     {"settings", "settings.svg",
+      "0ae27fd0f81999229e3127ac96c5b32edfea448e291d509e76212b917551d66b"}}};
 constexpr std::array<Tone, 3> kTones = {
     {{"text", "18303a"}, {"secondary", "687a7d"}, {"accent", "168c99"}}};
 
@@ -88,7 +90,8 @@ void ValidateLock(const fs::path& root) {
 }
 
 void ValidateSvg(const fs::path& source, std::string_view expected_digest) {
-    Require(fs::symlink_status(source).type() != fs::file_type::symlink, "SVG source cannot be a symlink");
+    Require(fs::symlink_status(source).type() != fs::file_type::symlink,
+            "SVG source cannot be a symlink");
     const std::vector<unsigned char> bytes = ReadFile(source);
     Require(bytes.size() <= 8192, "SVG source exceeds 8192 byte limit");
     Require(Sha256(bytes) == expected_digest, "SVG source hash is not locked");
@@ -104,9 +107,11 @@ void ValidateSvg(const fs::path& source, std::string_view expected_digest) {
     while ((cursor = svg.find('<', cursor)) != std::string::npos) {
         const size_t name_start = cursor + (svg[cursor + 1] == '/' ? 2 : 1);
         size_t name_end = name_start;
-        while (name_end < svg.size() && std::isalpha(static_cast<unsigned char>(svg[name_end]))) ++name_end;
+        while (name_end < svg.size() && std::isalpha(static_cast<unsigned char>(svg[name_end])))
+            ++name_end;
         const std::string_view name(svg.data() + name_start, name_end - name_start);
-        Require(name == "svg" || name == "path" || name == "circle", "SVG contains a forbidden element");
+        Require(name == "svg" || name == "path" || name == "circle" || name == "rect",
+                "SVG contains a forbidden element");
         cursor = name_end;
     }
 }
@@ -117,7 +122,8 @@ std::string ReadSvg(const fs::path& path, std::string_view digest, std::string_v
     std::string svg(bytes.begin(), bytes.end());
     const std::string needle = "currentColor";
     const size_t offset = svg.find(needle);
-    Require(offset != std::string::npos && svg.find(needle, offset + needle.size()) == std::string::npos,
+    Require(offset != std::string::npos &&
+                svg.find(needle, offset + needle.size()) == std::string::npos,
             "SVG must contain exactly one currentColor stroke");
     svg.replace(offset, needle.size(), "#" + std::string(color));
     return svg;
@@ -125,8 +131,8 @@ std::string ReadSvg(const fs::path& path, std::string_view digest, std::string_v
 
 fs::path OutputPath(const fs::path& root, const Icon& icon, const Tone& tone, int dip, int scale) {
     return root / "resources/island/icons/png" /
-           (std::string(icon.name) + "-" + std::string(tone.name) + "-" + std::to_string(dip) + "@" +
-            std::to_string(scale) + "x.png");
+           (std::string(icon.name) + "-" + std::string(tone.name) + "-" + std::to_string(dip) +
+            "@" + std::to_string(scale) + "x.png");
 }
 
 void WritePng(const fs::path& destination, const std::string& svg, int pixels) {
@@ -137,18 +143,17 @@ void WritePng(const fs::path& destination, const std::string& svg, int pixels) {
     std::unique_ptr<NSVGimage, decltype(&nsvgDelete)> image_guard(image, nsvgDelete);
     NSVGrasterizer* rasterizer = nsvgCreateRasterizer();
     Require(rasterizer != nullptr, "NanoSVG rasterizer allocation failed");
-    std::unique_ptr<NSVGrasterizer, decltype(&nsvgDeleteRasterizer)> rasterizer_guard(rasterizer,
-                                                                                         nsvgDeleteRasterizer);
+    std::unique_ptr<NSVGrasterizer, decltype(&nsvgDeleteRasterizer)> rasterizer_guard(
+        rasterizer, nsvgDeleteRasterizer);
     std::vector<unsigned char> pixels_rgba(static_cast<size_t>(pixels) * pixels * 4, 0);
-    nsvgRasterize(rasterizer, image, 0.0f, 0.0f, static_cast<float>(pixels) / 24.0f, pixels_rgba.data(), pixels,
-                  pixels, pixels * 4);
-    Require(stbi_write_png(destination.string().c_str(), pixels, pixels, 4, pixels_rgba.data(), pixels * 4) != 0,
+    nsvgRasterize(rasterizer, image, 0.0f, 0.0f, static_cast<float>(pixels) / 24.0f,
+                  pixels_rgba.data(), pixels, pixels, pixels * 4);
+    Require(stbi_write_png(destination.string().c_str(), pixels, pixels, 4, pixels_rgba.data(),
+                           pixels * 4) != 0,
             "stb_image_write could not write canonical PNG");
 }
 
-std::string OutputDigest(const fs::path& output) {
-    return Sha256(ReadFile(output));
-}
+std::string OutputDigest(const fs::path& output) { return Sha256(ReadFile(output)); }
 
 struct Output {
     std::string path;
@@ -170,7 +175,8 @@ std::vector<Output> Generate(const fs::path& root) {
                     const fs::path output = OutputPath(root, icon, tone, dip, scale);
                     Require(IsWithin(output, output_directory), "PNG output path is untrusted");
                     WritePng(output, svg, dip * scale);
-                    outputs.push_back({fs::relative(output, root).generic_string(), OutputDigest(output)});
+                    outputs.push_back(
+                        {fs::relative(output, root).generic_string(), OutputDigest(output)});
                 }
             }
         }
@@ -182,9 +188,11 @@ void WriteManifest(const fs::path& root, const std::vector<Output>& outputs) {
     const fs::path manifest = root / "resources/island/icons/manifest.json";
     std::ofstream output(manifest, std::ios::binary | std::ios::trunc);
     Require(output.good(), "cannot write icon manifest");
-    output << "{\n  \"schema\": 1,\n  \"generator\": \"NanoSVG 239e102 + stb_image_write 2c980bb\",\n";
+    output
+        << "{\n  \"schema\": 1,\n  \"generator\": \"NanoSVG 239e102 + stb_image_write 2c980bb\",\n";
     output << "  \"lock_sha256\": \"" << kLockHash << "\",\n";
-    output << "  \"canonical_host_limit\": \"PNG byte hashes are canonical on macOS arm64 with Apple clang; other hosts must verify before adopting regenerated output.\",\n";
+    output << "  \"canonical_host_limit\": \"PNG byte hashes are canonical on macOS arm64 with "
+              "Apple clang; other hosts must verify before adopting regenerated output.\",\n";
     output << "  \"source_hashes\": {\n";
     for (size_t index = 0; index < kIcons.size(); ++index) {
         output << "    \"" << kIcons[index].name << "\": \"" << kIcons[index].digest << "\""
@@ -202,8 +210,9 @@ void WriteManifest(const fs::path& root, const std::vector<Output>& outputs) {
 std::vector<std::string> ManifestDigests(const fs::path& manifest) {
     const std::vector<unsigned char> bytes = ReadFile(manifest);
     const std::string document(bytes.begin(), bytes.end());
-    Require(document.find("\"lock_sha256\": \"" + std::string(kLockHash) + "\"") != std::string::npos,
-            "manifest was not generated from the approved icon lock");
+    Require(
+        document.find("\"lock_sha256\": \"" + std::string(kLockHash) + "\"") != std::string::npos,
+        "manifest was not generated from the approved icon lock");
     std::vector<std::string> digests;
     const std::string marker = "\"sha256\": \"";
     size_t cursor = 0;
@@ -221,7 +230,8 @@ std::vector<std::string> ManifestDigests(const fs::path& manifest) {
 void Verify(const fs::path& root) {
     const fs::path source_directory = root / "resources/island/icons/source";
     for (const Icon& icon : kIcons) ValidateSvg(source_directory / icon.source, icon.digest);
-    const std::vector<std::string> expected = ManifestDigests(root / "resources/island/icons/manifest.json");
+    const std::vector<std::string> expected =
+        ManifestDigests(root / "resources/island/icons/manifest.json");
     size_t index = 0;
     for (const Icon& icon : kIcons) {
         for (const Tone& tone : kTones) {
@@ -237,7 +247,7 @@ void Verify(const fs::path& root) {
     }
 }
 
-}
+}  // namespace
 
 int main(int argc, char* argv[]) {
     try {

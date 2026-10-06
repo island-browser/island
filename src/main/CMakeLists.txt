@@ -1,14 +1,15 @@
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 
 add_library(island_browser_core STATIC
-    "${ISLAND_AGENT_PANEL_HTML_CC}"
+    ${ISLAND_LOCAL_PAGE_SOURCES}
     address_bar_model.cc
     agent_navigation.cc
-    agent_panel.cc
+    local_page.cc
     address_policy.cc
     app_resources.cc
     bookmark_import.cc
     bookmark_store.cc
+    browser_import.cc
     app_runtime.cc
     browser_chrome.cc
     browser_window.cc
@@ -19,6 +20,7 @@ add_library(island_browser_core STATIC
     devtools_bridge.cc
     icon_catalog.cc
     island_app.cc
+    keymap.cc
     navigation_state.cc
     prefs_store.cc
     search_palette.cc

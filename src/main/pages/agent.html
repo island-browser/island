@@ -202,7 +202,7 @@ textarea::placeholder { color: var(--text-2); }
 <script>
 "use strict";
 (function () {
-  var MESSAGE_PREFIX = "\u0001island-agent:";
+  var MESSAGE_PREFIX = "\u0001island:";
   var state = { session: { state: "idle", status: "Not running", items: [], busy: false, command: "" },
                 context: null, endpoint: "", theme: null };
   var includeContext = true;
@@ -513,7 +513,7 @@ textarea::placeholder { color: var(--text-2); }
     if ("endpoint" in next) state.endpoint = next.endpoint;
     render();
   };
-  window.islandFocusInput = function () { input.focus(); };
+  window.islandFocus = function () { input.focus(); };
 
   render();
   post({ type: "ready" });

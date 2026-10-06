@@ -25,6 +25,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void ShowCommandPalette();
     void ToggleSidebar();
     void ToggleAgentPanel();
+    void ToggleSettings();
+    void ToggleTabOverview();
     void BeginSpaceRenaming();
     // Space reorder menu entries; a move that would leave the space list is a
     // no-op.

@@ -46,6 +46,7 @@ TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional
     PrefsState state;
     state.agent_command = "npx -y \"my agent\" --acp";
     state.agent_panel_open = true;
+    state.keybindings = {{"new_tab", "Mod+Shift+T"}, {"close_tab", ""}};
     const std::filesystem::path path = TempPath("agent.json");
     ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
     const PrefsLoadResult loaded = PrefsStore::Load(path);
@@ -61,6 +62,9 @@ TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional
 
     WriteFile(path,
               R"({"version":1,"onboarding_completed":true,"theme":"dark","agent_command":7})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","keybindings":{"a":1}})");
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
 }
 

@@ -1,4 +1,4 @@
-// Behavioral check of src/main/agent_panel.html in headless Chromium.
+// Behavioral check of src/main/pages/agent.html in headless Chromium.
 //
 // Optional (needs Node and Playwright, which the C++ build does not):
 //   NODE_PATH=$(npm root -g) node tests/agent/panel/agent_panel_behavior.js
@@ -8,13 +8,13 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
-const html = fs.readFileSync(process.argv[2] || path.join(__dirname, '../../../src/main/agent_panel.html'), 'utf8');
+const html = fs.readFileSync(process.argv[2] || path.join(__dirname, '../../../src/main/pages/agent.html'), 'utf8');
 const assert = (c, m) => { if (!c) { console.log('FAIL ' + m); process.exitCode = 1; } else console.log('ok   ' + m); };
 (async () => {
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 380, height: 700 } });
   const sent = [];
-  page.on('console', m => { const t = m.text(); if (t.startsWith('\u0001island-agent:')) sent.push(JSON.parse(t.slice(14))); });
+  page.on('console', m => { const t = m.text(); if (t.startsWith('\u0001island:')) sent.push(JSON.parse(t.slice(8))); });
   await page.setContent(html);
   const render = s => page.evaluate(x => window.islandRender(x), s);
   await render({ session: { state: 'ready', status: 'Ready', items: [], busy: false }, context: { title: 'Docs', url: 'https://d.test/' } });

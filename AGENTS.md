@@ -23,8 +23,12 @@
   historical context only, and the "Phase 1 contract" section below describes Phase 1, not the
   current feature set.
 - Every phase still requires its own accepted spec and plan, and only units of the currently
-  accepted plans may be implemented. Settings, extensions, sync, profiles/accounts, and multiple
-  top-level `CefWindow`s remain out of scope (see each design's non-goals).
+  accepted plans may be implemented. Extensions, sync, profiles/accounts, and multiple top-level
+  `CefWindow`s remain out of scope (see each design's non-goals). A Settings page (theme, agent
+  command, MCP config, configurable shortcuts, browser import) and an All-tabs overview were added
+  on 2026-10-06 at the project owner's request; both are local HTML pages shown in the content
+  slot (`src/main/pages/`). Shortcut overrides persist in prefs; on macOS they reach the NSMenu
+  on the next launch.
 - Agentic integration is in scope as of 2026-10-06 at the project owner's request: the CEF-free
   `src/agent/` kernel provides an MCP tools endpoint (`http://127.0.0.1:<port>/mcp`, bearer token,
   discovery file) and an ACP client that runs an agent in the sidebar. GitHub Actions triggers

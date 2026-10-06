@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "browser_import.h"
 #include "json_util.h"
 
 namespace island {
@@ -177,11 +178,31 @@ std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path
     sources.push_back(
         ImportSourceInfo{ImportSource::kSafari, "Safari", safari_available,
                          PlatformCanReadSafari() ? safari_path : std::filesystem::path{}});
+    const std::filesystem::path firefox = FindFirefoxBookmarksBackup(base_home);
+    sources.push_back(
+        ImportSourceInfo{ImportSource::kFirefox, "Firefox", !firefox.empty(), firefox});
+    const std::filesystem::path arc = FindArcSidebarFile(base_home);
+    sources.push_back(ImportSourceInfo{ImportSource::kArc, "Arc", !arc.empty(), arc});
     return sources;
 }
 
 std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
                                                           const std::filesystem::path& base_home) {
+    if (source == ImportSource::kFirefox) {
+        return ImportFirefoxBookmarks(base_home);
+    }
+    if (source == ImportSource::kArc) {
+        // As plain bookmarks, Arc contributes every space's pinned tabs.
+        const std::optional<std::vector<ImportedSpace>> spaces = ImportArcSpaces(base_home);
+        if (!spaces.has_value()) {
+            return std::nullopt;
+        }
+        std::vector<BookmarkItem> items;
+        for (const ImportedSpace& space : *spaces) {
+            items.insert(items.end(), space.pinned_tabs.begin(), space.pinned_tabs.end());
+        }
+        return items;
+    }
     if (source == ImportSource::kSafari) {
 #if defined(__APPLE__)
         return ImportSafariBookmarks(base_home);
@@ -196,6 +217,40 @@ std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
         return std::nullopt;
     }
     return ReadAndParse(SourceBookmarksPath(kChromiumSources[index], base_home));
+}
+
+namespace {
+
+constexpr std::array<std::string_view, 9> kImportSourceIds = {
+    "chrome", "edge", "brave", "chromium", "vivaldi", "opera", "safari", "firefox", "arc"};
+
+}  // namespace
+
+std::string_view ImportSourceId(ImportSource source) noexcept {
+    const auto index = static_cast<std::size_t>(source);
+    return index < kImportSourceIds.size() ? kImportSourceIds[index] : std::string_view("unknown");
+}
+
+std::optional<ImportSource> ImportSourceFromId(std::string_view id) noexcept {
+    for (std::size_t index = 0; index < kImportSourceIds.size(); ++index) {
+        if (kImportSourceIds[index] == id) {
+            return static_cast<ImportSource>(index);
+        }
+    }
+    return std::nullopt;
+}
+
+std::string ImportSourceDescription(const ImportSourceInfo& info) {
+    switch (info.id) {
+        case ImportSource::kArc:
+            return "Spaces, their colors, and pinned tabs";
+        case ImportSource::kFirefox:
+            return "Bookmarks from the latest Firefox backup";
+        case ImportSource::kSafari:
+            return "Bookmarks";
+        default:
+            return "Bookmarks";
+    }
 }
 
 }  // namespace island

@@ -27,7 +27,7 @@ manifest that the build and `src/main/icon_catalog.cc` read.
 ### Working In This Directory
 
 - The output count is a build-enforced invariant: the root `CMakeLists.txt` reads
-  `resources/island/icons/manifest.json` and **fails configuration unless it declares exactly 192
+  `resources/island/icons/manifest.json` and **fails configuration unless it declares exactly 240
   PNG resources**, each matching `^resources/island/icons/png/[^/]+\.png$` and present on disk.
   Adding or removing an icon means updating that expected count in `CMakeLists.txt` too.
 - This tool is not part of the CMake build. Run it by hand; commit its outputs under

@@ -531,6 +531,20 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     agent_button_->SetMinimumSize(CefSize(0, TabRowHeightDip()));
     rail_footer_->AddChildView(agent_button_);
     footer_layout->SetFlexForView(agent_button_, 1);
+    tabs_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    tabs_button_->SetID(static_cast<int>(ChromeViewId::kRailTabsButton));
+    tabs_button_->SetAccessibleName("All tabs");
+    tabs_button_->SetTooltipText("All tabs");
+    tabs_button_->SetFocusable(true);
+    tabs_button_->SetMinimumSize(CefSize(TabRowHeightDip(), TabRowHeightDip()));
+    rail_footer_->AddChildView(tabs_button_);
+    settings_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    settings_button_->SetID(static_cast<int>(ChromeViewId::kRailSettingsButton));
+    settings_button_->SetAccessibleName("Settings");
+    settings_button_->SetTooltipText("Settings");
+    settings_button_->SetFocusable(true);
+    settings_button_->SetMinimumSize(CefSize(TabRowHeightDip(), TabRowHeightDip()));
+    rail_footer_->AddChildView(settings_button_);
     new_space_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     new_space_button_->SetID(static_cast<int>(ChromeViewId::kRailNewSpaceButton));
     new_space_button_->SetAccessibleName("New Space");
@@ -1086,6 +1100,12 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
         case ChromeViewId::kRailNewSpaceButton:
             host_->ExecuteBrowserCommand(BrowserCommand::kNewSpace);
             return;
+        case ChromeViewId::kRailTabsButton:
+            host_->ToggleTabOverview();
+            return;
+        case ChromeViewId::kRailSettingsButton:
+            host_->ToggleSettings();
+            return;
         default:
             return;
     }
@@ -1272,8 +1292,18 @@ void BrowserChrome::ApplyRailButtonTheme() {
         icon_catalog_.Load(ChromeIcon::kSparkles,
                            agent_panel_open_ ? ChromeIconTone::kAccent : ChromeIconTone::kSecondary,
                            ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> grid =
+        icon_catalog_.Load(ChromeIcon::kGrid, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> gear =
+        icon_catalog_.Load(ChromeIcon::kSettings, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+    if (grid.has_value()) {
+        tabs_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *grid);
+    }
+    if (gear.has_value()) {
+        settings_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *gear);
+    }
     for (const CefRefPtr<CefLabelButton>& button :
-         {new_tab_button_, agent_button_, new_space_button_}) {
+         {new_tab_button_, agent_button_, new_space_button_, tabs_button_, settings_button_}) {
         button->SetInkDropEnabled(true);
         button->SetFontList("Geist, 13px");
         button->SetEnabledTextColors(tokens_.text_secondary.argb);

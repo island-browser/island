@@ -16,14 +16,17 @@ FetchContent_MakeAvailable(googletest)
 add_executable(island_tests
     address_bar_model_test.cpp
     address_policy_test.cpp
-    agent_panel_test.cpp
+    local_page_test.cpp
     bookmark_import_test.cpp
     bookmark_store_test.cpp
+    browser_import_test.cpp
     browser_window_test.cpp
+    browser_window_pages_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
     command_palette_test.cpp
     design_tokens_test.cpp
+    keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
     prefs_store_test.cpp
@@ -39,11 +42,12 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/agent_navigation.cc"
-    "${CMAKE_SOURCE_DIR}/src/main/agent_panel.cc"
-    "${ISLAND_AGENT_PANEL_HTML_CC}"
+    "${CMAKE_SOURCE_DIR}/src/main/local_page.cc"
+    ${ISLAND_LOCAL_PAGE_SOURCES}
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/browser_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
@@ -52,6 +56,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
