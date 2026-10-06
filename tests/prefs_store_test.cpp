@@ -44,6 +44,7 @@ TEST(PrefsStoreTest, GivenARoundTripWhenSavedAndLoadedThenTheStateSurvives) {
 
 TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional) {
     PrefsState state;
+    state.agent_provider = "custom";
     state.agent_command = "npx -y \"my agent\" --acp";
     state.agent_panel_open = true;
     state.keybindings = {{"new_tab", "Mod+Shift+T"}, {"close_tab", ""}};
@@ -66,6 +67,63 @@ TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional
     WriteFile(path,
               R"({"version":1,"onboarding_completed":true,"theme":"dark","keybindings":{"a":1}})");
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
+TEST(PrefsStoreTest, GivenAnAgentProviderWhenSavedThenItRoundTripsBesideTheCustomCommand) {
+    PrefsState state;
+    EXPECT_EQ(state.agent_provider, "claude");
+    state.agent_provider = "gemini";
+    state.agent_command = "my-agent --acp";
+    const std::filesystem::path path = TempPath("provider.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state, state);
+
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","agent_provider":1})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
+TEST(PrefsStoreTest, GivenPrefsFromBeforeProvidersWhenLoadedThenTheCommandMigrates) {
+    const std::filesystem::path path = TempPath("migrate.json");
+    const std::string head = R"({"version":1,"onboarding_completed":true,"theme":"dark")";
+
+    // No command: the default provider.
+    WriteFile(path, head + "}");
+    PrefsLoadResult loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.agent_provider, "claude");
+    EXPECT_TRUE(loaded.state.agent_command.empty());
+
+    // The old built-in default (the deprecated adapter): Claude Code, and
+    // the stale command is dropped.
+    WriteFile(path, head + R"(,"agent_command":"npx -y @zed-industries/claude-code-acp"})");
+    loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.agent_provider, "claude");
+    EXPECT_TRUE(loaded.state.agent_command.empty());
+
+    // Any other saved command: the custom provider keeps running it.
+    WriteFile(path, head + R"(,"agent_command":"gemini --experimental-acp"})");
+    loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.agent_provider, "custom");
+    EXPECT_EQ(loaded.state.agent_command, "gemini --experimental-acp");
+
+    // Once a provider is saved, the command is never reinterpreted.
+    WriteFile(path, head + R"(,"agent_provider":"codex","agent_command":"my-agent"})");
+    loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.agent_provider, "codex");
+    EXPECT_EQ(loaded.state.agent_command, "my-agent");
+
+    // A migrated file saves the provider, so the next load is stable.
+    WriteFile(path, head + R"(,"agent_command":"npx -y @zed-industries/claude-code-acp"})");
+    ASSERT_EQ(PrefsStore::Save(path, PrefsStore::Load(path).state), PrefsError::kNone);
+    loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.state.agent_provider, "claude");
+    EXPECT_TRUE(loaded.state.agent_command.empty());
 }
 
 TEST(PrefsStoreTest, GivenUpdatePrefsWhenSavedThenTheyRoundTripAndStayOptional) {

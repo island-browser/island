@@ -1,12 +1,17 @@
 #ifndef ISLAND_BROWSER_WINDOW_H_
 #define ISLAND_BROWSER_WINDOW_H_
 
+#include <chrono>
+#include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "active_tab_provider.h"
 #include "agent_navigation.h"
+#include "agent_providers.h"
 #include "agent_session.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
@@ -135,11 +140,34 @@ class BrowserWindow : public CefClient,
     void ToggleAgentPanel() override;
     void SetAgentPanelOpen(bool open);
     [[nodiscard]] bool agent_panel_open() const noexcept;
-    // The agent command the panel launches: ISLAND_AGENT_COMMAND, else the
-    // saved preference, else the built-in default.
-    [[nodiscard]] std::string ResolvedAgentCommand() const;
-    static constexpr std::string_view kDefaultAgentCommand =
-        "npx -y @zed-industries/claude-code-acp";
+    // The agent the panel launches: ISLAND_AGENT_COMMAND when set, else the
+    // selected provider's preset (or the custom command).
+    [[nodiscard]] agent::ResolvedAgentCommand ResolvedAgent() const;
+    [[nodiscard]] std::string ResolvedAgentCommand() const { return ResolvedAgent().command; }
+    // The selected provider id (prefs `agent_provider`) and the custom
+    // provider's command (prefs `agent_command`).
+    [[nodiscard]] const std::string& agent_provider() const noexcept {
+        return prefs_.agent_provider;
+    }
+    [[nodiscard]] const std::string& custom_agent_command() const noexcept {
+        return prefs_.agent_command;
+    }
+    // Selects another provider and persists it. A running agent stops and
+    // the panel starts a new chat with the new one; an idle session only
+    // adopts it. False for an unknown id or while closing.
+    bool SetAgentProvider(std::string_view id);
+    // The agent session, once the panel or a message created it.
+    [[nodiscard]] const agent::AgentSession* agent_session() const noexcept {
+        return agent_session_.get();
+    }
+    // The state the agent panel renders, exposed for tests.
+    [[nodiscard]] std::string AgentPanelStateJson() const;
+    // Test seam: provider availability is searched in `dirs` instead of the
+    // process PATH.
+    void SetAgentSearchDirsForTest(std::vector<std::filesystem::path> dirs) {
+        agent_search_dirs_for_test_ = std::move(dirs);
+        provider_statuses_.reset();
+    }
     void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) override;
 
     // Built-in pages shown in the content area (Settings, the all-tabs
@@ -382,8 +410,15 @@ class BrowserWindow : public CefClient,
     void ShutdownAgentHost();
     void ApplyKeymap();
     void EnsureAgentSession();
-    [[nodiscard]] agent::AgentSessionConfig AgentConfig(std::string command) const;
-    [[nodiscard]] std::string AgentPanelStateJson() const;
+    [[nodiscard]] agent::AgentSessionConfig AgentConfig() const;
+    // Every provider with its availability, cached for a few seconds because
+    // the pages re-render on every streamed chunk.
+    [[nodiscard]] const std::vector<agent::AgentProviderStatus>& ProviderStatuses() const;
+    // {provider, providers, command, env_override, env_command,
+    //  effective_command}: what both the panel and Settings show.
+    [[nodiscard]] json::Value AgentProvidersStateJson() const;
+    // Shows Settings scrolled to `section` (e.g. "agent").
+    void ShowSettingsSection(std::string section);
     [[nodiscard]] std::string ActiveTabAgentContext() const;
     // Coalesces panel re-renders (streaming chunks arrive in bursts).
     void ScheduleLocalPagesRender();
@@ -489,6 +524,12 @@ class BrowserWindow : public CefClient,
     // A one-shot notice for the Settings page (import results, errors).
     std::string settings_message_;
     std::unique_ptr<agent::AgentSession> agent_session_;
+    // Provider availability (see ProviderStatuses) and its test override.
+    mutable std::optional<std::vector<agent::AgentProviderStatus>> provider_statuses_;
+    mutable std::chrono::steady_clock::time_point provider_statuses_at_;
+    std::optional<std::vector<std::filesystem::path>> agent_search_dirs_for_test_;
+    // A one-shot Settings section to scroll to on the next render.
+    std::string settings_focus_;
     std::unique_ptr<update::Updater> updater_;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is

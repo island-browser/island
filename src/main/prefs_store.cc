@@ -9,10 +9,14 @@
 #include <string_view>
 #include <system_error>
 
+#include "agent_providers.h"
 #include "json_util.h"
 
 namespace island {
 namespace {
+
+static_assert(agent::kDefaultAgentProviderId == "claude",
+              "PrefsState::agent_provider defaults to the default provider");
 
 PrefsLoadResult Fail(PrefsError error) { return {error, PrefsState{}}; }
 
@@ -37,6 +41,20 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             return Fail(PrefsError::kSchemaError);
         }
         state.agent_command = command->string_val;
+    }
+    if (const json::Value* provider = root.FindMember("agent_provider")) {
+        if (!provider->IsString()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        state.agent_provider = provider->string_val;
+    } else if (state.agent_command == agent::kLegacyClaudeAgentCommand) {
+        // Files from before providers existed: the old built-in default
+        // becomes the Claude Code provider (whose adapter was renamed) ...
+        state.agent_provider = std::string(agent::kDefaultAgentProviderId);
+        state.agent_command.clear();
+    } else if (!state.agent_command.empty()) {
+        // ... and any other saved command becomes the custom provider.
+        state.agent_provider = std::string(agent::kCustomAgentProviderId);
     }
     if (const json::Value* bindings = root.FindMember("keybindings")) {
         if (!bindings->IsObject()) {
@@ -85,6 +103,8 @@ std::string SerializeToJson(const PrefsState& state) {
     w.BoolValue(state.onboarding_completed);
     w.Key("theme");
     w.StringValue(ThemePreferenceToString(state.theme));
+    w.Key("agent_provider");
+    w.StringValue(state.agent_provider);
     if (!state.agent_command.empty()) {
         w.Key("agent_command");
         w.StringValue(state.agent_command);

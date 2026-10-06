@@ -84,10 +84,21 @@ TEST(LocalPageTest, AgentCommandResolutionPrefersTheEnvironment) {
 #else
     unsetenv("ISLAND_AGENT_COMMAND");
 #endif
-    EXPECT_EQ(window->ResolvedAgentCommand(), BrowserWindow::kDefaultAgentCommand);
+    EXPECT_EQ(window->ResolvedAgentCommand(), "npx -y @agentclientprotocol/claude-agent-acp");
+    EXPECT_EQ(window->ResolvedAgent().source, agent::AgentCommandSource::kProvider);
 #if !defined(_WIN32)
     setenv("ISLAND_AGENT_COMMAND", "gemini --experimental-acp", 1);
     EXPECT_EQ(window->ResolvedAgentCommand(), "gemini --experimental-acp");
+    EXPECT_EQ(window->ResolvedAgent().source, agent::AgentCommandSource::kEnvironment);
+    // The override is shown as such and survives a provider switch.
+    ASSERT_TRUE(window->SetAgentProvider("goose"));
+    EXPECT_EQ(window->ResolvedAgentCommand(), "gemini --experimental-acp");
+    const auto settings = json::Parse(window->SettingsStateJson());
+    const json::Value* agent = settings->FindMember("settings")->FindMember("agent");
+    EXPECT_TRUE(agent->BoolOr("env_override", false));
+    EXPECT_EQ(agent->StringOr("env_command", ""), "gemini --experimental-acp");
+    EXPECT_EQ(agent->StringOr("provider", ""), "goose");
+    EXPECT_TRUE(json::Parse(window->AgentPanelStateJson())->BoolOr("env_override", false));
     if (saved != nullptr) {
         setenv("ISLAND_AGENT_COMMAND", saved_value.c_str(), 1);
     } else {

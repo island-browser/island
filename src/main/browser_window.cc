@@ -513,20 +513,20 @@ bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
     return true;
 }
 
-std::string BrowserWindow::ResolvedAgentCommand() const {
-    const char* const configured = std::getenv("ISLAND_AGENT_COMMAND");
-    if (configured != nullptr && *configured != '\0') {
-        return configured;
-    }
-    if (!prefs_.agent_command.empty()) {
-        return prefs_.agent_command;
-    }
-    return std::string(kDefaultAgentCommand);
+agent::ResolvedAgentCommand BrowserWindow::ResolvedAgent() const {
+    const char* const env_command = std::getenv("ISLAND_AGENT_COMMAND");
+    return agent::ResolveAgentCommand(prefs_.agent_provider, prefs_.agent_command,
+                                      env_command != nullptr ? env_command : "");
 }
 
-agent::AgentSessionConfig BrowserWindow::AgentConfig(std::string command) const {
+agent::AgentSessionConfig BrowserWindow::AgentConfig() const {
+    const agent::ResolvedAgentCommand resolved = ResolvedAgent();
     agent::AgentSessionConfig config;
-    config.command = command.empty() ? ResolvedAgentCommand() : std::move(command);
+    config.command = resolved.command;
+    config.provider_id = resolved.provider_id;
+    if (const agent::AgentProvider* provider = agent::FindAgentProvider(resolved.provider_id)) {
+        config.provider_name = std::string(provider->name);
+    }
     config.cwd = UserBaseHome();
     const agent::AgentEndpoint* endpoint =
         agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
@@ -537,6 +537,70 @@ agent::AgentSessionConfig BrowserWindow::AgentConfig(std::string command) const 
                                       .bridge_command = McpBridgePath()});
     }
     return config;
+}
+
+const std::vector<agent::AgentProviderStatus>& BrowserWindow::ProviderStatuses() const {
+    // Availability is a PATH search (a few stat calls per provider); the
+    // pages re-render on every streamed chunk, so it is refreshed at most
+    // every few seconds, or when the custom command changes.
+    const auto now = std::chrono::steady_clock::now();
+    const bool stale = !provider_statuses_.has_value() ||
+                       now - provider_statuses_at_ > std::chrono::seconds(5) ||
+                       provider_statuses_->back().command != TrimmedCopy(prefs_.agent_command);
+    if (stale) {
+        provider_statuses_ =
+            agent_search_dirs_for_test_.has_value()
+                ? agent::DetectAgentProviders(prefs_.agent_command, *agent_search_dirs_for_test_)
+                : agent::DetectAgentProviders(prefs_.agent_command);
+        provider_statuses_at_ = now;
+    }
+    return *provider_statuses_;
+}
+
+json::Value BrowserWindow::AgentProvidersStateJson() const {
+    using json::Value;
+    const agent::ResolvedAgentCommand resolved = ResolvedAgent();
+    const bool env_override = resolved.source == agent::AgentCommandSource::kEnvironment;
+    return Value::MakeObject()
+        .Set("provider", Value::String(resolved.provider_id))
+        .Set("providers", agent::AgentProvidersJson(ProviderStatuses()))
+        .Set("command", Value::String(prefs_.agent_command))
+        .Set("default_command", Value::String(std::string(agent::DefaultAgentProvider().command)))
+        .Set("env_override", Value::Bool(env_override))
+        .Set("env_command", Value::String(env_override ? resolved.command : std::string()))
+        .Set("effective_command", Value::String(resolved.command));
+}
+
+bool BrowserWindow::SetAgentProvider(std::string_view id) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || agent::FindAgentProvider(id) == nullptr) {
+        return false;
+    }
+    if (prefs_.agent_provider == id) {
+        return true;
+    }
+    prefs_.agent_provider = std::string(id);
+    SavePrefs();
+    if (agent_session_ != nullptr) {
+        agent::AgentSessionConfig config = AgentConfig();
+        if (config.command == agent_session_->config().command) {
+            // ISLAND_AGENT_COMMAND pins the command: nothing to restart.
+            agent_session_->Configure(std::move(config));
+        } else {
+            static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
+        }
+    }
+    ScheduleLocalPagesRender();
+    return true;
+}
+
+void BrowserWindow::ShowSettingsSection(std::string section) {
+    settings_focus_ = std::move(section);
+    if (internal_page_ == LocalPageKind::kSettings) {
+        ScheduleLocalPagesRender();
+    } else {
+        ToggleInternalPage(LocalPageKind::kSettings);
+    }
 }
 
 void BrowserWindow::EnsureAgentSession() {
@@ -551,7 +615,7 @@ void BrowserWindow::EnsureAgentSession() {
                         CefCreateClosureTask(base::BindOnce(&RunAgentTask, std::move(task))));
         },
         [this] { ScheduleLocalPagesRender(); });
-    agent_session_->Configure(AgentConfig({}));
+    agent_session_->Configure(AgentConfig());
 }
 
 bool BrowserWindow::agent_panel_open() const noexcept {
@@ -564,6 +628,9 @@ void BrowserWindow::SetAgentPanelOpen(bool open) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr) {
         return;
+    }
+    if (open) {
+        provider_statuses_.reset();
     }
     if (open && agent_panel_ == nullptr) {
         EnsureAgentSession();
@@ -619,6 +686,12 @@ std::string BrowserWindow::AgentPanelStateJson() const {
             .Set("endpoint",
                  json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
                                                                                 : std::string()));
+    json::Value providers = AgentProvidersStateJson();
+    for (auto& [key, value] : providers.object_val) {
+        if (key == "provider" || key == "providers" || key == "env_override") {
+            state.Set(key, std::move(value));
+        }
+    }
     if (agent_session_ != nullptr) {
         std::optional<json::Value> session = json::Parse(agent_session_->StateJson());
         if (session.has_value()) {
@@ -651,6 +724,7 @@ void BrowserWindow::FlushLocalPagesRender() {
     if (internal_page_ == LocalPageKind::kSettings && settings_page_ != nullptr) {
         settings_page_->Render(SettingsStateJson());
         settings_message_.clear();
+        settings_focus_.clear();
     } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
     }
@@ -717,6 +791,9 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     if (page == nullptr) {
         page = std::make_unique<LocalPage>(kind, *this);
     }
+    if (kind == LocalPageKind::kSettings) {
+        provider_statuses_.reset();  // re-detect agents installed meanwhile
+    }
     internal_page_ = kind;
     chrome_->AttachBrowserView(page->view());
     FlushLocalPagesRender();
@@ -741,12 +818,7 @@ std::string BrowserWindow::SettingsStateJson() const {
     const std::string platform = "linux";
 #endif
     using json::Value;
-    const char* const env_command = std::getenv("ISLAND_AGENT_COMMAND");
-    Value agent =
-        Value::MakeObject()
-            .Set("command", Value::String(prefs_.agent_command))
-            .Set("default_command", Value::String(std::string(kDefaultAgentCommand)))
-            .Set("env_override", Value::Bool(env_command != nullptr && *env_command != '\0'));
+    Value agent = AgentProvidersStateJson();
 
     Value endpoint = Value::MakeObject().Set("running", Value::Bool(false));
     const agent::AgentEndpoint* live = agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
@@ -820,7 +892,8 @@ std::string BrowserWindow::SettingsStateJson() const {
                          .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
                          .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
                          .Set("update", UpdateStateJson())
-                         .Set("message", Value::String(settings_message_));
+                         .Set("message", Value::String(settings_message_))
+                         .Set("focus", Value::String(settings_focus_));
     return json::Serialize(
         Value::MakeObject().Set("theme", ThemeJson()).Set("settings", std::move(settings)));
 }
@@ -897,11 +970,20 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
             static_cast<void>(SetThemePreference(preference));
         }
+    } else if (type == "set_agent_provider") {
+        static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "set_agent_command") {
+        // The custom provider's command; it takes effect on the next start.
         prefs_.agent_command = TrimmedCopy(message.StringOr("command", ""));
         SavePrefs();
         if (agent_session_ != nullptr) {
-            agent_session_->Configure(AgentConfig({}));
+            agent_session_->Configure(AgentConfig());
+        }
+    } else if (type == "open_agent_docs") {
+        // Only a registry URL opens; the page cannot supply one.
+        if (const agent::AgentProvider* provider =
+                agent::FindAgentProvider(message.StringOr("id", ""))) {
+            static_cast<void>(OpenNewTab(std::string(provider->docs_url)));
         }
     } else if (type == "open_agent") {
         SetAgentPanelOpen(true);
@@ -1309,6 +1391,10 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         SetAgentPanelOpen(false);
         return;
     }
+    if (type == "open_settings") {
+        ShowSettingsSection("agent");
+        return;
+    }
     EnsureAgentSession();
     if (type == "send") {
         const std::string context =
@@ -1324,13 +1410,18 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
                                               : std::nullopt);
     } else if (type == "new_chat") {
         agent_session_->NewChat();
+    } else if (type == "set_provider") {
+        static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "start") {
+        // (Re)starts the selected agent. A command that differs from what the
+        // selected provider runs becomes the custom provider's command.
         const std::string command = TrimmedCopy(message.StringOr("command", ""));
-        if (command != prefs_.agent_command) {
+        if (!command.empty() && command != ResolvedAgentCommand()) {
+            prefs_.agent_provider = std::string(agent::kCustomAgentProviderId);
             prefs_.agent_command = command;
             SavePrefs();
         }
-        static_cast<void>(agent_session_->Start(AgentConfig(command)));
+        static_cast<void>(agent_session_->Start(AgentConfig()));
     }
     ScheduleLocalPagesRender();
 }
