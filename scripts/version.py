@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[1]
-REPO_URL = "https://github.com/impelixx/island"
+REPO_URL = "https://github.com/island-browser/island"
 
 SEMVER = re.compile(
     r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"

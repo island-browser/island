@@ -7,10 +7,10 @@ sitemap locations, and the robots sitemap line). Run this once after deploying
 to a new domain, then commit the result:
 
     python3 scripts/site_set_domain.py https://island.example.com
-    python3 scripts/site_set_domain.py https://impelixx.github.io/island   # back to Pages
+    python3 scripts/site_set_domain.py https://island-browser.github.io/island   # back to Pages
 
 The trailing slash of |domain| is optional and normalized. Only the exact
-current domain (https://impelixx.github.io/island) is rewritten, so running
+current domain (https://island-browser.github.io/island) is rewritten, so running
 the script twice is safe.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[1]
 SITE = REPOSITORY / "site"
 
-OLD = "https://impelixx.github.io/island"
+OLD = "https://island-browser.github.io/island"
 TARGETS = ("index.html", "docs.html", "changelog.html", "privacy.html", "sitemap.xml", "robots.txt")
 
 

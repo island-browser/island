@@ -9,7 +9,7 @@
   Arc (per-space color as identity). Gradients are explicitly out.
 - Consumers: the native chrome (`src/main/design_tokens.cc`), the browser's internal pages
   (`src/main/pages/*.html`, which receive the live tokens from the native state), and the product
-  site, which lives in its own repository (`impelixx/island-site`) and checks its CSS variables
+  site, which lives in its own repository (`island-browser/island-site`) and checks its CSS variables
   against the block below in CI.
 
 ## 1. Atmosphere & Identity
