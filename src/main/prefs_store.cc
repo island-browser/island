@@ -55,6 +55,22 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         }
         state.agent_panel_open = open->bool_val;
     }
+    for (const auto& [key, field] :
+         {std::pair{"auto_check_updates", &state.auto_check_updates},
+          std::pair{"include_prereleases", &state.include_prereleases}}) {
+        if (const json::Value* value = root.FindMember(key)) {
+            if (!value->IsBool()) {
+                return Fail(PrefsError::kSchemaError);
+            }
+            *field = value->bool_val;
+        }
+    }
+    if (const json::Value* last_check = root.FindMember("last_update_check")) {
+        if (!last_check->IsInt()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        state.last_update_check = last_check->int_val;
+    }
     return {PrefsError::kNone, state};
 }
 
@@ -83,6 +99,14 @@ std::string SerializeToJson(const PrefsState& state) {
             w.StringValue(binding);
         }
         w.EndObject();
+    }
+    w.Key("auto_check_updates");
+    w.BoolValue(state.auto_check_updates);
+    w.Key("include_prereleases");
+    w.BoolValue(state.include_prereleases);
+    if (state.last_update_check != 0) {
+        w.Key("last_update_check");
+        w.IntValue(state.last_update_check);
     }
     w.EndObject();
     oss << '\n';

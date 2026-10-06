@@ -27,6 +27,7 @@ add_library(island_browser_core STATIC
     search_palette_model.cc
     search_provider.cc
     session_store.cc
+    sha256.cc
     sidebar_state.cc
     space.cc
     space_rename_overlay.cc
@@ -34,6 +35,7 @@ add_library(island_browser_core STATIC
     welcome_flow.cc
     window_agent_host.cc
     tab.cc
+    updater.cc
 )
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
