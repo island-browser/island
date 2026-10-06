@@ -32,6 +32,11 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
   serves browser tools over MCP at `http://127.0.0.1:9223/mcp` (bearer token in
   `agent-endpoint.json`, or the `island_mcp_bridge` stdio bridge). Settings shows a ready-to-paste
   `mcpServers` config.
+- **Updates** (Settings > Updates): Island checks its GitHub releases shortly after startup (at
+  most once a day) or on demand, downloads the archive for your platform, verifies it against the
+  release's `SHA256SUMS.txt`, and swaps it in on "Restart to update", keeping the previous version
+  as a backup until the new one starts. Pre-releases are opt-in. Builds run from a CMake build
+  directory never update themselves; `ISLAND_DISABLE_UPDATES=1` turns updates off.
 
 ## Versions
 
