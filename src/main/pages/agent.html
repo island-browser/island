@@ -49,9 +49,42 @@ header {
   place-items: center; background: var(--surface); border: 1px solid var(--border); color: var(--text);
 }
 .mark svg { width: 13px; height: 13px; }
-.titles { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 8px; }
-.titles h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: -.01em;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titles { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; }
+
+/* Provider switcher: the header title opens a small menu of agents */
+header { position: relative; }
+.provider-btn { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+  margin-left: -6px; padding: 3px 6px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; font-size: 13px; font-weight: 600; letter-spacing: -.01em;
+  transition: background .16s, border-color .16s; }
+.provider-btn:hover, .provider-btn[aria-expanded="true"] { background: var(--surface); border-color: var(--border); }
+.provider-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.provider-btn svg { width: 12px; height: 12px; flex: none; color: var(--text-2); transition: transform .16s; }
+.provider-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.menu { position: absolute; left: 10px; right: 10px; top: calc(100% - 4px); z-index: 10;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 4px; max-height: calc(100vh - 64px); overflow-y: auto;
+  animation: drop .14s cubic-bezier(.16, 1, .3, 1); }
+@keyframes drop { from { opacity: 0; transform: translateY(-3px); } }
+.menu-label { font: 500 10.5px/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--text-2); padding: 6px 8px 4px; }
+.menu-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  border: 0; background: transparent; border-radius: var(--radius-sm); padding: 6px 8px; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+.menu-item .mi-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.menu-item .mi-name { font-size: 12.5px; font-weight: 500; }
+.menu-item .mi-hint { font: 11px/1.45 var(--mono); color: var(--text-2); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.menu-item .mi-hint.wrap { white-space: normal; overflow-wrap: anywhere; }
+.menu-item .mi-check { width: 13px; height: 13px; flex: none; color: var(--text); }
+.menu-item[aria-checked="false"] .mi-check { visibility: hidden; }
+.avail { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--success); }
+.avail[data-available="false"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); opacity: .7; }
+.menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.menu-item.action { color: var(--text-2); font-size: 12.5px; padding: 7px 8px; }
+.menu-item.action:hover, .menu-item.action:focus-visible { color: var(--text); }
+.menu-item.action svg { width: 13px; height: 13px; flex: none; }
+.menu-note { font: 11px/1.45 var(--mono); color: var(--text-2); padding: 6px 8px 4px; }
 .status { display: flex; align-items: center; gap: 6px; font: 11px/1.4 var(--mono);
   color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); flex: none; }
@@ -162,6 +195,16 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .setup input { width: 100%; font: 12px var(--mono); color: var(--text); background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; }
 .endpoint { margin-top: 14px; font-size: 12px; color: var(--text-2); }
+.missing { margin: 0 0 14px; }
+.missing p { color: var(--text-2); font-size: 12.5px; margin: 0 0 10px; }
+.missing p code { color: var(--text); }
+.copy-row { display: flex; align-items: center; gap: 6px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 4px 4px 10px; }
+.copy-row code { flex: 1; min-width: 0; background: none; border: 0; padding: 0; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
+.copy-row .btn { padding: 3px 9px; font-size: 12px; flex: none; }
+.links { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.setup .copy-row { margin-top: 6px; }
 .endpoint code { display: block; margin-top: 6px; padding: 6px 8px; word-break: break-all; }
 
 /* Composer */
@@ -191,11 +234,14 @@ textarea::placeholder { color: var(--text-2); }
 <header>
   <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg></div>
   <div class="titles">
-    <h1 id="agent-name">Agent</h1>
+    <button class="provider-btn" id="provider-button" aria-haspopup="menu" aria-expanded="false" aria-controls="provider-menu" title="Choose an agent">
+      <span id="agent-name">Agent</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
     <div class="status"><span class="dot" id="dot"></span><span id="status">Not running</span></div>
   </div>
   <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>
   <button class="icon-btn" id="close" title="Hide panel" aria-label="Hide agent panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+  <div class="menu" id="provider-menu" role="menu" aria-label="Choose an agent" hidden></div>
 </header>
 <main id="log" aria-live="polite"></main>
 <footer>
@@ -216,7 +262,7 @@ textarea::placeholder { color: var(--text-2); }
 (function () {
   var MESSAGE_PREFIX = "\u0001island:";
   var state = { session: { state: "idle", status: "Not running", items: [], busy: false, command: "" },
-                context: null, endpoint: "", theme: null };
+                context: null, endpoint: "", theme: null, provider: "", providers: [], env_override: false };
   var includeContext = true;
   var log = document.getElementById("log");
   var input = document.getElementById("input");
@@ -238,6 +284,8 @@ textarea::placeholder { color: var(--text-2); }
   var SPARK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/></svg>';
   var CHECK = '<svg class="glyph ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
   var CROSS = '<svg class="glyph bad" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M17 7L7 17M7 7l10 10"/></svg>';
+  var CHEVRON_CHECK = '<svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  var GEAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>';
   var ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
 
   // --- Safe markdown: builds DOM nodes, never HTML from agent text. ---
@@ -390,13 +438,98 @@ textarea::placeholder { color: var(--text-2); }
     "List my open tabs and group them into spaces"
   ];
 
+  // --- Providers ---
+  function providers() { return state.providers || []; }
+  function currentProvider() {
+    var list = providers();
+    for (var i = 0; i < list.length; i++) if (list[i].id === state.provider) return list[i];
+    return null;
+  }
+  function providerName() {
+    if (state.env_override && state.env_command) return state.env_command.split(/\s+/)[0];
+    var provider = currentProvider();
+    if (provider) return provider.id === "custom" && provider.command ? provider.command.split(/\s+/)[0] : provider.name;
+    return (state.session && state.session.agent) || "Agent";
+  }
+  // The missing-agent notice applies when the selected agent was not found
+  // (and ISLAND_AGENT_COMMAND does not replace it).
+  function missingProvider() {
+    var provider = currentProvider();
+    return provider && !provider.available && !state.env_override ? provider : null;
+  }
+
+  function copyText(text, button) {
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(area);
+    if (button) {
+      button.textContent = ok ? "Copied" : "Select and copy";
+      setTimeout(function () { button.textContent = "Copy"; }, 1600);
+    }
+  }
+
+  function copyRow(command) {
+    var row = el("div", "copy-row");
+    row.appendChild(el("code", "", command));
+    var button = el("button", "btn", "Copy");
+    button.setAttribute("aria-label", "Copy install command");
+    button.addEventListener("click", function () { copyText(command, button); });
+    row.appendChild(button);
+    return row;
+  }
+
+  function missingNode(provider) {
+    var card = el("div", "card missing");
+    if (provider.id === "custom") {
+      card.appendChild(el("h4", "", "Choose a command"));
+      card.appendChild(el("p", "", provider.command
+        ? provider.command.split(/\s+/)[0] + " was not found on PATH. It may still start if your login shell finds it."
+        : "Enter the command that starts your Agent Client Protocol agent, or pick another agent above."));
+      var settings = el("button", "btn", "Open Settings");
+      settings.addEventListener("click", function () { post({ type: "open_settings" }); });
+      var row = el("div", "links");
+      row.appendChild(settings);
+      card.appendChild(row);
+      return card;
+    }
+    card.appendChild(el("h4", "", provider.name + " may not be installed"));
+    var p = el("p");
+    p.appendChild(el("code", "", provider.executable || provider.command));
+    p.appendChild(document.createTextNode(" was not found on PATH. It may still start if your login shell finds it."));
+    card.appendChild(p);
+    if (provider.install_command) {
+      card.appendChild(copyRow(provider.install_command));
+    } else if (provider.install) {
+      card.appendChild(el("p", "", provider.install + "."));
+    }
+    var links = el("div", "links");
+    if (provider.docs) {
+      var docs = el("button", "btn", "Install guide");
+      docs.addEventListener("click", function () { post({ type: "open_url", url: provider.docs }); });
+      links.appendChild(docs);
+    }
+    var other = el("button", "btn", "Choose another agent");
+    other.addEventListener("click", function () { openMenu(true); });
+    links.appendChild(other);
+    card.appendChild(links);
+    return card;
+  }
+
   function heroNode() {
     var hero = el("div", "hero");
     var mark = el("div", "mark");
     mark.innerHTML = SPARK;
     hero.appendChild(mark);
     hero.appendChild(el("h2", "", "What should we do?"));
-    hero.appendChild(el("p", "", "The agent can read pages, click, type, and manage your tabs and spaces through Island's browser tools."));
+    hero.appendChild(el("p", "", providerName() + " can read pages, click, type, and manage your tabs and spaces through Island's browser tools."));
+    var missing = missingProvider();
+    if (missing) hero.appendChild(missingNode(missing));
     var chips = el("div", "chips");
     SUGGESTIONS.forEach(function (text) {
       var chip = el("button", "chip");
@@ -410,28 +543,45 @@ textarea::placeholder { color: var(--text-2); }
   }
 
   function setupNode(session) {
+    var provider = currentProvider();
+    var custom = provider && provider.id === "custom" && !state.env_override;
     var card = el("div", "card setup");
-    card.appendChild(el("h4", "", session.error ? "The agent stopped" : "Connect an agent"));
+    card.appendChild(el("h4", "", session.error ? providerName() + " stopped" : "Connect an agent"));
     if (session.error) card.appendChild(el("div", "error", session.error));
     else card.appendChild(el("p", "", "Island runs any Agent Client Protocol agent here."));
-    var label = el("label", "", "Agent command");
-    label.htmlFor = "command";
-    card.appendChild(label);
-    var field = el("input");
-    field.id = "command";
-    field.value = session.command || "";
-    field.spellcheck = false;
-    field.placeholder = "npx -y @zed-industries/claude-code-acp";
-    card.appendChild(field);
+    var field = null;
+    if (custom) {
+      var label = el("label", "", "Agent command");
+      label.htmlFor = "command";
+      card.appendChild(label);
+      field = el("input");
+      field.id = "command";
+      field.value = session.command || "";
+      field.spellcheck = false;
+      field.placeholder = "my-agent --acp";
+      card.appendChild(field);
+    }
+    var start = function () {
+      post(field ? { type: "start", command: field.value } : { type: "start" });
+    };
     var actions = el("div", "actions");
     actions.style.marginTop = "10px";
-    var start = el("button", "btn primary", session.error ? "Restart agent" : "Start agent");
-    start.addEventListener("click", function () { post({ type: "start", command: field.value }); });
-    field.addEventListener("keydown", function (event) {
-      if (event.key === "Enter") post({ type: "start", command: field.value });
-    });
-    actions.appendChild(start);
+    var restart = el("button", "btn primary", session.error ? "Restart agent" : "Start agent");
+    restart.addEventListener("click", start);
+    if (field) field.addEventListener("keydown", function (event) { if (event.key === "Enter") start(); });
+    actions.appendChild(restart);
+    var other = el("button", "btn", "Choose another agent");
+    other.addEventListener("click", function () { openMenu(true); });
+    actions.appendChild(other);
     card.appendChild(actions);
+    var missing = missingProvider();
+    if (missing && missing.id !== "custom") {
+      var hint = el("div", "endpoint");
+      hint.appendChild(document.createTextNode(missing.name + " may not be installed. " +
+        (missing.install_command ? "Install it with:" : missing.install + ".")));
+      card.appendChild(hint);
+      if (missing.install_command) card.appendChild(copyRow(missing.install_command));
+    }
     if (state.endpoint) {
       var endpoint = el("div", "endpoint");
       endpoint.appendChild(document.createTextNode("External agents can use the browser tools too: MCP at "));
@@ -441,18 +591,139 @@ textarea::placeholder { color: var(--text-2); }
     return card;
   }
 
+  // --- Provider menu ---
+  var menu = document.getElementById("provider-menu");
+  var menuButton = document.getElementById("provider-button");
+  var menuSignature = "";
+
+  function menuItems() { return Array.prototype.slice.call(menu.querySelectorAll(".menu-item")); }
+
+  function buildMenu() {
+    var focusedId = document.activeElement && document.activeElement.getAttribute("data-id");
+    menu.textContent = "";
+    menu.appendChild(el("div", "menu-label", "Agent"));
+    providers().forEach(function (provider) {
+      var custom = provider.id === "custom";
+      if (custom && !provider.command) return;
+      var item = el("button", "menu-item");
+      item.setAttribute("role", "menuitemradio");
+      item.setAttribute("aria-checked", provider.id === state.provider ? "true" : "false");
+      item.setAttribute("data-id", provider.id);
+      item.tabIndex = -1;
+      var dot = el("span", "avail");
+      dot.setAttribute("data-available", provider.available ? "true" : "false");
+      dot.title = provider.available ? "Installed" : "Not found";
+      item.appendChild(dot);
+      var text = el("span", "mi-text");
+      text.appendChild(el("span", "mi-name", provider.name));
+      var hint = provider.available ? provider.command
+        : custom ? "Not found \u2014 " + provider.command
+        : "Not found \u2014 " + provider.install;
+      var hintNode = el("span", "mi-hint" + (provider.available ? "" : " wrap"), hint);
+      hintNode.title = hint;
+      text.appendChild(hintNode);
+      item.appendChild(text);
+      item.insertAdjacentHTML("beforeend", CHEVRON_CHECK);
+      item.setAttribute("aria-label", provider.name + (provider.available ? "" : ", not found"));
+      item.addEventListener("click", function () { choose(provider.id); });
+      menu.appendChild(item);
+    });
+    menu.appendChild(el("div", "menu-sep"));
+    var settings = el("button", "menu-item action");
+    settings.setAttribute("role", "menuitem");
+    settings.setAttribute("data-id", "settings");
+    settings.tabIndex = -1;
+    settings.innerHTML = GEAR;
+    settings.appendChild(el("span", "mi-text", "Custom\u2026"));
+    settings.title = "Use your own command in Settings";
+    settings.addEventListener("click", function () { closeMenu(false); post({ type: "open_settings" }); });
+    menu.appendChild(settings);
+    if (state.env_override) {
+      menu.appendChild(el("div", "menu-note", "ISLAND_AGENT_COMMAND overrides the agent for this launch."));
+    }
+    if (focusedId) {
+      menuItems().forEach(function (item) { if (item.getAttribute("data-id") === focusedId) item.focus(); });
+    }
+  }
+
+  function openMenu(focusItem, last) {
+    menuSignature = JSON.stringify([state.provider, state.providers, state.env_override]);
+    buildMenu();
+    menu.hidden = false;
+    menuButton.setAttribute("aria-expanded", "true");
+    if (focusItem) {
+      var items = menuItems();
+      var target = items.filter(function (item) { return item.getAttribute("aria-checked") === "true"; })[0];
+      if (last) target = items[items.length - 1];
+      (target || items[0]).focus();
+    }
+  }
+
+  function closeMenu(restoreFocus) {
+    if (menu.hidden) return;
+    menu.hidden = true;
+    menuButton.setAttribute("aria-expanded", "false");
+    if (restoreFocus) menuButton.focus();
+  }
+
+  function choose(id) {
+    closeMenu(false);
+    if (id !== state.provider) post({ type: "set_provider", id: id });
+    input.focus();
+  }
+
+  menuButton.addEventListener("click", function () {
+    if (menu.hidden) openMenu(false); else closeMenu(false);
+  });
+  menuButton.addEventListener("keydown", function (event) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp" ||
+        ((event.key === "Enter" || event.key === " ") && menu.hidden)) {
+      event.preventDefault();
+      openMenu(true, event.key === "ArrowUp");
+    } else if (event.key === "Escape" && !menu.hidden) {
+      event.preventDefault();
+      closeMenu(true);
+    }
+  });
+  menu.addEventListener("keydown", function (event) {
+    var items = menuItems();
+    var index = items.indexOf(document.activeElement);
+    var next = -1;
+    if (event.key === "ArrowDown") next = (index + 1) % items.length;
+    else if (event.key === "ArrowUp") next = (index - 1 + items.length) % items.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = items.length - 1;
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeMenu(true); return; }
+    else if (event.key === "Tab") { closeMenu(false); return; }
+    else if ((event.key === "Enter" || event.key === " ") && index >= 0) {
+      event.preventDefault();
+      items[index].click();
+      return;
+    }
+    if (next >= 0) { event.preventDefault(); items[next].focus(); }
+  });
+  document.addEventListener("mousedown", function (event) {
+    if (!menu.hidden && !menu.contains(event.target) && !menuButton.contains(event.target)) closeMenu(false);
+  });
+
   function render() {
     var session = state.session || {};
-    document.getElementById("agent-name").textContent = session.agent || "Agent";
+    document.getElementById("agent-name").textContent = providerName();
+    menuButton.setAttribute("aria-label", "Agent: " + providerName() + ". Choose another agent");
+    if (!menu.hidden) {
+      var signature = JSON.stringify([state.provider, state.providers, state.env_override]);
+      if (signature !== menuSignature) { menuSignature = signature; buildMenu(); }
+    }
     document.getElementById("status").textContent = session.status || "";
     document.getElementById("dot").setAttribute("data-state", session.state || "idle");
 
     var items = session.items || [];
     var showSetup = session.state === "failed" || (session.state === "idle" && !!session.error);
-    var signature = JSON.stringify([items, showSetup, session.error, session.command, state.endpoint]);
-    if (signature !== renderedSignature) {
+    var logSignature = JSON.stringify([items, showSetup, session.error, session.command, state.endpoint,
+                                       state.provider, state.providers, state.env_override]);
+    if (logSignature !== renderedSignature) {
       var nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
-      renderedSignature = signature;
+      renderedSignature = logSignature;
       log.textContent = "";
       if (!items.length && !showSetup) log.appendChild(heroNode());
       items.forEach(function (item) { log.appendChild(itemNode(item)); });
@@ -523,6 +794,10 @@ textarea::placeholder { color: var(--text-2); }
     if (next.session) state.session = next.session;
     if ("context" in next) state.context = next.context;
     if ("endpoint" in next) state.endpoint = next.endpoint;
+    if ("provider" in next) state.provider = next.provider;
+    if ("providers" in next) state.providers = next.providers || [];
+    if ("env_override" in next) state.env_override = !!next.env_override;
+    if ("env_command" in next) state.env_command = next.env_command || "";
     render();
   };
   window.islandFocus = function () { input.focus(); };

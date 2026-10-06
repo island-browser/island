@@ -29,10 +29,10 @@ Two independent test systems live side by side here:
 | `tab_test.cpp` | Move-only `Tab` model |
 | `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
 | `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
-| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut seams of `BrowserWindow` |
+| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow` |
 | `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |
-| `prefs_store_test.cpp` | Preferences round-trip, optional keys (agent, shortcuts, update checks), schema errors |
+| `prefs_store_test.cpp` | Preferences round-trip, optional keys (agent provider, shortcuts, update checks), agent-command migration, schema errors |
 | `session_store_test.cpp` | Session JSON round-trip — **not currently listed in `CMakeLists.txt`**, so it has never run (PR #27 in flight) |
 
 ## Test targets

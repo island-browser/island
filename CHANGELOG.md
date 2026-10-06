@@ -13,6 +13,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-06
+
 ### Added
 
 - Automatic builds: every push to `main` that changes the app builds, tests, and packages all
@@ -25,6 +27,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   downloads the platform archive, verifies it against `SHA256SUMS.txt`, and installs it on
   "Restart to update" with a backup and automatic rollback. SemVer pre-releases are opt-in; build
   trees and read-only installs only report new versions.
+- Agent providers: choose the sidebar agent from the panel's title or Settings > Agent & tools —
+  Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Goose, or a custom command. Each shows
+  whether its program was found on the `PATH`, with an install hint and docs link when it was not;
+  switching stops a running agent and starts a new chat with the new one. `ISLAND_AGENT_COMMAND`
+  still overrides the choice.
 
 ### Changed
 
@@ -32,6 +39,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   [island-browser/site](https://github.com/island-browser/site), and is served at
   https://island-browser.github.io/site/. It reads the version and these notes from this
   repository when it builds; `scripts/version.py sync` no longer touches site pages.
+- The default Claude Code agent now runs `npx -y @agentclientprotocol/claude-agent-acp`, the
+  renamed successor of the deprecated `@zed-industries/claude-code-acp`. A saved command equal to
+  the old default switches to the Claude Code provider; any other saved command becomes the
+  custom provider.
 - New "Graphite" design language across the browser: neutral near-black and white surfaces,
   1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the
   space tint is now a faint cast on the sidebar instead of a colored wash.
@@ -124,7 +135,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/island-browser/island/releases/tag/v0.5.0
 [0.4.0]: https://github.com/island-browser/island/releases/tag/v0.4.0
 [0.3.0]: https://github.com/island-browser/island/commits/main
 [0.2.0]: https://github.com/island-browser/island/commits/main

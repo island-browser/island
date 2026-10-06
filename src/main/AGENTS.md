@@ -37,7 +37,7 @@ platform executable links.
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
 | `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
 | `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping |
-| `prefs_store.{h,cc}` | Preferences JSON (theme, agent command, agent panel state, shortcut overrides, update checks) |
+| `prefs_store.{h,cc}` | Preferences JSON (theme, agent provider + custom command with migration from the old single command, agent panel state, shortcut overrides, update checks) |
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
 | `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
 | `cef_update_fetcher.{h,cc}` | `UpdateFetcher` over `CefURLRequest` (manual, allow-listed redirects; capped, hashed streaming) |
@@ -77,6 +77,12 @@ platform executable links.
   both `island_browser_core` and `island_tests`; until it merges, that file has never been
   compiled.) `space.cc` and `tab.cc` *are* in `island_browser_core` as of commit `043aa34`, and
   also in `island_tests`.
+- The agent panel and Settings share one provider contract built by `BrowserWindow`
+  (`AgentProvidersStateJson`): `provider`, `providers[{id,name,description,command,executable,
+  available,install,install_command,docs}]`, `command` (custom), `env_override`, `env_command`.
+  Page messages: panel `set_provider {id}` / `open_settings` / `start {command?}`; Settings
+  `set_agent_provider {id}` / `set_agent_command {command}` / `open_agent_docs {id}`. Availability
+  is re-detected at most every 5 s and whenever the panel or Settings opens.
 - Platform selection is `if(APPLE) / elseif(WIN32) / elseif(Linux)` with a `FATAL_ERROR` fallback;
   each branch adds its own `font_registry_*` source and platform link libraries.
 

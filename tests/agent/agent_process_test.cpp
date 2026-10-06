@@ -16,8 +16,8 @@ namespace island::agent {
 namespace {
 
 TEST(SplitCommandLineTest, HandlesQuotesAndEscapes) {
-    EXPECT_EQ(SplitCommandLine("npx -y @zed-industries/claude-code-acp"),
-              (std::vector<std::string>{"npx", "-y", "@zed-industries/claude-code-acp"}));
+    EXPECT_EQ(SplitCommandLine("npx -y @agentclientprotocol/claude-agent-acp"),
+              (std::vector<std::string>{"npx", "-y", "@agentclientprotocol/claude-agent-acp"}));
     EXPECT_EQ(SplitCommandLine(R"(  "/Applications/My Agent/agent" --flag='a b' x\ y )"),
               (std::vector<std::string>{"/Applications/My Agent/agent", "--flag=a b", "x y"}));
     EXPECT_EQ(SplitCommandLine(R"(a "" b)"), (std::vector<std::string>{"a", "", "b"}));

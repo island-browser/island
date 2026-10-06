@@ -107,6 +107,32 @@ input.field.filter { font-family: var(--font); font-size: 13px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
 dt { color: var(--text-2); font: 11px/1.8 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
 dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.providers { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.provider { display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px 9px 12px; border-top: 1px solid var(--border);
+  transition: background .16s; }
+.provider:first-child { border-top: 0; }
+.provider:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.provider.selected { background: var(--surface-2); }
+.provider:first-child.selected { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.provider:last-child.selected { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.provider label { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.provider input[type="radio"] { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin: 3px 0 0;
+  flex: none; border: 1px solid var(--text-2); border-radius: 50%; background: var(--surface); cursor: pointer;
+  transition: border-color .16s, box-shadow .16s; }
+.provider input[type="radio"]:checked { border-color: var(--text); box-shadow: inset 0 0 0 3.5px var(--surface), inset 0 0 0 8px var(--text); }
+.provider input[type="radio"]:focus-visible { outline-offset: 2px; }
+.provider .p-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.provider .p-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.provider .p-name { font-size: 13px; font-weight: 500; }
+.provider small { color: var(--text-2); font-size: 12px; }
+.provider .p-cmd { font: 11.5px/1.5 var(--mono); color: var(--text-2); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; margin-top: 2px; }
+.provider .p-install { font: 11.5px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.provider .p-install::before { content: "\2193  "; color: var(--text-2); }
+.provider .btn.quiet { padding: 2px 8px; font-size: 12px; flex: none; }
+.dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+#custom-command { margin-top: 10px; }
+#custom-command .label { display: block; margin-bottom: 6px; font-size: 13px; }
 #updates input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
 #updates .status { font: 12px/1.5 var(--mono); }
 #updates .status.error { color: var(--danger); }
@@ -140,11 +166,18 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     <h2>Agent &amp; tools</h2>
     <p class="lead">Run any Agent Client Protocol agent in the sidebar, and let external agents drive Island over MCP.</p>
     <div class="row" style="display:block">
-      <div class="label" style="margin-bottom:6px">Agent command<small id="agent-hint"></small></div>
-      <div class="inline">
-        <input class="field" id="agent-command" spellcheck="false" aria-label="Agent command">
-        <button class="btn" id="agent-save">Save</button>
+      <div class="label" style="margin-bottom:8px">Agent in the sidebar<small id="agent-hint"></small></div>
+      <div class="providers" id="providers" role="radiogroup" aria-label="Agent in the sidebar"></div>
+      <div id="custom-command" hidden>
+        <label class="label" for="agent-command">Command<small>Any command that starts an Agent Client Protocol agent over stdio.</small></label>
+        <div class="inline">
+          <input class="field" id="agent-command" spellcheck="false" placeholder="my-agent --acp">
+          <button class="btn" id="agent-save">Save</button>
+        </div>
+      </div>
+      <div class="inline" style="margin-top:12px">
         <button class="btn primary" id="agent-open">Open agent</button>
+        <span class="note" id="agent-note" style="margin-top:0"></span>
       </div>
     </div>
     <div class="row" style="display:block">
@@ -337,6 +370,69 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  var providersSignature = "";
+  function renderAgent(agent) {
+    var list = agent.providers || [];
+    var signature = JSON.stringify([agent.provider, list]);
+    if (signature !== providersSignature) {
+      providersSignature = signature;
+      var focused = document.activeElement && document.activeElement.name === "agent-provider"
+        ? document.activeElement.value : null;
+      var box = $("providers");
+      box.textContent = "";
+      list.forEach(function (provider) {
+        var selected = provider.id === agent.provider;
+        var row = el("div", "provider" + (selected ? " selected" : ""));
+        var label = el("label");
+        var radio = el("input");
+        radio.type = "radio";
+        radio.name = "agent-provider";
+        radio.value = provider.id;
+        radio.checked = selected;
+        radio.addEventListener("change", function () {
+          if (radio.checked) post({ type: "set_agent_provider", id: provider.id });
+        });
+        label.appendChild(radio);
+        var text = el("span", "p-text");
+        var head = el("span", "p-head");
+        head.appendChild(el("span", "p-name", provider.name));
+        var custom = provider.id === "custom";
+        if (!custom || provider.command) {
+          var pill = el("span", "pill");
+          pill.appendChild(el("span", "dot " + (provider.available ? "on" : "off")));
+          pill.appendChild(document.createTextNode(provider.available ? "Installed" : "Not found"));
+          head.appendChild(pill);
+        }
+        text.appendChild(head);
+        text.appendChild(el("small", "", provider.description));
+        var command = custom ? (provider.command || "No command yet") : provider.command;
+        text.appendChild(el("span", "p-cmd", command));
+        if (!provider.available && !custom) {
+          text.appendChild(el("span", "p-install", provider.install_command
+            ? "Install: " + provider.install_command : provider.install));
+        }
+        label.appendChild(text);
+        row.appendChild(label);
+        if (provider.docs) {
+          var docs = el("button", "btn quiet", "Docs");
+          docs.setAttribute("aria-label", provider.name + " documentation");
+          docs.addEventListener("click", function () { post({ type: "open_agent_docs", id: provider.id }); });
+          row.appendChild(docs);
+        }
+        box.appendChild(row);
+        if (focused === provider.id) radio.focus();
+      });
+    }
+    var custom = agent.provider === "custom";
+    $("custom-command").hidden = !custom;
+    if (document.activeElement !== $("agent-command")) $("agent-command").value = agent.command || "";
+    $("agent-hint").textContent = "Island starts it through your login shell and gives it the browser tools. " +
+      "\u201cNot found\u201d means it is not on Island's PATH; it may still start if your shell finds it.";
+    $("agent-note").textContent = agent.env_override
+      ? "ISLAND_AGENT_COMMAND is set, so this launch runs: " + agent.env_command
+      : "";
+  }
+
   function renderUpdate() {
     var u = state.settings.update;
     if (!u) return;
@@ -377,12 +473,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-value") === s.theme_pref ? "true" : "false");
     });
-    var agent = s.agent || {};
-    if (document.activeElement !== $("agent-command")) $("agent-command").value = agent.command || "";
-    $("agent-command").placeholder = agent.default_command || "";
-    $("agent-hint").textContent = agent.env_override
-      ? "Set by ISLAND_AGENT_COMMAND for this launch."
-      : "Default: " + (agent.default_command || "");
+    renderAgent(s.agent || {});
     var endpoint = s.endpoint || {};
     $("endpoint-dot").className = "dot" + (endpoint.running ? " on" : "");
     $("endpoint-state").textContent = endpoint.running ? endpoint.url : "Not running";
@@ -400,6 +491,14 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       about.appendChild(el("dd", "", row[1]));
     });
     if (s.message) toast(s.message);
+    if (s.focus) {
+      var section = $(s.focus);
+      if (section) {
+        section.scrollIntoView({ block: "start" });
+        var checked = section.querySelector("input[type=radio]:checked");
+        if (checked) checked.focus();
+      }
+    }
   }
 
   Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {

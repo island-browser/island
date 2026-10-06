@@ -2,6 +2,7 @@
 // BrowserWindow. The CEF view types must be complete before browser_window.h.
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -308,6 +309,154 @@ TEST(BrowserWindowPagesTest, SettingsUpdateMessagesCheckDownloadAndOpenNotes) {
     EXPECT_EQ(SpaceAt(*window, 0).tabs()[1].startup_url(),
               "https://github.com/island-browser/island/releases/tag/v99.0.0");
     std::filesystem::remove_all(base, error);
+}
+
+// Clears ISLAND_AGENT_COMMAND for one test and restores it afterwards.
+class ScopedNoAgentEnv {
+  public:
+    ScopedNoAgentEnv() {
+        const char* saved = std::getenv("ISLAND_AGENT_COMMAND");
+        if (saved != nullptr) saved_ = saved;
+        Set(nullptr);
+    }
+    ~ScopedNoAgentEnv() { Set(saved_ ? saved_->c_str() : nullptr); }
+
+  private:
+    static void Set(const char* value) {
+#if defined(_WIN32)
+        _putenv_s("ISLAND_AGENT_COMMAND", value != nullptr ? value : "");
+#else
+        if (value != nullptr) {
+            setenv("ISLAND_AGENT_COMMAND", value, 1);
+        } else {
+            unsetenv("ISLAND_AGENT_COMMAND");
+        }
+#endif
+    }
+    std::optional<std::string> saved_;
+};
+
+// A directory holding fake `npx` and `opencode` executables.
+std::filesystem::path FakeAgentBin() {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() /
+        ("island_window_agents_" + std::to_string(update::CurrentProcessId()));
+    std::filesystem::create_directories(dir);
+    for (const char* name : {"npx", "opencode"}) {
+        std::ofstream(dir / name) << "#!/bin/sh\n";
+        std::filesystem::permissions(dir / name, std::filesystem::perms::owner_all);
+    }
+    return dir;
+}
+
+const Value* FindProvider(const Value& providers, std::string_view id) {
+    for (const Value& provider : providers.array_val) {
+        if (provider.StringOr("id", "") == id) return &provider;
+    }
+    return nullptr;
+}
+
+Value SettingsAgent(const BrowserWindow& window) {
+    const std::optional<Value> state = json::Parse(window.SettingsStateJson());
+    return *state->FindMember("settings")->FindMember("agent");
+}
+
+TEST(BrowserWindowPagesTest, SettingsListsAgentProvidersAndSwitchesThem) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSearchDirsForTest({FakeAgentBin()});
+
+    Value agent = SettingsAgent(*window);
+    EXPECT_EQ(agent.StringOr("provider", ""), "claude");
+    EXPECT_FALSE(agent.BoolOr("env_override", true));
+    EXPECT_EQ(agent.StringOr("effective_command", ""),
+              "npx -y @agentclientprotocol/claude-agent-acp");
+    EXPECT_EQ(agent.StringOr("default_command", ""),
+              "npx -y @agentclientprotocol/claude-agent-acp");
+    const Value& providers = *agent.FindMember("providers");
+    ASSERT_EQ(providers.array_val.size(), agent::AgentProviders().size());
+    EXPECT_TRUE(FindProvider(providers, "claude")->BoolOr("available", false));
+    EXPECT_TRUE(FindProvider(providers, "opencode")->BoolOr("available", false));
+    const Value* gemini = FindProvider(providers, "gemini");
+    ASSERT_NE(gemini, nullptr);
+    EXPECT_FALSE(gemini->BoolOr("available", true));
+    EXPECT_EQ(gemini->StringOr("name", ""), "Gemini CLI");
+    EXPECT_EQ(gemini->StringOr("command", ""), "gemini --acp");
+    EXPECT_EQ(gemini->StringOr("install", ""), "npm i -g @google/gemini-cli");
+
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"opencode"})");
+    EXPECT_EQ(window->agent_provider(), "opencode");
+    EXPECT_EQ(window->ResolvedAgentCommand(), "opencode acp");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"not-a-provider"})");
+    EXPECT_EQ(window->agent_provider(), "opencode");
+
+    // The custom command is kept beside the selection and used once picked.
+    SendSettings(*window, R"({"type":"set_agent_command","command":"  my-agent --acp "})");
+    EXPECT_EQ(window->custom_agent_command(), "my-agent --acp");
+    EXPECT_EQ(window->ResolvedAgentCommand(), "opencode acp");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    EXPECT_EQ(window->ResolvedAgentCommand(), "my-agent --acp");
+    agent = SettingsAgent(*window);
+    EXPECT_EQ(agent.StringOr("provider", ""), "custom");
+    EXPECT_EQ(agent.StringOr("command", ""), "my-agent --acp");
+    const Value* custom = FindProvider(*agent.FindMember("providers"), "custom");
+    EXPECT_EQ(custom->StringOr("command", ""), "my-agent --acp");
+    EXPECT_FALSE(custom->BoolOr("available", true));
+
+    // Docs open the registry's URL only.
+    SendSettings(*window,
+                 R"({"type":"open_agent_docs","id":"goose","url":"https://evil.example/"})");
+    SendSettings(*window, R"({"type":"open_agent_docs","id":"bogus"})");
+    ASSERT_EQ(SpaceAt(*window, 0).tab_count(), 2U);
+    EXPECT_EQ(SpaceAt(*window, 0).tabs()[1].startup_url(), "https://block.github.io/goose/");
+}
+
+void SendAgent(BrowserWindow& window, std::string_view json_text) {
+    const std::optional<Value> message = json::Parse(json_text);
+    ASSERT_TRUE(message.has_value()) << json_text;
+    window.OnLocalPageMessage(LocalPageKind::kAgent, *message);
+}
+
+TEST(BrowserWindowPagesTest, AgentPanelSwitchesProvidersWithoutLaunching) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSearchDirsForTest({FakeAgentBin()});
+
+    std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->StringOr("provider", ""), "claude");
+    EXPECT_EQ(state->FindMember("providers")->array_val.size(), agent::AgentProviders().size());
+    EXPECT_FALSE(state->BoolOr("env_override", true));
+
+    // Picking a provider in the panel persists it and configures the session;
+    // an idle session does not launch anything.
+    SendAgent(*window, R"({"type":"set_provider","id":"gemini"})");
+    EXPECT_EQ(window->agent_provider(), "gemini");
+    ASSERT_NE(window->agent_session(), nullptr);
+    EXPECT_FALSE(window->agent_session()->running());
+    EXPECT_EQ(window->agent_session()->config().command, "gemini --acp");
+    EXPECT_EQ(window->agent_session()->config().provider_id, "gemini");
+    state = json::Parse(window->AgentPanelStateJson());
+    EXPECT_EQ(state->StringOr("provider", ""), "gemini");
+    const Value* session = state->FindMember("session");
+    ASSERT_NE(session, nullptr);
+    EXPECT_EQ(session->StringOr("provider", ""), "gemini");
+    EXPECT_EQ(session->StringOr("agent", ""), "Gemini CLI");
+    EXPECT_EQ(session->StringOr("state", ""), "idle");
+
+    // Unknown ids are ignored; "Custom..." asks for Settings (a no-op without
+    // chrome, never a crash).
+    SendAgent(*window, R"({"type":"set_provider","id":"<script>"})");
+    EXPECT_EQ(window->agent_provider(), "gemini");
+    SendAgent(*window, R"({"type":"open_settings"})");
+    EXPECT_EQ(window->agent_provider(), "gemini");
+
+    // The custom provider without a command reports that instead of launching.
+    SendAgent(*window, R"({"type":"set_provider","id":"custom"})");
+    EXPECT_EQ(window->agent_session()->config().command, "");
+    SendAgent(*window, R"({"type":"send","text":"hello"})");
+    EXPECT_FALSE(window->agent_session()->running());
+    EXPECT_NE(window->agent_session()->error().find("No agent command is set"), std::string::npos);
 }
 
 }  // namespace

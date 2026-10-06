@@ -23,11 +23,13 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
   page card, command palette (`Cmd/Ctrl+K`) and search palette (`Cmd/Ctrl+Shift+K`).
 - **All tabs** (`Cmd/Ctrl+Shift+A`): every space's tabs as searchable cards; arrow keys, Enter,
   Delete, `P` to pin, drag a card onto another space to move it.
-- **Settings** (`Cmd/Ctrl+,`): theme, agent command, MCP client config, keyboard shortcuts (click a
+- **Settings** (`Cmd/Ctrl+,`): theme, sidebar agent, MCP client config, keyboard shortcuts (click a
   shortcut and press new keys; conflicts are flagged), and import.
 - **Import** from Chrome-family browsers, Safari and Firefox (bookmarks), and Arc (spaces with their
   colors and pinned tabs). Nothing leaves the computer.
-- **AI agents**: an Agent Client Protocol agent runs in the sidebar (`Cmd/Ctrl+J`), and Island
+- **AI agents**: an Agent Client Protocol agent runs in the sidebar (`Cmd/Ctrl+J`) — Claude Code
+  (the default, via `npx -y @agentclientprotocol/claude-agent-acp`), Codex, OpenCode, Gemini CLI,
+  Qwen Code, Goose, or your own command; switch from the panel's title or Settings — and Island
   serves browser tools over MCP at `http://127.0.0.1:9223/mcp` (bearer token in
   `agent-endpoint.json`, or the `island_mcp_bridge` stdio bridge). Settings shows a ready-to-paste
   `mcpServers` config.

@@ -6,6 +6,8 @@
 #     http://127.0.0.1:<port>/mcp (bearer token, loopback-only)
 #   - AcpClient + AgentProcess + AgentTranscript: Island as an Agent Client
 #     Protocol client that runs an agent subprocess in the sidebar
+#   - AgentProviders: the agents the panel can launch (Claude Code, Codex,
+#     OpenCode, Gemini CLI, Qwen Code, Goose, or a custom command)
 #   - island_mcp_bridge: stdio <-> HTTP bridge for stdio-only MCP clients
 #
 # CEF-free by design, so this subtree builds and tests without
@@ -58,6 +60,7 @@ add_library(island_agent STATIC
     acp_client.cc
     agent_endpoint.cc
     agent_process.cc
+    agent_providers.cc
     agent_session.cc
     agent_transcript.cc
     browser_tools.cc
@@ -92,6 +95,7 @@ if(TARGET GTest::gtest_main)
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/acp_client_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_endpoint_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_process_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_providers_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_session_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_transcript_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/browser_tools_test.cpp"

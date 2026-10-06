@@ -23,8 +23,13 @@
 namespace island::agent {
 
 struct AgentSessionConfig {
-    // Shell command line, e.g. "npx -y @zed-industries/claude-code-acp".
+    // Shell command line, e.g. "npx -y @agentclientprotocol/claude-agent-acp".
     std::string command;
+    // The provider the command came from (agent_providers.h) and its display
+    // name, which stands in for the agent's own name until it introduces
+    // itself. Both optional.
+    std::string provider_id;
+    std::string provider_name;
     std::filesystem::path cwd;
     std::vector<AcpMcpServer> mcp_servers;
     // Run through the user's login shell ($SHELL -lc) so PATH matches a
@@ -57,6 +62,11 @@ class AgentSession {
     void ResolvePermission(std::int64_t request_id, std::optional<std::string> option_id);
     // Stops the agent, clears the conversation, and starts a fresh session.
     void NewChat();
+    // Switches to another agent: stops the current one, clears the
+    // conversation and any error, and adopts `config`. The new agent is
+    // launched right away only when one was running; otherwise the next
+    // Send() starts it. Returns whether it launched.
+    bool SwitchAgent(AgentSessionConfig config);
 
     [[nodiscard]] AcpState state() const noexcept;
     [[nodiscard]] bool busy() const noexcept;

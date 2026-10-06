@@ -30,6 +30,7 @@ agent panel) lives in `src/main/`.
 | `http_client.{h,cc}` | Blocking loopback POST used by the bridge and the end-to-end tests |
 | `agent_endpoint.{h,cc}` | Request policy (loopback `Host`/`Origin`, bearer token, `POST /mcp`), discovery file (`agent-endpoint.json`, mode 0600, next to `session.json`) |
 | `acp_client.{h,cc}` | ACP v1 client state machine: `initialize` → `session/new` → `session/prompt`, `session/update`, `session/request_permission`, `session/cancel` |
+| `agent_providers.{h,cc}` | Provider registry (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Goose, custom): command, required executable, install hint, docs URL; PATH availability detection (`ExecutableSearchDirs`, `FindExecutable`); `ResolveAgentCommand` (`ISLAND_AGENT_COMMAND` > provider preset or custom command) |
 | `agent_process.{h,cc}` | fork/exec of the agent with stdio pipes, line reader, stderr tail, EOF→SIGTERM→SIGKILL shutdown of the process group |
 | `agent_transcript.{h,cc}` | Folds ACP events into the panel's conversation model; `ToJson()` feeds the view |
 | `mcp_bridge_main.cc` | `island_mcp_bridge` executable |
@@ -48,6 +49,11 @@ agent panel) lives in `src/main/`.
   token, owner-only discovery file. Do not add a CORS allowance or a non-loopback bind.
 - POSIX only for now: on Windows `LoopbackHttpServer::Start` and `AgentProcess::Start` fail with
   an explicit message. That is a documented gap.
+- Provider availability is a hint, never a gate: agents launch through `$SHELL -lc`, whose `PATH`
+  can differ from the app's (a Dock-launched macOS app sees a minimal one). Only add a preset whose
+  ACP command is verified against the agent's own docs; the deprecated
+  `@zed-industries/claude-code-acp` survives only as the prefs-migration constant
+  `kLegacyClaudeAgentCommand`.
 - `json_util.h` (in `src/main/`) is the shared parser; it now handles `\uXXXX` escapes and
   fractional numbers (`Type::kDouble`).
 
@@ -59,7 +65,7 @@ cmake --build build-agent
 ctest --test-dir build-agent --output-on-failure
 ```
 
-54 tests as of 2026-10-06, also clean under `-fsanitize=address,undefined` and
+72 tests as of 2026-10-06, also clean under `-fsanitize=address,undefined` and
 `-fsanitize=thread`. The browser root builds the same `island_agent_tests` target.
 
 ## Dependencies

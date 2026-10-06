@@ -69,7 +69,7 @@ bool AgentSession::Start(AgentSessionConfig config) {
     config_ = std::move(config);
     error_.clear();
     if (IsBlank(config_.command)) {
-        error_ = "No agent is configured. Enter the command that starts an ACP agent.";
+        error_ = "No agent command is set. Choose an agent, or enter a custom command in Settings.";
         Changed();
         return false;
     }
@@ -184,6 +184,19 @@ void AgentSession::NewChat() {
     }
 }
 
+bool AgentSession::SwitchAgent(AgentSessionConfig config) {
+    const bool was_running = running();
+    Stop();
+    transcript_.Clear();
+    error_.clear();
+    config_ = std::move(config);
+    if (was_running && !IsBlank(config_.command)) {
+        return Start(config_);
+    }
+    Changed();
+    return false;
+}
+
 AcpState AgentSession::state() const noexcept {
     if (client_ != nullptr) return client_->state();
     return error_.empty() ? AcpState::kIdle : AcpState::kFailed;
@@ -195,7 +208,7 @@ bool AgentSession::busy() const noexcept {
 
 std::string AgentSession::agent_name() const {
     if (client_ != nullptr && !client_->agent_name().empty()) return client_->agent_name();
-    return "Agent";
+    return config_.provider_name.empty() ? "Agent" : config_.provider_name;
 }
 
 std::string AgentSession::StatusText() const {
@@ -225,6 +238,7 @@ std::string AgentSession::StateJson() const {
             .Set("error", json::Value::String(error_))
             .Set("busy", json::Value::Bool(busy()))
             .Set("command", json::Value::String(config_.command))
+            .Set("provider", json::Value::String(config_.provider_id))
             .Set("items", std::move(items));
     return json::Serialize(state);
 }
