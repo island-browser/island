@@ -122,8 +122,8 @@ class TokenContractCompleteness(unittest.TestCase):
 
     def test_contract_identifies_the_accepted_design(self) -> None:
         self.assertEqual(self.contract["contract"], "island-design-tokens")
-        self.assertEqual(self.contract["version"], 2)
-        self.assertEqual(self.contract["accepted_design"], "Ledger")
+        self.assertEqual(self.contract["version"], 3)
+        self.assertEqual(self.contract["accepted_design"], "Graphite")
 
     def test_semantic_roles_cover_both_themes_exactly(self) -> None:
         for theme in ("light", "dark"):
@@ -146,8 +146,28 @@ class TokenContractCompleteness(unittest.TestCase):
             {"space_1": 4, "space_2": 8, "space_3": 12, "space_4": 16, "space_6": 24},
         )
 
-    def test_radii_are_8_and_12(self) -> None:
-        self.assertEqual(self.contract["radii"], {"radius_small": 8, "radius_medium": 12})
+    def test_radii_are_6_and_10(self) -> None:
+        self.assertEqual(self.contract["radii"], {"radius_small": 6, "radius_medium": 10})
+
+    def test_text_and_accent_meet_contrast_on_every_surface(self) -> None:
+        def luminance(hex_color: str) -> float:
+            channels = [int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+            linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+                      for c in channels]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        def contrast(a: str, b: str) -> float:
+            la, lb = luminance(a), luminance(b)
+            return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+        minimum = self.contract["accessibility"]["body_contrast_min"]
+        for theme in ("light", "dark"):
+            palette = self.contract["colors"][theme]
+            for foreground in ("text", "text_secondary", "accent"):
+                for background in ("background", "surface", "surface_secondary"):
+                    with self.subTest(theme=theme, fg=foreground, bg=background):
+                        self.assertGreaterEqual(
+                            contrast(palette[foreground], palette[background]), minimum)
 
     def test_rail_width_is_286_dip(self) -> None:
         self.assertEqual(self.contract["rail_width_dip"], 286)

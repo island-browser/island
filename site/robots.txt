@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://impelixx.github.io/island/sitemap.xml
+Sitemap: https://island-browser.github.io/island/sitemap.xml

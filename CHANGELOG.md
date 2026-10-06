@@ -13,6 +13,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Changed
+
+- New "Graphite" design language across the browser: neutral near-black and white surfaces,
+  1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the
+  space tint is now a faint cast on the sidebar instead of a colored wash.
+
 ## [0.4.0] - 2026-10-06
 
 ### Added
@@ -85,8 +91,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/impelixx/island/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/impelixx/island/releases/tag/v0.4.0
-[0.3.0]: https://github.com/impelixx/island/commits/main
-[0.2.0]: https://github.com/impelixx/island/commits/main
-[0.1.0]: https://github.com/impelixx/island/commits/main
+[Unreleased]: https://github.com/island-browser/island/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/island-browser/island/releases/tag/v0.4.0
+[0.3.0]: https://github.com/island-browser/island/commits/main
+[0.2.0]: https://github.com/island-browser/island/commits/main
+[0.1.0]: https://github.com/island-browser/island/commits/main

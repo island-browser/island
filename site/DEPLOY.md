@@ -25,7 +25,7 @@ git commit -am "Point the site SEO URLs at <your-project>.vercel.app"
 ```
 
 Running the script again with a different domain (or the original
-`https://impelixx.github.io/island`) rewrites safely — only the exact current
+`https://island-browser.github.io/island`) rewrites safely — only the exact current
 domain is replaced.
 
 ## GitHub Pages (already wired)

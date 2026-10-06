@@ -8,24 +8,24 @@ namespace island {
 ChromeTokens ChromeTokens::ForTheme(ChromeTheme theme) noexcept {
     if (theme == ChromeTheme::kDark) {
         return {
-            .background = {.argb = 0xFF0D1B26U},
-            .surface = {.argb = 0xFF142633U},
-            .surface_secondary = {.argb = 0xFF1B3040U},
-            .text = {.argb = 0xFFEAF3F3U},
-            .text_secondary = {.argb = 0xFF9CB0B5U},
-            .border = {.argb = 0xFF29414EU},
-            .accent = {.argb = 0xFF168C99U},
+            .background = {.argb = 0xFF0A0A0AU},
+            .surface = {.argb = 0xFF111111U},
+            .surface_secondary = {.argb = 0xFF1A1A1AU},
+            .text = {.argb = 0xFFEDEDEDU},
+            .text_secondary = {.argb = 0xFFA1A1A1U},
+            .border = {.argb = 0xFF2A2A2AU},
+            .accent = {.argb = 0xFF3291FFU},
         };
     }
 
     return {
-        .background = {.argb = 0xFFF3F0E9U},
-        .surface = {.argb = 0xFFFFFEFBU},
-        .surface_secondary = {.argb = 0xFFECE9E2U},
-        .text = {.argb = 0xFF18303AU},
-        .text_secondary = {.argb = 0xFF687A7DU},
-        .border = {.argb = 0xFFD8D8D0U},
-        .accent = {.argb = 0xFF168C99U},
+        .background = {.argb = 0xFFFAFAFAU},
+        .surface = {.argb = 0xFFFFFFFFU},
+        .surface_secondary = {.argb = 0xFFF2F2F2U},
+        .text = {.argb = 0xFF0A0A0AU},
+        .text_secondary = {.argb = 0xFF666666U},
+        .border = {.argb = 0xFFE5E5E5U},
+        .accent = {.argb = 0xFF0068D6U},
     };
 }
 
@@ -67,12 +67,11 @@ ChromeTokens ChromeTokens::TintedForSpace(ArgbColor space_color, ChromeTheme the
     const ArgbColor space{.argb = space_color.argb | 0xFF000000U};
     const bool dark = theme == ChromeTheme::kDark;
     ChromeTokens tinted = *this;
-    tinted.background = MixColor(background, space, dark ? 0.12 : 0.10);
-    tinted.surface_secondary = MixColor(surface_secondary, space, dark ? 0.18 : 0.16);
-    tinted.border = MixColor(border, space, dark ? 0.24 : 0.20);
-    if (dark) {
-        tinted.surface = MixColor(surface, space, 0.06);
-    }
+    // Graphite keeps surfaces neutral: the space shows as a faint cast on the
+    // rail and hairlines, never as a colored panel.
+    tinted.background = MixColor(background, space, dark ? 0.05 : 0.04);
+    tinted.surface_secondary = MixColor(surface_secondary, space, dark ? 0.08 : 0.07);
+    tinted.border = MixColor(border, space, dark ? 0.14 : 0.12);
     // The accent marks actions and active state on the surface; walk it
     // toward black (light) or white (dark) until it reads at 3:1.
     const ArgbColor anchor{.argb = dark ? 0xFFFFFFFFU : 0xFF000000U};

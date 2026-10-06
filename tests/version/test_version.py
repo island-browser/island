@@ -36,8 +36,8 @@ Intro.
 
 - First.
 
-[Unreleased]: https://github.com/impelixx/island/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/impelixx/island/releases/tag/v0.1.0
+[Unreleased]: https://github.com/island-browser/island/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/island-browser/island/releases/tag/v0.1.0
 """
 
 SITE_PAGE = """<html><head><script type="application/ld+json">{"softwareVersion": "0.0.1"}</script></head>
@@ -95,9 +95,9 @@ class ChangelogTests(unittest.TestCase):
         self.assertEqual(releases[1].date, "2026-02-02")
         self.assertIn("- A new thing with `code`.", releases[1].body)
         self.assertEqual(links["Unreleased"],
-                         "https://github.com/impelixx/island/compare/v0.2.0...HEAD")
-        self.assertEqual(links["0.2.0"], "https://github.com/impelixx/island/releases/tag/v0.2.0")
-        self.assertEqual(links["0.1.0"], "https://github.com/impelixx/island/releases/tag/v0.1.0")
+                         "https://github.com/island-browser/island/compare/v0.2.0...HEAD")
+        self.assertEqual(links["0.2.0"], "https://github.com/island-browser/island/releases/tag/v0.2.0")
+        self.assertEqual(links["0.1.0"], "https://github.com/island-browser/island/releases/tag/v0.1.0")
 
     def test_rotation_refuses_empty_or_duplicate_releases(self) -> None:
         empty = version.rotate_changelog(CHANGELOG, version.Version.parse("0.2.0"), "d", False)
@@ -111,10 +111,10 @@ class ChangelogTests(unittest.TestCase):
     def test_render_escapes_html_and_supports_the_subset(self) -> None:
         text = ("## [1.0.0] - 2026-03-03\n\n### Fixed\n\n- A <script> **bold** `a<b>` and\n"
                 "  [docs](https://example.test/x) [bad](javascript:alert(1))\n\nA paragraph.\n\n"
-                "[1.0.0]: https://github.com/impelixx/island/releases/tag/v1.0.0\n")
+                "[1.0.0]: https://github.com/island-browser/island/releases/tag/v1.0.0\n")
         rendered = version.render_changelog_html(text)
         self.assertIn('id="v1.0.0"', rendered)
-        self.assertIn('<a href="https://github.com/impelixx/island/releases/tag/v1.0.0">1.0.0</a>',
+        self.assertIn('<a href="https://github.com/island-browser/island/releases/tag/v1.0.0">1.0.0</a>',
                       rendered)
         self.assertIn('<time datetime="2026-03-03">', rendered)
         self.assertIn("<h3>Fixed</h3>", rendered)
