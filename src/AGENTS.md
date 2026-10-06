@@ -13,6 +13,7 @@ there is no web app shell, no bundler, and no scripting runtime in this tree.
 | Directory | Purpose |
 |-----------|---------|
 | `main/` | The browser application, its chrome, and platform entrypoints (see `main/AGENTS.md`) |
+| `agent/` | CEF-free AI-agent kernel: MCP browser tools endpoint and the ACP client (see `agent/AGENTS.md`) |
 | `search/` | Phase S0 local search primitives, built only under `ISLAND_ENABLE_SEARCH=ON` (see `search/AGENTS.md`) |
 
 ## For AI Agents

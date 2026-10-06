@@ -119,6 +119,10 @@ find_package(CEF REQUIRED)
 
 add_subdirectory(tests)
 
+# The AI-agent kernel (MCP tools endpoint, ACP client) is CEF-free and always
+# built; src/main links it.
+add_subdirectory(src/agent)
+
 # Guarded Search S0 hook: the on-device search kernel is pure C++20 and never
 # links CEF. Default OFF keeps the Phase 0-3 flow byte-for-byte unchanged.
 if(ISLAND_ENABLE_SEARCH)
