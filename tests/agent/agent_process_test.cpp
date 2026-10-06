@@ -2,6 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
+
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -72,6 +76,26 @@ TEST(AgentProcessTest, EchoesLinesAndReportsExit) {
     EXPECT_EQ(collector.exit_code, 3);
     EXPECT_EQ(collector.stderr_tail, "bye\n");
     EXPECT_FALSE(process.running());
+}
+
+TEST(AgentProcessTest, ChildInheritsOnlyStdio) {
+    // A descriptor opened without FD_CLOEXEC (here a plain pipe) must still
+    // not reach the agent: the child closes everything above stderr.
+    int leaky[2];
+    ASSERT_EQ(::pipe(leaky), 0);
+    Collector collector;
+    AgentProcess process;
+    std::string error;
+    ASSERT_TRUE(process.Start({"/bin/sh", "-c",
+                               "for f in 3 4 5 6 7 8 9 10 11 12 13 14 15; do "
+                               "if ( : >&$f ) 2>/dev/null; then echo open:$f; fi; done; "
+                               "echo done"},
+                              {}, collector.OnLine(), collector.OnExit(), &error))
+        << error;
+    ASSERT_TRUE(collector.WaitExit());
+    ::close(leaky[0]);
+    ::close(leaky[1]);
+    EXPECT_EQ(collector.lines, (std::vector<std::string>{"done"}));
 }
 
 TEST(AgentProcessTest, ReportsMissingExecutable) {

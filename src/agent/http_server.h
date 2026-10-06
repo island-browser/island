@@ -49,6 +49,10 @@ bool ParseHttpRequestHead(std::string_view head, HttpRequest& out);
 [[nodiscard]] std::string SerializeHttpResponse(const HttpResponse& response);
 [[nodiscard]] std::string_view HttpReasonPhrase(int status);
 
+// A TCP socket that child processes (the ACP agent) never inherit; -1 on
+// failure or on Windows.
+[[nodiscard]] int CreateStreamSocket();
+
 class LoopbackHttpServer {
   public:
     using Respond = std::function<void(HttpResponse)>;
@@ -70,6 +74,9 @@ class LoopbackHttpServer {
 
     static constexpr std::size_t kMaxHeadBytes = 64 * 1024;
     static constexpr std::size_t kMaxBodyBytes = 16 * 1024 * 1024;
+    // Each connection gets a thread before it authenticates; beyond this many
+    // open connections new ones are answered 503 and closed.
+    static constexpr std::size_t kMaxConnections = 32;
     // How long a connection waits for the handler before answering 504.
     static constexpr int kHandlerTimeoutSeconds = 120;
 

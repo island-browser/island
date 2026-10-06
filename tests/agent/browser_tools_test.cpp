@@ -138,6 +138,14 @@ TEST(BrowserToolsTest, ReadPageEvaluatesAndReturnsPageJson) {
               std::string_view::npos);
 }
 
+TEST(BrowserToolsTest, HostilePageJsonIsAnErrorNotACrash) {
+    // A page can replace JSON.stringify, so the page script's result is untrusted.
+    FakeBrowserHost host;
+    host.QueueScriptResult(std::string(50000, '['));
+    BrowserToolbox toolbox(host);
+    EXPECT_TRUE(CallTool(toolbox, "page_read").is_error);
+}
+
 TEST(BrowserToolsTest, EvaluateSurfacesPageExceptions) {
     FakeBrowserHost host;
     DevToolsReply reply;

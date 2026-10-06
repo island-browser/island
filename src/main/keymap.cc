@@ -99,7 +99,7 @@ std::optional<int> KeyCodeForName(std::string_view name) {
         }
         if (c >= '0' && c <= '9') return c;
     }
-    if (name.size() >= 2 && (name[0] == 'F' || name[0] == 'f')) {
+    if (name.size() >= 2 && name.size() <= 3 && (name[0] == 'F' || name[0] == 'f')) {
         int number = 0;
         for (std::size_t i = 1; i < name.size(); ++i) {
             if (!std::isdigit(static_cast<unsigned char>(name[i]))) return std::nullopt;

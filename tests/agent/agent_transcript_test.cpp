@@ -79,6 +79,23 @@ TEST(AgentTranscriptTest, PlanUpdatesWithinATurnAndPermissionsResolve) {
     EXPECT_EQ(transcript.items().back().text, "Stopped.");
 }
 
+TEST(AgentTranscriptTest, AFailedTurnClosesOpenPermissionPrompts) {
+    AgentTranscript transcript;
+    AcpEvent permission;
+    permission.type = AcpEvent::Type::kPermissionRequest;
+    permission.request_id = 7;
+    permission.title = "Submit form";
+    permission.options = {{"a", "Allow", "allow_once"}};
+    transcript.Apply(permission);
+    AcpEvent failed;
+    failed.type = AcpEvent::Type::kError;
+    failed.text = "The turn failed: boom";
+    transcript.Apply(failed);
+    ASSERT_EQ(transcript.items().size(), 2U);
+    EXPECT_EQ(transcript.items()[0].resolution, "Cancelled");
+    EXPECT_EQ(transcript.items()[1].kind, TranscriptItem::Kind::kError);
+}
+
 TEST(AgentTranscriptTest, JsonCarriesKindsAndIsBounded) {
     AgentTranscript transcript;
     transcript.AddUserPrompt("a \"quote\"");

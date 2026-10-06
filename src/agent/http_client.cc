@@ -1,17 +1,23 @@
 #include "http_client.h"
 
 #include <charconv>
+#include <optional>
 
 #if !defined(_WIN32)
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <cerrno>
 #endif
 
 namespace island::agent {
+
+namespace {
+constexpr std::size_t kMaxResponseBytes = 64U << 20;
+}  // namespace
 
 std::optional<LoopbackUrl> ParseLoopbackUrl(std::string_view url) {
     constexpr std::string_view kScheme = "http://";
@@ -51,7 +57,7 @@ std::optional<HttpResponse> LoopbackHttpRequest(int port, std::string_view metho
                                                 std::string_view path,
                                                 const std::vector<HttpHeader>& headers,
                                                 std::string_view body, std::string* error) {
-    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    const int fd = CreateStreamSocket();
     if (fd < 0) {
         if (error != nullptr) *error = "socket() failed";
         return std::nullopt;
@@ -60,6 +66,11 @@ std::optional<HttpResponse> LoopbackHttpRequest(int port, std::string_view metho
     int one = 1;
     ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
+    // A wedged peer must not hang the caller forever; tool calls such as
+    // screenshots finish well within this.
+    timeval timeout{};
+    timeout.tv_sec = 120;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(static_cast<std::uint16_t>(port));
@@ -93,13 +104,42 @@ std::optional<HttpResponse> LoopbackHttpRequest(int port, std::string_view metho
         pending.remove_prefix(static_cast<std::size_t>(sent));
     }
 
+    // Read until the declared body is complete (or EOF without a length):
+    // waiting for EOF alone hangs whenever another process still holds the
+    // server's end of the connection.
     std::string raw;
     char chunk[16 * 1024];
+    std::optional<std::size_t> expected_total;
     for (;;) {
         const ssize_t got = ::recv(fd, chunk, sizeof(chunk), 0);
         if (got < 0 && errno == EINTR) continue;
         if (got <= 0) break;
         raw.append(chunk, static_cast<std::size_t>(got));
+        if (raw.size() > kMaxResponseBytes) {
+            if (error != nullptr) *error = "HTTP response too large";
+            ::close(fd);
+            return std::nullopt;
+        }
+        if (!expected_total) {
+            const std::size_t end = raw.find("\r\n\r\n");
+            if (end != std::string::npos) {
+                HttpRequest probe;
+                const std::string_view head = std::string_view(raw).substr(0, end);
+                const std::size_t first = head.find("\r\n");
+                if (first != std::string_view::npos &&
+                    ParseHttpRequestHead("X / HTTP/1.1\r\n" + std::string(head.substr(first + 2)),
+                                         probe)) {
+                    const std::string_view length = probe.Header("Content-Length");
+                    std::size_t value = 0;
+                    if (!length.empty() &&
+                        std::from_chars(length.data(), length.data() + length.size(), value).ec ==
+                            std::errc{}) {
+                        expected_total = end + 4 + value;
+                    }
+                }
+            }
+        }
+        if (expected_total && raw.size() >= *expected_total) break;
     }
     ::close(fd);
 

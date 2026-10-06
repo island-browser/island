@@ -35,6 +35,10 @@ TEST(KeymapTest, ParsesModifiersKeysAndRejectsPlainTyping) {
     EXPECT_EQ(ParseKeyBinding("Mod+,"), (KeyBinding{.key_code = 0xBC, .primary = true}));
     EXPECT_EQ(ParseKeyBinding("F5"), (KeyBinding{.key_code = 0x74}));
     EXPECT_EQ(ParseKeyBinding("Shift+F12"), (KeyBinding{.key_code = 0x7B, .shift = true}));
+    EXPECT_FALSE(ParseKeyBinding("F25").has_value());
+    // Long digit runs used to overflow the accumulator and wrap to a real key.
+    EXPECT_FALSE(ParseKeyBinding("Mod+F4294967301").has_value());
+    EXPECT_FALSE(ParseKeyBinding("F0005").has_value());
     EXPECT_EQ(ParseKeyBinding("Mod+7"), (KeyBinding{.key_code = '7', .primary = true}));
     // Without Mod/Alt a non-function key would hijack typing.
     EXPECT_FALSE(ParseKeyBinding("K").has_value());

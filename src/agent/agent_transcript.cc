@@ -116,6 +116,8 @@ void AgentTranscript::Apply(const AcpEvent& event) {
             }
             return;
         case AcpEvent::Type::kError:
+            // A failed turn (or a dead agent) will never answer open prompts.
+            CancelOpenPermissions();
             Push({.kind = Kind::kError, .text = event.text});
             return;
         case AcpEvent::Type::kStateChanged:

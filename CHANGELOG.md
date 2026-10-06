@@ -42,6 +42,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- A web page could crash the browser while an agent read it, by returning deeply nested
+  JSON to the page tools; JSON nesting is now capped.
+- The agent process no longer inherits the MCP server's sockets or other descriptors.
+- The MCP endpoint caps concurrent connections, the stdio bridge stops reading at the
+  response's `Content-Length`, and the discovery file is created owner-only and is
+  removed on quit only if it still belongs to this instance.
+- Permission prompts close when an agent turn fails; oversized function-key names such
+  as `F4294967301` are rejected instead of wrapping to a real key.
 - Split view was bound to `Shift+S` without `Cmd/Ctrl`.
 - Next/previous tab matched ASCII brackets instead of virtual key codes.
 
