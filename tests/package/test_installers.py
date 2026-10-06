@@ -85,11 +85,15 @@ class InstallerTests(unittest.TestCase):
         (framework / "Libraries/libEGL.dylib").write_bytes(b"")
         (app / "Contents/Frameworks/island_browser Helper.app").mkdir()
         (app / "Contents/Frameworks/island_browser Helper (GPU).app").mkdir()
+        (app / "Contents/MacOS").mkdir()
+        (app / "Contents/MacOS/island_browser").write_bytes(b"")
+        (app / "Contents/MacOS/island_mcp_bridge").write_bytes(b"")
         self.assertEqual([path.relative_to(self.root).as_posix() for path in installers.macos_nested_code(app)], [
             "island_browser.app/Contents/Frameworks/Chromium Embedded Framework.framework/Libraries/libEGL.dylib",
             "island_browser.app/Contents/Frameworks/Chromium Embedded Framework.framework",
             "island_browser.app/Contents/Frameworks/island_browser Helper (GPU).app",
             "island_browser.app/Contents/Frameworks/island_browser Helper.app",
+            "island_browser.app/Contents/MacOS/island_mcp_bridge",
             "island_browser.app",
         ])
 
