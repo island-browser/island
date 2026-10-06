@@ -108,16 +108,16 @@ class PackageTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing sandbox client DLL", result.stderr)
 
-    def test_rejects_windows_client_dll_without_bootstrap(self) -> None:
+    def test_rejects_windows_dll_that_is_not_a_sandbox_client(self) -> None:
         self.fixture.stage("windows64")
         self.fixture.write_binary(self.build / "src/main/Release/island_browser.dll", "windows64")
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("bootstrap/client DLL mismatch", result.stderr)
+        self.assertIn("is not a sandbox client", result.stderr)
 
     def test_rejects_windows_sandbox_client_dll_architecture_mismatch(self) -> None:
         self.fixture.stage("windows64", sandbox=True)
-        self.fixture.write_binary(self.build / "src/main/Release/island_browser.dll", "windowsarm64")
+        self.fixture.write_binary(self.build / "src/main/Release/island_browser.dll", "windowsarm64", bootstrap=True)
         result = self._run("windows64", check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("architecture", result.stderr)

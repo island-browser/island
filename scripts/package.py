@@ -195,15 +195,23 @@ def _validate_paths(root: Path) -> None:
             raise PackageError(f"unsupported runtime entry: {path.relative_to(root)}")
 
 
+# A sandbox build ships CEF's bootstrap.exe renamed to island_browser.exe; it
+# loads the client DLL named after itself at run time and calls its RunWinMain
+# export, so that export name is in both files while the DLL name is in neither.
+_BOOTSTRAP_ENTRY = b"RunWinMain"
+
+
 def _windows_mode(root: Path) -> WindowsMode:
     executable = root / "island_browser.exe"
     client = root / "island_browser.dll"
-    bootstrap = b"island_browser.dll" in executable.read_bytes().lower()
-    if bootstrap and not client.is_file():
-        raise PackageError("missing sandbox client DLL: island_browser.dll")
-    if client.is_file() and not bootstrap:
-        raise PackageError("bootstrap/client DLL mismatch: island_browser.dll requires island_browser.exe bootstrap")
-    return WindowsMode.SANDBOX if bootstrap else WindowsMode.NORMAL
+    bootstrap = _BOOTSTRAP_ENTRY in executable.read_bytes()
+    if not client.is_file():
+        if bootstrap:
+            raise PackageError("missing sandbox client DLL: island_browser.dll")
+        return WindowsMode.NORMAL
+    if _BOOTSTRAP_ENTRY not in client.read_bytes():
+        raise PackageError("island_browser.dll is not a sandbox client: it does not export RunWinMain")
+    return WindowsMode.SANDBOX
 
 
 def _architecture(executable: Path) -> Architecture:

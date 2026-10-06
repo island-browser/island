@@ -46,6 +46,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Windows builds: the agent tests compile with MSVC's conforming preprocessor and UTF-8 literals,
   and the macOS/Linux update script always writes `/`-separated paths, also when generated on a
   Windows host.
+- Windows packaging recognizes the sandbox build again: CEF's bootstrap `island_browser.exe`
+  does not name `island_browser.dll`, so the package step now checks that the DLL exports
+  `RunWinMain` instead.
 
 ## [0.4.0] - 2026-10-06
 
