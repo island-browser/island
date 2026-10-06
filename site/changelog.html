@@ -6,13 +6,13 @@
     <title>Changelog — Island</title>
     <meta name="description" content="Every Island release and what changed in it: the built-in agent, MCP tools, spaces, split view, palettes, import, and more.">
     <link rel="canonical" href="https://island-browser.github.io/island/changelog.html">
-    <meta name="theme-color" content="#FAFAFA">
+    <meta name="theme-color" content="#F3F0E9">
     <meta property="og:site_name" content="Island">
     <meta property="og:title" content="Island changelog">
     <meta property="og:description" content="What changed in each Island release.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://island-browser.github.io/island/changelog.html">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%230068D6' d='M5 20.5c3.2-1.1 5.3-4.2 6.2-9.4 3.5 1.9 5.5 5 6 9.4 3.6-1 6.7-.5 9.8 1.8-4.7 4.3-13.7 5.3-22 1.1Z'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23168C99' d='M5 20.5c3.2-1.1 5.3-4.2 6.2-9.4 3.5 1.9 5.5 5 6 9.4 3.6-1 6.7-.5 9.8 1.8-4.7 4.3-13.7 5.3-22 1.1Z'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="assets/css/site.css">
   </head>
   <body>
@@ -46,6 +46,11 @@
 <!-- changelog:start -->
           <section class="release" id="unreleased">
             <h2>Unreleased</h2>
+            <h3>Added</h3>
+            <ul>
+              <li>Automatic builds: every push to <code>main</code> that changes the app builds, tests, and packages all six targets and publishes them as unsigned GitHub prereleases — a rolling <code>nightly</code>, plus a <code>vX.Y.Z</code> prerelease with the changelog notes the first time a version builds. Each release carries the six archives and one <code>SHA256SUMS.txt</code>.</li>
+              <li><code>scripts/version.py notes</code> prints one version's changelog section.</li>
+            </ul>
             <h3>Changed</h3>
             <ul>
               <li>New "Graphite" design language across the browser: neutral near-black and white surfaces, 1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the space tint is now a faint cast on the sidebar instead of a colored wash.</li>

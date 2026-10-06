@@ -7,7 +7,7 @@
 
 Tests for `scripts/version.py`: SemVer parsing and bumping, `CHANGELOG.md` rotation, the Markdown
 subset rendered into `site/changelog.html` (HTML-escaped, unsafe link schemes dropped), the
-`show`/`bump`/`sync`/`check` commands against a temporary repository, and the real repository's
+`show`/`bump`/`sync`/`check`/`notes` commands against a temporary repository, and the real repository's
 consistency — `VERSION`, `CHANGELOG.md`, the site, the Windows manifest, and the CMake wiring must
 agree.
 

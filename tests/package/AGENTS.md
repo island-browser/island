@@ -17,6 +17,7 @@ each artifact).
 | `package_fixture.py` | `PackageFixture` dataclass: synthesizes a throwaway build tree and repository root |
 | `test_package.py` | Archive layout, tar/zip contents, and hashing for each target |
 | `test_package_resources.py` | Resource manifest completeness and digests |
+| `test_release_assets.py` | `scripts/release_assets.py`: the six-archive release set and the combined `SHA256SUMS.txt` the in-browser updater verifies against |
 
 ## For AI Agents
 

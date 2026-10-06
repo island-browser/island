@@ -47,6 +47,23 @@ python3 scripts/version.py check
 When the bump lands on `main`, the commit is tagged `vX.Y.Z` automatically and the site (with its
 changelog page) redeploys to GitHub Pages.
 
+## Downloads / releases
+
+Every push to `main` that changes the app builds all six targets and publishes them on
+[GitHub Releases](https://github.com/island-browser/island/releases) (`build-release.yml`):
+
+- `nightly` — a rolling prerelease that always holds the latest successful build of `main`.
+- `vX.Y.Z` — one prerelease per version, titled `Island X.Y.Z (unsigned)`, with that version's
+  `CHANGELOG.md` notes.
+
+Each release carries `island_browser-<version>-<target>.zip` (macOS, Windows) or `.tar.gz` (Linux)
+and a `SHA256SUMS.txt` to verify them against. **All builds are unsigned prereleases**: they are not
+code-signed or notarized, so macOS Gatekeeper refuses to open the app until you allow it in System
+Settings > Privacy & Security (or run `xattr -dr com.apple.quarantine island_browser.app`), and
+Windows SmartScreen may warn. While the repository is private, its releases (like its Pages site)
+are visible only to people with access to the repository, and downloading assets needs an
+authenticated GitHub request.
+
 ## Dependencies
 
 CEF 150 and Geist are pinned in `deps/dependencies.lock.json` and installed outside git:

@@ -1,29 +1,50 @@
 name: Package unsigned candidates
 
 on:
-  # Automatic triggers are paused: builds and tests run locally to save
-  # GitHub Actions minutes. Restore the triggers from git history to re-enable.
+  # build-release.yml calls this on pushes to main (all six targets, then it publishes).
+  # Dispatching it directly builds and uploads candidates without publishing anything.
   workflow_dispatch:
     inputs:
       commit_sha:
         description: Full 40-character commit SHA reachable from main.
         required: true
         type: string
+      version:
+        description: Package version (SemVer, no build metadata). Empty means <VERSION>-ci.<run number>.
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: Full 40-character commit SHA reachable from main.
+        required: true
+        type: string
+      version:
+        description: Package version (SemVer, no build metadata). Empty means <VERSION>-ci.<run number>.
+        required: false
+        type: string
+        default: ''
+    outputs:
+      sha:
+        description: The packaged commit.
+        value: ${{ jobs.prepare-candidate.outputs.sha }}
+      version:
+        description: The version in every archive name and build-metadata.json.
+        value: ${{ jobs.prepare-candidate.outputs.version }}
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
-  group: package-candidate-${{ github.event.workflow_run.head_sha || inputs.commit_sha }}
+  group: package-candidate-${{ inputs.commit_sha }}-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
   prepare-candidate:
-    name: Resolve successful CI commit
-    if: >-
-      github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    name: Resolve candidate commit and version
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
       version: ${{ steps.commit.outputs.version }}
@@ -37,22 +58,29 @@ jobs:
         name: Resolve exact candidate commit
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          MANUAL_SHA: ${{ inputs.commit_sha }}
-          UPSTREAM_SHA: ${{ github.event.workflow_run.head_sha }}
+          CANDIDATE_SHA: ${{ inputs.commit_sha }}
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          sha="$UPSTREAM_SHA"
-          if [ "$EVENT_NAME" = workflow_dispatch ]; then
-            sha="$MANUAL_SHA"
-            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-              echo 'commit_sha must be a full 40-character SHA.' >&2
-              exit 1
-            fi
+          sha="$CANDIDATE_SHA"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'commit_sha must be a full 40-character SHA.' >&2
+            exit 1
           fi
           GIT_MASTER=1 git cat-file -e "$sha^{commit}"
           GIT_MASTER=1 git merge-base --is-ancestor "$sha" origin/main
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ -n "$REQUESTED_VERSION" ]; then
+            # scripts/package.py's SEMVER minus build metadata ("+" is awkward in asset URLs).
+            # Validated here because later steps interpolate the version into shell commands.
+            semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+            if ! [[ "$REQUESTED_VERSION" =~ $semver ]]; then
+              echo "version must be SemVer without build metadata, got '$REQUESTED_VERSION'." >&2
+              exit 1
+            fi
+            echo "version=$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           base="$(git show "$sha:VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
           base="${base%%-*}"
           echo "version=${base:-0.0.0}-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"

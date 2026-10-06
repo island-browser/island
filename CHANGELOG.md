@@ -13,6 +13,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Added
+
+- Automatic builds: every push to `main` that changes the app builds, tests, and packages all
+  six targets and publishes them as unsigned GitHub prereleases — a rolling `nightly`, plus a
+  `vX.Y.Z` prerelease with the changelog notes the first time a version builds. Each release
+  carries the six archives and one `SHA256SUMS.txt`.
+- `scripts/version.py notes` prints one version's changelog section.
+
 ### Changed
 
 - New "Graphite" design language across the browser: neutral near-black and white surfaces,

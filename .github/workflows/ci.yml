@@ -39,7 +39,9 @@ jobs:
         run: python3 -m unittest discover -s tests/deps -p 'test_*.py'
       - name: Run package unit tests
         shell: bash
-        run: python3 -m unittest tests.package.test_package tests.package.test_package_resources
+        run: >-
+          python3 -m unittest tests.package.test_package tests.package.test_package_resources
+          tests.package.test_release_assets
       - name: Run design token drift guard
         shell: bash
         run: python3 -m unittest discover -s tests/design -p 'test_*.py'

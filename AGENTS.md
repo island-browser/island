@@ -32,8 +32,11 @@
 - Agentic integration is in scope as of 2026-10-06 at the project owner's request: the CEF-free
   `src/agent/` kernel provides an MCP tools endpoint (`http://127.0.0.1:<port>/mcp`, bearer token,
   discovery file) and an ACP client that runs an agent in the sidebar. GitHub Actions triggers
-  are paused (manual `workflow_dispatch` only); build, test, and look at changes locally before
-  committing.
+  are paused (manual `workflow_dispatch` only) except `build-release.yml`, `pages.yml`, and
+  `version-tag.yml` on pushes to `main`; build, test, and look at changes locally before
+  committing. At the project owner's request (2026-10-06), `build-release.yml` builds all six
+  targets on every push to `main` that changes the app and publishes them as **unsigned GitHub
+  prereleases** (`nightly`, plus `vX.Y.Z` once per version) for the in-browser updater.
 - Versioning: `VERSION` is the only place the version is written. Bump it with
   `python3 scripts/version.py bump <part>` (never by hand-editing derived files), keep notes under
   `## [Unreleased]` in `CHANGELOG.md` as you land changes, and run

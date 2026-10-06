@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-08-28 | Updated: 2026-08-28 -->
+<!-- Generated: 2026-08-28 | Updated: 2026-10-06 -->
 
 # workflows
 
@@ -10,18 +10,19 @@ the root `AGENTS.md` requires before any non-macOS-arm64 support claim can be ma
 
 ## Which workflow proves what
 
-**Automatic triggers are paused** to save GitHub Actions minutes: every workflow runs only on a
-manual `workflow_dispatch` (and `ci.yml` via `workflow_call`), except two single cheap jobs on
-pushes to `main` — `pages.yml` (when the site, `CHANGELOG.md`, or `VERSION` change) and
-`version-tag.yml` (when `VERSION` changes). Build, test, and package locally
-with the root `AGENTS.md` Verification commands before committing. To re-enable a workflow,
-restore its original `on:` block from git history.
+**Most automatic triggers are paused** to save GitHub Actions minutes. Three workflows run on
+pushes to `main`: `build-release.yml` (when anything that ships changes — it builds all six
+targets and publishes unsigned prereleases), `pages.yml` (when the site, `CHANGELOG.md`, or
+`VERSION` change), and `version-tag.yml` (when `VERSION` changes). Everything else runs only on a
+manual `workflow_dispatch` (plus `workflow_call` for `ci.yml` and `package.yml`). Build, test, and
+package locally with the root `AGENTS.md` Verification commands before committing. To re-enable a
+paused workflow, restore its original `on:` block from git history.
 
 | File | Trigger | Evidence it produces |
 |------|---------|----------------------|
 | `ci.yml` | dispatch, `workflow_call` (automatic triggers paused) | The authoritative gate. `portable` (ubuntu-24.04) runs shell syntax + dry run, dependency tests, package tests, the design-token drift guard, and `icon_pipeline verify`. `native-macos`, `native-linux`, `native-windows` each configure, build Release, and run native tests per target, uploading `ci-diagnostics-<target>` on failure. |
-| `package.yml` | Dispatch only (the `workflow_run` chain is paused) | Unsigned candidates, versioned `<VERSION>-ci.<run number>`, for all six targets: `macosx64`, `macosarm64`, `linux64`, `linuxarm64`, `windows64`, `windowsarm64` |
-| `nightly.yml` | Dispatch with a run id (the `workflow_run` chain is paused) | Republishes a completed package run as a nightly release |
+| `build-release.yml` | Push to `main` touching `src/**`, `cmake/**`, `CMakeLists.txt`, `deps/**`, `resources/**`, `tests/**`, `VERSION`, the packaging scripts, or itself/`package.yml`; dispatch (optional `commit`: a SHA or tag on `main`) | Calls `package.yml` for all six targets, then publishes **prereleases only**, and only when all six succeed: the rolling `nightly` prerelease (deleted and recreated so its tag moves to the commit; never moved backwards), and — the first time a build of the `v<VERSION>` commit succeeds — the `v<VERSION>` prerelease titled `Island <VERSION> (unsigned)` with that version's `CHANGELOG.md` section. Package version: `<VERSION>` for a run that creates `v<VERSION>`, else `<VERSION>-nightly.<run number>`. Assets: six `island_browser-<version>-<target>.<zip or tar.gz>` archives plus one combined `SHA256SUMS.txt` (`scripts/release_assets.py`). Only the two publish jobs get `contents: write` (plus `actions: read` for `gh run download`). |
+| `package.yml` | `workflow_call` from `build-release.yml`; dispatch (builds only, publishes nothing) | Unsigned candidates for all six targets (`macosx64`, `macosarm64`, `linux64`, `linuxarm64`, `windows64`, `windowsarm64`): deps install, Release build, ctest, `scripts/package.py`, metadata check, artifact `unsigned-candidate-<version>-<target>`. Version is the `version` input, else `<VERSION>-ci.<run number>` |
 | `release.yml` | Dispatch only (the `v*` tag trigger is paused) | The stable-release **gate**. It requires the tag to match `VERSION`, asserts `scripts/package.py` still emits `signed: False` / `publicReleaseEligible: False`, rejects unprotected tags, and then **fails on purpose** — stable publishing stays blocked until signing and notarization are implemented. |
 | `search.yml` | Dispatch only (automatic triggers paused) | The only automated coverage of the search kernel. Configures `src/search` as its own source root with `-DISLAND_ENABLE_SEARCH=ON` on all six targets, builds `island_search`/`island_search_tests`/`island_search_posting_codec_harness`, and runs `ctest --no-tests=error` |
 | `dependency-check.yml` | Dispatch only (the weekly cron is paused) | Read-only upstream check for newer pinned dependencies |
@@ -43,7 +44,15 @@ restore its original `on:` block from git history.
   that will catch it.
 - Third-party actions are pinned by full commit SHA. Match that when adding steps.
 - `permissions:` is `contents: read` at workflow level, with write escalated only per job
-  (`nightly.yml`, `pages.yml`, `version-tag.yml`). Preserve that shape.
+  (`build-release.yml`'s publish jobs, `pages.yml`, `version-tag.yml`). Preserve that shape.
+- Everything `build-release.yml` publishes is a GitHub **prerelease** marked unsigned; it never
+  creates a stable release. Because every release is a prerelease, the REST `/releases/latest`
+  endpoint returns 404 — consumers such as the in-browser updater list `/releases` instead.
+- `nightly.yml` was removed: `build-release.yml` owns the `nightly` prerelease now.
+- A `v<VERSION>` tag whose commit never had a successful build (for example `v0.4.0`, tagged
+  before this pipeline existed) has no release; dispatch `build-release.yml` with
+  `commit: v<VERSION>` to build that exact commit and publish it. A run on a later commit only
+  publishes `nightly` and warns, because its archives would not match the tag.
 - `ci.yml` has five jobs: `portable`, `native-macos`, `native-linux`, `native-windows`, and
   `ci-success` as the aggregate gate.
 

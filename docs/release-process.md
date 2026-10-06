@@ -26,6 +26,28 @@ Only macOS arm64 has local Phase 1 build/run/test/package evidence: dependency v
 close/menu Quit cleanup, 11 package tests, and Phase 0 package compatibility. Do not promote macOS
 x64, Windows, or Linux packages without native GitHub Actions evidence for those targets.
 
+## Automatic unsigned prereleases
+
+`.github/workflows/build-release.yml` runs on pushes to `main` that change the app (and on
+dispatch). It calls `package.yml` for all six targets and, only when all six succeed, publishes
+GitHub **prereleases** — never a stable release:
+
+- `nightly`: rolling; deleted and recreated each time so its tag moves to the built commit (it
+  never moves backwards along `main`). Package version `<VERSION>-nightly.<run number>`, or
+  `<VERSION>` when the same run also creates the version release.
+- `v<VERSION>`: created once, from a build of the commit tagged `v<VERSION>` (or of the commit
+  that bumped `VERSION`, when no tag exists yet). Title `Island <VERSION> (unsigned)`, body from
+  `python3 scripts/version.py notes <VERSION>`. Never replaced.
+- Assets on both: `island_browser-<version>-<target>.zip|.tar.gz` for the six targets and one
+  `SHA256SUMS.txt` (`<sha256>  <file name>` per archive, sorted, LF), built by
+  `scripts/release_assets.py`.
+
+Note that `<VERSION>-nightly.N` sorts *below* `<VERSION>` in SemVer precedence; treat `nightly`
+as its own channel rather than comparing it to version tags. Because every release is a
+prerelease, the REST `/releases/latest` endpoint returns 404; list `/releases` instead.
+
+The sections below predate this pipeline and describe the original, now mostly paused, workflows.
+
 ## GitHub workflows
 
 - **Native build** runs on pull requests, pushes to `main`, and manual dispatch for native build
