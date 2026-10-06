@@ -2,6 +2,7 @@ add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 
 add_library(island_browser_core STATIC
     address_bar_model.cc
+    agent_navigation.cc
     address_policy.cc
     app_resources.cc
     bookmark_import.cc
@@ -13,6 +14,7 @@ add_library(island_browser_core STATIC
     command_palette.cc
     command_palette_view.cc
     design_tokens.cc
+    devtools_bridge.cc
     icon_catalog.cc
     island_app.cc
     navigation_state.cc
@@ -26,11 +28,13 @@ add_library(island_browser_core STATIC
     space_rename_overlay.cc
     startup_options.cc
     welcome_flow.cc
+    window_agent_host.cc
     tab.cc
 )
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
+target_link_libraries(island_browser_core PUBLIC island_agent)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)

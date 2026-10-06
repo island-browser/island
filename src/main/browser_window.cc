@@ -24,6 +24,7 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 #include "session_store.h"
+#include "window_agent_host.h"
 
 namespace island {
 namespace {
@@ -94,7 +95,9 @@ CefRefPtr<BrowserWindow> BrowserWindow::CreateHeadlessForTest(std::string initia
 }
 
 BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
-    : initial_url_(std::move(initial_url)), persist_session_(persist_session) {
+    : initial_url_(std::move(initial_url)),
+      persist_session_(persist_session),
+      address_validator_(&ParseAndValidate) {
     if (!persist_session_ || !RestoreSession()) {
         // CreateDefaultSpace already appends the space's single starting tab.
         spaces_.push_back(CreateDefaultSpace());
@@ -122,6 +125,8 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         tab->navigation_state().SetObserver(this);
     }
 }
+
+BrowserWindow::~BrowserWindow() = default;
 
 Space BrowserWindow::CreateDefaultSpace() {
     Space space{SpaceId{NextSpaceId()}, std::string(kDefaultSpaceName), kDefaultSpaceColor};
@@ -240,23 +245,9 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             }
             return;
         }
-        case BrowserCommand::kNewTab: {
-            Space& space = active_space();
-            DetachActiveTabObservers();
-            space.AppendTab(Tab{NextTabId()});
-            Tab* appended = active_tab();
-            if (chrome_ != nullptr && appended != nullptr) {
-                // Same creation path as OnWindowCreated's first view: the
-                // space's request context and the tab's startup URL (the fixed
-                // local data startup page unless session restore set one).
-                CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-                    this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
-                    space.request_context(), this);
-                appended->SetBrowserView(browser_view);
-            }
-            AttachActiveTabObservers();
+        case BrowserCommand::kNewTab:
+            AppendTabToActiveSpace({});
             return;
-        }
         case BrowserCommand::kCloseTab: {
             const Space& space = active_space();
             if (!space.has_active_tab()) {
@@ -331,6 +322,120 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             CloseSpaceBrowsers(removed);
             return;
         }
+    }
+}
+
+void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
+    Space& space = active_space();
+    DetachActiveTabObservers();
+    Tab tab{NextTabId()};
+    tab.SetStartupUrl(std::move(startup_url));
+    space.AppendTab(std::move(tab));
+    Tab* appended = active_tab();
+    if (chrome_ != nullptr && appended != nullptr) {
+        // Same creation path as OnWindowCreated's first view: the space's
+        // request context and the tab's startup URL (the fixed local data
+        // startup page unless session restore or an agent set one).
+        CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+            this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
+            space.request_context(), this);
+        appended->SetBrowserView(browser_view);
+    }
+    AttachActiveTabObservers();
+}
+
+bool BrowserWindow::OpenNewTab(std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    std::string url;
+    if (!text.empty()) {
+        const std::optional<std::string> resolved =
+            ResolveAgentNavigation(text, address_validator_);
+        if (!resolved.has_value()) {
+            return false;
+        }
+        url = *resolved;
+    }
+    AppendTabToActiveSpace(std::move(url));
+    return true;
+}
+
+bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    Space& space = active_space();
+    if (index.has_value() && *index >= space.tab_count()) {
+        return false;
+    }
+    if (!index.has_value() && !space.has_active_tab()) {
+        return false;
+    }
+    const std::optional<std::string> url = ResolveAgentNavigation(text, address_validator_);
+    if (!url.has_value()) {
+        return false;
+    }
+    Tab& tab = space.tabs()[index.value_or(space.active_tab_index())];
+    if (index.value_or(space.active_tab_index()) == space.active_tab_index()) {
+        // The active tab goes through the address model so the rail shows the
+        // committed URL exactly as for typed navigation.
+        address_bar_model_.SetEditText(*url);
+        static_cast<void>(address_bar_model_.Submit(ValidatedAddress{.url = *url}));
+        if (chrome_ != nullptr) {
+            chrome_->OnAddressChanged(address_bar_model_.snapshot());
+        }
+    }
+    if (tab.browser() != nullptr && tab.browser()->GetMainFrame() != nullptr) {
+        tab.browser()->GetMainFrame()->LoadURL(*url);
+    } else {
+        tab.SetStartupUrl(*url);
+    }
+    return true;
+}
+
+CefRefPtr<CefBrowser> BrowserWindow::BrowserForTab(std::optional<std::size_t> index) const {
+    if (closing_) {
+        return nullptr;
+    }
+    const Space& space = active_space();
+    if (index.has_value()) {
+        return *index < space.tab_count() ? space.tabs()[*index].browser() : nullptr;
+    }
+    const Tab* tab = active_tab();
+    return tab != nullptr ? tab->browser() : nullptr;
+}
+
+bool BrowserWindow::CreateSpace(std::string_view name) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    ExecuteCommand(BrowserCommand::kNewSpace);
+    if (!name.empty()) {
+        static_cast<void>(RenameSpace(active_space_index_, std::string(name)));
+    }
+    return true;
+}
+
+bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
+    CEF_REQUIRE_UI_THREAD();
+    Space& space = active_space();
+    if (closing_ || index >= space.tab_count()) {
+        return false;
+    }
+    if (!space.SetTabPinned(space.tabs()[index].id(), pinned)) {
+        return false;
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
+void BrowserWindow::ShutdownAgentHost() {
+    if (agent_host_ != nullptr) {
+        agent_host_->Shutdown();
     }
 }
 
@@ -682,6 +787,10 @@ bool BrowserWindow::DoClose(CefRefPtr<CefBrowser>) {
 void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     CEF_REQUIRE_UI_THREAD();
 
+    if (agent_host_ != nullptr) {
+        agent_host_->OnBrowserClosed(browser);
+    }
+
     Tab* owner = FindTabByBrowser(browser);
     if (owner != nullptr) {
         owner->SetBrowser(nullptr);
@@ -829,6 +938,12 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     if (persist_session_ && !prefs_.onboarding_completed) {
         ShowWelcomeFlow();
     }
+    // AI-agent tools over MCP on 127.0.0.1. The smoke run stays offline and
+    // deterministic, so only persisted windows serve them.
+    if (persist_session_) {
+        agent_host_ = std::make_unique<WindowAgentHost>(*this);
+        static_cast<void>(agent_host_->StartEndpoint(agent::DefaultDiscoveryFilePath()));
+    }
     // The seam only observes; every chrome mutation it triggers is posted onto the
     // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
     // cannot create a refcount cycle, and OnWindowDestroyed uninstalls it.
@@ -847,6 +962,7 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     CEF_REQUIRE_UI_THREAD();
 
     closing_ = true;
+    ShutdownAgentHost();
     DetachChromeAndObservers();
     window_ = nullptr;
 
@@ -916,6 +1032,8 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         // carry no unload handlers, so the cancel path TryCloseBrowser allows
         // for cannot arise in practice.
         closing_ = true;
+        // No agent tool call may touch the model once teardown starts.
+        ShutdownAgentHost();
         // Clean quit: persist the session before any browser tears down, so
         // the last-committed URLs are still in the navigation snapshots. The
         // smoke run never touches the session file.

@@ -77,6 +77,13 @@ class Space {
     // Reorders; the active tab keeps its identity. Rejects out-of-range positions.
     bool MoveTab(std::size_t from_index, std::size_t to_index);
 
+    // Pins or unpins a tab and keeps the pinned group contiguous at the front:
+    // a newly pinned tab joins the end of the pinned group, an unpinned one
+    // becomes the first regular tab. The active tab keeps its identity.
+    // Unknown ids return false.
+    bool SetTabPinned(TabId id, bool pinned);
+    [[nodiscard]] std::size_t pinned_count() const noexcept;
+
     // A pairing is accepted only when both ids name different live tabs of this
     // space; a successful SetSplit replaces any previous pairing.
     [[nodiscard]] const std::optional<SplitPairing>& split() const noexcept;

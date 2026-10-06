@@ -38,6 +38,11 @@ class Tab {
     void SetStartupUrl(std::string url);
     [[nodiscard]] const std::string& startup_url() const noexcept;
 
+    // Arc-style pinned tabs sit in their own group at the top of the sidebar
+    // and persist with the session. Ordering is the Space's job (SetTabPinned).
+    void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
+    [[nodiscard]] bool pinned() const noexcept { return pinned_; }
+
     // U2: Caller-built CEF browser seam. The tab's CefBrowserView is created and owned
     // externally (by BrowserWindow); the tab holds raw CefRefPtr references to the view and
     // its underlying CefBrowser. Callers SetBrowserView after BrowserWindow creates the view;
@@ -51,6 +56,7 @@ class Tab {
   private:
     TabId id_;
     std::string startup_url_;
+    bool pinned_ = false;
     NavigationState navigation_state_;
 
     CefRefPtr<CefBrowserView> browser_view_;

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "active_tab_provider.h"
+#include "agent_navigation.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
 #include "browser_chrome.h"
@@ -33,6 +34,8 @@ class CefOverlayController;
 class CefWindow;
 
 namespace island {
+
+class WindowAgentHost;
 
 [[nodiscard]] inline ChromeTheme ClassifyChromeTheme(cef_color_t primary_background) noexcept {
     constexpr std::uint32_t kLuminanceScale = 10000;
@@ -99,6 +102,27 @@ class BrowserWindow : public CefClient,
     // [BrowserChrome::SplitRatioMin, SplitRatioMax]. False while closing.
     [[nodiscard]] bool SetSplitRatio(double ratio);
     [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
+
+    // Agent seams (src/agent tools). OpenNewTab appends a tab to the active
+    // space and loads `text` resolved through ResolveAgentNavigation (blank
+    // text opens the startup page). NavigateTab targets a tab of the active
+    // space (std::nullopt = the active tab); a tab without a live browser
+    // keeps the URL as its startup URL. Both return false when closing, for
+    // an unknown tab, or for text that resolves to no allowed URL.
+    [[nodiscard]] bool OpenNewTab(std::string_view text);
+    [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
+    // The live CefBrowser of a tab of the active space, or nullptr.
+    [[nodiscard]] CefRefPtr<CefBrowser> BrowserForTab(std::optional<std::size_t> index) const;
+    // kNewSpace plus an optional name.
+    [[nodiscard]] bool CreateSpace(std::string_view name);
+    // Pins/unpins a tab of the active space (Arc-style pinned group).
+    [[nodiscard]] bool SetActiveSpaceTabPinned(std::size_t index, bool pinned);
+    [[nodiscard]] const std::vector<Space>& spaces() const noexcept { return spaces_; }
+    // Test seam: headless tests have no CefParseURL, so they inject the
+    // address validation the agent seams use.
+    void SetAddressValidatorForTest(AddressValidator validator) {
+        address_validator_ = std::move(validator);
+    }
 
     // Welcome flow (first-run import + appearance). ShowWelcomeFlow is a
     // no-op without a window, like the palette seams.
@@ -248,6 +272,8 @@ class BrowserWindow : public CefClient,
     };
 
     explicit BrowserWindow(std::string initial_url, bool persist_session = true);
+    // Out of line so the agent host's definition is only needed in the .cc.
+    ~BrowserWindow() override;
 
     [[nodiscard]] Space& active_space() noexcept { return spaces_[active_space_index_]; }
     [[nodiscard]] const Space& active_space() const noexcept {
@@ -284,6 +310,10 @@ class BrowserWindow : public CefClient,
     void AttachActiveTabBrowserView();
     void UpdateChromeCollections();
     [[nodiscard]] static Space CreateDefaultSpace();
+    // Appends a tab to the active space with `startup_url` (empty = the
+    // startup page) and makes it active; kNewTab and OpenNewTab share it.
+    void AppendTabToActiveSpace(std::string startup_url);
+    void ShutdownAgentHost();
     // Session restore: rebuilds spaces, tabs, active selections, and split
     // pairings from the session file. Returns false and leaves the model in
     // its fresh-install shape for every non-recoverable outcome (missing,
@@ -355,6 +385,10 @@ class BrowserWindow : public CefClient,
     PrefsState prefs_;
     BookmarkState bookmarks_;
     std::unique_ptr<WelcomeFlow> welcome_;
+    // Agent integration: the MCP tools endpoint and its DevTools bridge.
+    // Created in OnWindowCreated for persisted (non-smoke) windows only.
+    std::unique_ptr<WindowAgentHost> agent_host_;
+    AddressValidator address_validator_;
 
     IMPLEMENT_REFCOUNTING(BrowserWindow);
     DISALLOW_COPY_AND_ASSIGN(BrowserWindow);

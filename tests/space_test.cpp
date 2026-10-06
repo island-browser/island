@@ -450,5 +450,31 @@ TEST(Space, IsMoveOnlyAndMovesItsWholeTabCollection) {
     EXPECT_EQ(moved.split()->first, first_id);
 }
 
+TEST(Space, PinningKeepsThePinnedGroupContiguousAtTheFront) {
+    Space space = MakeSpace();
+    space.AppendTab(MakeTab());
+    space.AppendTab(MakeTab());
+    space.AppendTab(MakeTab());
+    const TabId a = space.tabs()[0].id();
+    const TabId b = space.tabs()[1].id();
+    const TabId c = space.tabs()[2].id();
+    ASSERT_TRUE(space.SetTabPinned(c, true));
+    ASSERT_TRUE(space.SetTabPinned(b, true));
+    EXPECT_EQ(space.tabs()[0].id(), c);
+    EXPECT_EQ(space.tabs()[1].id(), b);
+    EXPECT_EQ(space.tabs()[2].id(), a);
+    EXPECT_EQ(space.pinned_count(), 2U);
+    // The active tab (c, the last appended) keeps its identity across moves.
+    EXPECT_EQ(space.active_tab_id(), c);
+
+    ASSERT_TRUE(space.SetTabPinned(c, false));
+    EXPECT_EQ(space.tabs()[0].id(), b);
+    EXPECT_EQ(space.tabs()[1].id(), c);
+    EXPECT_FALSE(space.tabs()[1].pinned());
+    EXPECT_EQ(space.pinned_count(), 1U);
+    EXPECT_TRUE(space.SetTabPinned(b, true));  // already pinned: no-op success
+    EXPECT_FALSE(space.SetTabPinned(TabId{987654}, true));
+}
+
 }  // namespace
 }  // namespace island

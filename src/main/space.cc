@@ -133,6 +133,33 @@ bool Space::MoveTab(std::size_t from_index, std::size_t to_index) {
     return true;
 }
 
+bool Space::SetTabPinned(TabId id, bool pinned) {
+    const std::optional<std::size_t> index = IndexOfTab(id);
+    if (!index.has_value()) {
+        return false;
+    }
+    if (tabs_[*index].pinned() == pinned) {
+        return true;
+    }
+    tabs_[*index].SetPinned(pinned);
+    // pinned_count() now counts the toggled tab when pinning, so the pinned
+    // group's last slot is count - 1; when unpinning, the first regular slot
+    // (just after the remaining pinned tabs) is count.
+    const std::size_t count = pinned_count();
+    const std::size_t target = pinned ? count - 1 : count;
+    return MoveTab(*index, target);
+}
+
+std::size_t Space::pinned_count() const noexcept {
+    std::size_t count = 0;
+    for (const Tab& tab : tabs_) {
+        if (tab.pinned()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 const std::optional<SplitPairing>& Space::split() const noexcept { return split_; }
 
 bool Space::SetSplit(SplitPairing pairing) {
