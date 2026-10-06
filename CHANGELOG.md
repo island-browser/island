@@ -43,6 +43,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Native builds on every target again: a GCC `-Werror` warning in the command palette, an MSVC
   parse error in a JSON test, the Windows arm64 runner's Visual Studio generator, and a macOS-only
   false positive in the agent descriptor-leak test.
+- Windows builds: the agent tests compile with MSVC's conforming preprocessor and UTF-8 literals,
+  and the macOS/Linux update script always writes `/`-separated paths, also when generated on a
+  Windows host.
 
 ## [0.4.0] - 2026-10-06
 

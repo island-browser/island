@@ -102,6 +102,13 @@ if(TARGET GTest::gtest_main)
     target_compile_definitions(island_agent_tests PRIVATE
         ISLAND_AGENT_BRIDGE_PATH="$<TARGET_FILE:island_mcp_bridge>"
         ISLAND_AGENT_FIXTURE_DIR="${ISLAND_AGENT_REPO_ROOT}/tests/agent/fixtures")
+    if(MSVC)
+        # The tests compare against raw string literals inside EXPECT_* macros;
+        # MSVC's traditional preprocessor rescans those as ordinary literals
+        # (C2017, C3850), and narrow literals with \u escapes need a UTF-8
+        # execution charset instead of the code page (C4566).
+        target_compile_options(island_agent_tests PRIVATE /Zc:preprocessor /utf-8)
+    endif()
     add_dependencies(island_agent_tests island_mcp_bridge)
     gtest_discover_tests(island_agent_tests)
 endif()
