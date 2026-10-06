@@ -13,6 +13,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Changed
+
+- New "Graphite" design language across the browser: neutral near-black and white surfaces,
+  1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the
+  space tint is now a faint cast on the sidebar instead of a colored wash.
+
 ## [0.4.0] - 2026-10-06
 
 ### Added

@@ -47,13 +47,13 @@ constexpr int kMinimumWindowWidth = 800;
 constexpr int kMinimumWindowHeight = 560;
 
 constexpr std::string_view kDefaultSpaceName = "Default";
-constexpr ArgbColor kDefaultSpaceColor{0xFF5B8DEF};
+constexpr ArgbColor kDefaultSpaceColor{0xFF0090FF};
 // Fixed palette for spaces created through New Space, cycled in creation order
 // so the switcher's color marks stay distinguishable. The default space keeps
 // the palette's first entry.
 constexpr std::array<ArgbColor, 5> kSpaceColorPalette{
-    ArgbColor{0xFF5B8DEF}, ArgbColor{0xFF34A853}, ArgbColor{0xFFFBBC05},
-    ArgbColor{0xFFEA4335}, ArgbColor{0xFF9334E6},
+    ArgbColor{0xFF0090FF}, ArgbColor{0xFF30A46C}, ArgbColor{0xFFFFB224},
+    ArgbColor{0xFFE5484D}, ArgbColor{0xFF8E4EC6},
 };
 
 // The per-user home root the import detection probes under (mirrors the

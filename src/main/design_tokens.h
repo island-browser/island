@@ -30,8 +30,8 @@ struct ChromeTokens {
     ArgbColor border;
     ArgbColor accent;
     int rail_width_dip = 286;
-    int radius_small_dip = 8;
-    int radius_medium_dip = 12;
+    int radius_small_dip = 6;
+    int radius_medium_dip = 10;
     int spacing_1_dip = 4;
     int spacing_2_dip = 8;
     int spacing_3_dip = 12;
@@ -43,7 +43,7 @@ struct ChromeTokens {
     [[nodiscard]] static ChromeTokens ForTheme(ChromeTheme theme) noexcept;
 
     // Arc-style space theming, applied at runtime on top of the contract
-    // tokens: the canvas, rail, and hairlines take a soft wash of the active
+    // tokens: the canvas, rail, and hairlines take a faint cast of the active
     // space's color, and the accent becomes that color, darkened (light) or
     // lightened (dark) until it keeps 3:1 contrast against the surface. Text
     // tokens never change, and the wash is light enough to keep body text at

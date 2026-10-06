@@ -27,8 +27,8 @@ TEST(ChromeTokens, MixesAndMeasuresContrastLikeWcag) {
 TEST(ChromeTokens, SpaceTintKeepsTextReadableAndTheAccentVisible) {
     // The window's space palette plus deliberately hard cases (pale yellow,
     // near-white, near-black).
-    const ArgbColor spaces[] = {{0xFF5B8DEFU}, {0xFF34A853U}, {0xFFFBBC05U}, {0xFFEA4335U},
-                                {0xFF9334E6U}, {0xFFFFF7AEU}, {0xFFFAFAFAU}, {0xFF111111U}};
+    const ArgbColor spaces[] = {{0xFF0090FFU}, {0xFF30A46CU}, {0xFFFFB224U}, {0xFFE5484DU},
+                                {0xFF8E4EC6U}, {0xFFFFF7AEU}, {0xFFFAFAFAU}, {0xFF111111U}};
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
         const ChromeTokens base = ChromeTokens::ForTheme(theme);
         for (const ArgbColor space : spaces) {
@@ -49,25 +49,25 @@ TEST(ChromeTokens, SpaceTintKeepsTextReadableAndTheAccentVisible) {
 TEST(ChromeTokens, ProvidesTheExactLightSemanticValues) {
     const ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
 
-    EXPECT_EQ(tokens.background.argb, 0xFFF3F0E9U);
-    EXPECT_EQ(tokens.surface.argb, 0xFFFFFEFBU);
-    EXPECT_EQ(tokens.surface_secondary.argb, 0xFFECE9E2U);
-    EXPECT_EQ(tokens.text.argb, 0xFF18303AU);
-    EXPECT_EQ(tokens.text_secondary.argb, 0xFF687A7DU);
-    EXPECT_EQ(tokens.border.argb, 0xFFD8D8D0U);
-    EXPECT_EQ(tokens.accent.argb, 0xFF168C99U);
+    EXPECT_EQ(tokens.background.argb, 0xFFFAFAFAU);
+    EXPECT_EQ(tokens.surface.argb, 0xFFFFFFFFU);
+    EXPECT_EQ(tokens.surface_secondary.argb, 0xFFF2F2F2U);
+    EXPECT_EQ(tokens.text.argb, 0xFF0A0A0AU);
+    EXPECT_EQ(tokens.text_secondary.argb, 0xFF666666U);
+    EXPECT_EQ(tokens.border.argb, 0xFFE5E5E5U);
+    EXPECT_EQ(tokens.accent.argb, 0xFF0068D6U);
 }
 
 TEST(ChromeTokens, ProvidesTheExactDarkSemanticValues) {
     const ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kDark);
 
-    EXPECT_EQ(tokens.background.argb, 0xFF0D1B26U);
-    EXPECT_EQ(tokens.surface.argb, 0xFF142633U);
-    EXPECT_EQ(tokens.surface_secondary.argb, 0xFF1B3040U);
-    EXPECT_EQ(tokens.text.argb, 0xFFEAF3F3U);
-    EXPECT_EQ(tokens.text_secondary.argb, 0xFF9CB0B5U);
-    EXPECT_EQ(tokens.border.argb, 0xFF29414EU);
-    EXPECT_EQ(tokens.accent.argb, 0xFF168C99U);
+    EXPECT_EQ(tokens.background.argb, 0xFF0A0A0AU);
+    EXPECT_EQ(tokens.surface.argb, 0xFF111111U);
+    EXPECT_EQ(tokens.surface_secondary.argb, 0xFF1A1A1AU);
+    EXPECT_EQ(tokens.text.argb, 0xFFEDEDEDU);
+    EXPECT_EQ(tokens.text_secondary.argb, 0xFFA1A1A1U);
+    EXPECT_EQ(tokens.border.argb, 0xFF2A2A2AU);
+    EXPECT_EQ(tokens.accent.argb, 0xFF3291FFU);
 }
 
 TEST(ChromeTokens, UsesTheSpecifiedLayoutAndFontTokensInEveryTheme) {
@@ -75,8 +75,8 @@ TEST(ChromeTokens, UsesTheSpecifiedLayoutAndFontTokensInEveryTheme) {
         const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
 
         EXPECT_EQ(tokens.rail_width_dip, 286);
-        EXPECT_EQ(tokens.radius_small_dip, 8);
-        EXPECT_EQ(tokens.radius_medium_dip, 12);
+        EXPECT_EQ(tokens.radius_small_dip, 6);
+        EXPECT_EQ(tokens.radius_medium_dip, 10);
         EXPECT_EQ(tokens.spacing_1_dip, 4);
         EXPECT_EQ(tokens.spacing_2_dip, 8);
         EXPECT_EQ(tokens.spacing_3_dip, 12);

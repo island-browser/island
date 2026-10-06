@@ -35,11 +35,11 @@ namespace island {
 namespace {
 
 constexpr std::string_view kDefaultSpaceName = "Default";
-constexpr SpaceColor kDefaultSpaceColor{0xFF5B8DEF};
+constexpr SpaceColor kDefaultSpaceColor{0xFF0090FF};
 // browser_window.cc's kSpaceColorPalette entries 2 and 3: the second and third
 // space created through New Space take these marks.
-constexpr SpaceColor kSecondPaletteColor{0xFF34A853};
-constexpr SpaceColor kThirdPaletteColor{0xFFFBBC05};
+constexpr SpaceColor kSecondPaletteColor{0xFF30A46C};
+constexpr SpaceColor kThirdPaletteColor{0xFFFFB224};
 
 CefRefPtr<BrowserWindow> MakeWindow() {
     return BrowserWindow::CreateHeadlessForTest("data:text/html,Island");
