@@ -13,6 +13,18 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Added
+
+- Installers next to every release archive: a macOS `.dmg` to drag Island onto Applications, a
+  Debian/Ubuntu `.deb` (installs to `/opt/island-browser`, adds the `island-browser` command and
+  a menu entry), and a Windows `-setup.exe` that installs per user without administrator rights,
+  with a Start menu entry and an uninstaller.
+
+### Fixed
+
+- macOS: a downloaded Island no longer opens as "damaged and can't be opened". The app bundle is
+  now ad-hoc signed, so Gatekeeper offers "Open Anyway" in Privacy & Security instead.
+
 ## [0.5.0] - 2026-10-06
 
 ### Added

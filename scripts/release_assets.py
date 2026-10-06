@@ -8,11 +8,11 @@
     python3 scripts/release_assets.py --staging staging --version 0.4.0 --output release-dist
 
 `--staging` holds the downloaded `unsigned-candidate-<version>-<target>` artifacts, each with
-one archive and the `SHA256SUMS.txt` that `scripts/package.py` wrote next to it (any directory
-depth). The command verifies every archive against its own checksum line, requires exactly one
-archive per target (all six), copies them into `--output`, and writes a combined
-`SHA256SUMS.txt` there: one `<sha256>  <file name>` line per archive, sorted by file name, LF
-line endings. The in-browser updater verifies downloads against that exact file.
+one archive, one installer from `scripts/installers.py` (`.dmg`, `.deb`, or `-setup.exe`), and the
+`SHA256SUMS.txt` written next to them (any directory depth). The command verifies every file
+against its own checksum line, requires exactly one archive and one installer per target (all
+six), copies them into `--output`, and writes a combined `SHA256SUMS.txt` there: one
+`<sha256>  <file name>` line per file, sorted by file name, LF line endings. The in-browser updater verifies downloads against that exact file.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 from typing import Final
 
-from package import SEMVER, Target, archive_name
+from package import SEMVER, release_files
 
 SUMS_NAME: Final = "SHA256SUMS.txt"
 
@@ -59,7 +59,7 @@ def _parse_sums(path: Path) -> dict[str, str]:
 def expected_archives(version: str) -> list[str]:
     if SEMVER.fullmatch(version) is None or "+" in version:
         raise AssetError(f"version must be SemVer without build metadata, got {version!r}")
-    return sorted(archive_name(version, target) for target in Target)
+    return release_files(version)
 
 
 def assemble(staging: Path, version: str, output: Path) -> list[tuple[str, str]]:
@@ -88,7 +88,7 @@ def assemble(staging: Path, version: str, output: Path) -> list[tuple[str, str]]
     missing = [name for name in expected if name not in found]
     unexpected = sorted(name for name in found if name not in expected)
     if missing or unexpected:
-        raise AssetError("archive set does not match the six targets for "
+        raise AssetError("file set does not match the six targets for "
                          f"{version}: missing {missing}, unexpected {unexpected}")
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):

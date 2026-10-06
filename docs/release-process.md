@@ -38,9 +38,12 @@ GitHub **prereleases** — never a stable release:
 - `v<VERSION>`: created once, from a build of the commit tagged `v<VERSION>` (or of the commit
   that bumped `VERSION`, when no tag exists yet). Title `Island <VERSION> (unsigned)`, body from
   `python3 scripts/version.py notes <VERSION>`. Never replaced.
-- Assets on both: `island_browser-<version>-<target>.zip|.tar.gz` for the six targets and one
-  `SHA256SUMS.txt` (`<sha256>  <file name>` per archive, sorted, LF), built by
-  `scripts/release_assets.py`.
+- Assets on both: `island_browser-<version>-<target>.zip|.tar.gz` for the six targets (the
+  portable builds the in-browser updater installs), one installer per target from
+  `scripts/installers.py` — `<target>.dmg` (ad-hoc signed `Island.app` plus an `Applications`
+  link), `<target>.deb` (installs to `/opt/island-browser`), `<target>-setup.exe` (per-user Inno
+  Setup installer) — and one `SHA256SUMS.txt` (`<sha256>  <file name>` per file, sorted, LF),
+  built by `scripts/release_assets.py`.
 
 Note that `<VERSION>-nightly.N` sorts *below* `<VERSION>` in SemVer precedence; treat `nightly`
 as its own channel rather than comparing it to version tags. Because every release is a

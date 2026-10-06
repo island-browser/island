@@ -15,8 +15,10 @@ name: Build and publish unsigned prereleases
 #   build so its tag moves to the built commit. It only moves forward along main.
 # - Package version: <VERSION> for a build that creates v<VERSION>; otherwise
 #   <VERSION>-nightly.<run number>. Each release carries the six archives
-#   island_browser-<version>-<target>.<zip|tar.gz> and one SHA256SUMS.txt with a
-#   "<sha256>  <file name>" line per archive (scripts/release_assets.py).
+#   island_browser-<version>-<target>.<zip|tar.gz>, one installer per target
+#   (scripts/installers.py: <target>.dmg, <target>.deb, <target>-setup.exe), and one
+#   SHA256SUMS.txt with a "<sha256>  <file name>" line per file
+#   (scripts/release_assets.py).
 on:
   push:
     branches:
@@ -33,6 +35,7 @@ on:
       - scripts/package.py
       - scripts/package_resources.py
       - scripts/release_assets.py
+      - scripts/installers.py
       - .github/workflows/build-release.yml
       - .github/workflows/package.yml
   workflow_dispatch:
@@ -174,7 +177,7 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Download and assemble the six archives
+      - name: Download and assemble the archives and installers
         shell: bash
         run: |
           set -euo pipefail
@@ -197,12 +200,16 @@ jobs:
 
           ---
 
-          **Unsigned prerelease.** These archives are not code-signed or notarized
-          (\`build-metadata.json\`: \`signed: false\`, \`notarized: false\`,
-          \`publicReleaseEligible: false\`). macOS Gatekeeper will refuse to open the app until you
-          allow it in System Settings > Privacy & Security (or run
-          \`xattr -dr com.apple.quarantine island_browser.app\`); Windows SmartScreen may warn.
-          Verify each download against \`SHA256SUMS.txt\`.
+          **Install:** macOS: open the \`.dmg\` and drag Island to Applications. Windows: run
+          \`-setup.exe\` (no administrator rights needed). Linux: \`sudo apt install ./<file>.deb\`.
+          The \`.zip\` / \`.tar.gz\` archives are the portable builds the in-browser updater uses.
+
+          **Unsigned prerelease.** These builds are not code-signed with a Developer ID or
+          notarized (the macOS app is ad-hoc signed; \`build-metadata.json\`: \`signed: false\`,
+          \`notarized: false\`, \`publicReleaseEligible: false\`). On first launch macOS asks you to
+          allow Island in System Settings > Privacy & Security > Open Anyway (or run
+          \`xattr -dr com.apple.quarantine /Applications/Island.app\`); Windows SmartScreen may
+          warn ("More info" > "Run anyway"). Verify each download against \`SHA256SUMS.txt\`.
 
           Built from \`${SHA}\` by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}.
           EOF
@@ -257,7 +264,7 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Download and assemble the six archives
+      - name: Download and assemble the archives and installers
         shell: bash
         run: |
           set -euo pipefail
@@ -296,12 +303,16 @@ jobs:
 
           ---
 
-          **Unsigned prerelease.** These archives are not code-signed or notarized
-          (\`build-metadata.json\`: \`signed: false\`, \`notarized: false\`,
-          \`publicReleaseEligible: false\`). macOS Gatekeeper will refuse to open the app until you
-          allow it in System Settings > Privacy & Security (or run
-          \`xattr -dr com.apple.quarantine island_browser.app\`); Windows SmartScreen may warn.
-          Verify each download against \`SHA256SUMS.txt\`.
+          **Install:** macOS: open the \`.dmg\` and drag Island to Applications. Windows: run
+          \`-setup.exe\` (no administrator rights needed). Linux: \`sudo apt install ./<file>.deb\`.
+          The \`.zip\` / \`.tar.gz\` archives are the portable builds the in-browser updater uses.
+
+          **Unsigned prerelease.** These builds are not code-signed with a Developer ID or
+          notarized (the macOS app is ad-hoc signed; \`build-metadata.json\`: \`signed: false\`,
+          \`notarized: false\`, \`publicReleaseEligible: false\`). On first launch macOS asks you to
+          allow Island in System Settings > Privacy & Security > Open Anyway (or run
+          \`xattr -dr com.apple.quarantine /Applications/Island.app\`); Windows SmartScreen may
+          warn ("More info" > "Run anyway"). Verify each download against \`SHA256SUMS.txt\`.
 
           Built from \`${SHA}\` by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}.
           EOF

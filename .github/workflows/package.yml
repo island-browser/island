@@ -141,6 +141,11 @@ jobs:
           mkdir -p ci-logs
           ctest --test-dir build -C Release --output-on-failure --no-tests=error \
             --output-junit junit.xml 2>&1 | tee ci-logs/test-${{ matrix.target }}.log
+      - name: Ad-hoc sign the app bundle
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/installers.py macos-sign build/src/main/island_browser.app 2>&1 | tee sign.log
       - name: Package and verify candidate
         shell: bash
         run: |
@@ -164,6 +169,14 @@ jobs:
               metadata = json.loads(archive.read("build-metadata.json"))
           assert metadata == {"format": "zip", "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
           PY
+      - name: Build the disk image
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/installers.py build --target '${{ matrix.target }}' \
+            --version '${{ needs.prepare-candidate.outputs.version }}' --output-dir dist \
+            --app build/src/main/island_browser.app 2>&1 | tee installer.log
+          (cd dist && shasum -a 256 -c SHA256SUMS.txt)
       - name: Upload unsigned candidate
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -181,6 +194,8 @@ jobs:
             ci-logs/**
             dependency-receipt.txt
             package.log
+            sign.log
+            installer.log
             junit.xml
             build/CMakeCache.txt
           if-no-files-found: warn
@@ -273,6 +288,13 @@ jobs:
               metadata = json.load(member)
           assert metadata == {"format": "tar.gz", "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
           PY
+      - name: Build the Debian package
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/installers.py build --target '${{ matrix.target }}' \
+            --version '${{ needs.prepare-candidate.outputs.version }}' --output-dir dist 2>&1 | tee installer.log
+          (cd dist && sha256sum -c SHA256SUMS.txt)
       - name: Upload unsigned candidate
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -290,6 +312,8 @@ jobs:
             ci-logs/**
             dependency-receipt.txt
             package.log
+            sign.log
+            installer.log
             junit.xml
             build/CMakeCache.txt
           if-no-files-found: warn
@@ -388,6 +412,28 @@ jobs:
               metadata = json.loads(archive.read("build-metadata.json"))
           assert metadata == {"format": "zip", "notarized": False, "publicReleaseEligible": False, "signed": False, "target": target, "version": version}
           '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the setup program
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Inno Setup ships on windows-2022; install it where the image lacks it.
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup *\ISCC.exe", "$env:ProgramFiles\Inno Setup *\ISCC.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) {
+            if (Get-Command choco -ErrorAction SilentlyContinue) {
+              choco install innosetup --yes --no-progress
+            } else {
+              Invoke-WebRequest -Uri 'https://jrsoftware.org/download.php/is.exe' -OutFile "$env:RUNNER_TEMP\innosetup.exe"
+              Start-Process -Wait -FilePath "$env:RUNNER_TEMP\innosetup.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/ALLUSERS'
+            }
+          }
+          python scripts/installers.py build --target '${{ matrix.target }}' --version '${{ needs.prepare-candidate.outputs.version }}' --output-dir dist 2>&1 | Tee-Object -FilePath installer.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Content dist/SHA256SUMS.txt | ForEach-Object {
+            $digest, $name = $_ -split '\s+', 2
+            $actual = (Get-FileHash -Algorithm SHA256 "dist/$name").Hash.ToLowerInvariant()
+            if ($actual -ne $digest) { throw "checksum mismatch for $name" }
+          }
       - name: Upload unsigned candidate
         if: success()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -405,6 +451,8 @@ jobs:
             ci-logs/**
             dependency-receipt.txt
             package.log
+            sign.log
+            installer.log
             junit.xml
             build/CMakeCache.txt
           if-no-files-found: warn
