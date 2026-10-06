@@ -7,6 +7,8 @@
 
 #include "active_tab_provider.h"
 #include "agent_navigation.h"
+#include "agent_panel.h"
+#include "agent_session.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
 #include "browser_chrome.h"
@@ -63,6 +65,7 @@ class BrowserWindow : public CefClient,
                       public CommandPaletteHost,
                       public SpaceRenameOverlayHost,
                       public WelcomeFlowHost,
+                      public AgentPanelDelegate,
                       public NavigationObserver {
   public:
     // |persist_session| stays false for the smoke run (a deterministic fixed
@@ -123,6 +126,18 @@ class BrowserWindow : public CefClient,
     void SetAddressValidatorForTest(AddressValidator validator) {
         address_validator_ = std::move(validator);
     }
+
+    // The ACP agent panel (Cmd/Ctrl+J): opens/closes the right-hand column,
+    // creating the panel and its session on first use. No-op without chrome.
+    void ToggleAgentPanel();
+    void SetAgentPanelOpen(bool open);
+    [[nodiscard]] bool agent_panel_open() const noexcept;
+    // The agent command the panel launches: ISLAND_AGENT_COMMAND, else the
+    // saved preference, else the built-in default.
+    [[nodiscard]] std::string ResolvedAgentCommand() const;
+    static constexpr std::string_view kDefaultAgentCommand =
+        "npx -y @zed-industries/claude-code-acp";
+    void OnAgentPanelMessage(const json::Value& message) override;
 
     // Welcome flow (first-run import + appearance). ShowWelcomeFlow is a
     // no-op without a window, like the palette seams.
@@ -269,6 +284,7 @@ class BrowserWindow : public CefClient,
         // Welcome flow: Escape dismisses ("just start browsing") while the
         // overlay is visible and is otherwise untouched.
         kWelcomeDismissAccelerator,
+        kToggleAgentPanelAccelerator,
     };
 
     explicit BrowserWindow(std::string initial_url, bool persist_session = true);
@@ -314,6 +330,14 @@ class BrowserWindow : public CefClient,
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     void AppendTabToActiveSpace(std::string startup_url);
     void ShutdownAgentHost();
+    void EnsureAgentSession();
+    [[nodiscard]] agent::AgentSessionConfig AgentConfig(std::string command) const;
+    [[nodiscard]] std::string AgentPanelStateJson() const;
+    [[nodiscard]] std::string ActiveTabAgentContext() const;
+    // Coalesces panel re-renders (streaming chunks arrive in bursts).
+    void ScheduleAgentPanelRender();
+    void FlushAgentPanelRender();
+    void CloseAgentPanelAndSession();
     // Session restore: rebuilds spaces, tabs, active selections, and split
     // pairings from the session file. Returns false and leaves the model in
     // its fresh-install shape for every non-recoverable outcome (missing,
@@ -389,6 +413,13 @@ class BrowserWindow : public CefClient,
     // Created in OnWindowCreated for persisted (non-smoke) windows only.
     std::unique_ptr<WindowAgentHost> agent_host_;
     AddressValidator address_validator_;
+    // The sidebar agent: its panel view and the ACP session behind it.
+    std::unique_ptr<AgentPanel> agent_panel_;
+    std::unique_ptr<agent::AgentSession> agent_session_;
+    bool agent_panel_render_scheduled_ = false;
+    // The window's current width in DIP; the snapshot's rail/content split is
+    // derived from it (the agent panel column is not part of either).
+    int window_width_dip_ = 1440;
 
     IMPLEMENT_REFCOUNTING(BrowserWindow);
     DISALLOW_COPY_AND_ASSIGN(BrowserWindow);

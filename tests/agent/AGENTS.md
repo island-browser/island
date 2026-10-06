@@ -20,6 +20,9 @@ defined in `src/agent/CMakeLists.txt` (not `tests/CMakeLists.txt`) so the standa
 | `agent_endpoint_test.cpp` | Request policy, live HTTP round trips, concurrency, discovery file, stdio bridge end to end |
 | `acp_client_test.cpp` | ACP handshake, HTTP vs stdio MCP hand-off, streaming updates, permissions, cancel, failures |
 | `agent_process_test.cpp` | Command-line splitting, child stdio, exit codes, stubborn-child termination |
+| `agent_session_test.cpp` | Full conversation against a real fake agent subprocess (`fixtures/fake_acp_agent.py`): queued first prompt, streaming, permissions, cancel, crash + relaunch |
+| `fixtures/fake_acp_agent.py` | Minimal ACP agent over stdio used by the session tests (needs `python3`) |
+| `panel/agent_panel_behavior.js` | Optional Playwright check of `src/main/agent_panel.html` (messages, keys, no HTML injection) |
 | `agent_transcript_test.cpp` | Event folding, in-place tool/plan updates, permission resolution, bounds |
 
 ## For AI Agents

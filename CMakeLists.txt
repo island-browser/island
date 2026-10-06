@@ -117,6 +117,16 @@ option(ISLAND_ENABLE_SEARCH "Build Island search index modules" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 
+# Embed the agent panel page as a byte array (string literals hit MSVC's
+# length limit). Reconfigures automatically when the HTML changes.
+set(ISLAND_AGENT_PANEL_HTML "${CMAKE_SOURCE_DIR}/src/main/agent_panel.html")
+set(ISLAND_AGENT_PANEL_HTML_CC "${CMAKE_BINARY_DIR}/generated/agent_panel_html.cc")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ISLAND_AGENT_PANEL_HTML}")
+file(READ "${ISLAND_AGENT_PANEL_HTML}" _island_agent_panel_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ISLAND_AGENT_PANEL_BYTES
+       "${_island_agent_panel_hex}")
+configure_file("${CMAKE_SOURCE_DIR}/cmake/agent_panel_html.cc.in" "${ISLAND_AGENT_PANEL_HTML_CC}" @ONLY)
+
 add_subdirectory(tests)
 
 # The AI-agent kernel (MCP tools endpoint, ACP client) is CEF-free and always

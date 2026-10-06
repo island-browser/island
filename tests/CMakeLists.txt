@@ -16,6 +16,7 @@ FetchContent_MakeAvailable(googletest)
 add_executable(island_tests
     address_bar_model_test.cpp
     address_policy_test.cpp
+    agent_panel_test.cpp
     bookmark_import_test.cpp
     bookmark_store_test.cpp
     browser_window_test.cpp
@@ -38,6 +39,8 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/agent_navigation.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/agent_panel.cc"
+    "${ISLAND_AGENT_PANEL_HTML_CC}"
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_store.cc"

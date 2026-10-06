@@ -207,14 +207,17 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
   public:
     explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
 
-    void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> browser_content) {
+    void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> browser_content,
+                     CefRefPtr<CefPanel> agent_panel) {
         rail_ = rail;
         browser_content_ = browser_content;
+        agent_panel_ = agent_panel;
     }
 
     void SetTokens(ChromeTokens tokens) { tokens_ = tokens; }
 
     void SetSidebarRevealed(bool revealed) { sidebar_revealed_ = revealed; }
+    void SetAgentPanelOpen(bool open) { agent_panel_open_ = open; }
 
     void OnLayoutChanged(CefRefPtr<CefView>, const CefRect& new_bounds) override {
         if (rail_ == nullptr || browser_content_ == nullptr) {
@@ -226,11 +229,15 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
                                             .y = new_bounds.y,
                                             .width = new_bounds.width,
                                             .height = new_bounds.height},
-                                           tokens_, sidebar_revealed_);
+                                           tokens_, sidebar_revealed_, agent_panel_open_);
         ApplyBounds(rail_, geometry.rail_bounds);
         ApplyBounds(browser_content_, geometry.browser_content_bounds);
         rail_->Layout();
         browser_content_->Layout();
+        if (agent_panel_ != nullptr) {
+            ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
+            agent_panel_->Layout();
+        }
     }
 
   private:
@@ -243,8 +250,10 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
 
     ChromeTokens tokens_;
     bool sidebar_revealed_ = kSidebarRevealedByDefault;
+    bool agent_panel_open_ = false;
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<CefPanel> agent_panel_;
 
     IMPLEMENT_REFCOUNTING(RootPanelDelegate);
 };
@@ -510,9 +519,24 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     browser_content_->AddChildView(browser_view_);
     browser_content_layout_->SetFlexForView(browser_view_, 1);
 
+    // The agent panel column floats on the same canvas as the page card: the
+    // gutter on its top, right, and bottom matches the content gutter, and the
+    // content's own right gutter separates the two.
+    agent_panel_ = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, 0)));
+    agent_panel_->SetID(static_cast<int>(ChromeViewId::kAgentPanel));
+    {
+        const int pad = BrowserContentPaddingDip();
+        CefBoxLayoutSettings settings;
+        settings.horizontal = static_cast<int>(true);
+        settings.inside_border_insets = CefInsets(pad, 0, pad, pad);
+        agent_panel_->SetToBoxLayout(settings);
+    }
+    agent_panel_->SetVisible(false);
+
     root_->AddChildView(sidebar_);
     root_->AddChildView(browser_content_);
-    root_delegate_->SetChildren(sidebar_, browser_content_);
+    root_->AddChildView(agent_panel_);
+    root_delegate_->SetChildren(sidebar_, browser_content_, agent_panel_);
     ApplyControlTheme();
     // Apply the hidden-by-default reveal state before the first layout so no
     // frame ever shows a rail the sidebar state says is collapsed.
@@ -832,6 +856,30 @@ void BrowserChrome::SetSidebarRevealed(bool revealed) {
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
+void BrowserChrome::SetAgentPanelView(CefRefPtr<CefView> view) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || view == nullptr || agent_panel_view_ != nullptr) {
+        return;
+    }
+    agent_panel_view_ = view;
+    agent_panel_->AddChildView(view);
+    CefRefPtr<CefBoxLayout> layout = agent_panel_->GetLayout()->AsBoxLayout();
+    if (layout != nullptr) {
+        layout->SetFlexForView(view, 1);
+    }
+}
+
+void BrowserChrome::SetAgentPanelOpen(bool open) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    agent_panel_open_ = open;
+    agent_panel_->SetVisible(open);
+    root_delegate_->SetAgentPanelOpen(open);
+    root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
+}
+
 void BrowserChrome::BeginAddressEditing() {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {
@@ -864,6 +912,10 @@ void BrowserChrome::Detach() {
         browser_content_->RemoveChildView(browser_view_);
     }
     browser_view_ = nullptr;
+    if (agent_panel_view_ != nullptr && agent_panel_ != nullptr) {
+        agent_panel_->RemoveChildView(agent_panel_view_);
+    }
+    agent_panel_view_ = nullptr;
 }
 
 void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
@@ -995,6 +1047,7 @@ void BrowserChrome::ApplyControlTheme() {
     root_->SetBackgroundColor(background.argb);
     sidebar_->SetBackgroundColor(rail.argb);
     browser_content_->SetBackgroundColor(browser_content.argb);
+    agent_panel_->SetBackgroundColor(browser_content.argb);
     // Rail-descendant panels are created with no delegate and would otherwise inherit
     // the window's primary background; painting them the rail color keeps the whole
     // column one uniform tinted surface so the floating card separates cleanly.

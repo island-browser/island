@@ -20,6 +20,12 @@ struct PrefsState {
     int version = kCurrentSchemaVersion;
     bool onboarding_completed = false;
     ThemePreference theme = ThemePreference::kSystem;
+    // The ACP agent the sidebar panel runs (a shell command line). Optional in
+    // the file; empty means "use the built-in default". Added without a schema
+    // bump because older files simply lack the keys.
+    std::string agent_command;
+    // Whether the agent panel was open at the last clean quit.
+    bool agent_panel_open = false;
 
     bool operator==(const PrefsState&) const = default;
 };

@@ -53,6 +53,7 @@ add_library(island_agent STATIC
     acp_client.cc
     agent_endpoint.cc
     agent_process.cc
+    agent_session.cc
     agent_transcript.cc
     browser_tools.cc
     http_client.cc
@@ -86,6 +87,7 @@ if(TARGET GTest::gtest_main)
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/acp_client_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_endpoint_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_process_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_session_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_transcript_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/browser_tools_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/json_util_test.cpp"
@@ -93,7 +95,8 @@ if(TARGET GTest::gtest_main)
     )
     target_link_libraries(island_agent_tests PRIVATE island_agent GTest::gtest_main)
     target_compile_definitions(island_agent_tests PRIVATE
-        ISLAND_AGENT_BRIDGE_PATH="$<TARGET_FILE:island_mcp_bridge>")
+        ISLAND_AGENT_BRIDGE_PATH="$<TARGET_FILE:island_mcp_bridge>"
+        ISLAND_AGENT_FIXTURE_DIR="${ISLAND_AGENT_REPO_ROOT}/tests/agent/fixtures")
     add_dependencies(island_agent_tests island_mcp_bridge)
     gtest_discover_tests(island_agent_tests)
 endif()

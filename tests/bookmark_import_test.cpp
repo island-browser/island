@@ -106,8 +106,7 @@ TEST(BookmarkImportTest, GivenTheEntryCapWhenParsedThenTheListStopsAtTheLimit) {
 TEST(BookmarkImportTest, GivenInstalledBrowsersWhenDetectedThenOnlyReadableOnesAreAvailable) {
     const std::filesystem::path home = TempHome("detect");
     // Chrome (Chromium-family path) and nothing else.
-    WriteFile(home / ChromeBookmarksPath(),
-              R"({"roots": {"bookmark_bar": {"children": []}}})");
+    WriteFile(home / ChromeBookmarksPath(), R"({"roots": {"bookmark_bar": {"children": []}}})");
 
     const std::vector<ImportSourceInfo> sources = DetectInstalledSources(home);
     ASSERT_FALSE(sources.empty());

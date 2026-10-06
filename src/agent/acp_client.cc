@@ -69,11 +69,17 @@ void AcpClient::Start(std::string cwd, std::vector<AcpMcpServer> mcp_servers) {
                                            .Set("version", Value::String("0.4.0"))));
 }
 
-bool AcpClient::Prompt(std::string_view text) {
+bool AcpClient::Prompt(std::string_view text, std::string_view context) {
     if (state_ != AcpState::kReady || text.empty()) return false;
-    Value prompt = Value::MakeArray().Push(Value::MakeObject()
-                                               .Set("type", Value::String("text"))
-                                               .Set("text", Value::String(std::string(text))));
+    Value prompt = Value::MakeArray();
+    if (!context.empty()) {
+        prompt.Push(Value::MakeObject()
+                        .Set("type", Value::String("text"))
+                        .Set("text", Value::String(std::string(context))));
+    }
+    prompt.Push(Value::MakeObject()
+                    .Set("type", Value::String("text"))
+                    .Set("text", Value::String(std::string(text))));
     SetState(AcpState::kPrompting);
     SendRequest("session/prompt", Value::MakeObject()
                                       .Set("sessionId", Value::String(session_id_))

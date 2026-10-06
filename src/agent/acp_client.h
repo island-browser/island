@@ -97,8 +97,10 @@ class AcpClient {
 
     // Sends initialize, then session/new once the agent answers.
     void Start(std::string cwd, std::vector<AcpMcpServer> mcp_servers);
-    // Sends one user turn. Returns false unless the session is ready.
-    bool Prompt(std::string_view text);
+    // Sends one user turn. Returns false unless the session is ready. A
+    // non-empty `context` goes first as its own text block (the browser's
+    // current tab, so the agent knows what "this page" means).
+    bool Prompt(std::string_view text, std::string_view context = {});
     // Cancels the running turn (session/cancel) and answers every open
     // permission request as cancelled, as the protocol requires.
     void Cancel();

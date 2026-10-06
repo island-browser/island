@@ -110,6 +110,14 @@ void IslandApp::ToggleSidebar() {
     }
 }
 
+void IslandApp::ToggleAgentPanel() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ToggleAgentPanel();
+    }
+}
+
 void IslandApp::RequestClose() {
     CEF_REQUIRE_UI_THREAD();
 

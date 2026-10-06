@@ -21,8 +21,12 @@ TEST(BrowserChromeContractTest, GivenTheChromeTreeWhenInspectedThenItHasOneRailA
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
 
     ASSERT_EQ(tree.id, ChromeViewId::kRoot);
-    ASSERT_EQ(tree.children.size(), 2U);
+    // Rail, page content, and the (zero-width while closed) agent panel column.
+    ASSERT_EQ(tree.children.size(), 3U);
     EXPECT_EQ(tree.children[0].id, ChromeViewId::kRail);
+    EXPECT_EQ(tree.children[1].id, ChromeViewId::kBrowserContent);
+    EXPECT_EQ(tree.children[2].id, ChromeViewId::kAgentPanel);
+    EXPECT_TRUE(tree.children[2].children.empty());
     ASSERT_NE(FindChild(tree, ChromeViewId::kBrowserContent), nullptr);
     const ChromeViewTreeNode* browser_content = FindChild(tree, ChromeViewId::kBrowserContent);
     ASSERT_EQ(browser_content->children.size(), 1U);
@@ -287,7 +291,37 @@ TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenTheTreeIsInspectedThenNone
     EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPaletteQuery), nullptr);
     EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPaletteProvider), nullptr);
     EXPECT_EQ(FindChild(tree, ChromeViewId::kSearchPaletteProviderName), nullptr);
-    ASSERT_EQ(tree.children.size(), 2U);
+    ASSERT_EQ(tree.children.size(), 3U);
+}
+
+TEST(BrowserChromeContractTest, GivenAnOpenAgentPanelWhenLaidOutThenItTakesTheRightColumn) {
+    ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
+    const DipRect root = {.x = 0, .y = 0, .width = 1440, .height = 900};
+    const int panel = BrowserChrome::AgentPanelWidthDip();
+
+    const ChromeGeometrySnapshot open = BrowserChrome::LayoutForBounds(root, tokens, true, true);
+    EXPECT_EQ(open.agent_panel_bounds,
+              (DipRect{.x = 1440 - panel, .y = 0, .width = panel, .height = 900}));
+    EXPECT_EQ(open.browser_content_bounds,
+              (DipRect{.x = 286, .y = 0, .width = 1440 - 286 - panel, .height = 900}));
+
+    const ChromeGeometrySnapshot closed = BrowserChrome::LayoutForBounds(root, tokens, true, false);
+    EXPECT_EQ(closed.agent_panel_bounds, (DipRect{.x = 1440, .y = 0, .width = 0, .height = 900}));
+    EXPECT_EQ(closed, BrowserChrome::LayoutForBounds(root, tokens));
+}
+
+TEST(BrowserChromeContractTest,
+     GivenANarrowWindowWhenTheAgentPanelOpensThenThePageKeepsItsMinimum) {
+    ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
+    const ChromeGeometrySnapshot compact = BrowserChrome::LayoutForBounds(
+        DipRect{.x = 0, .y = 0, .width = 800, .height = 560}, tokens, true, true);
+    EXPECT_EQ(compact.browser_content_bounds.width, BrowserChrome::MinimumBrowserContentWidthDip());
+    EXPECT_EQ(compact.agent_panel_bounds.width, 800 - 286 - 320);
+
+    const ChromeGeometrySnapshot tiny = BrowserChrome::LayoutForBounds(
+        DipRect{.x = 0, .y = 0, .width = 500, .height = 560}, tokens, true, true);
+    EXPECT_EQ(tiny.agent_panel_bounds.width, 0);
+    EXPECT_EQ(tiny.browser_content_bounds.width, 500 - 286);
 }
 
 }  // namespace

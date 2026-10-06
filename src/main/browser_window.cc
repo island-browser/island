@@ -12,16 +12,20 @@
 #include "app_resources.h"
 #include "cef_address_parser.h"
 #include "design_tokens.h"
+#include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
+#include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_color_ids.h"
 #include "include/cef_frame.h"
+#include "include/cef_task.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_fill_layout.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
+#include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "session_store.h"
 #include "window_agent_host.h"
@@ -61,6 +65,47 @@ std::filesystem::path UserBaseHome() {
     return home != nullptr && *home != '\0' ? std::filesystem::path(home)
                                             : std::filesystem::path(".");
 #endif
+}
+
+std::string CssColor(ArgbColor color) {
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string css = "#";
+    for (int shift = 20; shift >= 0; shift -= 4) {
+        css += kHex[(color.argb >> static_cast<unsigned>(shift)) & 0xFU];
+    }
+    return css;
+}
+
+std::string TrimmedCopy(std::string_view text) {
+    const std::size_t first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    const std::size_t last = text.find_last_not_of(" \t\r\n");
+    return std::string(text.substr(first, last - first + 1));
+}
+
+bool IsWebUrl(std::string_view url) {
+    return url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0;
+}
+
+// The stdio MCP bridge ships next to the browser binary; agents without MCP
+// over HTTP launch it. Empty when it is not there.
+std::string McpBridgePath() {
+    std::error_code error;
+    const std::filesystem::path binary = CurrentRuntimeBinaryPath();
+#if defined(_WIN32)
+    const std::filesystem::path bridge = binary.parent_path() / "island_mcp_bridge.exe";
+#else
+    const std::filesystem::path bridge = binary.parent_path() / "island_mcp_bridge";
+#endif
+    return std::filesystem::is_regular_file(bridge, error) ? bridge.string() : std::string();
+}
+
+void RunAgentTask(std::function<void()> task) {
+    if (task) {
+        task();
+    }
 }
 
 // The edge sliver is a bare fill panel; it only needs a preferred size so the
@@ -433,6 +478,202 @@ bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
     return true;
 }
 
+std::string BrowserWindow::ResolvedAgentCommand() const {
+    const char* const configured = std::getenv("ISLAND_AGENT_COMMAND");
+    if (configured != nullptr && *configured != '\0') {
+        return configured;
+    }
+    if (!prefs_.agent_command.empty()) {
+        return prefs_.agent_command;
+    }
+    return std::string(kDefaultAgentCommand);
+}
+
+agent::AgentSessionConfig BrowserWindow::AgentConfig(std::string command) const {
+    agent::AgentSessionConfig config;
+    config.command = command.empty() ? ResolvedAgentCommand() : std::move(command);
+    config.cwd = UserBaseHome();
+    const agent::AgentEndpoint* endpoint =
+        agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
+    if (endpoint != nullptr && endpoint->running()) {
+        config.mcp_servers.push_back({.name = "island-browser",
+                                      .url = endpoint->url(),
+                                      .bearer_token = endpoint->token(),
+                                      .bridge_command = McpBridgePath()});
+    }
+    return config;
+}
+
+void BrowserWindow::EnsureAgentSession() {
+    if (agent_session_ != nullptr) {
+        return;
+    }
+    // Process output is hopped onto the UI thread; the session drops tasks
+    // that arrive after it was destroyed.
+    agent_session_ = std::make_unique<agent::AgentSession>(
+        [](std::function<void()> task) {
+            CefPostTask(TID_UI,
+                        CefCreateClosureTask(base::BindOnce(&RunAgentTask, std::move(task))));
+        },
+        [this] { ScheduleAgentPanelRender(); });
+    agent_session_->Configure(AgentConfig({}));
+}
+
+bool BrowserWindow::agent_panel_open() const noexcept {
+    return chrome_ != nullptr && chrome_->agent_panel_open();
+}
+
+void BrowserWindow::ToggleAgentPanel() { SetAgentPanelOpen(!agent_panel_open()); }
+
+void BrowserWindow::SetAgentPanelOpen(bool open) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    if (open && agent_panel_ == nullptr) {
+        EnsureAgentSession();
+        agent_panel_ = std::make_unique<AgentPanel>(*this);
+        chrome_->SetAgentPanelView(agent_panel_->view());
+    }
+    chrome_->SetAgentPanelOpen(open);
+    ApplySidebarState();
+    PublishChromeSnapshot();
+    if (prefs_.agent_panel_open != open) {
+        prefs_.agent_panel_open = open;
+        SavePrefs();
+    }
+    if (open) {
+        ScheduleAgentPanelRender();
+        agent_panel_->FocusInput();
+    } else {
+        FocusBrowserView();
+    }
+}
+
+std::string BrowserWindow::ActiveTabAgentContext() const {
+    const Tab* tab = active_tab();
+    if (tab == nullptr) {
+        return {};
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    if (!IsWebUrl(nav.url)) {
+        return {};
+    }
+    return "The user is looking at the tab \"" + nav.page_title + "\" (" + nav.url +
+           ") in the Island browser. Use the island-browser tools (page_read, page_snapshot, "
+           "page_click, page_type, browser_*) to see and act on the browser.";
+}
+
+std::string BrowserWindow::AgentPanelStateJson() const {
+    const ChromeTokens tokens = ChromeTokens::ForTheme(chrome_snapshot_.theme);
+    json::Value theme =
+        json::Value::MakeObject()
+            .Set("bg", json::Value::String(CssColor(tokens.background)))
+            .Set("surface", json::Value::String(CssColor(tokens.surface)))
+            .Set("surface_2", json::Value::String(CssColor(tokens.surface_secondary)))
+            .Set("text", json::Value::String(CssColor(tokens.text)))
+            .Set("text_2", json::Value::String(CssColor(tokens.text_secondary)))
+            .Set("border", json::Value::String(CssColor(tokens.border)))
+            .Set("accent", json::Value::String(CssColor(tokens.accent)))
+            .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
+    json::Value context = json::Value::Null();
+    if (const Tab* tab = active_tab(); tab != nullptr) {
+        const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+        if (IsWebUrl(nav.url)) {
+            context = json::Value::MakeObject()
+                          .Set("title", json::Value::String(nav.page_title))
+                          .Set("url", json::Value::String(nav.url));
+        }
+    }
+    const agent::AgentEndpoint* endpoint =
+        agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
+    json::Value state =
+        json::Value::MakeObject()
+            .Set("theme", std::move(theme))
+            .Set("context", std::move(context))
+            .Set("endpoint",
+                 json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
+                                                                                : std::string()));
+    if (agent_session_ != nullptr) {
+        std::optional<json::Value> session = json::Parse(agent_session_->StateJson());
+        if (session.has_value()) {
+            state.Set("session", std::move(*session));
+        }
+    }
+    return json::Serialize(state);
+}
+
+void BrowserWindow::ScheduleAgentPanelRender() {
+    if (agent_panel_ == nullptr || agent_panel_render_scheduled_ || closing_) {
+        return;
+    }
+    agent_panel_render_scheduled_ = true;
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(&BrowserWindow::FlushAgentPanelRender,
+                                                           CefRefPtr<BrowserWindow>(this))),
+                       30);
+}
+
+void BrowserWindow::FlushAgentPanelRender() {
+    agent_panel_render_scheduled_ = false;
+    if (closing_ || agent_panel_ == nullptr) {
+        return;
+    }
+    agent_panel_->Render(AgentPanelStateJson());
+}
+
+void BrowserWindow::OnAgentPanelMessage(const json::Value& message) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    const std::string_view type = message.StringOr("type", "");
+    if (type == "ready") {
+        FlushAgentPanelRender();
+        return;
+    }
+    if (type == "open_url") {
+        static_cast<void>(OpenNewTab(message.StringOr("url", "")));
+        return;
+    }
+    if (type == "close_panel") {
+        SetAgentPanelOpen(false);
+        return;
+    }
+    EnsureAgentSession();
+    if (type == "send") {
+        const std::string context =
+            message.BoolOr("include_context", true) ? ActiveTabAgentContext() : std::string();
+        static_cast<void>(agent_session_->Send(std::string(message.StringOr("text", "")), context));
+    } else if (type == "cancel") {
+        agent_session_->Cancel();
+    } else if (type == "permission") {
+        const json::Value* option = message.FindMember("option_id");
+        agent_session_->ResolvePermission(message.IntOr("request_id", -1),
+                                          option != nullptr && option->IsString()
+                                              ? std::optional<std::string>(option->string_val)
+                                              : std::nullopt);
+    } else if (type == "new_chat") {
+        agent_session_->NewChat();
+    } else if (type == "start") {
+        const std::string command = TrimmedCopy(message.StringOr("command", ""));
+        if (command != prefs_.agent_command) {
+            prefs_.agent_command = command;
+            SavePrefs();
+        }
+        static_cast<void>(agent_session_->Start(AgentConfig(command)));
+    }
+    ScheduleAgentPanelRender();
+}
+
+void BrowserWindow::CloseAgentPanelAndSession() {
+    if (agent_panel_ != nullptr) {
+        agent_panel_->Close();
+        agent_panel_.reset();
+    }
+    agent_session_.reset();
+}
+
 void BrowserWindow::ShutdownAgentHost() {
     if (agent_host_ != nullptr) {
         agent_host_->Shutdown();
@@ -724,6 +965,7 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
         UpdateChromeCollections();
     }
     PublishChromeSnapshot();
+    ScheduleAgentPanelRender();
     if (navigation_observer_ != nullptr) {
         navigation_observer_->OnNavigationChanged(snapshot);
     }
@@ -929,6 +1171,8 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
                             true);
     window_->SetAccelerator(kWelcomeDismissAccelerator, kVirtualKeyEscape, false, false, false,
                             true);
+    // Cmd/Ctrl+J toggles the agent panel (the NSMenu owns it on macOS).
+    window_->SetAccelerator(kToggleAgentPanelAccelerator, 'J', false, true, false, true);
 
     CreateHoverSliver();
     ApplySidebarState();
@@ -943,6 +1187,9 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     if (persist_session_) {
         agent_host_ = std::make_unique<WindowAgentHost>(*this);
         static_cast<void>(agent_host_->StartEndpoint(agent::DefaultDiscoveryFilePath()));
+        if (prefs_.agent_panel_open) {
+            SetAgentPanelOpen(true);
+        }
     }
     // The seam only observes; every chrome mutation it triggers is posted onto the
     // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
@@ -963,6 +1210,7 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
 
     closing_ = true;
     ShutdownAgentHost();
+    CloseAgentPanelAndSession();
     DetachChromeAndObservers();
     window_ = nullptr;
 
@@ -978,6 +1226,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         return;
     }
 
+    window_width_dip_ = new_bounds.width;
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
@@ -1032,8 +1281,10 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         // carry no unload handlers, so the cancel path TryCloseBrowser allows
         // for cannot arise in practice.
         closing_ = true;
-        // No agent tool call may touch the model once teardown starts.
+        // No agent tool call may touch the model once teardown starts, and the
+        // panel's browser closes alongside the tab browsers.
         ShutdownAgentHost();
+        CloseAgentPanelAndSession();
         // Clean quit: persist the session before any browser tears down, so
         // the last-committed URLs are still in the navigation snapshots. The
         // smoke run never touches the session file.
@@ -1109,6 +1360,9 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
             return true;
         case kMoveDividerRightAccelerator:
             ExecuteCommand(BrowserCommand::kMoveDividerRight);
+            return true;
+        case kToggleAgentPanelAccelerator:
+            ToggleAgentPanel();
             return true;
         case kWelcomeDismissAccelerator: {
             const bool consumed = welcome_ != nullptr && welcome_->visible();
@@ -1363,6 +1617,7 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     chrome_snapshot_.theme = theme;
     ApplySidebarState();
     PublishChromeSnapshot();
+    ScheduleAgentPanelRender();
 }
 
 void BrowserWindow::PublishChromeSnapshot() {
@@ -1770,13 +2025,19 @@ void BrowserWindow::ApplySidebarState() {
     }
     // Keep the published snapshot's rail/content split in step with the reveal
     // state so observers never read a stale 286 DIP rail.
-    const int window_width =
-        chrome_snapshot_.rail_bounds.width + chrome_snapshot_.content_bounds.width;
+    const int window_width = window_width_dip_;
     const int rail_width = sidebar_state_.RailWidthDip(
         std::min(ChromeTokens::ForTheme(chrome_snapshot_.theme).rail_width_dip, window_width));
+    // The open agent panel takes its column out of the published content
+    // width exactly like BrowserChrome::LayoutForBounds does.
+    const int panel_width =
+        agent_panel_open()
+            ? std::clamp(window_width - rail_width - BrowserChrome::MinimumBrowserContentWidthDip(),
+                         0, BrowserChrome::AgentPanelWidthDip())
+            : 0;
     chrome_snapshot_.rail_bounds.width = rail_width;
     chrome_snapshot_.content_bounds.x = rail_width;
-    chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width);
+    chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
 }
 
 void BrowserWindow::UninstallHoverSeam() {

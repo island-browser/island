@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Island Agent</title>
+<style>
+:root {
+  --bg: #F3F0E9;
+  --surface: #FFFEFB;
+  --surface-2: #ECE9E2;
+  --text: #18303A;
+  --text-2: #687A7D;
+  --border: #D8D8D0;
+  --accent: #168C99;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-text: #FFFFFF;
+  --danger: #C2412D;
+  --shadow: 0 1px 2px rgba(16, 32, 40, .06), 0 6px 20px rgba(16, 32, 40, .06);
+  --radius: 14px;
+  --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark; --danger: #F07A63;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25); }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text); font: 14px/1.5 var(--font);
+  display: flex; flex-direction: column; overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, textarea:focus-visible, input:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* Header */
+header {
+  display: flex; align-items: center; gap: 10px; padding: 14px 14px 10px 16px;
+  flex: none;
+}
+.mark {
+  width: 28px; height: 28px; border-radius: 9px; flex: none; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #8B5CF6));
+  color: var(--accent-text); box-shadow: var(--shadow);
+}
+.mark svg { width: 16px; height: 16px; }
+.titles { min-width: 0; flex: 1; }
+.titles h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-2); flex: none; }
+.dot[data-state="ready"] { background: #2EA66B; }
+.dot[data-state="prompting"], .dot[data-state="initializing"], .dot[data-state="creating_session"] {
+  background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.dot[data-state="failed"] { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .35; transform: scale(.8); } }
+.icon-btn {
+  width: 30px; height: 30px; border-radius: 9px; border: 0; background: transparent;
+  display: grid; place-items: center; color: var(--text-2); flex: none;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn svg { width: 16px; height: 16px; }
+
+/* Log */
+#log { flex: 1; overflow-y: auto; padding: 4px 14px 16px; scroll-behavior: smooth; }
+#log::-webkit-scrollbar { width: 8px; }
+#log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+.item { margin: 10px 0; animation: rise .22s cubic-bezier(.16, 1, .3, 1); }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; } #log { scroll-behavior: auto; } }
+.user { display: flex; justify-content: flex-end; }
+.user .bubble {
+  background: var(--accent); color: var(--accent-text); padding: 8px 12px; max-width: 88%;
+  border-radius: 16px 16px 4px 16px; white-space: pre-wrap; word-wrap: break-word;
+  box-shadow: var(--shadow);
+}
+.agent { padding: 2px 2px; word-wrap: break-word; }
+.agent p { margin: 0 0 8px; }
+.agent p:last-child { margin-bottom: 0; }
+.agent h3 { font-size: 14px; margin: 12px 0 6px; }
+.agent ul, .agent ol { margin: 4px 0 8px; padding-left: 20px; }
+.agent li { margin: 2px 0; }
+.agent a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+.agent a:hover { border-bottom-color: var(--accent); }
+code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2);
+  padding: 1px 5px; border-radius: 6px; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; overflow-x: auto; margin: 6px 0 10px; }
+pre code { background: none; padding: 0; font-size: 12px; }
+.thought { color: var(--text-2); font-size: 12.5px; border-left: 2px solid var(--border);
+  padding: 2px 0 2px 10px; white-space: pre-wrap; max-height: 7.5em; overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 70%, transparent); cursor: pointer; }
+.thought.open { max-height: none; -webkit-mask-image: none; }
+.thought::before { content: "Thinking"; display: block; font-weight: 600; font-size: 11px;
+  letter-spacing: .04em; text-transform: uppercase; margin-bottom: 2px; }
+.tool { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; }
+.tool .name { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; flex: 1; }
+.tool .badge { font-size: 11px; color: var(--text-2); flex: none; }
+.spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.glyph { width: 14px; height: 14px; flex: none; }
+.ok { color: #2EA66B; } .bad { color: var(--danger); }
+.plan { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; }
+.plan h4, .card h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-2); }
+.plan ol { list-style: none; margin: 0; padding: 0; }
+.plan li { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; font-size: 13px; }
+.plan li .box { width: 14px; height: 14px; border-radius: 5px; border: 1.5px solid var(--border);
+  margin-top: 3px; flex: none; display: grid; place-items: center; }
+.plan li[data-status="in_progress"] .box { border-color: var(--accent); background: var(--accent-soft); }
+.plan li[data-status="completed"] .box { border-color: var(--accent); background: var(--accent); }
+.plan li[data-status="completed"] .box::after { content: ""; width: 6px; height: 3px;
+  border: solid var(--accent-text); border-width: 0 0 1.5px 1.5px; transform: rotate(-45deg) translate(1px, -1px); }
+.plan li[data-status="completed"] span { color: var(--text-2); text-decoration: line-through; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px; box-shadow: var(--shadow); }
+.card.ask { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.card p { margin: 0 0 10px; }
+.card .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 9px;
+  padding: 6px 12px; font-size: 13px; font-weight: 500; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary:hover { filter: brightness(1.06); }
+.resolved { font-size: 12px; color: var(--text-2); }
+.notice { text-align: center; font-size: 12px; color: var(--text-2); }
+.error { white-space: pre-wrap; font-size: 12.5px; color: var(--danger); font-family: var(--mono);
+  background: color-mix(in srgb, var(--danger) 8%, transparent); border-radius: 10px; padding: 8px 10px; }
+
+/* Empty state */
+.hero { padding: 28px 6px 8px; text-align: center; }
+.hero .mark { width: 44px; height: 44px; border-radius: 14px; margin: 0 auto 12px; }
+.hero .mark svg { width: 22px; height: 22px; }
+.hero h2 { margin: 0 0 4px; font-size: 17px; letter-spacing: -.015em; }
+.hero p { margin: 0 auto 16px; max-width: 290px; color: var(--text-2); font-size: 13px; }
+.chips { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.chip { border: 1px solid var(--border); background: var(--surface); border-radius: 12px;
+  padding: 9px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.chip:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.chip span { text-align: left; }
+.chip svg { width: 14px; height: 14px; color: var(--accent); flex: none; }
+.setup label { display: block; font-size: 12px; color: var(--text-2); margin: 10px 0 4px; }
+.setup input { width: 100%; font: 12.5px var(--mono); color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; }
+.endpoint { margin-top: 12px; font-size: 12px; color: var(--text-2); }
+.endpoint code { display: block; margin-top: 4px; padding: 6px 8px; word-break: break-all; }
+
+/* Composer */
+footer { flex: none; padding: 8px 12px 12px; }
+.composer { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: var(--shadow); padding: 8px 8px 8px 12px; transition: border-color .16s; }
+.composer:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.context { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font-size: 11.5px;
+  color: var(--text-2); background: var(--surface-2); border: 0; border-radius: 7px;
+  padding: 2px 8px; margin-bottom: 6px; }
+[hidden] { display: none !important; }
+.context[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
+.context span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row { display: flex; align-items: flex-end; gap: 8px; }
+textarea { flex: 1; border: 0; background: transparent; color: var(--text); font: inherit;
+  resize: none; outline: none; max-height: 160px; min-height: 22px; padding: 4px 0; }
+textarea::placeholder { color: var(--text-2); }
+.send { width: 32px; height: 32px; border-radius: 10px; border: 0; background: var(--accent);
+  color: var(--accent-text); display: grid; place-items: center; flex: none; transition: transform .16s; }
+.send:disabled { opacity: .35; cursor: default; }
+.send:not(:disabled):hover { transform: translateY(-1px); }
+.send svg { width: 16px; height: 16px; }
+.hint { font-size: 11px; color: var(--text-2); text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg></div>
+  <div class="titles">
+    <h1 id="agent-name">Agent</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Not running</span></div>
+  </div>
+  <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>
+  <button class="icon-btn" id="close" title="Hide panel" aria-label="Hide agent panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+</header>
+<main id="log" aria-live="polite"></main>
+<footer>
+  <div class="composer">
+    <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent" hidden>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+      <span id="context-label"></span>
+    </button>
+    <div class="row">
+      <textarea id="input" rows="1" placeholder="Ask anything, or tell it what to do" aria-label="Message the agent"></textarea>
+      <button class="send" id="send" title="Send (Enter)" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </div>
+  </div>
+  <div class="hint">Enter to send &middot; Shift+Enter for a new line &middot; Esc to stop</div>
+</footer>
+<script>
+"use strict";
+(function () {
+  var MESSAGE_PREFIX = "\u0001island-agent:";
+  var state = { session: { state: "idle", status: "Not running", items: [], busy: false, command: "" },
+                context: null, endpoint: "", theme: null };
+  var includeContext = true;
+  var log = document.getElementById("log");
+  var input = document.getElementById("input");
+  var sendButton = document.getElementById("send");
+  var contextButton = document.getElementById("context");
+  var renderedSignature = "";
+
+  function post(message) { console.log(MESSAGE_PREFIX + JSON.stringify(message)); }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  var SEND_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  var STOP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>';
+  var SPARK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/></svg>';
+  var CHECK = '<svg class="glyph ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+  var CROSS = '<svg class="glyph bad" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M17 7L7 17M7 7l10 10"/></svg>';
+  var ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+
+  // --- Safe markdown: builds DOM nodes, never HTML from agent text. ---
+  function appendInline(parent, text) {
+    var pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*\s][^*]*\*)|(\[[^\]]+\]\((https?:\/\/[^)\s]+)\))|(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])/g;
+    var last = 0, match;
+    while ((match = pattern.exec(text)) !== null) {
+      if (match.index > last) parent.appendChild(document.createTextNode(text.slice(last, match.index)));
+      var token = match[0];
+      if (match[1]) parent.appendChild(el("code", "", token.slice(1, -1)));
+      else if (match[2]) parent.appendChild(el("strong", "", token.slice(2, -2)));
+      else if (match[3]) parent.appendChild(el("em", "", token.slice(1, -1)));
+      else {
+        var label = match[4] ? token.slice(1, token.indexOf("](")) : token;
+        var url = match[4] ? match[5] : token;
+        var link = el("a", "", label);
+        link.href = url;
+        link.title = url;
+        link.addEventListener("click", function (u) { return function (event) {
+          event.preventDefault(); post({ type: "open_url", url: u }); }; }(url));
+        parent.appendChild(link);
+      }
+      last = match.index + token.length;
+    }
+    if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function renderMarkdown(text) {
+    var root = el("div", "agent");
+    var lines = text.replace(/\r/g, "").split("\n");
+    var i = 0, paragraph = [], list = null;
+    function flushParagraph() {
+      if (!paragraph.length) return;
+      var p = el("p");
+      appendInline(p, paragraph.join("\n"));
+      root.appendChild(p);
+      paragraph = [];
+    }
+    while (i < lines.length) {
+      var line = lines[i];
+      var fence = /^```/.test(line);
+      if (fence) {
+        flushParagraph(); list = null;
+        var code = [];
+        i++;
+        while (i < lines.length && !/^```/.test(lines[i])) { code.push(lines[i]); i++; }
+        var pre = el("pre");
+        pre.appendChild(el("code", "", code.join("\n")));
+        root.appendChild(pre);
+        i++;
+        continue;
+      }
+      var heading = /^#{1,4}\s+(.*)$/.exec(line);
+      var bullet = /^\s*[-*\u2022]\s+(.*)$/.exec(line);
+      var numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+      if (heading) {
+        flushParagraph(); list = null;
+        var h = el("h3"); appendInline(h, heading[1]); root.appendChild(h);
+      } else if (bullet || numbered) {
+        flushParagraph();
+        var tag = bullet ? "ul" : "ol";
+        if (!list || list.tagName.toLowerCase() !== tag) { list = el(tag); root.appendChild(list); }
+        var li = el("li"); appendInline(li, (bullet || numbered)[1]); list.appendChild(li);
+      } else if (!line.trim()) {
+        flushParagraph(); list = null;
+      } else {
+        list = null; paragraph.push(line);
+      }
+      i++;
+    }
+    flushParagraph();
+    return root;
+  }
+
+  // --- Items ---
+  function toolNode(item) {
+    var node = el("div", "tool");
+    var status = item.status || "pending";
+    if (status === "completed") node.insertAdjacentHTML("beforeend", CHECK);
+    else if (status === "failed") node.insertAdjacentHTML("beforeend", CROSS);
+    else node.appendChild(el("span", "spinner"));
+    node.appendChild(el("span", "name", item.text));
+    node.appendChild(el("span", "badge", status === "in_progress" ? "running" : status));
+    return node;
+  }
+
+  function planNode(item) {
+    var node = el("div", "plan");
+    node.appendChild(el("h4", "", "Plan"));
+    var list = el("ol");
+    (item.plan || []).forEach(function (step) {
+      var li = el("li");
+      li.setAttribute("data-status", step.status);
+      li.appendChild(el("span", "box"));
+      li.appendChild(el("span", "", step.content));
+      list.appendChild(li);
+    });
+    node.appendChild(list);
+    return node;
+  }
+
+  function permissionNode(item) {
+    var node = el("div", "card ask");
+    node.appendChild(el("h4", "", "Permission"));
+    node.appendChild(el("p", "", item.text));
+    if (item.resolution) {
+      node.appendChild(el("div", "resolved", item.resolution));
+      return node;
+    }
+    var actions = el("div", "actions");
+    (item.options || []).forEach(function (option, index) {
+      var allow = option.kind && option.kind.indexOf("allow") === 0;
+      var button = el("button", "btn" + (allow && index === 0 ? " primary" : ""), option.name);
+      button.addEventListener("click", function () {
+        post({ type: "permission", request_id: item.request_id, option_id: option.id });
+      });
+      actions.appendChild(button);
+    });
+    node.appendChild(actions);
+    return node;
+  }
+
+  function itemNode(item) {
+    var wrap = el("div", "item");
+    switch (item.kind) {
+      case "user":
+        wrap.classList.add("user");
+        wrap.appendChild(el("div", "bubble", item.text));
+        break;
+      case "agent": wrap.appendChild(renderMarkdown(item.text)); break;
+      case "thought": {
+        var thought = el("div", "thought", item.text);
+        thought.addEventListener("click", function () { thought.classList.toggle("open"); });
+        wrap.appendChild(thought);
+        break;
+      }
+      case "tool": wrap.appendChild(toolNode(item)); break;
+      case "plan": wrap.appendChild(planNode(item)); break;
+      case "permission": wrap.appendChild(permissionNode(item)); break;
+      case "error": wrap.appendChild(el("div", "error", item.text)); break;
+      default: wrap.appendChild(el("div", "notice", item.text));
+    }
+    return wrap;
+  }
+
+  var SUGGESTIONS = [
+    "Summarize this page in five bullet points",
+    "Find the pricing on this site and compare the plans",
+    "Open the documentation in a new tab",
+    "List my open tabs and group them into spaces"
+  ];
+
+  function heroNode() {
+    var hero = el("div", "hero");
+    var mark = el("div", "mark");
+    mark.innerHTML = SPARK;
+    hero.appendChild(mark);
+    hero.appendChild(el("h2", "", "What should we do?"));
+    hero.appendChild(el("p", "", "The agent can read pages, click, type, and manage your tabs and spaces through Island's browser tools."));
+    var chips = el("div", "chips");
+    SUGGESTIONS.forEach(function (text) {
+      var chip = el("button", "chip");
+      chip.innerHTML = ARROW;
+      chip.appendChild(el("span", "", text));
+      chip.addEventListener("click", function () { submit(text); });
+      chips.appendChild(chip);
+    });
+    hero.appendChild(chips);
+    return hero;
+  }
+
+  function setupNode(session) {
+    var card = el("div", "card setup");
+    card.appendChild(el("h4", "", session.error ? "The agent stopped" : "Connect an agent"));
+    if (session.error) card.appendChild(el("div", "error", session.error));
+    else card.appendChild(el("p", "", "Island runs any Agent Client Protocol agent here."));
+    var label = el("label", "", "Agent command");
+    label.htmlFor = "command";
+    card.appendChild(label);
+    var field = el("input");
+    field.id = "command";
+    field.value = session.command || "";
+    field.spellcheck = false;
+    field.placeholder = "npx -y @zed-industries/claude-code-acp";
+    card.appendChild(field);
+    var actions = el("div", "actions");
+    actions.style.marginTop = "10px";
+    var start = el("button", "btn primary", session.error ? "Restart agent" : "Start agent");
+    start.addEventListener("click", function () { post({ type: "start", command: field.value }); });
+    field.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") post({ type: "start", command: field.value });
+    });
+    actions.appendChild(start);
+    card.appendChild(actions);
+    if (state.endpoint) {
+      var endpoint = el("div", "endpoint");
+      endpoint.appendChild(document.createTextNode("External agents can use the browser tools too: MCP at "));
+      endpoint.appendChild(el("code", "", state.endpoint));
+      card.appendChild(endpoint);
+    }
+    return card;
+  }
+
+  function render() {
+    var session = state.session || {};
+    document.getElementById("agent-name").textContent = session.agent || "Agent";
+    document.getElementById("status").textContent = session.status || "";
+    document.getElementById("dot").setAttribute("data-state", session.state || "idle");
+
+    var items = session.items || [];
+    var showSetup = session.state === "failed" || (session.state === "idle" && !!session.error);
+    var signature = JSON.stringify([items, showSetup, session.error, session.command, state.endpoint]);
+    if (signature !== renderedSignature) {
+      var nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+      renderedSignature = signature;
+      log.textContent = "";
+      if (!items.length && !showSetup) log.appendChild(heroNode());
+      items.forEach(function (item) { log.appendChild(itemNode(item)); });
+      if (showSetup) log.appendChild(setupNode(session));
+      if (nearBottom || !items.length) log.scrollTop = log.scrollHeight;
+    }
+
+    var busy = !!session.busy;
+    sendButton.innerHTML = busy ? STOP_ICON : SEND_ICON;
+    sendButton.title = busy ? "Stop (Esc)" : "Send (Enter)";
+    sendButton.setAttribute("aria-label", busy ? "Stop" : "Send");
+    sendButton.disabled = !busy && !input.value.trim();
+
+    if (state.context && state.context.url) {
+      contextButton.hidden = false;
+      document.getElementById("context-label").textContent =
+        state.context.title ? state.context.title : state.context.url;
+      contextButton.setAttribute("aria-pressed", includeContext ? "true" : "false");
+    } else {
+      contextButton.hidden = true;
+    }
+  }
+
+  function applyTheme(theme) {
+    if (!theme) return;
+    var root = document.documentElement;
+    ["bg", "surface", "surface-2", "text", "text-2", "border", "accent"].forEach(function (key) {
+      var value = theme[key.replace("-", "_")];
+      if (value) root.style.setProperty("--" + key, value);
+    });
+    root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+  }
+
+  function submit(text) {
+    text = (text || "").trim();
+    if (!text) return;
+    post({ type: "send", text: text, include_context: includeContext });
+    input.value = "";
+    autosize();
+    render();
+  }
+
+  function autosize() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 160) + "px";
+  }
+
+  input.addEventListener("input", function () { autosize(); render(); });
+  input.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      if (!(state.session && state.session.busy)) submit(input.value);
+    } else if (event.key === "Escape") {
+      if (state.session && state.session.busy) post({ type: "cancel" });
+      else post({ type: "close_panel" });
+    }
+  });
+  sendButton.addEventListener("click", function () {
+    if (state.session && state.session.busy) post({ type: "cancel" });
+    else submit(input.value);
+  });
+  contextButton.addEventListener("click", function () { includeContext = !includeContext; render(); });
+  document.getElementById("new-chat").addEventListener("click", function () { post({ type: "new_chat" }); });
+  document.getElementById("close").addEventListener("click", function () { post({ type: "close_panel" }); });
+
+  window.islandRender = function (next) {
+    if (next.theme) { state.theme = next.theme; applyTheme(next.theme); }
+    if (next.session) state.session = next.session;
+    if ("context" in next) state.context = next.context;
+    if ("endpoint" in next) state.endpoint = next.endpoint;
+    render();
+  };
+  window.islandFocusInput = function () { input.focus(); };
+
+  render();
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

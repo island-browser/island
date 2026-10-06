@@ -25,6 +25,7 @@
 #include "sidebar_state.h"
 
 class CefBoxLayout;
+class CefView;
 class CefBrowserView;
 class CefButton;
 class CefLabelButton;
@@ -84,6 +85,10 @@ enum class ChromeViewId : int {
     // Welcome flow overlay (first-run import + appearance). Like the palettes,
     // it lives on the CefWindow, not in the rail/root contract tree.
     kWelcome = 1040,
+    // The agent panel column at the right edge of the root (ACP chat). It is
+    // a contract node with zero width while the panel is closed; the panel's
+    // own CefBrowserView inside it is not a contract node.
+    kAgentPanel = 1041,
 };
 
 struct ChromeViewTreeNode {
@@ -121,6 +126,8 @@ struct ChromeGeometrySnapshot {
     DipRect rail_bounds;
     DipRect browser_content_bounds;
     DipRect browser_view_bounds;
+    // Zero width (at the right edge) while the agent panel is closed.
+    DipRect agent_panel_bounds;
 
     bool operator==(const ChromeGeometrySnapshot&) const = default;
 };
@@ -197,6 +204,11 @@ class BrowserChrome final : public NavigationObserver {
     // CEF cannot round or clip the CefBrowserView, so the floating read comes from
     // this rectangular inset, not from a corner radius.
     [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 12; }
+
+    // The agent panel column: a fixed 380 DIP that yields to the page, so the
+    // browser content never drops below MinimumBrowserContentWidthDip.
+    [[nodiscard]] static constexpr int AgentPanelWidthDip() { return 380; }
+    [[nodiscard]] static constexpr int MinimumBrowserContentWidthDip() { return 320; }
 
     enum class SurfaceSlot : std::uint8_t {
         kRoot,
@@ -276,14 +288,28 @@ class BrowserChrome final : public NavigationObserver {
         DipRect root_bounds, const ChromeTokens& tokens) noexcept {
         return LayoutForBounds(root_bounds, tokens, /*sidebar_revealed=*/true);
     }
-    // The hidden sidebar occupies 0 DIP of layout width; the rail stays in the
-    // view tree, so the contract shape is unchanged and only the content
-    // x-offset moves. This is the single layout path for both states.
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_revealed) noexcept {
+        return LayoutForBounds(root_bounds, tokens, sidebar_revealed,
+                               /*agent_panel_open=*/false);
+    }
+    // The hidden sidebar occupies 0 DIP of layout width; the rail stays in the
+    // view tree, so the contract shape is unchanged and only the content
+    // x-offset moves. This is the single layout path for both states.
+    // The open agent panel takes its column from the right edge before the
+    // content gutter applies; closed, it is a zero-width rect at that edge.
+    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
+                                                                const ChromeTokens& tokens,
+                                                                bool sidebar_revealed,
+                                                                bool agent_panel_open) noexcept {
         const int rail_width =
             sidebar_revealed ? std::min(tokens.rail_width_dip, root_bounds.width) : 0;
+        const int panel_width =
+            agent_panel_open
+                ? std::clamp(root_bounds.width - rail_width - MinimumBrowserContentWidthDip(), 0,
+                             AgentPanelWidthDip())
+                : 0;
         const DipRect rail_bounds = {
             .x = root_bounds.x,
             .y = root_bounds.y,
@@ -295,7 +321,7 @@ class BrowserChrome final : public NavigationObserver {
         // very narrow windows.
         const int pad = BrowserContentPaddingDip();
         const int content_x = root_bounds.x + rail_width;
-        const int content_width = std::max(0, root_bounds.width - rail_width);
+        const int content_width = std::max(0, root_bounds.width - rail_width - panel_width);
         const DipRect browser_content_bounds = {
             .x = content_x,
             .y = root_bounds.y,
@@ -310,11 +336,18 @@ class BrowserChrome final : public NavigationObserver {
             .width = inset_width,
             .height = inset_height,
         };
+        const DipRect agent_panel_bounds = {
+            .x = content_x + content_width,
+            .y = root_bounds.y,
+            .width = panel_width,
+            .height = root_bounds.height,
+        };
         return {
             .root_bounds = root_bounds,
             .rail_bounds = rail_bounds,
             .browser_content_bounds = browser_content_bounds,
             .browser_view_bounds = browser_view_bounds,
+            .agent_panel_bounds = agent_panel_bounds,
         };
     }
     // The fixed rail regions keep their Phase 2 shape; the collection regions
@@ -339,7 +372,8 @@ class BrowserChrome final : public NavigationObserver {
                     {{ChromeViewId::kActivePageFallbackFavicon, {}},
                      {ChromeViewId::kActiveTab, {}},
                      {ChromeViewId::kActivePageIndicator, {}}}}}},
-                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}}}};
+                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
+                 {ChromeViewId::kAgentPanel, {}}}};
     }
 
     // Projects the collection regions the way U4/U5 wire them at runtime: one
@@ -424,6 +458,11 @@ class BrowserChrome final : public NavigationObserver {
     // the rail is never removed from the tree.
     void SetSidebarRevealed(bool revealed);
     [[nodiscard]] bool sidebar_revealed() const noexcept { return sidebar_revealed_; }
+    // Hosts the agent panel's view in the kAgentPanel column (once) and opens
+    // or closes the column.
+    void SetAgentPanelView(CefRefPtr<CefView> view);
+    void SetAgentPanelOpen(bool open);
+    [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
     void BeginAddressEditing();
     void Detach();
 
@@ -462,6 +501,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefBoxLayout> browser_content_layout_;
+    CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<CefView> agent_panel_view_;
+    bool agent_panel_open_ = false;
     CefRefPtr<CefBrowserView> browser_view_;
     // U6 split view state; both stay null while a single view is attached.
     CefRefPtr<CefBrowserView> split_view_;

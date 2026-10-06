@@ -64,6 +64,7 @@
 - (void)openSearchPalette:(id)sender;
 - (void)openCommandPalette:(id)sender;
 - (void)toggleSidebar:(id)sender;
+- (void)toggleAgentPanel:(id)sender;
 - (void)newTab:(id)sender;
 - (void)closeTab:(id)sender;
 - (void)selectNextTab:(id)sender;
@@ -195,6 +196,12 @@
 - (void)toggleSidebar:(id)sender {
     if (app_ != nullptr) {
         app_->ToggleSidebar();
+    }
+}
+
+- (void)toggleAgentPanel:(id)sender {
+    if (app_ != nullptr) {
+        app_->ToggleAgentPanel();
     }
 }
 
@@ -342,6 +349,8 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
         AddBrowserMenuItem(browser_menu, menu_actions, @"Search", @selector(openSearchPalette:),
                            @"k", NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
     [browser_menu addItem:toggle_sidebar_menu_item];
+    AddBrowserMenuItem(browser_menu, menu_actions, @"Toggle Agent", @selector(toggleAgentPanel:),
+                       @"j", NSEventModifierFlagCommand, 0);
     [browser_menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* new_tab_menu_item =
