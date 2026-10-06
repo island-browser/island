@@ -41,7 +41,7 @@ class PackageFixture:
                 self.write_binary(root / name, target)
             self.write(root / "vk_swiftshader_icd.json")
             if sandbox:
-                self.write_binary(root / "island_browser.dll", target)
+                self.write_binary(root / "island_browser.dll", target, bootstrap=True)
         else:
             for name in ("chrome-sandbox", "libcef.so", "libEGL.so", "libGLESv2.so", "libvk_swiftshader.so", "libvulkan.so.1", "v8_context_snapshot.bin"):
                 self.write_binary(root / name, target)
@@ -88,5 +88,7 @@ class PackageFixture:
             case unexpected:
                 raise AssertionError(f"unexpected fixture target: {unexpected}")
         if bootstrap:
-            data += b"island_browser.dll\x00"
+            # CEF's bootstrap.exe looks up the client's RunWinMain export by
+            # name, and the client DLL exports it.
+            data += b"RunWinMain\x00"
         _ = path.write_bytes(data)
