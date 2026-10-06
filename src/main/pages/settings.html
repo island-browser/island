@@ -95,6 +95,8 @@ input.field.filter { font-family: var(--font); font-size: 13px; }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 13px; }
 dt { color: var(--text-2); }
 dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+#updates input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
+#updates .status.error { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -107,7 +109,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   </div>
   <nav aria-label="Sections">
     <a href="#appearance">Appearance</a><a href="#agent">Agent &amp; tools</a>
-    <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#about">About</a>
+    <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
   <section id="appearance">
@@ -158,6 +160,26 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     <h2>Import from another browser</h2>
     <p class="lead">Bring your bookmarks over, or recreate your Arc spaces and pinned tabs. Nothing leaves this computer.</p>
     <div class="sources" id="sources"></div>
+  </section>
+
+  <section id="updates">
+    <h2>Updates</h2>
+    <p class="lead">Island checks its GitHub releases for new versions. Every download is checked against its published SHA-256 checksum before it is installed.</p>
+    <div class="row">
+      <div class="label">Island <span id="update-current"></span><small class="status" id="update-status" role="status" aria-live="polite"></small></div>
+      <button class="btn quiet" id="update-notes" hidden>Release notes</button>
+      <button class="btn" id="update-check">Check for updates</button>
+      <button class="btn primary" id="update-install" hidden>Download and install</button>
+    </div>
+    <div class="row">
+      <label class="label" for="update-auto">Check automatically<small>Once a day, shortly after Island starts.</small></label>
+      <input type="checkbox" id="update-auto">
+    </div>
+    <div class="row">
+      <label class="label" for="update-pre">Include pre-releases<small>Also offer test versions such as 0.5.0-beta.1.</small></label>
+      <input type="checkbox" id="update-pre">
+    </div>
+    <p class="note" id="update-note" hidden></p>
   </section>
 
   <section id="about">
@@ -302,6 +324,40 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  function renderUpdate() {
+    var u = state.settings.update;
+    if (!u) return;
+    var status = u.status || "idle";
+    $("update-current").textContent = u.current_version || "";
+    var text = "";
+    if (u.disabled_by_env) text = "Updates are turned off by ISLAND_DISABLE_UPDATES.";
+    else if (status === "checking") text = "Checking for updates\u2026";
+    else if (status === "up_to_date") text = "Island is up to date.";
+    else if (status === "unavailable") text = "No update information is available right now.";
+    else if (status === "available") text = "Island " + u.latest_version + " is available.";
+    else if (status === "downloading") text = "Downloading Island " + u.latest_version +
+        (u.progress >= 0 ? "\u2026 " + u.progress + "%" : "\u2026");
+    else if (status === "ready") text = "Island " + u.latest_version + " is ready. Restart Island to finish updating.";
+    else if (status === "error") text = u.error || "Something went wrong.";
+    else text = u.last_check > 0 ? "Last checked " + new Date(u.last_check * 1000).toLocaleString() + "." : "";
+    $("update-status").textContent = text;
+    $("update-status").className = "status" + (status === "error" ? " error" : "");
+    var busy = status === "checking" || status === "downloading";
+    $("update-check").disabled = busy || status === "ready" || !!u.disabled_by_env;
+    $("update-notes").hidden = !u.release_url;
+    var install = $("update-install");
+    var offer = status === "available" || status === "downloading" || status === "ready";
+    install.hidden = !offer || !u.can_install;
+    install.disabled = status === "downloading";
+    install.textContent = status === "ready" ? "Restart to update"
+      : status === "downloading" ? "Downloading\u2026" : "Download and install";
+    $("update-auto").checked = !!u.auto_check;
+    $("update-pre").checked = !!u.include_prereleases;
+    var note = u.notice || (offer && !u.can_install ? u.install_blocked_reason : "");
+    $("update-note").textContent = note || "";
+    $("update-note").hidden = !note;
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
@@ -323,6 +379,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("mac-note").hidden = !isMac();
     renderShortcuts();
     renderSources();
+    renderUpdate();
     var about = $("about-list");
     about.textContent = "";
     ((s.about || {}).rows || []).forEach(function (row) {
@@ -347,6 +404,18 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   $("reset-keys").addEventListener("click", function () { recording = null; post({ type: "reset_shortcuts" }); });
   $("key-filter").addEventListener("input", renderShortcuts);
   $("close").addEventListener("click", function () { post({ type: "close" }); });
+  $("update-check").addEventListener("click", function () { post({ type: "check_updates" }); });
+  $("update-notes").addEventListener("click", function () { post({ type: "open_release_notes" }); });
+  $("update-install").addEventListener("click", function () {
+    var u = (state.settings && state.settings.update) || {};
+    post({ type: u.status === "ready" ? "restart_to_update" : "install_update" });
+  });
+  $("update-auto").addEventListener("change", function () {
+    post({ type: "set_update_pref", key: "auto_check", value: $("update-auto").checked });
+  });
+  $("update-pre").addEventListener("change", function () {
+    post({ type: "set_update_pref", key: "include_prereleases", value: $("update-pre").checked });
+  });
   Array.prototype.forEach.call(document.querySelectorAll("nav a"), function (link) {
     link.addEventListener("click", function (event) {
       event.preventDefault();

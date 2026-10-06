@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <limits>
 #include <optional>
@@ -13,6 +14,7 @@
 #include "app_resources.h"
 #include "browser_import.h"
 #include "cef_address_parser.h"
+#include "cef_update_fetcher.h"
 #include "design_tokens.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
@@ -105,6 +107,24 @@ std::string McpBridgePath() {
     return std::filesystem::is_regular_file(bridge, error) ? bridge.string() : std::string();
 }
 
+// The updater's view of this process: the running version, the release
+// target, and where (and whether) the install can be replaced.
+update::Updater::Config DefaultUpdaterConfig() {
+    update::Updater::Config config;
+    config.current_version = ISLAND_VERSION_STRING;
+    config.target = std::string(update::CurrentTarget());
+    if (const std::optional<update::Platform> platform = update::CurrentPlatform()) {
+        config.install = update::DetectInstallLocation(*platform, CurrentRuntimeBinaryPath());
+    }
+    return config;
+}
+
+std::int64_t UnixNow() {
+    return std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
 void RunAgentTask(std::function<void()> task) {
     if (task) {
         task();
@@ -158,6 +178,7 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
     }
     keymap_ = Keymap::WithOverrides(prefs_.keybindings);
+    ConfigureUpdater(DefaultUpdaterConfig(), std::make_unique<CefUpdateFetcher>());
     chrome_snapshot_.rail_bounds = {.x = 0,
                                     .y = 0,
                                     .width = sidebar_state_.RailWidthDip(
@@ -798,6 +819,7 @@ std::string BrowserWindow::SettingsStateJson() const {
                          .Set("shortcuts", std::move(shortcuts))
                          .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
                          .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
+                         .Set("update", UpdateStateJson())
                          .Set("message", Value::String(settings_message_));
     return json::Serialize(
         Value::MakeObject().Set("theme", ThemeJson()).Set("settings", std::move(settings)));
@@ -866,6 +888,10 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         HideInternalPage();
         return;
     }
+    if (HandleUpdateMessage(type, message)) {
+        ScheduleLocalPagesRender();
+        return;
+    }
     if (type == "set_theme") {
         ThemePreference preference = ThemePreference::kSystem;
         if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
@@ -903,6 +929,121 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         settings_message_ = ImportFromBrowser(message.StringOr("source", ""));
     }
     ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::ConfigureUpdater(update::Updater::Config config,
+                                     std::unique_ptr<update::UpdateFetcher> fetcher) {
+    updater_ = std::make_unique<update::Updater>(std::move(config), std::move(fetcher),
+                                                 [this] { OnUpdaterChanged(); });
+}
+
+bool BrowserWindow::CheckForUpdates() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || updater_ == nullptr) {
+        return false;
+    }
+    if (update::UpdatesDisabledByEnvironment()) {
+        settings_message_ = "Updates are turned off by ISLAND_DISABLE_UPDATES.";
+        ScheduleLocalPagesRender();
+        return false;
+    }
+    if (!updater_->Check(prefs_.include_prereleases)) {
+        return false;
+    }
+    prefs_.last_update_check = UnixNow();
+    SavePrefs();
+    return true;
+}
+
+void BrowserWindow::RunStartupUpdateCheck() {
+    if (closing_ || updater_ == nullptr || update::UpdatesDisabledByEnvironment()) {
+        return;
+    }
+    // A relaunch after an update: report the outcome, drop the backup.
+    static_cast<void>(updater_->FinalizePreviousInstall());
+    if (update::AutoCheckDue(prefs_.auto_check_updates, prefs_.last_update_check, UnixNow())) {
+        static_cast<void>(CheckForUpdates());
+    }
+}
+
+void BrowserWindow::RestartToUpdate() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || updater_ == nullptr) {
+        return;
+    }
+    const std::optional<std::filesystem::path> script =
+        updater_->PrepareInstall(update::CurrentProcessId());
+    if (!script.has_value()) {
+        return;  // the updater reports why
+    }
+    if (!update::LaunchDetachedScript(updater_->config().install.platform, *script)) {
+        settings_message_ = "Couldn't start the updater.";
+        ScheduleLocalPagesRender();
+        return;
+    }
+    // The script waits for this process to exit, then swaps and relaunches.
+    RequestClose();
+}
+
+void BrowserWindow::OnUpdaterChanged() {
+    if (closing_ || updater_ == nullptr) {
+        return;
+    }
+    const update::UpdateSnapshot& snapshot = updater_->snapshot();
+    std::string notice;
+    if (snapshot.status == update::UpdateStatus::kAvailable) {
+        notice = "Island " + snapshot.latest_version + " is available";
+    } else if (snapshot.status == update::UpdateStatus::kReady) {
+        notice = "Island " + snapshot.latest_version + " is ready. Restart to update";
+    }
+    if (chrome_ != nullptr) {
+        chrome_->SetUpdateNotice(notice);
+    }
+    ScheduleLocalPagesRender();
+}
+
+json::Value BrowserWindow::UpdateStateJson() const {
+    json::Value state = updater_ != nullptr ? updater_->StateJson() : json::Value::MakeObject();
+    state.Set("auto_check", json::Value::Bool(prefs_.auto_check_updates))
+        .Set("include_prereleases", json::Value::Bool(prefs_.include_prereleases))
+        .Set("last_check", json::Value::Int(prefs_.last_update_check))
+        .Set("disabled_by_env", json::Value::Bool(update::UpdatesDisabledByEnvironment()));
+    return state;
+}
+
+bool BrowserWindow::HandleUpdateMessage(std::string_view type, const json::Value& message) {
+    if (type == "check_updates") {
+        static_cast<void>(CheckForUpdates());
+    } else if (type == "install_update") {
+        if (updater_ != nullptr && !update::UpdatesDisabledByEnvironment()) {
+            static_cast<void>(updater_->StartDownload());
+        }
+    } else if (type == "restart_to_update") {
+        RestartToUpdate();
+    } else if (type == "open_release_notes") {
+        // Only the updater's own release URL, never one from the page.
+        const std::string url = updater_ != nullptr ? updater_->snapshot().release_url : "";
+        if (!url.empty() && OpenNewTab(url)) {
+            HideInternalPage();
+        }
+    } else if (type == "set_update_pref") {
+        const std::string_view key = message.StringOr("key", "");
+        const json::Value* value = message.FindMember("value");
+        if (value == nullptr || !value->IsBool()) {
+            return true;
+        }
+        if (key == "auto_check") {
+            prefs_.auto_check_updates = value->bool_val;
+        } else if (key == "include_prereleases") {
+            prefs_.include_prereleases = value->bool_val;
+        } else {
+            return true;
+        }
+        SavePrefs();
+    } else {
+        return false;
+    }
+    return true;
 }
 
 void BrowserWindow::HandleOverviewMessage(const json::Value& message) {
@@ -1750,6 +1891,15 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
         if (prefs_.agent_panel_open) {
             SetAgentPanelOpen(true);
         }
+        // Updates: deferred so startup stays offline and fast; the smoke run
+        // and ISLAND_DISABLE_UPDATES=1 never check.
+        if (!update::UpdatesDisabledByEnvironment()) {
+            CefPostDelayedTask(
+                TID_UI,
+                CefCreateClosureTask(base::BindOnce(&BrowserWindow::RunStartupUpdateCheck,
+                                                    CefRefPtr<BrowserWindow>(this))),
+                update::kStartupCheckDelayMs);
+        }
     }
     // The seam only observes; every chrome mutation it triggers is posted onto the
     // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
@@ -1771,6 +1921,9 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     closing_ = true;
     ShutdownAgentHost();
     CloseAgentPanelAndSession();
+    if (updater_ != nullptr) {
+        updater_->Cancel();
+    }
     DetachChromeAndObservers();
     window_ = nullptr;
 
@@ -1845,6 +1998,9 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         // panel's browser closes alongside the tab browsers.
         ShutdownAgentHost();
         CloseAgentPanelAndSession();
+        if (updater_ != nullptr) {
+            updater_->Cancel();
+        }
         // Clean quit: persist the session before any browser tears down, so
         // the last-committed URLs are still in the navigation snapshots. The
         // smoke run never touches the session file.

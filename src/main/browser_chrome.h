@@ -499,6 +499,11 @@ class BrowserChrome final : public NavigationObserver {
     void SetAgentPanelView(CefRefPtr<CefView> view);
     void SetAgentPanelOpen(bool open);
     [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
+    // A short updater notice ("Island 0.5.0 is available"): the rail's
+    // Settings button takes the accent tint and carries it in its tooltip
+    // and accessible name. "" restores the plain button.
+    void SetUpdateNotice(std::string notice);
+    [[nodiscard]] const std::string& update_notice() const noexcept { return update_notice_; }
     void BeginAddressEditing();
     void Detach();
 
@@ -542,6 +547,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> agent_panel_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
+    std::string update_notice_;
     CefRefPtr<CefBrowserView> browser_view_;
     // U6 split view state; both stay null while a single view is attached.
     CefRefPtr<CefBrowserView> split_view_;

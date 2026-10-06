@@ -52,6 +52,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/cef_update_fetcher.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"

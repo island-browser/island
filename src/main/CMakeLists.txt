@@ -14,6 +14,7 @@ add_library(island_browser_core STATIC
     browser_chrome.cc
     browser_window.cc
     cef_address_parser.cc
+    cef_update_fetcher.cc
     command_palette.cc
     command_palette_view.cc
     design_tokens.cc

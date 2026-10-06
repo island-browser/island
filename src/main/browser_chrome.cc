@@ -1029,6 +1029,19 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
+void BrowserChrome::SetUpdateNotice(std::string notice) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || notice == update_notice_) {
+        return;
+    }
+    update_notice_ = std::move(notice);
+    const std::string label =
+        update_notice_.empty() ? std::string("Settings") : "Settings: " + update_notice_;
+    settings_button_->SetTooltipText(label);
+    settings_button_->SetAccessibleName(label);
+    ApplyRailButtonTheme();
+}
+
 void BrowserChrome::BeginAddressEditing() {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {
@@ -1294,8 +1307,10 @@ void BrowserChrome::ApplyRailButtonTheme() {
                            ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> grid =
         icon_catalog_.Load(ChromeIcon::kGrid, ChromeIconTone::kSecondary, ChromeIconSize::k16);
-    const std::optional<CefRefPtr<CefImage>> gear =
-        icon_catalog_.Load(ChromeIcon::kSettings, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> gear = icon_catalog_.Load(
+        ChromeIcon::kSettings,
+        update_notice_.empty() ? ChromeIconTone::kSecondary : ChromeIconTone::kAccent,
+        ChromeIconSize::k16);
     if (grid.has_value()) {
         tabs_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *grid);
     }
