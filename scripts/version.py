@@ -12,13 +12,16 @@ it for the binaries; this script keeps everything else in step:
     python3 scripts/version.py bump release        # 0.5.0
     python3 scripts/version.py sync                # rewrite derived files
     python3 scripts/version.py check [--tag v0.5.0]
+    python3 scripts/version.py notes [0.5.0|v0.5.0|Unreleased]
 
 `bump` moves the CHANGELOG's Unreleased notes under the new version (it refuses
 an empty Unreleased section unless --allow-empty), then runs `sync`. `sync`
 rewrites the derived files: the site's version markers and JSON-LD, the
 rendered site/changelog.html, and the Windows manifest. `check` fails when any
 of them is stale, when the changelog has no entry for a release version, or
-when --tag disagrees with VERSION; CI and the site deploy run it.
+when --tag disagrees with VERSION; CI and the site deploy run it. `notes` prints
+one version's CHANGELOG section (default: VERSION) as Markdown; the release
+workflow uses it for the GitHub release body.
 """
 
 from __future__ import annotations
@@ -126,6 +129,20 @@ def parse_changelog(text: str) -> tuple[list[Release], dict[str, str]]:
         while release.body and not release.body[0].strip():
             release.body.pop(0)
     return releases, links
+
+
+def release_notes(text: str, name: str) -> str:
+    """Returns the Markdown body of one CHANGELOG section ("" when it is empty).
+
+    `name` is a version (a leading "v" is accepted) or "Unreleased"."""
+    wanted = "Unreleased" if name.strip().lower() == "unreleased" else name.strip()
+    if wanted != "Unreleased":
+        wanted = str(Version.parse(wanted.removeprefix("v")))
+    releases, _ = parse_changelog(text)
+    for release in releases:
+        if release.name == wanted:
+            return "\n".join(release.body) + ("\n" if release.body else "")
+    raise VersionError(f"CHANGELOG.md has no '## [{wanted}]' section")
 
 
 def rotate_changelog(text: str, version: Version, date: str, allow_empty: bool) -> str:
@@ -331,6 +348,9 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("sync", help="rewrite files derived from VERSION and CHANGELOG")
     check_parser = commands.add_parser("check", help="fail if anything is out of step")
     check_parser.add_argument("--tag", help="a git tag (vX.Y.Z) that must match VERSION")
+    notes_parser = commands.add_parser("notes", help="print one version's CHANGELOG section")
+    notes_parser.add_argument("version", nargs="?",
+                              help="a version, vX.Y.Z, or Unreleased (default: VERSION)")
     args = parser.parse_args(argv)
     root: Path = args.root
     try:
@@ -351,6 +371,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "sync":
             for path in sync(root):
                 print(f"updated {path.relative_to(root)}")
+        elif args.command == "notes":
+            name = args.version if args.version else str(read_version(root))
+            changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+            sys.stdout.write(release_notes(changelog, name))
         elif args.command == "check":
             problems = check(root, args.tag)
             for problem in problems:

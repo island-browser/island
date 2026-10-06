@@ -188,6 +188,28 @@ class CommandTests(unittest.TestCase):
             (self.root / "CHANGELOG.md").read_text(encoding="utf-8"))[0][0].body[-1])
         self.assertEqual(run(self.root, "check")[0], 0)
 
+    def test_notes_prints_one_section(self) -> None:
+        code, out, _ = run(self.root, "notes")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "### Added\n\n- First.\n")
+        self.assertEqual(run(self.root, "notes", "v0.1.0")[1], out)
+        self.assertEqual(run(self.root, "notes", "0.1.0")[1], out)
+        code, out, _ = run(self.root, "notes", "Unreleased")
+        self.assertEqual((code, out), (0, "### Added\n\n- A new thing with `code`.\n"))
+        self.assertEqual(run(self.root, "notes", "unreleased")[1], out)
+        self.assertNotIn("[Unreleased]:", out)
+
+    def test_notes_rejects_missing_or_invalid_versions(self) -> None:
+        code, out, err = run(self.root, "notes", "0.9.0")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("no '## [0.9.0]' section", err)
+        self.assertEqual(run(self.root, "notes", "latest")[0], 2)
+
+    def test_notes_of_an_empty_section_is_empty(self) -> None:
+        (self.root / "CHANGELOG.md").write_text(CHANGELOG.replace(
+            "### Added\n\n- A new thing with `code`.\n\n", ""), encoding="utf-8")
+        self.assertEqual(run(self.root, "notes", "Unreleased"), (0, "", ""))
+
     def test_invalid_version_file(self) -> None:
         (self.root / "VERSION").write_text("one\n", encoding="utf-8")
         code, _, err = run(self.root, "check")
