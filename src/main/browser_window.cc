@@ -688,7 +688,8 @@ std::string BrowserWindow::AgentPanelStateJson() const {
                                                                                 : std::string()));
     json::Value providers = AgentProvidersStateJson();
     for (auto& [key, value] : providers.object_val) {
-        if (key == "provider" || key == "providers" || key == "env_override") {
+        if (key == "provider" || key == "providers" || key == "env_override" ||
+            key == "env_command") {
             state.Set(key, std::move(value));
         }
     }
