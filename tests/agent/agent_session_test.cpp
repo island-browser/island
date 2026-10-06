@@ -156,7 +156,45 @@ TEST(AgentSessionTest, NewChatClearsTheTranscriptAndBadCommandsReportErrors) {
     AgentSessionConfig blank = FakeAgentConfig();
     blank.command = "   ";
     EXPECT_FALSE(session.Start(blank));
-    EXPECT_NE(session.error().find("No agent is configured"), std::string::npos);
+    EXPECT_NE(session.error().find("No agent command is set"), std::string::npos);
+}
+
+TEST(AgentSessionTest, SwitchingAgentsRestartsOnlyARunningAgent) {
+    TaskLoop loop;
+    AgentSession session(loop.dispatcher(), [] {});
+    AgentSessionConfig first = FakeAgentConfig();
+    first.provider_id = "claude";
+    first.provider_name = "Claude Code";
+    // Idle: the switch only adopts the config; nothing launches.
+    EXPECT_FALSE(session.SwitchAgent(first));
+    EXPECT_FALSE(session.running());
+    EXPECT_EQ(session.agent_name(), "Claude Code");
+    EXPECT_EQ(json::Parse(session.StateJson())->StringOr("provider", ""), "claude");
+
+    ASSERT_TRUE(session.Send("hello"));
+    ASSERT_TRUE(loop.PumpUntil([&] { return OpenPermission(session) != nullptr; }));
+    ASSERT_FALSE(session.transcript().items().empty());
+
+    // Running: the old agent stops, the conversation clears, and the new one
+    // launches with the new config.
+    AgentSessionConfig second = FakeAgentConfig();
+    second.provider_id = "custom";
+    second.provider_name = "Custom command";
+    EXPECT_TRUE(session.SwitchAgent(second));
+    EXPECT_TRUE(session.running());
+    EXPECT_TRUE(session.transcript().items().empty());
+    EXPECT_FALSE(session.busy());
+    EXPECT_EQ(session.config().provider_id, "custom");
+    ASSERT_TRUE(loop.PumpUntil([&] { return session.state() == AcpState::kReady; }));
+
+    // A failed agent is not running: switching clears the error and waits.
+    AgentSessionConfig missing = FakeAgentConfig();
+    missing.command = "island-definitely-missing-agent --acp";
+    EXPECT_FALSE(session.Start(missing));
+    EXPECT_FALSE(session.error().empty());
+    EXPECT_FALSE(session.SwitchAgent(first));
+    EXPECT_TRUE(session.error().empty());
+    EXPECT_EQ(session.state(), AcpState::kIdle);
 }
 
 #endif
