@@ -49,6 +49,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Windows packaging recognizes the sandbox build again: CEF's bootstrap `island_browser.exe`
   does not name `island_browser.dll`, so the package step now checks that the DLL exports
   `RunWinMain` instead.
+- Windows arm64 packaging no longer requires `dxcompiler.dll` and `dxil.dll`, which CEF ships
+  only for x64.
 
 ## [0.4.0] - 2026-10-06
 

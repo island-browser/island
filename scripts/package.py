@@ -134,7 +134,11 @@ def layout(target: Target) -> Layout:
             return Layout(".zip", (root / "Contents/MacOS/island_browser", framework / "Chromium Embedded Framework", *helpers), root / "Contents/MacOS/island_browser", root, (framework, framework / "Chromium Embedded Framework", *helpers, *(framework / "Resources" / item for item in MAC_RESOURCES)))
         case Target.WINDOWS_X64 | Target.WINDOWS_ARM64:
             root = Path("src/main/Release")
-            binaries = (Path("island_browser.exe"), Path("libcef.dll"), Path("chrome_elf.dll"), Path("d3dcompiler_47.dll"), Path("dxcompiler.dll"), Path("dxil.dll"), Path("libEGL.dll"), Path("libGLESv2.dll"), Path("vk_swiftshader.dll"), Path("vulkan-1.dll"))
+            # CEF ships the DirectX shader compiler (dxcompiler.dll, dxil.dll)
+            # only in its x64 Windows distribution; cef_variables.cmake adds
+            # them to CEF_BINARY_FILES for every architecture except arm64.
+            dxc = (Path("dxcompiler.dll"), Path("dxil.dll")) if target is Target.WINDOWS_X64 else ()
+            binaries = (Path("island_browser.exe"), Path("libcef.dll"), Path("chrome_elf.dll"), Path("d3dcompiler_47.dll"), *dxc, Path("libEGL.dll"), Path("libGLESv2.dll"), Path("vk_swiftshader.dll"), Path("vulkan-1.dll"))
             # CEF 150 / Chromium 150 no longer ships snapshot_blob.bin as a
             # separate file: the V8 startup snapshot was consolidated into
             # v8_context_snapshot.bin, and the CEF_BINARY_FILES macro therefore
