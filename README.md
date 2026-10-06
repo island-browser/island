@@ -16,7 +16,6 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
   test, and package evidence before they are treated as verified.
 - Windows build matrix covers both sandbox off and sandbox on.
 - Public stable release is blocked until signing and notarization verification exist.
-- Static Pages/site visual QA is pending because Chrome was unavailable during review.
 
 ## Features at a glance
 
@@ -41,16 +40,18 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
 ## Versions
 
 The version lives in `VERSION` (SemVer) and feeds the build, the app's About page, the agent
-protocols, the macOS bundle, and the site. Release notes go under `## [Unreleased]` in
-`CHANGELOG.md`; cut a release with:
+protocols, the macOS bundle, and the site
+([island-browser/site](https://github.com/island-browser/site)). Release notes go under
+`## [Unreleased]` in `CHANGELOG.md`; cut a release with:
 
 ```bash
 python3 scripts/version.py bump minor   # or major / patch; --pre beta for a pre-release
 python3 scripts/version.py check
 ```
 
-When the bump lands on `main`, the commit is tagged `vX.Y.Z` automatically and the site (with its
-changelog page) redeploys to GitHub Pages.
+When the bump lands on `main`, the commit is tagged `vX.Y.Z` automatically. The site, which lives
+in its own repository, picks up the new version and changelog on its next daily build (or a manual
+run of its deploy workflow).
 
 ## Downloads / releases
 
@@ -65,7 +66,7 @@ Each release carries `island_browser-<version>-<target>.zip` (macOS, Windows) or
 and a `SHA256SUMS.txt` to verify them against. **All builds are unsigned prereleases**: they are not
 code-signed or notarized, so macOS Gatekeeper refuses to open the app until you allow it in System
 Settings > Privacy & Security (or run `xattr -dr com.apple.quarantine island_browser.app`), and
-Windows SmartScreen may warn. While the repository is private, its releases (like its Pages site)
+Windows SmartScreen may warn. While the repository is private, its releases
 are visible only to people with access to the repository, and downloading assets needs an
 authenticated GitHub request.
 

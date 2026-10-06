@@ -10,11 +10,12 @@ the root `AGENTS.md` requires before any non-macOS-arm64 support claim can be ma
 
 ## Which workflow proves what
 
-**Most automatic triggers are paused** to save GitHub Actions minutes. Three workflows run on
+**Most automatic triggers are paused** to save GitHub Actions minutes. Two workflows run on
 pushes to `main`: `build-release.yml` (when anything that ships changes — it builds all six
-targets and publishes unsigned prereleases), `pages.yml` (when the site, `CHANGELOG.md`, or
-`VERSION` change), and `version-tag.yml` (when `VERSION` changes). Everything else runs only on a
-manual `workflow_dispatch` (plus `workflow_call` for `ci.yml` and `package.yml`). Build, test, and
+targets and publishes unsigned prereleases) and `version-tag.yml` (when `VERSION` changes). The
+product site and its Pages deploy live in their own repository, `island-browser/site`, which reads
+`VERSION` and `CHANGELOG.md` from here. Everything else runs only on a manual
+`workflow_dispatch` (plus `workflow_call` for `ci.yml` and `package.yml`). Build, test, and
 package locally with the root `AGENTS.md` Verification commands before committing. To re-enable a
 paused workflow, restore its original `on:` block from git history.
 
@@ -26,7 +27,6 @@ paused workflow, restore its original `on:` block from git history.
 | `release.yml` | Dispatch only (the `v*` tag trigger is paused) | The stable-release **gate**. It requires the tag to match `VERSION`, asserts `scripts/package.py` still emits `signed: False` / `publicReleaseEligible: False`, rejects unprotected tags, and then **fails on purpose** — stable publishing stays blocked until signing and notarization are implemented. |
 | `search.yml` | Dispatch only (automatic triggers paused) | The only automated coverage of the search kernel. Configures `src/search` as its own source root with `-DISLAND_ENABLE_SEARCH=ON` on all six targets, builds `island_search`/`island_search_tests`/`island_search_posting_codec_harness`, and runs `ctest --no-tests=error` |
 | `dependency-check.yml` | Dispatch only (the weekly cron is paused) | Read-only upstream check for newer pinned dependencies |
-| `pages.yml` | Push to `main` touching `site/**`, `CHANGELOG.md`, `VERSION`, or `scripts/version.py`; dispatch | Runs `scripts/version.py check`, then deploys the product site to GitHub Pages |
 | `version-tag.yml` | Push to `main` touching `VERSION`; dispatch | Tags the commit `v<VERSION>` (annotated, by `github-actions[bot]`) unless the tag exists; needs `contents: write` on that job only |
 | `claude.yml` | Dispatch only (comment triggers paused) | Claude Code agent invoked from a comment |
 | `claude-code-review.yml` | Dispatch only (PR triggers paused) | Automated Claude review pass on pull requests |
@@ -44,7 +44,7 @@ paused workflow, restore its original `on:` block from git history.
   that will catch it.
 - Third-party actions are pinned by full commit SHA. Match that when adding steps.
 - `permissions:` is `contents: read` at workflow level, with write escalated only per job
-  (`build-release.yml`'s publish jobs, `pages.yml`, `version-tag.yml`). Preserve that shape.
+  (`build-release.yml`'s publish jobs, `version-tag.yml`). Preserve that shape.
 - Everything `build-release.yml` publishes is a GitHub **prerelease** marked unsigned; it never
   creates a stable release. Because every release is a prerelease, the REST `/releases/latest`
   endpoint returns 404 — consumers such as the in-browser updater list `/releases` instead.
@@ -71,6 +71,6 @@ python3 -c "import yaml,glob;[yaml.safe_load(open(f)) for f in glob.glob('.githu
 ### Internal
 
 - `scripts/` (deps, package, icon verify), `deps/dependencies.lock.json`, `tests/` (all suites),
-  `src/search/` (via `search.yml`), `site/` (pages)
+  `src/search/` (via `search.yml`)
 
 <!-- MANUAL: -->

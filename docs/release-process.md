@@ -59,8 +59,8 @@ The sections below predate this pipeline and describe the original, now mostly p
   unsigned candidate, verifies package checksum and metadata, and uploads short-retention artifacts.
 - **Dependency check** runs weekly and manually. It reports current/changed dependency artifacts per
   target and uploads reports; it does not edit the lock file, open/merge PRs, or release anything.
-- **Deploy site to GitHub Pages** deploys the static `site/` directory on `main` pushes that change
-  `site/**`. Browser visual QA for the site is still pending because Chrome was unavailable.
+- The product site is deployed from its own repository, `island-browser/site`,
+  which reads `VERSION` and `CHANGELOG.md` from this repository's `main` when it builds.
 - **Release gate** runs for `v*` tags but intentionally fails after recognizing the unsigned package
   contract. It requires protected tags and blocks stable publication until signed/notarized release
   verification exists.

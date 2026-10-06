@@ -7,7 +7,7 @@ All notable changes to Island are recorded here. The format follows
 
 The version lives in the `VERSION` file. Bump it with
 `python3 scripts/version.py bump minor` (or `major` / `patch`), which moves the
-Unreleased notes under the new version and refreshes the site. Merging a
+Unreleased notes under the new version. Merging a
 version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 0.4.0 were never tagged; their entries are reconstructed from the git history.
 
@@ -27,6 +27,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   trees and read-only installs only report new versions.
 
 ### Changed
+
+- The product site moved to its own repository,
+  [island-browser/site](https://github.com/island-browser/site), and is served at
+  https://island-browser.github.io/site/. It reads the version and these notes from this
+  repository when it builds; `scripts/version.py sync` no longer touches site pages.
 
 - New "Graphite" design language across the browser: neutral near-black and white surfaces,
   1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the

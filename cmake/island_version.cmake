@@ -1,6 +1,6 @@
 # Island's version comes from one place: the VERSION file at the repository
 # root (SemVer, optionally with a pre-release suffix such as 0.5.0-beta.1).
-# scripts/version.py bumps it and keeps the site and changelog in step.
+# scripts/version.py bumps it and keeps the changelog in step.
 #
 # island_read_version(<repo_root>) sets, in the caller's scope:
 #   ISLAND_VERSION          full string, e.g. 0.5.0-beta.1

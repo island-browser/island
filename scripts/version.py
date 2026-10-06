@@ -16,12 +16,16 @@ it for the binaries; this script keeps everything else in step:
 
 `bump` moves the CHANGELOG's Unreleased notes under the new version (it refuses
 an empty Unreleased section unless --allow-empty), then runs `sync`. `sync`
-rewrites the derived files: the site's version markers and JSON-LD, the
-rendered site/changelog.html, and the Windows manifest. `check` fails when any
-of them is stale, when the changelog has no entry for a release version, or
-when --tag disagrees with VERSION; CI and the site deploy run it. `notes` prints
-one version's CHANGELOG section (default: VERSION) as Markdown; the release
-workflow uses it for the GitHub release body.
+rewrites the derived files (the Windows manifest). `check` fails when any of
+them is stale, when the changelog has no entry for a release version, or when
+--tag disagrees with VERSION; CI runs it. `notes` prints one version's
+CHANGELOG section (default: VERSION) as Markdown; the release workflow uses it
+for the GitHub release body.
+
+The product site lives in island-browser/site. Its build reads VERSION and
+CHANGELOG.md from this repository and imports this script for
+`read_version`, `check`, `render_changelog_html` and the CHANGELOG_START /
+CHANGELOG_END markers, so keep those names stable.
 """
 
 from __future__ import annotations
@@ -263,30 +267,9 @@ def render_changelog_html(text: str) -> str:
 # --- Derived files ------------------------------------------------------------
 
 
-def _replace_between(text: str, start: str, end: str, content: str, path: Path) -> str:
-    a = text.find(start)
-    b = text.find(end)
-    if a < 0 or b < a:
-        raise VersionError(f"{path} lacks the {start} ... {end} markers")
-    return text[:a + len(start)] + "\n" + content + "\n" + text[b:]
-
-
 def derived_files(root: Path, version: Version) -> dict[Path, str]:
     """Returns {path: expected content} for every file `sync` maintains."""
     expected: dict[Path, str] = {}
-    site = root / "site"
-    marker = re.compile(r"(<[^>]*\bdata-island-version\b[^>]*>)[^<]*(<)")
-    json_ld = re.compile(r'("softwareVersion":\s*")[^"]*(")')
-    for page in sorted(site.glob("*.html")):
-        text = page.read_text(encoding="utf-8")
-        new = marker.sub(lambda m: f"{m[1]}{version}{m[2]}", text)
-        new = json_ld.sub(lambda m: f"{m[1]}{version}{m[2]}", new)
-        if page.name == "changelog.html":
-            changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-            new = _replace_between(new, CHANGELOG_START, CHANGELOG_END,
-                                   render_changelog_html(changelog), page)
-        if new != text:
-            expected[page] = new
     manifest = root / "src/main/windows/island_browser.exe.manifest"
     if manifest.exists():
         text = manifest.read_text(encoding="utf-8")

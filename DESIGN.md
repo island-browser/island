@@ -28,9 +28,10 @@ surface depicts a feature that does not exist in the build.
 The fenced `design-tokens` block below is the single machine-readable source of truth for the Island
 design contract. The tables in this section document it in human-readable form; the native runtime
 tokens (`src/main/design_tokens.cc`) and the drift tests (`tests/design/test_token_contract.py`,
-`tests/design_tokens_test.cpp`) must stay consistent with it, and the product site checks its own
-CSS variables against it. Any change to these values must update the block and pass the drift tests
-before it ships. Colors are opaque `#RRGGBB` hex; spacings, radii, and the rail width are DIP
+`tests/design_tokens_test.cpp`) must stay consistent with it, and the product site
+(`island-browser/site`) checks its own CSS variables against it. Any change to these values must
+update the block and pass the drift tests before it ships.
+Colors are opaque `#RRGGBB` hex; spacings, radii, and the rail width are DIP
 values.
 
 ```design-tokens
