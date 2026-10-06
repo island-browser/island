@@ -7,9 +7,12 @@
 // SearchResult.
 //
 // Single-writer: Ingest and Flush must be called from one thread. Query is
-// const and safe against other Query calls only while no Ingest or Flush is in
-// flight; S0 promises no reader/writer concurrency, so nothing here is
-// internally synchronized.
+// const and safe to call concurrently with other Query calls, but only while
+// no Ingest or Flush is in flight; S0 promises no reader/writer concurrency.
+// Concurrent queries share the decoded-posting cache, which an LRU mutates on
+// every read, so the cache is guarded by an internal mutex. That mutex is the
+// only synchronization here; it does not make Ingest or Flush safe to overlap
+// with anything.
 
 #ifndef ISLAND_SEARCH_INDEX_SEARCH_INDEX_H_
 #define ISLAND_SEARCH_INDEX_SEARCH_INDEX_H_
@@ -17,7 +20,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -92,6 +97,9 @@ class SearchIndex {
     [[nodiscard]] std::optional<StoredDocument> LoadDocument(DocId id) const;
 
     [[nodiscard]] std::uint64_t next_doc_id() const noexcept { return memtable_.next_doc_id(); }
+
+    // For tests and diagnostics: read it only while no Query is in flight,
+    // since the reference bypasses the cache mutex.
     [[nodiscard]] const BlockCache& cache() const noexcept { return cache_; }
 
   private:
@@ -100,7 +108,15 @@ class SearchIndex {
 
     // Ascending posting list for `term` from the segment, served through the
     // cache. Returns nullptr when the term is absent or there is no segment.
-    [[nodiscard]] const std::vector<std::uint64_t>* SegmentPostings(const std::string& term) const;
+    // A list too large for the cache is decoded into `uncached`, which the
+    // caller owns. The caller must hold cache_mutex_ until it has finished
+    // reading the returned list: another query's Put may evict it after that.
+    [[nodiscard]] const std::vector<std::uint64_t>* SegmentPostings(
+        const std::string& term, std::vector<std::uint64_t>& uncached) const;
+
+    // BM25's avgdl over the whole corpus -- the segment and the MemTable --
+    // never over the documents a particular query matched.
+    [[nodiscard]] double CorpusAverageDocLength() const;
 
     // Builds the ranker's view of one document, deriving per-field term
     // frequencies by re-tokenizing the stored url and title.
@@ -123,13 +139,11 @@ class SearchIndex {
     // the Flush comment above.
     bool segment_predates_memtable_ = false;
 
-    // Query is const, but an LRU promotes on read.
+    // Query is const, but an LRU promotes on read, so concurrent queries
+    // serialize every cache access -- and every read of a list the cache
+    // returned -- on cache_mutex_.
+    mutable std::mutex cache_mutex_;
     mutable BlockCache cache_;
-
-    // Holds a posting list too large for the cache's ceiling, so the
-    // oversized-entry bypass can still hand out a valid reference. Overwritten
-    // by the next oversized term; only ever read within one Query.
-    mutable std::vector<std::uint64_t> uncached_;
 };
 
 }  // namespace search

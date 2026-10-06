@@ -84,6 +84,10 @@ add_library(island_search STATIC
 target_compile_features(island_search PUBLIC cxx_std_20)
 # Search headers are included as "search/<header>", rooted at src/.
 target_include_directories(island_search PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# SearchIndex guards its shared posting cache with a std::mutex; older glibc
+# needs -pthread for that.
+find_package(Threads REQUIRED)
+target_link_libraries(island_search PUBLIC Threads::Threads)
 if(WIN32)
     # mem_sampler.cc calls GetProcessMemoryInfo, which lives in psapi.
     target_link_libraries(island_search PUBLIC psapi)
@@ -92,8 +96,9 @@ endif()
 # ---- Memory gate ---------------------------------------------------------
 # search_membench builds in both configurations: it needs only island_search
 # and the bench corpus generator, so unlike the test targets it is not confined
-# to the standalone tree. Registering it with add_test() puts the 32 MB ceiling
-# under `ctest` alongside the unit tests.
+# to the standalone tree. The 32 MB gate is not a CTest test (it would fail on
+# every run until the budget is met); bench/CMakeLists.txt registers only
+# SearchMemBenchSmoke, which checks the binary runs and samples, not the budget.
 add_subdirectory(bench)
 
 # ---- Tests (standalone only) --------------------------------------------------
@@ -108,9 +113,11 @@ if(ISLAND_SEARCH_STANDALONE)
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/block_cache_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/byte_lru_cache_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/mem_sampler_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/membench_checkpoints_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/memtable_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/query_parser_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/ranker_test.cpp"
+        "${ISLAND_SEARCH_REPO_ROOT}/tests/search/search_ci_contract_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/search_index_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/segment_test.cpp"
         "${ISLAND_SEARCH_REPO_ROOT}/tests/search/tokenizer_test.cpp"
@@ -122,6 +129,10 @@ if(ISLAND_SEARCH_STANDALONE)
     # under bench/search/, so expose the bench/ root for that include form.
     target_include_directories(island_search_tests PRIVATE "${ISLAND_SEARCH_REPO_ROOT}/bench")
     target_link_libraries(island_search_tests PRIVATE island_search GTest::gtest_main)
+    # search_ci_contract_test.cpp reads the workflow, docs and CMake files that
+    # describe the memory gate, so it needs the checkout's root.
+    target_compile_definitions(island_search_tests
+        PRIVATE ISLAND_SEARCH_REPO_ROOT="${ISLAND_SEARCH_REPO_ROOT}")
     gtest_discover_tests(island_search_tests)
 
     # Self-contained standalone regression harness with its own main(); not

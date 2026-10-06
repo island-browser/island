@@ -25,18 +25,18 @@ namespace search {
 
 std::uint64_t MemSampler::ResidentBytes() {
 #if defined(__APPLE__)
-    task_vm_info_data_t info{};
-    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
-    const kern_return_t kr =
-        task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count);
+    mach_task_basic_info_data_t info{};
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    const kern_return_t kr = task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                                       reinterpret_cast<task_info_t>(&info), &count);
     if (kr != KERN_SUCCESS) {
         return 0;
     }
-    // phys_footprint is the amount of memory actually charged to this process:
-    // resident private pages plus compressed-page accounting, excluding file-
-    // backed pages the kernel can evict. It is the fairest RSS measure for a
-    // memory-gate ceiling on macOS.
-    return static_cast<std::uint64_t>(info.phys_footprint);
+    // resident_size is what the S0 design's measurement methodology names, and
+    // it counts every resident page -- including the clean file-backed pages
+    // of the mmap'd segment, which the budget explicitly charges to search.
+    // phys_footprint would leave those out and under-report the gate.
+    return static_cast<std::uint64_t>(info.resident_size);
 #elif defined(__linux__)
     unsigned long total_pages = 0;
     unsigned long resident_pages = 0;

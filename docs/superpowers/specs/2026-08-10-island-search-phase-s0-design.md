@@ -359,7 +359,12 @@ score(d)    = bm25(d) * (1 + RECENCY_WEIGHT * recency(d))
 
 Constants (documented, fixed for S0, unit-tested): `k1 = 1.2`, `b = 0.75`, `HALFLIFE_DAYS = 14`,
 `RECENCY_WEIGHT = 0.5`. `N` is `doc_count`, `df(t)` is the term's posting count, `avgdl` is the
-segment/MemTable average document length, `len(d)` is the document's token count, `age_days(d)` is
+corpus average document length — over every document in the segment and the MemTable, never over
+the documents a particular query matched (an average over the candidates would let an unrelated query
+term change every other term's score). When the MemTable holds every document (no segment, or one
+flushed in this session) its exact token average is used; when the segment was mapped at `Open` and
+so predates the MemTable, the segment's `avg_doc_len_q16` and the MemTable's token total are combined,
+weighted by document count. `len(d)` is the document's token count, `age_days(d)` is
 `(query_now_ms - visited_at_ms) / 86_400_000`. `query_now_ms` is passed into `Query` by the caller
 (again, no hidden clock read), so ranking is deterministic and testable. Recency multiplies rather
 than adds so a fresh page is boosted proportionally to its relevance instead of dominating it. Ties
@@ -414,21 +419,36 @@ class SearchIndex {
   and avoids introducing locks or a background thread in S0.
 - `Query` is **const** and safe to call concurrently with other `Query` calls **only** when no
   `Ingest`/`Flush` is in flight; S0 does not promise reader/writer concurrency and documents this as a
-  hard precondition. The block cache is therefore not internally synchronized (no mutex, no atomics)
-  in S0 — adding a concurrent-reader guarantee is future scope with its own design.
+  hard precondition. Concurrent queries do share the block cache, and an LRU mutates on every read
+  (promotion, insertion, eviction), so `SearchIndex` guards the cache with one internal mutex, held
+  for each term's lookup *and* for the scan of the posting list it returns (another query's insert may
+  evict that list as soon as the lock drops). A list too large for the cache is decoded into
+  per-query storage, never into shared state. `BlockCache` itself stays unsynchronized; the mutex
+  lives in its owner. *(Amended after the review of impelixx/island#37, which reproduced a data race
+  and a heap use-after-free with two querying threads and a 64-byte cache.)* Reader/writer
+  concurrency remains future scope with its own design.
 - **Lifecycle.** `Open` maps any existing segment (quarantining a bad one) and initializes an empty
   MemTable. Destruction unmaps the segment and frees the MemTable; no global state, no singletons, no
   static init. The mmap is held for the object's lifetime; `Flush` swaps the active mapping under the
-  single-writer precondition.
+  single-writer precondition. It releases the active mapping *before* writing, because Windows refuses
+  to rename over a file that still has a mapped view; the retained MemTable answers every id until the
+  new segment is mapped, and a failed write re-maps the untouched previous file.
 
 ## Ingestion and privacy
 
 S0 enforces hard, testable refusals at the `Ingest` boundary as defense-in-depth, independent of
 whatever policy the future caller applies:
 
+- **URLs are judged the way a browser parses them.** Before either refusal below, the raw string is
+  normalized as WHATWG URL parsing does: leading and trailing C0 controls and spaces are stripped and
+  every ASCII tab and newline is removed, so `" data:..."` and `"da\tta:..."` are still `data:` URLs.
 - **No `data:` URLs.** Any `url` whose scheme is `data:` is refused (`kRefusedForPrivacy`) — such URLs
   can embed arbitrary page content and must never enter a persisted index.
-- **No credentialed URLs.** Any `url` containing userinfo (`user:pass@host`) is refused. S0 reuses the
+- **No credentialed URLs.** Any `url` containing userinfo (`user:pass@host`) is refused. The
+  authority starts right after `scheme:` — for the special schemes (`http`, `https`, `ws`, `wss`,
+  `ftp`, `file`) after any run of `/` or `\`, including none (`https:user:pass@host` carries
+  userinfo); for any other scheme only after a literal `//` (`about:blank#x=http://a@b` does not) —
+  and ends at `/`, `?` or `#` (and `\` for special schemes). An `@` inside it is userinfo. S0 reuses the
   existing browser judgment about credentialed URLs by accepting the caller's already-validated
   address: when the caller has an `island::ValidatedAddress`, S0 reads its `url` field (read-only,
   by value) and additionally re-checks the `data:`/credential refusals locally so the library is safe
@@ -469,7 +489,9 @@ whatever policy the future caller applies:
    - Linux: read `/proc/self/statm` field 2 (resident pages) × page size.
    - Windows: `GetProcessMemoryInfo` → `WorkingSetSize`.
    A thin `SampleResidentBytes()` abstraction picks the right implementation at compile time; no
-   third-party memory library is introduced.
+   third-party memory library is introduced. All three count resident file-backed pages, so the
+   mapped segment's touched pages are charged (macOS `phys_footprint` would leave them out). A
+   failed sample reads as 0 and is reported as `result=error` (exit 3), never as a pass.
 3. Prints a machine-readable line (`membench: docs=100000 rss_bytes=<n> ceiling=33554432 ...`) and
    **exits non-zero if `rss_bytes` exceeds the ceiling** (default `32 * 1024 * 1024`, overridable via
    `--ceiling-bytes` for local exploration but pinned in CI). This exit-code assertion is what CI

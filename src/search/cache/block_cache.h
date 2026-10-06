@@ -38,23 +38,42 @@ class BlockCache {
   public:
     explicit BlockCache(std::size_t capacity_bytes = kBlockCacheBytes);
 
-    BlockCache(BlockCache&&) noexcept = default;
-    BlockCache& operator=(BlockCache&&) noexcept = default;
+    // Written by hand: a defaulted move would copy current_bytes_ while leaving
+    // the source's list empty, so a reused moved-from cache would believe it
+    // held bytes it does not and overrun its ceiling. The source is left empty,
+    // with its capacity intact and its counters reset.
+    BlockCache(BlockCache&& other) noexcept;
+    BlockCache& operator=(BlockCache&& other) noexcept;
     BlockCache(const BlockCache&) = delete;
     BlockCache& operator=(const BlockCache&) = delete;
 
     // Returns the cached posting list for `term`, or nullptr on a miss. A hit
     // promotes the entry to most-recently-used, so this mutates recency even
     // though it reads. The pointer is invalidated by the next Put or Clear.
+    //
+    // Not internally synchronized: the owner must serialize every call, Get
+    // included, since a hit relinks the recency list.
     [[nodiscard]] const std::vector<std::uint64_t>* Get(const std::string& term);
 
     // Inserts or replaces `term`'s posting list, evicting least-recently-used
-    // entries until it fits. An entry larger than the whole ceiling is
-    // rejected outright (bypass) rather than emptying the cache to hold it;
-    // returns false in that case and leaves the cache untouched.
-    bool Put(const std::string& term, std::vector<std::uint64_t> postings);
+    // entries until it fits, and returns the stored list so a cold load need
+    // not call Get (which would count it as a hit). The pointer is invalidated
+    // by the next Put or Clear.
+    //
+    // An entry larger than the whole ceiling is rejected outright (bypass)
+    // rather than emptying the cache to hold it; Put returns nullptr and
+    // leaves every other entry in place. Any existing entry for `term` is
+    // dropped even then, so a later Get cannot serve the superseded list.
+    const std::vector<std::uint64_t>* Put(const std::string& term,
+                                          std::vector<std::uint64_t> postings);
 
     void Clear();
+
+    // True when an entry of this size can be cached at all: non-empty and no
+    // larger than the whole ceiling. Put bypasses exactly the entries for which
+    // this is false, so a caller can keep such a list itself instead of moving
+    // it into a Put that will discard it.
+    [[nodiscard]] bool Admits(const std::string& term, std::size_t posting_count) const noexcept;
 
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
     [[nodiscard]] std::size_t current_bytes() const noexcept { return current_bytes_; }
@@ -77,6 +96,9 @@ class BlockCache {
     };
 
     void EvictUntilFits(std::size_t byte_size);
+
+    // Empties the cache and zeroes its byte total and counters.
+    void Reset() noexcept;
 
     std::size_t capacity_;
     std::size_t current_bytes_ = 0;

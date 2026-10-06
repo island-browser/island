@@ -13,25 +13,32 @@ query mix over a deterministic synthetic corpus and reports process RSS growth a
 Unit W6 of the Phase S0 plan. Built only behind `ISLAND_ENABLE_SEARCH`; see `../AGENTS.md`.
 
 **The gate currently reports a failure**, and that is the honest state of the kernel rather than a
-defect in the benchmark: the design targets a 32 MB RSS delta at 100,000 documents and the measured
-delta is roughly 160 MB. Numbers, scaling and the two contributors are recorded in
-`docs/search-phase-s0-membench.md`.
+defect in the benchmark. The design targets a 32 MB RSS delta at 100,000 documents; the measured delta
+is 71–92 MB across the six CI targets (2026-10-06). Per-platform numbers and the contributors are
+recorded in `docs/search-phase-s0-membench.md`.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `search_membench.cc` | The gate: argument parsing, checkpoints, the machine-readable output line |
-| `CMakeLists.txt` | The `search_membench` target |
+| `search_membench.cc` | The gate: argument parsing, the lifecycle run, the machine-readable output line |
+| `membench_checkpoints.h` | Header-only checkpoint arithmetic and the pass/fail/error verdict, unit-tested in `tests/search/membench_checkpoints_test.cpp` |
+| `CMakeLists.txt` | The `search_membench` target and the `SearchMemBenchSmoke` CTest test |
 
 ## For AI Agents
 
 ### Working In This Directory
 
-- **This target is not registered with `add_test()`, on purpose.** The gate is currently red, and
-  registering it would turn the whole unit-test suite red for a reason unrelated to any individual
-  change. Register it with CTest — and turn off `continue-on-error` on the CI step in
-  `.github/workflows/search.yml` — in the same change that brings the delta under the ceiling.
+- **The gate is not a CTest test, on purpose.** It is currently red, and registering it would turn
+  the whole unit-test suite red for a reason unrelated to any individual change. Only
+  `SearchMemBenchSmoke` is registered: a 2,000-document run with an unbounded ceiling that fails on
+  an error and never on the budget. Register the gate with CTest, and drop the exit-1 allowance in
+  the CI step in `.github/workflows/search.yml`, in the same change that brings the delta under the
+  ceiling.
+- **A failed sample is an error, never a pass.** `MemSampler::ResidentBytes()` returns 0 when it
+  cannot sample. `Judge` checks every checkpoint before anything is printed and reports
+  `result=error` (exit 3). Do not reintroduce a verdict computed from the delta alone: a 0 sample
+  reads as zero growth.
 - **The gate is on the delta from baseline, not absolute RSS.** Absolute RSS includes the executable,
   the runtime and allocator arenas, none of which are attributable to search.
 - **Do not reimplement RSS sampling or the corpus generator here.** `../mem_sampler.{h,cc}` already
@@ -53,6 +60,11 @@ cmake --build build-ninja
 ./build-ninja/bench/search_membench --ceiling-bytes 33554432
 ```
 
-Exit codes: `0` within ceiling, `1` over, `2` bad arguments or a failed index operation, `3` no RSS
-sampler on this platform. Use Ninja — a Makefiles build directory for this tree reports stale
+Exit codes: `0` within ceiling, `1` over, `2` bad arguments or a failed index operation, `3` a failed
+RSS sample or no sampler on this platform (`result=error`). CI tolerates only `1`.
+
+```bash
+ctest --test-dir build-ninja -R "SearchMemBenchSmoke|MembenchCheckpoints|SearchCiContract" --output-on-failure
+```
+ Use Ninja — a Makefiles build directory for this tree reports stale
 results.
