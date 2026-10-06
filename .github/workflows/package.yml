@@ -53,7 +53,9 @@ jobs:
           GIT_MASTER=1 git cat-file -e "$sha^{commit}"
           GIT_MASTER=1 git merge-base --is-ancestor "$sha" origin/main
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "version=0.0.0-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          base="$(git show "$sha:VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+          base="${base%%-*}"
+          echo "version=${base:-0.0.0}-ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
   package-macos:
     name: ${{ matrix.target }}

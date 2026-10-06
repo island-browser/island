@@ -1,5 +1,6 @@
 #include "acp_client.h"
 
+#include "island_version.h"
 #include "jsonrpc.h"
 
 namespace island::agent {
@@ -66,7 +67,7 @@ void AcpClient::Start(std::string cwd, std::vector<AcpMcpServer> mcp_servers) {
                     .Set("clientInfo", Value::MakeObject()
                                            .Set("name", Value::String("island-browser"))
                                            .Set("title", Value::String("Island"))
-                                           .Set("version", Value::String("0.4.0"))));
+                                           .Set("version", Value::String(ISLAND_VERSION_STRING))));
 }
 
 bool AcpClient::Prompt(std::string_view text, std::string_view context) {

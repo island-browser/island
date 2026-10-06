@@ -31,6 +31,10 @@ domain is replaced.
 ## GitHub Pages (already wired)
 
 `.github/workflows/pages.yml` deploys `site/` to GitHub Pages on every push to
-`main` — no extra setup beyond enabling Pages once in the repository settings.
+`main` that touches `site/`, `CHANGELOG.md`, or `VERSION` — no extra setup beyond
+enabling Pages once in the repository settings (Source: GitHub Actions). The job
+runs `python3 scripts/version.py check` first, so a stale `site/changelog.html`
+or version marker fails the deploy instead of publishing; fix it with
+`python3 scripts/version.py sync`.
 If you use Vercel as the primary host, the Pages copy still works; update the
 SEO URLs to whichever domain should be canonical.

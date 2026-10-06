@@ -33,6 +33,20 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
   `agent-endpoint.json`, or the `island_mcp_bridge` stdio bridge). Settings shows a ready-to-paste
   `mcpServers` config.
 
+## Versions
+
+The version lives in `VERSION` (SemVer) and feeds the build, the app's About page, the agent
+protocols, the macOS bundle, and the site. Release notes go under `## [Unreleased]` in
+`CHANGELOG.md`; cut a release with:
+
+```bash
+python3 scripts/version.py bump minor   # or major / patch; --pre beta for a pre-release
+python3 scripts/version.py check
+```
+
+When the bump lands on `main`, the commit is tagged `vX.Y.Z` automatically and the site (with its
+changelog page) redeploys to GitHub Pages.
+
 ## Dependencies
 
 CEF 150 and Geist are pinned in `deps/dependencies.lock.json` and installed outside git:

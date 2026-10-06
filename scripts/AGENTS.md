@@ -15,6 +15,8 @@ Every non-CMake entrypoint: vendoring the binary dependencies and packaging unsi
 | `setup_deps.ps1` | Windows PowerShell equivalent |
 | `deps.py` | CLI over the `deps/` package: resolve, install, `verify` |
 | `package.py` | Builds a per-target unsigned artifact; `uv run`-compatible PEP 723 header, stdlib only |
+| `version.py` | Version tooling over the root `VERSION` file: `show`, `bump major\|minor\|patch\|pre\|release [--pre LABEL]` (rotates `CHANGELOG.md`), `sync` (site markers, `site/changelog.html`, Windows manifest), `check [--tag vX.Y.Z]`; stdlib only |
+| `site_set_domain.py` | Rewrites the site's canonical/SEO URLs to a new domain |
 | `package_resources.py` | Declares the font/icon files staged into a packaged artifact and their digests |
 
 That table is the complete contents of this directory on `main`. A hybrid native/container build

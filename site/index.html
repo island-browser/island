@@ -4,18 +4,18 @@
     <meta charset="utf-8">
     <script>document.documentElement.classList.add('js');</script>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Island — a calm native browser with tabs, spaces, and split view</title>
-    <meta name="description" content="Island is an open-source native desktop browser built on CEF: a quiet left rail with tabs, colored spaces, split view, a command palette, and session restore. Built in the open for macOS.">
+    <title>Island — a calm native browser with a built-in AI agent</title>
+    <meta name="description" content="Island is an open-source native desktop browser built on CEF: an Arc-style sidebar with colored spaces and pinned tabs, split view, an all-tabs overview, a built-in ACP agent, and browser tools any AI agent can use over MCP.">
     <link rel="canonical" href="https://impelixx.github.io/island/">
     <meta name="theme-color" content="#F3F0E9">
     <meta property="og:site_name" content="Island">
     <meta property="og:title" content="Island — a calm native browser">
-    <meta property="og:description" content="Tabs, spaces, split view, palettes, and session restore in a native CEF browser with a quiet left rail. Open source, built in the open.">
+    <meta property="og:description" content="Spaces, pinned tabs, split view, and an AI agent in the sidebar, in a native CEF browser that agents can drive over MCP. Open source, built in the open.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://impelixx.github.io/island/">
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="Island — a calm native browser">
-    <meta name="twitter:description" content="Tabs, spaces, split view, palettes, and session restore in a native CEF browser.">
+    <meta name="twitter:description" content="Spaces, pinned tabs, split view, and a built-in AI agent in a native CEF browser.">
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23168C99' d='M5 20.5c3.2-1.1 5.3-4.2 6.2-9.4 3.5 1.9 5.5 5 6 9.4 3.6-1 6.7-.5 9.8 1.8-4.7 4.3-13.7 5.3-22 1.1Z'/%3E%3C/svg%3E">
     <script type="application/ld+json">
     {
@@ -25,10 +25,10 @@
       "applicationCategory": "WebBrowser",
       "operatingSystem": "macOS",
       "url": "https://impelixx.github.io/island/",
-      "description": "An open-source native desktop browser built on CEF with a quiet left rail: tabs, colored spaces, split view, a command palette, and session restore.",
+      "description": "An open-source native desktop browser built on CEF with an Arc-style sidebar, colored spaces, split view, a built-in ACP agent, and MCP browser tools for AI agents.",
       "author": { "@type": "Organization", "name": "Island contributors" },
       "codeRepository": "https://github.com/impelixx/island",
-      "softwareVersion": "Phase 3 (in development)"
+      "softwareVersion": "0.4.0"
     }
     </script>
     <link rel="stylesheet" href="assets/css/site.css">
@@ -40,6 +40,11 @@
         <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
         <symbol id="i-rotate-cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
         <symbol id="i-globe-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></symbol>
+        <symbol id="i-sparkles" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.94 14.06 8 20l-1.94-5.94L0 12l6.06-1.94L8 4l1.94 6.06L16 12z" transform="translate(3 -1) scale(.85)"/><path d="M20 3v4"/><path d="M22 5h-4"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+        <symbol id="i-pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
         <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
       </defs>
     </svg>
@@ -55,9 +60,9 @@
       </a>
       <nav aria-label="Primary navigation">
         <a href="#features">Features</a>
-        <a href="#welcome">Welcome</a>
+        <a href="#agents">Agents</a>
         <a href="docs.html">Docs</a>
-        <a href="privacy.html">Privacy</a>
+        <a href="changelog.html">Changelog</a>
       </nav>
       <a class="header-source" href="https://github.com/impelixx/island" aria-label="View Island source on GitHub">
         Source <span aria-hidden="true">↗</span>
@@ -67,12 +72,14 @@
     <main id="main">
       <section class="hero shell" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="mark mark-blue"></span> An open-source native browser</p>
-          <h1 id="hero-title">A calm place for every page you keep open.</h1>
+          <p class="eyebrow"><span class="mark mark-blue"></span> An open-source native browser
+            <a class="version-badge" href="changelog.html">v<span data-island-version>0.4.0</span>&nbsp;· What&rsquo;s new</a></p>
+          <h1 id="hero-title">A calm browser, with an agent at your side.</h1>
           <p class="lede">
             Island is a native desktop browser built directly on CEF — no Electron, no web app
-            shell. One quiet rail holds your tabs, your spaces, and the page you're on; split view
-            and a command palette are one keystroke away.
+            shell. A sidebar tinted by each space holds your pinned and open tabs, an AI agent
+            lives one keystroke away, and any agent you already use can drive the browser
+            through its tools.
           </p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/impelixx/island">
@@ -87,69 +94,72 @@
 
         <div class="hero-visual">
           <!--
-            Illustration of the running build's view tree: a 286px rail with a
-            tab strip, space switcher, navigation and address rows, beside a
-            split-view canvas. Decorative; the copy describes the same controls.
+            Illustration of the 0.4 window: a space-tinted sidebar with the
+            compact address field, pinned tabs, and today's tabs; the page on a
+            floating card; and the agent panel. Decorative; the copy describes
+            the same controls.
           -->
-          <div class="browser" aria-hidden="true">
-            <aside class="rail">
+          <div class="browser browser--arc" aria-hidden="true">
+            <aside class="rail rail--tinted">
               <div class="rail-window"><i></i><i></i><i></i></div>
-              <div class="rail-row rail-row--nav">
-                <span class="rail-btn"><svg><use href="#i-chevron-left"/></svg></span>
-                <span class="rail-btn"><svg><use href="#i-chevron-right"/></svg></span>
-              </div>
               <div class="rail-row">
-                <span class="rail-address"><svg class="loc"><use href="#i-globe-2"/></svg><span class="fill">Island</span></span>
-                <span class="rail-reload"><svg><use href="#i-rotate-cw"/></svg></span>
+                <span class="rail-address"><svg class="loc"><use href="#i-globe-2"/></svg><span class="fill">github.com/impelixx/island</span></span>
+              </div>
+              <div class="pinned-grid">
+                <span class="pin-tile is-active"><b>G</b></span>
+                <span class="pin-tile"><b>L</b></span>
+                <span class="pin-tile"><b>M</b></span>
+                <span class="pin-tile"><b>C</b></span>
               </div>
               <div class="rail-tabs">
-                <span class="rail-tabs-label">Tabs</span>
+                <span class="rail-tabs-label">Today</span>
                 <div class="rail-tab is-active">
                   <span class="tab-favicon"><svg><use href="#i-globe-2"/></svg></span>
-                  <span class="tab-title">Island</span>
+                  <span class="tab-title">Island — pull requests</span>
                   <span class="tab-close">×</span>
                 </div>
                 <div class="rail-tab">
                   <span class="tab-favicon"><svg><use href="#i-globe-2"/></svg></span>
-                  <span class="tab-title">Docs</span>
-                  <span class="tab-close">×</span>
+                  <span class="tab-title">Agent Client Protocol</span>
+                </div>
+                <div class="rail-tab">
+                  <span class="tab-favicon"><svg><use href="#i-globe-2"/></svg></span>
+                  <span class="tab-title">MCP specification</span>
+                </div>
+                <div class="rail-tab rail-tab--new">
+                  <span class="tab-favicon"><svg><use href="#i-plus"/></svg></span>
+                  <span class="tab-title">New tab</span>
                 </div>
               </div>
-              <div class="rail-spaces">
-                <span class="rail-spaces-label">Spaces</span>
-                <div class="rail-space is-active"><span class="dot" style="background:var(--space-blue)"></span><span class="name">Focus</span></div>
-                <div class="rail-space"><span class="dot" style="background:var(--space-green)"></span><span class="name">Personal</span></div>
-                <div class="rail-space"><span class="dot" style="background:var(--space-coral)"></span><span class="name">Research</span></div>
-              </div>
-              <hr class="rail-divider">
-              <div class="active-page">
-                <span class="favicon"><svg><use href="#i-globe-2"/></svg></span>
-                <span class="label">Island</span>
-                <span class="indicator"></span>
+              <div class="rail-footer">
+                <span class="space-dots"><i class="is-active" style="background:var(--space-blue)"></i><i style="background:var(--space-green)"></i><i style="background:var(--space-coral)"></i></span>
+                <span class="rail-icons">
+                  <svg><use href="#i-grid"/></svg>
+                  <svg class="is-active"><use href="#i-sparkles"/></svg>
+                  <svg><use href="#i-settings"/></svg>
+                </span>
               </div>
             </aside>
-            <div class="canvas">
-              <div class="canvas-split">
-                <div class="canvas-pane canvas-pane--wide">
-                  <div>
-                    <p class="pane-title">Island Browser</p>
-                    <p class="pane-note">The local page the app opens with.</p>
-                  </div>
-                </div>
-                <span class="canvas-divider"></span>
-                <div class="canvas-pane canvas-pane--wide">
-                  <div>
-                    <p class="pane-title">Docs</p>
-                    <p class="pane-note">Split view: two tabs, one space, side by side.</p>
-                  </div>
-                </div>
+            <div class="canvas canvas--card">
+              <div class="page-card">
+                <p class="pane-title">impelixx/island</p>
+                <p class="pane-note">A calm native browser for you and your agents.</p>
+                <span class="page-line"></span>
+                <span class="page-line page-line--short"></span>
+                <span class="page-line"></span>
               </div>
             </div>
+            <aside class="agent-mock">
+              <p class="agent-head"><svg><use href="#i-sparkles"/></svg> Agent</p>
+              <p class="bubble bubble--user">Which tabs in Research are about MCP?</p>
+              <p class="tool-chip">browser_list_tabs ✓</p>
+              <p class="bubble">Two: <em>MCP specification</em> and <em>Streamable HTTP</em>. Want them in a split?</p>
+              <span class="agent-input">Ask the agent…</span>
+            </aside>
           </div>
           <p class="hero-caption">
-            <strong>What runs today.</strong> The macOS build in development opens one native window
-            with the rail, tabs, spaces, and split view shown here — a real foundation, not a
-            finished browser.
+            <strong>What&rsquo;s in 0.4.</strong> Spaces tint the sidebar, pinned tabs sit in a
+            tray, the page floats on a card, and the agent panel opens with <kbd>Cmd</kbd>+<kbd>J</kbd>.
           </p>
         </div>
       </section>
@@ -159,49 +169,111 @@
         <div>
           <h2 id="about-title">The browser chrome should get out of the way.</h2>
           <p>Island keeps the interface small and legible so the page stays in front. Everything it
-          adds — tabs, spaces, split view, palettes — lives in the same calm rail or behind one
-          keystroke, and every feature listed on this site runs in the current build.</p>
+          adds — spaces, split view, palettes, an agent — lives in the same calm sidebar or behind
+          one keystroke, and every feature listed on this site is in the current source.</p>
         </div>
       </section>
 
       <section class="ledger shell" id="features" aria-labelledby="features-title">
         <div class="section-heading reveal">
-          <p class="eyebrow">The rail, today</p>
+          <p class="eyebrow">The browser, today</p>
           <h2 id="features-title">What the current build actually has.</h2>
-          <p>Working pieces of the macOS build in development — not a roadmap and not a promise of
-          what's next.</p>
+          <p>Working pieces of the build in development — not a roadmap and not a promise of
+          what's next. See the <a class="inline-link" href="changelog.html">changelog</a> for what
+          landed when.</p>
         </div>
 
         <div class="rail-list">
           <article class="lift reveal">
             <div class="lift-index">
               <span class="num" aria-hidden="true">01</span>
-              <h3>Tabs and spaces</h3>
+              <h3>An agent in the sidebar</h3>
             </div>
             <div class="lift-copy">
-              <p>A tab strip and a space switcher live in the rail. Spaces are colored, named
-              contexts with their own tabs; rename with F2 or the menu, reorder from the menu, and
-              switch from the rail or the palette.</p>
-              <span class="lift-spec">Working in the build</span>
+              <p>Press <kbd>Cmd</kbd>+<kbd>J</kbd> and an Agent Client Protocol agent opens
+              beside the page — Claude Code by default, or any ACP agent you configure. Replies
+              stream in, tool calls ask before they act, and the agent already knows which tab
+              you are looking at.</p>
+              <span class="lift-spec lift-spec--new">New in 0.4</span>
             </div>
           </article>
-
           <article class="lift reveal">
             <div class="lift-index">
               <span class="num" aria-hidden="true">02</span>
+              <h3>Tools any agent can use</h3>
+            </div>
+            <div class="lift-copy">
+              <p>Island serves its browser as MCP tools on a loopback-only endpoint: list and
+              open tabs, switch spaces, read page text, take screenshots, evaluate JavaScript,
+              and pin tabs. Point Claude Code, Cursor, or any MCP client at it — Settings has
+              the config ready to copy.</p>
+              <span class="lift-spec lift-spec--new">New in 0.4</span>
+            </div>
+          </article>
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">03</span>
+              <h3>Spaces that color the sidebar</h3>
+            </div>
+            <div class="lift-copy">
+              <p>Each space is a named, colored context with its own tabs, and the sidebar takes
+              on its tint — always above WCAG contrast. Pinned tabs sit in a tray at the top
+              (<kbd>Cmd</kbd>+<kbd>D</kbd>), the address lives in the sidebar, and the page floats
+              on a card.</p>
+              <span class="lift-spec lift-spec--new">New in 0.4</span>
+            </div>
+          </article>
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">04</span>
+              <h3>All tabs at a glance</h3>
+            </div>
+            <div class="lift-copy">
+              <p><kbd>Cmd</kbd>+<kbd>⇧</kbd>+<kbd>A</kbd> lays every space's tabs out as
+              searchable cards. Arrow keys and Enter jump to one, Delete closes, <kbd>P</kbd> pins,
+              and dragging a card onto another space moves it there.</p>
+              <span class="lift-spec lift-spec--new">New in 0.4</span>
+            </div>
+          </article>
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">05</span>
+              <h3>Settings and your own shortcuts</h3>
+            </div>
+            <div class="lift-copy">
+              <p><kbd>Cmd</kbd>+<kbd>,</kbd> opens Settings: theme, the agent command, the MCP
+              config, and every keyboard shortcut. Click a shortcut, press new keys, and Island
+              flags conflicts; reset one or all to the defaults.</p>
+              <span class="lift-spec lift-spec--new">New in 0.4</span>
+            </div>
+          </article>
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">06</span>
+              <h3>Bring everything with you</h3>
+            </div>
+            <div class="lift-copy">
+              <p>Import bookmarks from Chrome, Edge, Brave, and other Chromium-family browsers,
+              Safari, and Firefox — or recreate your Arc spaces with their colors and pinned
+              tabs. Everything is read from disk on your machine; nothing is uploaded.</p>
+              <span class="lift-spec lift-spec--new">New in 0.4</span>
+            </div>
+          </article>
+          <article class="lift reveal">
+            <div class="lift-index">
+              <span class="num" aria-hidden="true">07</span>
               <h3>Split view</h3>
             </div>
             <div class="lift-copy">
               <p>Pair any two tabs of a space side by side with a keyboard-adjustable divider.
               Closing either half — or selecting a tab outside the pair — returns the survivor to
               full width.</p>
-              <span class="lift-spec">Working in the build</span>
+              <span class="lift-spec">In the build</span>
             </div>
           </article>
-
           <article class="lift reveal">
             <div class="lift-index">
-              <span class="num" aria-hidden="true">03</span>
+              <span class="num" aria-hidden="true">08</span>
               <h3>Command and search palettes</h3>
             </div>
             <div class="lift-copy">
@@ -209,47 +281,57 @@
               spaces, and your bookmarks, with a go-to-URL affordance through the same validation
               as the address bar. <kbd>Cmd</kbd>+<kbd>⇧</kbd>+<kbd>K</kbd> searches the web with
               your pick of providers.</p>
-              <span class="lift-spec">Working in the build</span>
+              <span class="lift-spec">In the build</span>
             </div>
           </article>
-
           <article class="lift reveal">
             <div class="lift-index">
-              <span class="num" aria-hidden="true">04</span>
-              <h3>Import from your browser</h3>
-            </div>
-            <div class="lift-copy">
-              <p>The first-run welcome offers to bring bookmarks in from browsers already on your
-              machine — Chrome, Edge, Brave, and other Chromium-family browsers, plus Safari where
-              the system allows — and an appearance choice of System, Light, or Dark.</p>
-              <span class="lift-spec">Working in the build</span>
-            </div>
-          </article>
-
-          <article class="lift reveal">
-            <div class="lift-index">
-              <span class="num" aria-hidden="true">05</span>
+              <span class="num" aria-hidden="true">09</span>
               <h3>Session restore</h3>
             </div>
             <div class="lift-copy">
-              <p>Quit cleanly and Island rebuilds your spaces, tabs, and active selections on the
-              next launch — including split pairs. Restored URLs pass the same validation as
-              anything you type; nothing bypasses policy.</p>
-              <span class="lift-spec">Working in the build</span>
+              <p>Quit cleanly and Island rebuilds your spaces, tabs, pins, and active selections
+              on the next launch — including split pairs. Restored URLs pass the same validation
+              as anything you type; nothing bypasses policy.</p>
+              <span class="lift-spec">In the build</span>
             </div>
           </article>
+        </div>
+      </section>
 
-          <article class="lift reveal">
-            <div class="lift-index">
-              <span class="num" aria-hidden="true">06</span>
-              <h3>Navigation and the address bar</h3>
-            </div>
-            <div class="lift-copy">
-              <p>Back, forward, and reload with the usual shortcuts; one address field that
-              validates what you type against a strict local allow-list before it ever loads.</p>
-              <span class="lift-spec">Working in the build</span>
-            </div>
-          </article>
+      <section class="agents-block shell reveal" id="agents" aria-labelledby="agents-title">
+        <div class="section-heading">
+          <p class="eyebrow">Made for agents</p>
+          <h2 id="agents-title">Your agent can use the browser you use.</h2>
+          <p>While Island runs, it listens on <code>127.0.0.1</code> only, behind a bearer token
+          that changes on every launch. Add this to any MCP client, or use the
+          <code>island_mcp_bridge</code> stdio bridge for clients that only speak stdio.</p>
+        </div>
+        <div class="agents-grid">
+          <pre class="code code--config" aria-label="Example MCP client configuration"><code>{
+  "mcpServers": {
+    "island": {
+      "type": "http",
+      "url": "http://127.0.0.1:9223/mcp",
+      "headers": {
+        "Authorization": "Bearer &lt;token from Settings&gt;"
+      }
+    }
+  }
+}</code></pre>
+          <div class="tool-list">
+            <p class="tool-list-label">Some of the 22 tools</p>
+            <ul>
+              <li><code>browser_list_tabs</code> / <code>browser_list_spaces</code> — everything that is open</li>
+              <li><code>browser_open_tab</code> / <code>browser_navigate</code> — go somewhere</li>
+              <li><code>page_read</code> / <code>page_snapshot</code> — the page as text or as clickable elements</li>
+              <li><code>page_click</code> / <code>page_type</code> / <code>page_scroll</code> — act on the page</li>
+              <li><code>page_screenshot</code> — what the page looks like</li>
+              <li><code>browser_switch_space</code> / <code>browser_pin_tab</code> — organize</li>
+            </ul>
+            </ul>
+            <a class="button button-text" href="docs.html#agents">Set up an agent <span aria-hidden="true">→</span></a>
+          </div>
         </div>
       </section>
 
@@ -258,21 +340,21 @@
           <p class="eyebrow">First run</p>
           <h2 id="welcome-title">A welcome that offers, never blocks.</h2>
           <p>On a fresh install Island shows one card: pick how it looks, tick the browsers to
-          import from, and start browsing. Escape skips it — now and forever, or until you reopen
-          it from the menu.</p>
+          import from, and start browsing. Escape skips it — and Settings can import again
+          anytime.</p>
         </div>
         <div class="palette-mock reveal" aria-hidden="true">
           <div class="welcome-mock">
             <h3>Welcome to Island</h3>
-            <p class="welcome-lede">Choose how Island looks, and bring your bookmarks from the browser you were using.</p>
+            <p class="welcome-lede">Choose how Island looks, and bring your bookmarks and spaces from the browser you were using.</p>
             <div class="theme-row">
               <span class="theme-choice is-active">System</span>
               <span class="theme-choice">Light</span>
               <span class="theme-choice">Dark</span>
             </div>
+            <div class="import-row"><span class="check">[x]</span> Arc — 4 spaces, 23 pinned tabs</div>
             <div class="import-row"><span class="check">[x]</span> Google Chrome</div>
-            <div class="import-row"><span class="check">[x]</span> Microsoft Edge</div>
-            <div class="import-row"><span class="check">[x]</span> Safari</div>
+            <div class="import-row"><span class="check">[ ]</span> Firefox</div>
             <div class="welcome-actions">
               <span class="button button-primary">Import and start</span>
               <span class="button button-text">Just start browsing</span>
@@ -332,6 +414,7 @@
       <p>Made openly. Browser software is in development.</p>
       <nav aria-label="Footer navigation">
         <a href="docs.html">Docs</a>
+        <a href="changelog.html">Changelog</a>
         <a href="privacy.html">Privacy</a>
         <a href="https://github.com/impelixx/island">GitHub</a>
       </nav>

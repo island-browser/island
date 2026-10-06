@@ -19,6 +19,7 @@
 
 #include "agent_endpoint.h"
 #include "http_client.h"
+#include "island_version.h"
 #include "json_util.h"
 #include "jsonrpc.h"
 
@@ -70,8 +71,12 @@ void WriteLine(const std::string& line) {
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg = argv[i];
+        if (arg == "--version") {
+            std::cout << "island_mcp_bridge " << ISLAND_VERSION_STRING << "\n";
+            return 0;
+        }
         if (arg == "--help" || arg == "-h") {
-            std::cout << "usage: island_mcp_bridge [--endpoint-file PATH]\n"
+            std::cout << "usage: island_mcp_bridge [--endpoint-file PATH] [--version]\n"
                          "Bridges stdio MCP to a running Island browser.\n";
             return 0;
         }

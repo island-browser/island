@@ -1,0 +1,51 @@
+name: Tag version
+
+# When a change to VERSION lands on main, tag that commit vX.Y.Z so every
+# release in CHANGELOG.md has a matching tag. Pre-release versions are tagged
+# too. Tags pushed with GITHUB_TOKEN do not start other workflows, so this
+# never triggers the (paused) release gate on its own.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: version-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Check version consistency
+        shell: bash
+        run: python3 scripts/version.py check
+      - name: Create the tag if it is new
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 scripts/version.py show)"
+          tag="v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "${tag} already exists at $(git rev-list -n1 "${tag}"); nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "Island ${version}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${tag}"
+          echo "Tagged ${GITHUB_SHA} as ${tag}."

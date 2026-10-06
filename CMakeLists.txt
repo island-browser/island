@@ -11,7 +11,11 @@ if(WIN32)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "" FORCE)
 endif()
 
-project(island_browser LANGUAGES C CXX)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/island_version.cmake")
+island_read_version("${CMAKE_CURRENT_SOURCE_DIR}")
+project(island_browser VERSION ${ISLAND_VERSION_NUMERIC} LANGUAGES C CXX)
+island_add_version_target("${CMAKE_CURRENT_SOURCE_DIR}")
+message(STATUS "Island version ${ISLAND_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

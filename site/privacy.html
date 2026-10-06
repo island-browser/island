@@ -19,10 +19,14 @@
         <span>Island</span>
       </a>
       <nav aria-label="Primary navigation">
-        <a href="index.html#rail">The rail</a>
-        <a href="index.html#availability">Availability</a>
-        <a href="privacy.html" aria-current="page">Privacy</a>
+        <a href="index.html#features">Features</a>
+        <a href="index.html#agents">Agents</a>
+        <a href="docs.html">Docs</a>
+        <a href="changelog.html">Changelog</a>
       </nav>
+      <a class="header-source" href="https://github.com/impelixx/island" aria-label="View Island source on GitHub">
+        Source <span aria-hidden="true">↗</span>
+      </a>
     </header>
     <main id="main" class="legal shell">
       <p class="eyebrow">Privacy</p>
@@ -42,6 +46,10 @@
           <p>GitHub links and GitHub Pages hosting are governed by the <a href="https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement">GitHub Privacy Statement</a>. Other external links are governed by their respective privacy policies.</p>
         </section>
         <section class="reveal">
+          <h2>The browser and your data</h2>
+          <p>Importing from another browser reads that browser's files on your own computer; nothing is uploaded. The agent tools endpoint listens on <code>127.0.0.1</code> only, behind a token that changes on every launch and is stored in a file only your user account can read. The sidebar agent is a program you choose and run locally — what it sends to its own provider is governed by that agent's terms, not by Island.</p>
+        </section>
+        <section class="reveal">
           <h2>Product status</h2>
           <p>The browser is under development. Any future product data practices will be documented separately before a public release.</p>
         </section>
@@ -55,6 +63,12 @@
         <span>Island</span>
       </a>
       <p>Made openly. Browser software is in development.</p>
+      <nav aria-label="Footer navigation">
+        <a href="docs.html">Docs</a>
+        <a href="changelog.html">Changelog</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="https://github.com/impelixx/island">GitHub</a>
+      </nav>
     </footer>
     <script>
       (function () {

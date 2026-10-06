@@ -34,6 +34,11 @@
   discovery file) and an ACP client that runs an agent in the sidebar. GitHub Actions triggers
   are paused (manual `workflow_dispatch` only); build, test, and look at changes locally before
   committing.
+- Versioning: `VERSION` is the only place the version is written. Bump it with
+  `python3 scripts/version.py bump <part>` (never by hand-editing derived files), keep notes under
+  `## [Unreleased]` in `CHANGELOG.md` as you land changes, and run
+  `python3 scripts/version.py check` before committing site or version changes. A `VERSION` change
+  on `main` is tagged `vX.Y.Z` by `version-tag.yml`; site changes deploy through `pages.yml`.
 - The Phase S0 search kernel under `src/search/` stays gated behind `ISLAND_ENABLE_SEARCH`
   (declared `OFF`), and the hybrid native/container build lane (`docker/`, `tests/container/`) is
   present on `main`.
@@ -126,6 +131,8 @@ hand-maintained project instructions and take precedence over anything a nested 
 | `CLAUDE.md` | Loader that pulls this file in via `@AGENTS.md` |
 | `DESIGN.md` | Long-form product/visual design narrative |
 | `README.md` | Human-facing project overview |
+| `VERSION` | The single source of the version (SemVer); read by CMake and `scripts/version.py` |
+| `CHANGELOG.md` | Keep-a-Changelog release notes; rendered into `site/changelog.html` by `scripts/version.py sync` |
 | `.clang-format` | Google base, 4-space indent, 100 columns, left-aligned pointers |
 
 ### Search build (opt-in)
@@ -164,7 +171,7 @@ ctest --test-dir build-search-root --output-on-failure
 That reports 361 tests on `main` (as of 2026-09-19; the combined target discovers a slightly different set than the sum of the standalone lanes). The Python suites are separate from `ctest` entirely:
 
 ```bash
-python3 -m pytest tests/deps tests/package tests/design
+python3 -m pytest tests/deps tests/package tests/design tests/version
 ```
 
 ### Excluded from this documentation tree

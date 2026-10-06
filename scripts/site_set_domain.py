@@ -23,7 +23,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 SITE = REPOSITORY / "site"
 
 OLD = "https://impelixx.github.io/island"
-TARGETS = ("index.html", "docs.html", "privacy.html", "sitemap.xml", "robots.txt")
+TARGETS = ("index.html", "docs.html", "changelog.html", "privacy.html", "sitemap.xml", "robots.txt")
 
 
 def main() -> int:

@@ -3,6 +3,7 @@
 #include <array>
 #include <utility>
 
+#include "island_version.h"
 #include "jsonrpc.h"
 
 namespace island::agent {
@@ -80,7 +81,7 @@ void McpServer::HandleMessage(std::string_view text, Reply reply) {
                 .Set("serverInfo", Value::MakeObject()
                                        .Set("name", Value::String(std::string(kServerName)))
                                        .Set("title", Value::String("Island Browser"))
-                                       .Set("version", Value::String("0.4.0")))
+                                       .Set("version", Value::String(ISLAND_VERSION_STRING)))
                 .Set("instructions", Value::String(std::string(kInstructions)));
         reply(jsonrpc::MakeResult(id, std::move(result)));
         return;

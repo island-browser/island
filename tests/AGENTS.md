@@ -59,6 +59,7 @@ with a source that calls `CefInitialize` (`cef_address_parser_test.cpp`). Keep i
 | `deps/` | pytest suite for `deps/` (see `deps/AGENTS.md`) |
 | `package/` | pytest suite for `scripts/package*.py` (see `package/AGENTS.md`) |
 | `design/` | pytest design-token drift guard (see `design/AGENTS.md`) |
+| `version/` | pytest suite for `scripts/version.py` and the repository's version consistency (see `version/AGENTS.md`) |
 | `manual/` | Human visual acceptance checklists (see `manual/AGENTS.md`) |
 
 ## For AI Agents
@@ -89,7 +90,7 @@ raises it to **187** by including the two search targets.
 Python suites run from the repository root:
 
 ```bash
-python3 -m pytest tests/deps tests/package tests/design
+python3 -m pytest tests/deps tests/package tests/design tests/version
 ```
 
 The Python suites are `unittest.TestCase` classes executed through pytest; they are not wired into
