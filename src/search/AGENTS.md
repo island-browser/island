@@ -16,8 +16,10 @@ it can be unit-tested and benchmarked in isolation.
 `add_subdirectory(src/search)` — but only inside `if(ISLAND_ENABLE_SEARCH)`, and that option is
 declared `OFF` by default. A plain `cmake -B build -S .` therefore builds **none** of this code.
 
-`.github/workflows/search.yml` does exercise it on every pull request and every push to `main`,
-across all six targets, using the standalone configuration described under Testing Requirements.
+`.github/workflows/search.yml` exercises it across all six targets, using the standalone
+configuration described under Testing Requirements, but only when dispatched manually
+(`workflow_dispatch`). Its automatic triggers are paused, so neither a push nor a pull request runs
+it.
 
 Read `docs/superpowers/specs/2026-08-10-island-search-phase-s0-design.md` and
 `docs/superpowers/plans/2026-08-10-island-search-phase-s0.md` before changing anything here, and do
@@ -32,7 +34,7 @@ not treat these interfaces as a settled contract.
 | `posting_codec.{h,cc}` | LEB128 delta encoding in 128-id blocks; non-throwing decode via `PostingCodecError` |
 | `ranker.{h,cc}` | BM25-lite with `RankingWeights`, `CorpusStats`, title/url field weighting, and a half-life recency boost |
 | `byte_lru_cache.h` | Header-only LRU cache bounded by total byte size |
-| `mem_sampler.{h,cc}` | Process memory sampling used by the memory-budget benchmarks |
+| `mem_sampler.{h,cc}` | Process RSS sampling for the memory gate: macOS `MACH_TASK_BASIC_INFO` `resident_size`, Linux `statm`, Windows `WorkingSetSize`. Each counts mapped file pages; 0 means the sample failed |
 | `bench/` | The `search_membench` memory gate (see `bench/AGENTS.md`) |
 | `cache/` | Byte-bounded LRU cache of decoded posting lists (see `cache/AGENTS.md`) |
 | `index/` | The Ingest/Query/Flush facade (see `index/AGENTS.md`) |

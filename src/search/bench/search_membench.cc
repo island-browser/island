@@ -22,6 +22,7 @@
 #include <system_error>
 #include <vector>
 
+#include "search/bench/membench_checkpoints.h"
 #include "search/benchmark_corpus.h"
 #include "search/index/search_index.h"
 #include "search/mem_sampler.h"
@@ -31,6 +32,8 @@ namespace {
 
 using island::search::MemSampler;
 using island::search::SearchIndex;
+using island::search::bench::MembenchCheckpoints;
+using island::search::bench::MembenchResult;
 
 constexpr std::uint64_t kDefaultCeilingBytes = 32ull * 1024ull * 1024ull;
 constexpr std::uint64_t kDefaultDocuments = 100000;
@@ -41,34 +44,6 @@ struct Options {
     std::uint64_t documents = kDefaultDocuments;
     std::uint64_t seed = kDefaultSeed;
     std::filesystem::path segment_path;
-};
-
-// Returns the highest RSS seen so far, so a transient peak between checkpoints
-// is not lost by the final reading alone.
-struct Checkpoints {
-    std::uint64_t baseline = 0;
-    std::uint64_t after_ingest = 0;
-    std::uint64_t after_flush = 0;
-    std::uint64_t after_query = 0;
-
-    [[nodiscard]] std::uint64_t peak() const {
-        std::uint64_t peak = after_ingest;
-        if (after_flush > peak) {
-            peak = after_flush;
-        }
-        if (after_query > peak) {
-            peak = after_query;
-        }
-        return peak;
-    }
-
-    // Growth attributable to search. Saturates at zero: RSS can dip below the
-    // baseline when the allocator returns pages, and negative growth is not a
-    // meaningful measurement.
-    [[nodiscard]] std::uint64_t delta() const {
-        const std::uint64_t high = peak();
-        return high > baseline ? high - baseline : 0;
-    }
 };
 
 bool ParseU64(std::string_view text, std::uint64_t* out) {
@@ -206,7 +181,7 @@ int main(int argc, char** argv) {
     }
     SearchIndex& index = *opened.value();
 
-    Checkpoints checkpoints;
+    MembenchCheckpoints checkpoints;
     checkpoints.baseline = MemSampler::ResidentBytes();
 
     island::search::bench::CorpusConfig corpus;
@@ -262,8 +237,11 @@ int main(int argc, char** argv) {
     }
     checkpoints.after_query = MemSampler::ResidentBytes();
 
+    // Every sample is validated before anything is printed: a failed reading
+    // (0) would otherwise look like zero growth and report a pass that
+    // nothing measured.
+    const MembenchResult result = island::search::bench::Judge(checkpoints, options.ceiling_bytes);
     const std::uint64_t delta = checkpoints.delta();
-    const bool within_ceiling = delta <= options.ceiling_bytes;
 
     // One machine-readable line, stable field order, so CI can assert on it
     // without parsing prose.
@@ -278,20 +256,23 @@ int main(int argc, char** argv) {
         static_cast<unsigned long long>(checkpoints.after_ingest),
         static_cast<unsigned long long>(checkpoints.after_flush),
         static_cast<unsigned long long>(checkpoints.after_query),
-        static_cast<unsigned long long>(checkpoints.peak()),
-        static_cast<unsigned long long>(delta),
-        static_cast<unsigned long long>(options.ceiling_bytes), within_ceiling ? "pass" : "fail");
+        static_cast<unsigned long long>(checkpoints.peak()), static_cast<unsigned long long>(delta),
+        static_cast<unsigned long long>(options.ceiling_bytes),
+        island::search::bench::ResultName(result));
     std::fflush(stdout);
 
     std::filesystem::remove(options.segment_path, ec);
 
-    if (MemSampler::ResidentBytes() == 0) {
-        // No sampler for this platform: reporting "pass" would assert a budget
-        // nothing measured.
-        std::fprintf(stderr,
-                     "search_membench: no RSS sampler on this platform; refusing to report a "
-                     "budget result\n");
-        return 3;
+    switch (result) {
+        case MembenchResult::kPass:
+            return 0;
+        case MembenchResult::kFail:
+            return 1;
+        case MembenchResult::kError:
+            break;
     }
-    return within_ceiling ? 0 : 1;
+    std::fprintf(stderr,
+                 "search_membench: an RSS sample failed (or there is no sampler on this "
+                 "platform); refusing to report a budget result\n");
+    return 3;
 }

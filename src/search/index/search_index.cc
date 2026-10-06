@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 #include <span>
 #include <string>
 #include <unordered_set>
@@ -22,39 +23,76 @@ SearchError MakeError(SearchErrorKind kind, std::string detail) {
     return error;
 }
 
+bool IsAsciiAlpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+bool IsSchemeChar(char c) {
+    return IsAsciiAlpha(c) || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.';
+}
+
 char LowerAscii(char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
 
-bool HasSchemeCaseInsensitive(std::string_view url, std::string_view scheme) {
-    if (url.size() < scheme.size()) {
-        return false;
+// WHATWG URL parsing strips leading and trailing C0 controls and spaces
+// before anything else, so " data:..." is still a data: URL to a browser.
+std::string_view TrimC0ControlsAndSpace(std::string_view url) {
+    const auto is_c0_or_space = [](char c) { return static_cast<unsigned char>(c) <= 0x20; };
+    while (!url.empty() && is_c0_or_space(url.front())) {
+        url.remove_prefix(1);
     }
-    for (std::size_t i = 0; i < scheme.size(); ++i) {
-        if (LowerAscii(url[i]) != scheme[i]) {
+    while (!url.empty() && is_c0_or_space(url.back())) {
+        url.remove_suffix(1);
+    }
+    return url;
+}
+
+// Walks a trimmed URL the way the WHATWG parser sees it: every ASCII tab and
+// newline is removed first, so "da\tta:" is a data: URL. Skipping them in
+// place instead of building a stripped copy keeps IsPrivacyRefusedUrl free of
+// allocation, which matters because it is noexcept.
+class UrlCursor {
+  public:
+    explicit UrlCursor(std::string_view url) : url_(url) { SkipTabsAndNewlines(); }
+
+    [[nodiscard]] bool done() const { return pos_ >= url_.size(); }
+    [[nodiscard]] char peek() const { return url_[pos_]; }
+    void Advance() {
+        ++pos_;
+        SkipTabsAndNewlines();
+    }
+
+  private:
+    void SkipTabsAndNewlines() {
+        while (pos_ < url_.size() &&
+               (url_[pos_] == '\t' || url_[pos_] == '\n' || url_[pos_] == '\r')) {
+            ++pos_;
+        }
+    }
+
+    std::string_view url_;
+    std::size_t pos_ = 0;
+};
+
+// The WHATWG "special" schemes whose authority may follow the colon after any
+// run of '/' or '\' -- including none, so "https:user@host" carries userinfo.
+bool IsSpecialScheme(std::string_view scheme) {
+    return scheme == "http" || scheme == "https" || scheme == "ws" || scheme == "wss" ||
+           scheme == "ftp" || scheme == "file";
+}
+
+// True when the authority starting at `cursor` carries userinfo. It ends at
+// '/', '?' or '#' (and '\' for special schemes); an '@' before that means
+// user[:pass]@host. An '@' later in the URL -- a query parameter holding an
+// address, say -- is not userinfo and must not trip the refusal.
+bool AuthorityHasUserinfo(UrlCursor& cursor, bool special) {
+    for (; !cursor.done(); cursor.Advance()) {
+        const char c = cursor.peek();
+        if (c == '@') {
+            return true;
+        }
+        if (c == '/' || c == '?' || c == '#' || (special && c == '\\')) {
             return false;
         }
     }
-    return true;
-}
-
-// True when the authority component carries userinfo. The authority runs from
-// after "://" to the first '/', '?' or '#'; an '@' inside it means
-// user[:pass]@host. Anything later in the URL (a query parameter holding an
-// address, say) is not userinfo and must not trip the refusal.
-bool HasCredentials(std::string_view url) {
-    const std::size_t scheme_end = url.find("://");
-    if (scheme_end == std::string_view::npos) {
-        return false;
-    }
-    const std::size_t authority_begin = scheme_end + 3;
-    std::size_t authority_end = url.size();
-    for (std::size_t i = authority_begin; i < url.size(); ++i) {
-        if (url[i] == '/' || url[i] == '?' || url[i] == '#') {
-            authority_end = i;
-            break;
-        }
-    }
-    return url.substr(authority_begin, authority_end - authority_begin).find('@') !=
-           std::string_view::npos;
+    return false;
 }
 
 // Merges `postings` into `candidates`, keeping only ids in [lo, hi).
@@ -78,7 +116,50 @@ FieldFrequencies CountTokens(const std::vector<std::string>& tokens) {
 }  // namespace
 
 bool IsPrivacyRefusedUrl(std::string_view url) noexcept {
-    return HasSchemeCaseInsensitive(url, "data:") || HasCredentials(url);
+    UrlCursor cursor(TrimC0ControlsAndSpace(url));
+
+    // scheme = ASCII alpha *( alnum / "+" / "-" / "." ) ":". Only schemes up
+    // to five letters are compared by name, so a longer one is kept as a
+    // truncated prefix flagged as matching none of them.
+    if (cursor.done() || !IsAsciiAlpha(cursor.peek())) {
+        // No scheme: a relative reference has no authority to inspect.
+        return false;
+    }
+    char scheme_buffer[5] = {};
+    std::size_t scheme_length = 0;
+    bool scheme_too_long = false;
+    for (; !cursor.done() && IsSchemeChar(cursor.peek()); cursor.Advance()) {
+        if (scheme_length < sizeof(scheme_buffer)) {
+            scheme_buffer[scheme_length++] = LowerAscii(cursor.peek());
+        } else {
+            scheme_too_long = true;
+        }
+    }
+    if (cursor.done() || cursor.peek() != ':') {
+        return false;
+    }
+    cursor.Advance();
+    const std::string_view scheme =
+        scheme_too_long ? std::string_view() : std::string_view(scheme_buffer, scheme_length);
+
+    if (scheme == "data") {
+        return true;
+    }
+    if (IsSpecialScheme(scheme)) {
+        while (!cursor.done() && (cursor.peek() == '/' || cursor.peek() == '\\')) {
+            cursor.Advance();
+        }
+        return AuthorityHasUserinfo(cursor, /*special=*/true);
+    }
+    // Any other scheme has an authority only when "//" follows the colon, so
+    // "about:blank#x=http://a@b" carries no userinfo.
+    for (int slash = 0; slash < 2; ++slash) {
+        if (cursor.done() || cursor.peek() != '/') {
+            return false;
+        }
+        cursor.Advance();
+    }
+    return AuthorityHasUserinfo(cursor, /*special=*/false);
 }
 
 SearchIndex::SearchIndex(Options options, std::unique_ptr<Segment> segment,
@@ -142,13 +223,14 @@ Expected<DocId, SearchError> SearchIndex::Ingest(const DocumentInput& input) {
         return Expected<DocId, SearchError>::Error(MakeError(
             SearchErrorKind::kInvalidInput, "document field exceeds the 1 MiB arena chunk size"));
     }
-    // A newly ingested term's segment posting list is unchanged, but a term
-    // that now resolves differently must not be served from a stale entry.
-    cache_.Clear();
+    // The cache is left alone: it holds segment posting lists only, and a
+    // mapped segment is immutable, so ingesting into the MemTable cannot make
+    // any cached entry stale.
     return Expected<DocId, SearchError>(*id);
 }
 
-const std::vector<std::uint64_t>* SearchIndex::SegmentPostings(const std::string& term) const {
+const std::vector<std::uint64_t>* SearchIndex::SegmentPostings(
+    const std::string& term, std::vector<std::uint64_t>& uncached) const {
     if (!segment_) {
         return nullptr;
     }
@@ -159,18 +241,34 @@ const std::vector<std::uint64_t>* SearchIndex::SegmentPostings(const std::string
     if (!postings.has_value()) {
         return nullptr;
     }
-    if (!cache_.Put(term, std::move(*postings))) {
+    if (!cache_.Admits(term, postings->size())) {
         // Oversized-entry bypass: the list is larger than the whole ceiling.
-        // Correctness must not depend on the cache, so decode it again and
-        // hand back an uncached copy held for this query only.
-        std::optional<std::vector<std::uint64_t>> again = segment_->PostingsFor(term);
-        if (!again.has_value()) {
-            return nullptr;
-        }
-        uncached_ = std::move(*again);
-        return &uncached_;
+        // Correctness must not depend on the cache, so hand back the decoded
+        // list from the caller's own storage, held for this query only.
+        uncached = std::move(*postings);
+        return &uncached;
     }
-    return cache_.Get(term);
+    return cache_.Put(term, std::move(*postings));
+}
+
+double SearchIndex::CorpusAverageDocLength() const {
+    if (segment_ != nullptr && segment_predates_memtable_) {
+        // The MemTable holds only the documents ingested since Open, so the
+        // segment's average, weighted by its document count, stands in for
+        // the rest of the corpus.
+        const auto segment_docs = static_cast<double>(segment_->doc_count());
+        const double docs = segment_docs + static_cast<double>(memtable_.doc_count());
+        if (docs == 0.0) {
+            return 0.0;
+        }
+        return (segment_->avg_doc_len() * segment_docs +
+                static_cast<double>(memtable_.total_token_count())) /
+               docs;
+    }
+    // Otherwise the retained MemTable holds every document, flushed or not,
+    // and its exact average beats the segment's Q16-rounded copy of the same
+    // number: a flush must not move any score.
+    return memtable_.avg_doc_length();
 }
 
 std::optional<StoredDocument> SearchIndex::LoadDocument(DocId id) const {
@@ -244,9 +342,15 @@ SearchResult SearchIndex::Query(const struct Query& query, std::uint64_t query_n
     // boundary is load-bearing for correctness, since counting the flushed
     // documents twice there would distort idf and therefore every score.
     std::unordered_set<DocId> candidates;
+    std::vector<std::uint64_t> uncached;
     for (const std::string& term : distinct) {
-        if (const std::vector<std::uint64_t>* postings = SegmentPostings(term)) {
-            CollectRange(*postings, 0, segment_boundary_, candidates);
+        {
+            // A cached list can be evicted by another Query's Put the moment
+            // the lock drops, so it is read while the lock is still held.
+            const std::lock_guard<std::mutex> lock(cache_mutex_);
+            if (const std::vector<std::uint64_t>* postings = SegmentPostings(term, uncached)) {
+                CollectRange(*postings, 0, segment_boundary_, candidates);
+            }
         }
         CollectRange(memtable_.PostingsFor(term), segment_boundary_, memtable_.next_doc_id(),
                      candidates);
@@ -273,11 +377,10 @@ SearchResult SearchIndex::Query(const struct Query& query, std::uint64_t query_n
     stats.num_docs = static_cast<std::size_t>(
         segment_ ? segment_->doc_count() + (memtable_.next_doc_id() - segment_boundary_)
                  : memtable_.doc_count());
-    double total_length = 0.0;
-    for (const DocumentStat& stat : corpus) {
-        total_length += static_cast<double>(stat.title_length + stat.url_length);
-    }
-    stats.avg_doc_length = corpus.empty() ? 0.0 : total_length / static_cast<double>(corpus.size());
+    // BM25's avgdl is a property of the corpus, not of the candidates: an
+    // average over the matching documents would let an unrelated query term
+    // change every other term's length normalization.
+    stats.avg_doc_length = CorpusAverageDocLength();
 
     const std::vector<std::string> query_terms(distinct.begin(), distinct.end());
     const std::vector<ScoredDoc> ranked =
@@ -307,19 +410,39 @@ Expected<void, SearchError> SearchIndex::Flush() {
             "S0 has no segment merge, so writing would discard them"));
     }
 
+    // Unmap the active segment before the writer renames over its file:
+    // Windows refuses to replace a file that still has a live view. The
+    // MemTable holds every document the segment does (the guard above ensures
+    // it), so with the boundary at 0 the MemTable alone answers every id until
+    // a segment is mapped again. The cache holds that segment's lists, so it
+    // goes too.
+    {
+        const std::lock_guard<std::mutex> lock(cache_mutex_);
+        cache_.Clear();
+    }
+    segment_.reset();
+    segment_boundary_ = 0;
+
     const Expected<void, SearchError> written = WriteSegment(memtable_, options_.segment_path);
+    auto opened = Segment::Open(options_.segment_path);
     if (!written.has_value()) {
+        // The rename is atomic, so a failed write leaves the previous segment
+        // file (if any) intact. Re-map it on a best-effort basis; results do
+        // not depend on it either way.
+        if (opened.has_value()) {
+            segment_ = std::move(opened.value());
+            segment_boundary_ = segment_->next_doc_id();
+            segment_error_.reset();
+        } else {
+            segment_error_ = written.error();
+        }
         return written;
     }
 
-    auto opened = Segment::Open(options_.segment_path);
     if (!opened.has_value()) {
         // The segment we just wrote failed to re-open; it has been quarantined.
         // Keep answering from the MemTable rather than failing the call chain.
-        segment_.reset();
         segment_error_ = opened.error();
-        segment_boundary_ = 0;
-        cache_.Clear();
         return Expected<void, SearchError>::Error(opened.error());
     }
 
@@ -329,7 +452,6 @@ Expected<void, SearchError> SearchIndex::Flush() {
     // The MemTable is retained and still holds every flushed document, so the
     // segment does not predate it and a later Flush stays safe.
     segment_predates_memtable_ = false;
-    cache_.Clear();
     return Expected<void, SearchError>::Ok();
 }
 

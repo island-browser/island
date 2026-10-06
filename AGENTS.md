@@ -160,7 +160,7 @@ cmake --build build-search
 ctest --test-dir build-search --output-on-failure
 ```
 
-That reports 150 tests (as of 2026-09-19). To build the browser and the search kernel together instead:
+That reports 175 tests (as of 2026-10-06). To build the browser and the search kernel together instead:
 
 ```bash
 cmake -B build-search-root -S . -DISLAND_ENABLE_SEARCH=ON
@@ -168,7 +168,7 @@ cmake --build build-search-root
 ctest --test-dir build-search-root --output-on-failure
 ```
 
-That reports 361 tests on `main` (as of 2026-09-19; the combined target discovers a slightly different set than the sum of the standalone lanes). The Python suites are separate from `ctest` entirely:
+That reports 469 tests (as of 2026-10-06; the combined target discovers a slightly different set than the sum of the standalone lanes). The Python suites are separate from `ctest` entirely:
 
 ```bash
 python3 -m pytest tests/deps tests/package tests/design tests/version

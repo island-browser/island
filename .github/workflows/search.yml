@@ -64,6 +64,7 @@ jobs:
           cmake --build build-search --config Release --parallel 2 \
             --target island_search --target island_search_tests \
             --target island_search_posting_codec_harness \
+            --target search_membench \
             2>&1 | tee ci-logs/build-${{ matrix.target }}.log
       - name: Run search tests
         shell: bash
@@ -75,14 +76,15 @@ jobs:
 
       - name: Run the search memory gate
         shell: bash
-        # Non-blocking on purpose. The S0 design targets a 32 MB RSS delta at
-        # 100k documents and the kernel currently measures roughly 5x that, so
-        # a blocking gate would make every pull request red for a reason
-        # unrelated to its own changes. The number is still printed on every
-        # target so a regression stays visible. Turn continue-on-error off in
-        # the same change that brings the delta under the ceiling -- see
-        # docs/search-phase-s0-membench.md.
-        continue-on-error: true
+        # Only the budget verdict is non-blocking. The S0 design targets a
+        # 32 MB RSS delta at 100k documents and the kernel currently measures
+        # about 2.6x that on macOS arm64, so exit 1 (over the ceiling) is downgraded to a
+        # warning: a blocking budget would make every pull request red for a
+        # reason unrelated to its own changes. Everything else fails the job --
+        # a missing binary, bad arguments or a failed index operation (2), or
+        # a failed RSS sample (3) -- because none of those is a measurement.
+        # Drop the exit-1 allowance in the same change that brings the delta
+        # under the ceiling -- see docs/search-phase-s0-membench.md.
         run: |
           set -o pipefail
           mkdir -p ci-logs
@@ -100,8 +102,14 @@ jobs:
             echo "search_membench binary not found under build-search/bench" >&2
             exit 1
           fi
+          status=0
           "$bench" --ceiling-bytes 33554432 2>&1 \
-            | tee ci-logs/membench-${{ matrix.target }}.log
+            | tee ci-logs/membench-${{ matrix.target }}.log || status=$?
+          if [ "$status" -eq 1 ]; then
+            echo "::warning title=search memory gate ${{ matrix.target }}::RSS delta is over the 32 MB S0 ceiling (non-blocking until the budget is met)"
+            exit 0
+          fi
+          exit "$status"
       - name: Annotate target failure
         if: failure()
         shell: bash
@@ -115,7 +123,7 @@ jobs:
           from pathlib import Path
 
           target, workspace = sys.argv[1:]
-          logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test")]
+          logs = [Path(f"ci-logs/{stage}-{target}.log") for stage in ("configure", "build", "test", "membench")]
           pattern = re.compile(r"CMake Error|fatal error|(?:^|\s)error:|undefined reference|linker|LNK\d+", re.I)
           lines = [line.strip() for log in logs if log.is_file() for line in log.read_text(errors="replace").splitlines()]
           selected = [line for line in lines if pattern.search(line)][:20] or lines[-20:]
