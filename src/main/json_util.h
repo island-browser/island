@@ -10,11 +10,11 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
+#include <locale>
 #include <optional>
 #include <ostream>
-#include <locale>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -312,9 +312,13 @@ class Writer {
 // Recursive-descent parser that never throws.  `island_browser_core` links
 // against CEF, which builds this translation unit with -fno-exceptions, so
 // every failure is recorded in `failed_` and surfaced as an empty Parse()
-// result instead.
+// result instead. Nesting is capped at kMaxDepth: the input can come from web
+// pages (agent page scripts), agents, and imported files, and unbounded
+// recursion would let any of them overflow the stack.
 class Parser {
   public:
+    static constexpr int kMaxDepth = 128;
+
     explicit Parser(std::string_view input) : input_(input), pos_(0) {}
 
     // Returns std::nullopt when the input is not a single well-formed JSON
@@ -365,9 +369,13 @@ class Parser {
         if (failed_) return Value{};
         switch (Peek()) {
             case '{':
-                return ParseObject();
-            case '[':
-                return ParseArray();
+            case '[': {
+                if (depth_ >= kMaxDepth) return Fail();
+                ++depth_;
+                Value nested = input_[pos_] == '{' ? ParseObject() : ParseArray();
+                --depth_;
+                return nested;
+            }
             case '"':
                 return ParseString();
             case 't':
@@ -610,6 +618,7 @@ class Parser {
 
     std::string_view input_;
     std::size_t pos_;
+    int depth_ = 0;
     bool failed_ = false;
 };
 

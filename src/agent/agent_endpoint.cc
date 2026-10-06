@@ -2,12 +2,18 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
+#include <optional>
 #include <random>
 #include <system_error>
 #include <utility>
 
 #if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#include <cerrno>
 #endif
 
 #include "json_util.h"
@@ -124,8 +130,16 @@ bool AgentEndpoint::Start(int port, std::string* error) {
 void AgentEndpoint::Stop() {
     http_.Stop();
     if (!discovery_file_.empty()) {
-        std::error_code ec;
-        std::filesystem::remove(discovery_file_, ec);
+        // Another Island instance may have replaced the file since; only
+        // remove it while it still describes this endpoint.
+        std::ifstream in(discovery_file_, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+        const std::optional<json::Value> info = json::Parse(text.substr(0, text.find('\n')));
+        if (info.has_value() && ConstantTimeEquals(info->StringOr("token", ""), token_)) {
+            std::error_code ec;
+            std::filesystem::remove(discovery_file_, ec);
+        }
         discovery_file_.clear();
     }
 }
@@ -138,24 +152,42 @@ bool AgentEndpoint::WriteDiscoveryFile(const std::filesystem::path& path) {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     const std::filesystem::path temp = path.string() + ".tmp";
+    json::Value info = json::Value::MakeObject()
+                           .Set("url", json::Value::String(url()))
+                           .Set("token", json::Value::String(token_))
+                           .Set("transport", json::Value::String("streamable-http"));
+#if !defined(_WIN32)
+    info.Set("pid", json::Value::Int(static_cast<std::int64_t>(::getpid())));
+#endif
+    const std::string contents = json::Serialize(info) + "\n";
+#if defined(_WIN32)
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out) return false;
-#if !defined(_WIN32)
-        std::filesystem::permissions(
-            temp, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-            std::filesystem::perm_options::replace, ec);
-#endif
-        json::Value info = json::Value::MakeObject()
-                               .Set("url", json::Value::String(url()))
-                               .Set("token", json::Value::String(token_))
-                               .Set("transport", json::Value::String("streamable-http"));
-#if !defined(_WIN32)
-        info.Set("pid", json::Value::Int(static_cast<std::int64_t>(::getpid())));
-#endif
-        out << json::Serialize(info) << '\n';
+        out << contents;
         if (!out) return false;
     }
+#else
+    // The file holds the bearer token: create it owner-only from the start
+    // (never widen-then-narrow), and refuse to write if that did not stick.
+    std::filesystem::remove(temp, ec);
+    const int fd = ::open(temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (fd < 0) return false;
+    struct stat info_stat {};
+    bool ok = ::fstat(fd, &info_stat) == 0 && (info_stat.st_mode & 077) == 0;
+    std::string_view pending = contents;
+    while (ok && !pending.empty()) {
+        const ssize_t written = ::write(fd, pending.data(), pending.size());
+        if (written < 0 && errno == EINTR) continue;
+        ok = written > 0;
+        if (ok) pending.remove_prefix(static_cast<std::size_t>(written));
+    }
+    ok = ::close(fd) == 0 && ok;
+    if (!ok) {
+        std::filesystem::remove(temp, ec);
+        return false;
+    }
+#endif
     std::filesystem::rename(temp, path, ec);
     if (ec) return false;
     discovery_file_ = path;

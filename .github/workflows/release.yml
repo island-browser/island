@@ -27,6 +27,9 @@ jobs:
         run: |
           echo "Stable release tags must be protected by repository rules." >&2
           exit 1
+      - name: Require the tag to match VERSION
+        shell: bash
+        run: python3 scripts/version.py check --tag "$GITHUB_REF_NAME"
       - name: Recognize the unsigned candidate contract
         shell: bash
         run: |

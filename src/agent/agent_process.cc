@@ -92,10 +92,15 @@ void CloseFd(int& fd) {
 }
 
 bool MakePipe(int fds[2]) {
+#if defined(__linux__)
+    // Atomic: a fork() on another thread can never inherit these.
+    return ::pipe2(fds, O_CLOEXEC) == 0;
+#else
     if (::pipe(fds) != 0) return false;
     ::fcntl(fds[0], F_SETFD, FD_CLOEXEC);
     ::fcntl(fds[1], F_SETFD, FD_CLOEXEC);
     return true;
+#endif
 }
 
 }  // namespace
@@ -128,6 +133,11 @@ bool AgentProcess::Start(const std::vector<std::string>& argv, const std::filesy
     for (const std::string& arg : argv) c_argv.push_back(const_cast<char*>(arg.c_str()));
     c_argv.push_back(nullptr);
     const std::string cwd_string = cwd.string();
+    // Highest descriptor the child closes before exec, so the agent inherits
+    // nothing but stdio (no MCP sockets, no browser files) even when another
+    // thread opened one without FD_CLOEXEC.
+    const long open_max = ::sysconf(_SC_OPEN_MAX);
+    const int close_limit = open_max > 0 && open_max < 65536 ? static_cast<int>(open_max) : 65536;
 
     const pid_t pid = ::fork();
     if (pid < 0) {
@@ -142,6 +152,9 @@ bool AgentProcess::Start(const std::vector<std::string>& argv, const std::filesy
         ::dup2(in_pipe[0], STDIN_FILENO);
         ::dup2(out_pipe[1], STDOUT_FILENO);
         ::dup2(err_pipe[1], STDERR_FILENO);
+        for (int fd = STDERR_FILENO + 1; fd < close_limit; ++fd) {
+            if (fd != exec_pipe[1]) ::close(fd);
+        }
         // Own process group so Terminate() reaches the agent's children too.
         ::setpgid(0, 0);
         ::signal(SIGPIPE, SIG_DFL);

@@ -8,6 +8,14 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <thread>
+
+#if !defined(_WIN32)
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 #include "agent_process.h"
 #include "fake_browser_host.h"
@@ -167,6 +175,57 @@ TEST_F(LiveEndpointTest, DiscoveryFileIsOwnerOnlyAndRemovedOnStop) {
     EXPECT_FALSE(std::filesystem::exists(file));
     std::filesystem::remove_all(dir);
 }
+
+TEST_F(LiveEndpointTest, StopLeavesAnotherInstancesDiscoveryFileAlone) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() /
+                                      ("island-agent-other-" + endpoint_.token().substr(0, 8));
+    const std::filesystem::path file = dir / "agent-endpoint.json";
+    ASSERT_TRUE(endpoint_.WriteDiscoveryFile(file));
+    // A second instance took the file over.
+    AgentEndpoint other{toolbox_, [](std::function<void()> task) { task(); }};
+    std::string error;
+    ASSERT_TRUE(other.Start(0, &error)) << error;
+    ASSERT_TRUE(other.WriteDiscoveryFile(file));
+    endpoint_.Stop();
+    EXPECT_TRUE(std::filesystem::exists(file));
+    other.Stop();
+    EXPECT_FALSE(std::filesystem::exists(file));
+    std::filesystem::remove_all(dir);
+}
+
+#if !defined(_WIN32)
+TEST_F(LiveEndpointTest, RefusesConnectionsBeyondTheCap) {
+    std::vector<int> idle;
+    for (std::size_t i = 0; i < LoopbackHttpServer::kMaxConnections; ++i) {
+        const int fd = CreateStreamSocket();
+        ASSERT_GE(fd, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(static_cast<std::uint16_t>(endpoint_.port()));
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        ASSERT_EQ(::connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+        idle.push_back(fd);
+    }
+    // The accept loop registers connections in order; give it a moment.
+    std::optional<HttpResponse> response;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        response = Post(R"({"jsonrpc":"2.0","id":1,"method":"ping"})", endpoint_.token());
+        if (response && response->status == 503) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ(response->status, 503);
+    for (int fd : idle) ::close(fd);
+    // Capacity comes back once the idle connections go away.
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        response = Post(R"({"jsonrpc":"2.0","id":2,"method":"ping"})", endpoint_.token());
+        if (response && response->status == 200) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_TRUE(response.has_value());
+    EXPECT_EQ(response->status, 200);
+}
+#endif
 
 #if defined(ISLAND_AGENT_BRIDGE_PATH)
 TEST_F(LiveEndpointTest, StdioBridgeRelaysToTheEndpoint) {

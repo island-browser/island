@@ -1,8 +1,17 @@
 name: Deploy site to GitHub Pages
 
 on:
-  # Automatic triggers are paused: builds and tests run locally to save
-  # GitHub Actions minutes. Restore the triggers from git history to re-enable.
+  # The one automatic trigger kept while the others are paused: a single cheap
+  # job that publishes the site whenever main changes what it shows.
+  push:
+    branches:
+      - main
+    paths:
+      - site/**
+      - CHANGELOG.md
+      - VERSION
+      - scripts/version.py
+      - .github/workflows/pages.yml
   workflow_dispatch:
 
 permissions:
@@ -26,6 +35,9 @@ jobs:
     steps:
       - name: Check out static site
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check the site matches VERSION and CHANGELOG
+        shell: bash
+        run: python3 scripts/version.py check
       - name: Configure Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d
       - name: Upload static site only

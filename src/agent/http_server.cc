@@ -10,6 +10,7 @@
 
 #if !defined(_WIN32)
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -141,6 +142,8 @@ std::string SerializeHttpResponse(const HttpResponse& response) {
 
 #if defined(_WIN32)
 
+int CreateStreamSocket() { return -1; }
+
 struct LoopbackHttpServer::Shared {};
 
 LoopbackHttpServer::~LoopbackHttpServer() = default;
@@ -199,11 +202,21 @@ struct PendingResponse {
 
 }  // namespace
 
+int CreateStreamSocket() {
+#if defined(SOCK_CLOEXEC)
+    return ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd >= 0) ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+    return fd;
+#endif
+}
+
 LoopbackHttpServer::~LoopbackHttpServer() { Stop(); }
 
 bool LoopbackHttpServer::Start(int port, Handler handler, std::string* error) {
     if (running_.load()) return true;
-    const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    const int fd = CreateStreamSocket();
     if (fd < 0) {
         if (error != nullptr) *error = "socket() failed";
         return false;
@@ -247,7 +260,7 @@ void LoopbackHttpServer::Stop() {
     ::shutdown(listen_fd_, SHUT_RDWR);
     // macOS does not wake accept() on shutdown(); a throwaway loopback
     // connection does, everywhere. The loop sees running_ == false and exits.
-    const int waker = ::socket(AF_INET, SOCK_STREAM, 0);
+    const int waker = CreateStreamSocket();
     if (waker >= 0) {
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -269,9 +282,15 @@ void LoopbackHttpServer::AcceptLoop() {
     for (;;) {
         sockaddr_in peer{};
         socklen_t length = sizeof(peer);
+#if defined(__linux__)
+        const int fd =
+            ::accept4(listen_fd_, reinterpret_cast<sockaddr*>(&peer), &length, SOCK_CLOEXEC);
+#else
         const int fd = ::accept(listen_fd_, reinterpret_cast<sockaddr*>(&peer), &length);
+        if (fd >= 0) ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
         if (fd < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR || errno == ECONNABORTED) continue;
             return;  // listen socket closed by Stop()
         }
         if (!running_.load()) {
@@ -290,6 +309,19 @@ void LoopbackHttpServer::AcceptLoop() {
             if (shared_->stopping) {
                 ::close(fd);
                 return;
+            }
+            if (shared_->open_fds.size() >= kMaxConnections) {
+                static constexpr std::string_view kBusy =
+                    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
+                    "Connection: close\r\n\r\n";
+                int send_flags = 0;
+#if defined(MSG_NOSIGNAL)
+                send_flags = MSG_NOSIGNAL;
+#endif
+                const ssize_t ignored = ::send(fd, kBusy.data(), kBusy.size(), send_flags);
+                static_cast<void>(ignored);
+                ::close(fd);
+                continue;
             }
             shared_->open_fds.insert(fd);
         }

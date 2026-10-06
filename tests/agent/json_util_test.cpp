@@ -53,6 +53,17 @@ TEST(JsonUtilTest, DoublesRoundTripAndStayDoubles) {
     EXPECT_EQ(Serialize(Value::Double(0.1)), "0.1");
 }
 
+TEST(JsonUtilTest, CapsNestingDepthInsteadOfOverflowingTheStack) {
+    const int max = Parser::kMaxDepth;
+    EXPECT_TRUE(Parse(std::string(max, '[') + std::string(max, ']')).has_value());
+    EXPECT_FALSE(Parse(std::string(max + 1, '[') + std::string(max + 1, ']')).has_value());
+    // A hostile page or agent can send arbitrarily deep input.
+    EXPECT_FALSE(Parse(std::string(200000, '[')).has_value());
+    std::string objects;
+    for (int i = 0; i < 100000; ++i) objects += R"({"a":)";
+    EXPECT_FALSE(Parse(objects).has_value());
+}
+
 TEST(JsonUtilTest, BuildersProduceCompactJson) {
     Value object = Value::MakeObject()
                        .Set("name", Value::String("island"))

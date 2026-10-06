@@ -2,17 +2,22 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://impelixx.github.io/island/</loc>
-    <lastmod>2026-09-19</lastmod>
+    <lastmod>2026-10-06</lastmod>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://impelixx.github.io/island/docs.html</loc>
-    <lastmod>2026-09-19</lastmod>
+    <lastmod>2026-10-06</lastmod>
     <priority>0.5</priority>
   </url>
   <url>
+    <loc>https://impelixx.github.io/island/changelog.html</loc>
+    <lastmod>2026-10-06</lastmod>
+    <priority>0.6</priority>
+  </url>
+  <url>
     <loc>https://impelixx.github.io/island/privacy.html</loc>
-    <lastmod>2026-09-19</lastmod>
+    <lastmod>2026-10-06</lastmod>
     <priority>0.5</priority>
   </url>
 </urlset>

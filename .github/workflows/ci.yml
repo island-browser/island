@@ -43,6 +43,11 @@ jobs:
       - name: Run design token drift guard
         shell: bash
         run: python3 -m unittest discover -s tests/design -p 'test_*.py'
+      - name: Check version consistency
+        shell: bash
+        run: |
+          python3 -m unittest discover -s tests/version -p 'test_*.py'
+          python3 scripts/version.py check
       - name: Verify committed icons
         shell: bash
         run: tools/icon_pipeline/run.sh verify

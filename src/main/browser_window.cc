@@ -32,6 +32,7 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
+#include "island_version.h"
 #include "session_store.h"
 #include "window_agent_host.h"
 
@@ -781,7 +782,7 @@ std::string BrowserWindow::SettingsStateJson() const {
                             .Push(Value::String(std::move(label)))
                             .Push(Value::String(std::move(value))));
     };
-    row("Version", "0.4.0");
+    row("Version", ISLAND_VERSION_STRING);
     row("Preferences", PrefsStore::DefaultPrefsFilePath().string());
     row("Session", SessionStore::DefaultSessionFilePath().string());
     row("Agent endpoint file", agent::DefaultDiscoveryFilePath().string());

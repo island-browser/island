@@ -6,6 +6,7 @@
 #include <string>
 
 #include "fake_browser_host.h"
+#include "island_version.h"
 
 namespace island::agent {
 namespace {
@@ -45,6 +46,7 @@ TEST_F(McpServerTest, InitializeNegotiatesVersionAndAdvertisesTools) {
     EXPECT_EQ(result->StringOr("protocolVersion", ""), "2025-03-26");
     EXPECT_NE(result->FindMember("capabilities")->FindMember("tools"), nullptr);
     EXPECT_EQ(result->FindMember("serverInfo")->StringOr("name", ""), "island-browser");
+    EXPECT_EQ(result->FindMember("serverInfo")->StringOr("version", ""), ISLAND_VERSION_STRING);
 
     const auto unknown = Send(
         R"({"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":"1999-01-01"}})");

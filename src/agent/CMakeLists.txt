@@ -49,6 +49,11 @@ endif()
 
 find_package(Threads REQUIRED)
 
+# The browser root defines island_version first; standalone builds read the
+# same VERSION file.
+include("${ISLAND_AGENT_REPO_ROOT}/cmake/island_version.cmake")
+island_add_version_target("${ISLAND_AGENT_REPO_ROOT}")
+
 add_library(island_agent STATIC
     acp_client.cc
     agent_endpoint.cc
@@ -68,7 +73,7 @@ target_include_directories(island_agent PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${ISLAND_AGENT_REPO_ROOT}/src/main"
 )
-target_link_libraries(island_agent PUBLIC Threads::Threads)
+target_link_libraries(island_agent PUBLIC Threads::Threads island_version)
 if(MSVC)
     target_compile_options(island_agent PRIVATE /W4)
 else()
