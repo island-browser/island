@@ -132,7 +132,7 @@ std::vector<PaletteEntry> ComposePaletteResults(
     scored.reserve(canonical.size());
     for (std::size_t index = 0; index < canonical.size(); ++index) {
         const PaletteEntry& entry = canonical[index];
-        PaletteMatchRank rank;
+        PaletteMatchRank rank = PaletteMatchRank::kNone;
         switch (entry.kind) {
             case PaletteEntryKind::kTab:
                 rank = RankTabEntry(entry.tab, query);

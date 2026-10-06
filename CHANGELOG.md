@@ -32,10 +32,17 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   [island-browser/site](https://github.com/island-browser/site), and is served at
   https://island-browser.github.io/site/. It reads the version and these notes from this
   repository when it builds; `scripts/version.py sync` no longer touches site pages.
-
 - New "Graphite" design language across the browser: neutral near-black and white surfaces,
   1px hairlines, a single blue accent, tighter radii (6/10), and a refined space palette; the
   space tint is now a faint cast on the sidebar instead of a colored wash.
+
+### Fixed
+
+- An agent command with unbalanced quotes is refused with "check its quotes" instead of being
+  handed to the login shell.
+- Native builds on every target again: a GCC `-Werror` warning in the command palette, an MSVC
+  parse error in a JSON test, the Windows arm64 runner's Visual Studio generator, and a macOS-only
+  false positive in the agent descriptor-leak test.
 
 ## [0.4.0] - 2026-10-06
 

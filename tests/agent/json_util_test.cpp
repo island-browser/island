@@ -37,7 +37,10 @@ TEST(JsonUtilTest, ParsesFractionsAndExponentsAsDoubles) {
 
 TEST(JsonUtilTest, SerializesControlCharactersAsEscapes) {
     const std::string text = Serialize(Value::String(std::string("a\x01\b\"\\\n", 6)));
-    EXPECT_EQ(text, R"("a\u0001\u0008\"\\\n")");
+    // Kept out of the EXPECT_EQ arguments: MSVC's preprocessor mis-tokenizes a
+    // raw string literal containing quotes inside a macro argument (C2146).
+    const std::string expected = "\"a\\u0001\\u0008\\\"\\\\\\n\"";
+    EXPECT_EQ(text, expected);
     const auto back = Parse(text);
     ASSERT_TRUE(back.has_value());
     EXPECT_EQ(back->string_val, std::string("a\x01\b\"\\\n", 6));
