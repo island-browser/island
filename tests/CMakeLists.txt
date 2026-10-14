@@ -38,6 +38,7 @@ add_executable(island_tests
     sidebar_state_test.cpp
     space_test.cpp
     startup_options_test.cpp
+    dev_capture_test.cpp
     tab_test.cpp
     updater_test.cpp
     window_agent_host_test.cpp
@@ -74,6 +75,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/space_rename_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/welcome_flow.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/dev_capture.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
     "${CMAKE_SOURCE_DIR}/src/main/updater.cc"
     "${CMAKE_SOURCE_DIR}/src/main/window_agent_host.cc"

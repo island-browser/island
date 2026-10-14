@@ -1,5 +1,7 @@
 #include "app_runtime.h"
 
+#include <cstdlib>
+
 #include "font_registry.h"
 #include "island_app.h"
 #include "lifecycle_config.h"
@@ -19,6 +21,13 @@ int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& ap
     // the "wants to use your confidential information stored in Chromium Safe
     // Storage" prompt from firing during tests and smoke runs.
     CefString(&settings.root_cache_path) = "/tmp/island_cef_cache";
+    // Developer runs (screenshots, debugging) may use their own cache root so
+    // they start alongside an already running Island instead of handing off
+    // to it ("Opening in existing browser session").
+    if (const char* dev_cache = std::getenv("ISLAND_DEV_CACHE_DIR");
+        dev_cache != nullptr && *dev_cache != '\0') {
+        CefString(&settings.root_cache_path) = dev_cache;
+    }
     // Disable session-cookie persistence so CEF never encrypts cookies to disk
     // through Chromium Safe Storage; this is the macOS keychain popup users hit
     // during tests.

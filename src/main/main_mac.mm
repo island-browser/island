@@ -1,13 +1,17 @@
 #import <Cocoa/Cocoa.h>
+#import <CoreGraphics/CoreGraphics.h>
 
+#include <cstdio>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "app_runtime.h"
 #include "browser_command.h"
+#include "dev_capture.h"
 #include "include/base/cef_logging.h"
 #include "include/cef_application_mac.h"
 #include "include/wrapper/cef_helpers.h"
@@ -286,6 +290,127 @@ class MenuActionsReleaseObserver final : public island::IslandAppReleaseObserver
   private:
     IslandMenuActions* menu_actions_;
 };
+
+// --- Developer capture (see dev_capture.h) --------------------------------
+
+// Maps a dev action name to the menu selector that performs it, so a capture
+// exercises exactly the path a user's menu or key equivalent takes.
+SEL DevActionSelector(const std::string& action) {
+    static const std::pair<const char*, const char*> kActions[] = {
+        {"welcome", "showWelcome:"},
+        {"theme:system", "useSystemTheme:"},
+        {"theme:light", "useLightTheme:"},
+        {"theme:dark", "useDarkTheme:"},
+        {"command_palette", "openCommandPalette:"},
+        {"search_palette", "openSearchPalette:"},
+        {"focus_address", "focusAddress:"},
+        {"toggle_sidebar", "toggleSidebar:"},
+        {"toggle_agent", "toggleAgentPanel:"},
+        {"settings", "openSettings:"},
+        {"tab_overview", "openTabOverview:"},
+        {"new_tab", "newTab:"},
+        {"next_tab", "selectNextTab:"},
+        {"previous_tab", "selectPreviousTab:"},
+        {"toggle_split", "toggleSplit:"},
+        {"new_space", "newSpace:"},
+        {"rename_space", "beginSpaceRenaming:"},
+    };
+    for (const auto& [name, selector] : kActions) {
+        if (action == name) {
+            return NSSelectorFromString([NSString stringWithUTF8String:selector]);
+        }
+    }
+    return nullptr;
+}
+
+// Composites every visible window of this process (the browser window plus
+// any overlay child windows) inside the main window's frame. Capturing one's
+// own windows needs no screen-recording permission.
+bool CaptureOwnWindows(const std::string& path) {
+    NSWindow* main_window = nil;
+    NSMutableArray* window_ids = [NSMutableArray array];
+    for (NSWindow* window in [NSApp windows]) {
+        if (![window isVisible] || [window windowNumber] <= 0) {
+            continue;
+        }
+        [window_ids addObject:@([window windowNumber])];
+        if (main_window == nil ||
+            window.frame.size.width * window.frame.size.height >
+                main_window.frame.size.width * main_window.frame.size.height) {
+            main_window = window;
+        }
+    }
+    if (main_window == nil) {
+        return false;
+    }
+    // CGWindowList uses top-left-origin global coordinates.
+    const CGFloat screen_height = NSMaxY([[NSScreen screens][0] frame]);
+    const NSRect frame = main_window.frame;
+    const CGRect bounds = CGRectMake(frame.origin.x, screen_height - NSMaxY(frame),
+                                     frame.size.width, frame.size.height);
+    CFMutableArrayRef ids = CFArrayCreateMutable(kCFAllocatorDefault, 0, nullptr);
+    for (NSNumber* number in window_ids) {
+        CFArrayAppendValue(
+            ids, reinterpret_cast<const void*>(static_cast<uintptr_t>([number unsignedIntValue])));
+    }
+    CGImageRef image = CGWindowListCreateImageFromArray(bounds, ids, kCGWindowImageBestResolution);
+    CFRelease(ids);
+    if (image == nullptr) {
+        return false;
+    }
+    NSBitmapImageRep* bitmap = [[NSBitmapImageRep alloc] initWithCGImage:image];
+    CGImageRelease(image);
+    NSData* png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    const BOOL written = [png writeToFile:[NSString stringWithUTF8String:path.c_str()]
+                               atomically:YES];
+    [bitmap release];
+    return written == YES;
+}
+
+void RunDevStep(IslandMenuActions* menu_actions, island::DevCaptureOptions options,
+                std::size_t next_action) {
+    constexpr double kActionPauseSeconds = 0.8;
+    if (next_action < options.actions.size()) {
+        const std::string& action = options.actions[next_action];
+        const SEL selector = DevActionSelector(action);
+        if (selector != nullptr && [menu_actions respondsToSelector:selector]) {
+            [menu_actions performSelector:selector withObject:nil];
+            fprintf(stderr, "island-dev: action %s\n", action.c_str());
+        } else {
+            fprintf(stderr, "island-dev: unknown action %s\n", action.c_str());
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     static_cast<int64_t>(kActionPauseSeconds * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+                         RunDevStep(menu_actions, options, next_action + 1);
+                       });
+        return;
+    }
+    if (options.capture_path.empty()) {
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 static_cast<int64_t>(options.delay_seconds * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                     const bool captured = CaptureOwnWindows(options.capture_path);
+                     fprintf(stderr, "island-dev: %s %s\n",
+                             captured ? "captured" : "capture FAILED",
+                             options.capture_path.c_str());
+                     if (!options.keep_open) {
+                         [NSApp terminate:nil];
+                     }
+                   });
+}
+
+// Starts once the window has had time to appear and lay out.
+void ScheduleDevCapture(IslandMenuActions* menu_actions, island::DevCaptureOptions options) {
+    constexpr double kStartupSeconds = 2.0;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(kStartupSeconds * NSEC_PER_SEC)),
+        dispatch_get_main_queue(), ^{
+          RunDevStep(menu_actions, options, 0);
+        });
+}
 
 island::StartupOptions ParseStartupOptions(int argc, char* argv[]) {
     std::vector<std::string_view> arguments;
@@ -575,6 +700,13 @@ int main(int argc, char* argv[]) {
         IslandMenuActions* menu_actions = [[IslandMenuActions alloc] initWithApp:app.get()];
         MenuActionsReleaseObserver release_observer(menu_actions);
         InstallMainMenu(menu_actions);
+
+        std::vector<std::string_view> arguments(argv, argv + argc);
+        const island::DevCaptureOptions dev_capture =
+            island::DevCaptureOptions::Parse(std::span<const std::string_view>(arguments));
+        if (dev_capture.enabled()) {
+            ScheduleDevCapture(menu_actions, dev_capture);
+        }
 
         const int exit_code =
             island::RunIslandMainProcess(main_args, std::move(app), &release_observer, nullptr);

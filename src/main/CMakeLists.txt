@@ -34,6 +34,7 @@ add_library(island_browser_core STATIC
     space.cc
     space_rename_overlay.cc
     startup_options.cc
+    dev_capture.cc
     welcome_flow.cc
     window_agent_host.cc
     tab.cc
