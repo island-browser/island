@@ -4,15 +4,29 @@
 
 #include "browser_window.h"
 #include "include/cef_browser.h"
+#include "include/cef_command_line.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
+#include "lifecycle_config.h"
 
 namespace island {
 
 IslandApp::IslandApp(StartupOptions startup_options) : startup_options_(startup_options) {}
 
 IslandApp::~IslandApp() = default;
+
+void IslandApp::OnBeforeCommandLineProcessing(const CefString& process_type,
+                                              CefRefPtr<CefCommandLine> command_line) {
+    // An empty process type is the browser process; helpers inherit what they
+    // need from it.
+    if (!process_type.empty()) {
+        return;
+    }
+    for (const std::string_view name : kBrowserProcessSwitches) {
+        command_line->AppendSwitch(std::string(name));
+    }
+}
 
 CefRefPtr<CefBrowserProcessHandler> IslandApp::GetBrowserProcessHandler() { return this; }
 

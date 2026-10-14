@@ -16,6 +16,9 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
   public:
     explicit IslandApp(StartupOptions startup_options);
 
+    // Appends kBrowserProcessSwitches to the browser process's command line.
+    void OnBeforeCommandLineProcessing(const CefString& process_type,
+                                       CefRefPtr<CefCommandLine> command_line) override;
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override;
     void OnContextInitialized() override;
 
