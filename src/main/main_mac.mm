@@ -53,7 +53,7 @@
 }
 @end
 
-@interface IslandMenuActions : NSObject {
+@interface IslandMenuActions : NSObject <NSMenuItemValidation> {
   @private
     island::IslandApp* app_;
 }
@@ -76,6 +76,9 @@
 - (void)selectNextTab:(id)sender;
 - (void)selectPreviousTab:(id)sender;
 - (void)selectNumberedTab:(id)sender;
+- (void)selectLastTab:(id)sender;
+- (void)runKeyAction:(id)sender;
+- (BOOL)validateMenuItem:(NSMenuItem*)item;
 - (void)newSpace:(id)sender;
 - (void)closeSpace:(id)sender;
 - (void)beginSpaceRenaming:(id)sender;
@@ -272,6 +275,38 @@
         app_->ExecuteCommand(island::BrowserCommand::kCloseSpace);
     }
 }
+
+// Cmd+9 selects the last tab, whatever the tab count.
+- (void)selectLastTab:(id)sender {
+    if (app_ != nullptr) {
+        app_->ExecuteCommand(island::BrowserCommand::kSelectLastTab);
+    }
+}
+
+// The Phase 4 shortcuts: the menu item's tag is the KeyAction plus one.
+- (void)runKeyAction:(id)sender {
+    if (app_ != nullptr && [sender isKindOfClass:[NSMenuItem class]]) {
+        app_->RunKeyAction(static_cast<island::KeyAction>([sender tag] - 1));
+    }
+}
+
+// Stop Loading is enabled only while the page loads. Its Escape twin also
+// needs no overlay, so Escape still reaches palettes, Settings, and fields.
+- (BOOL)validateMenuItem:(NSMenuItem*)item {
+    if ([item action] != @selector(runKeyAction:)) {
+        return YES;
+    }
+    if (app_ == nullptr) {
+        return NO;
+    }
+    if (static_cast<island::KeyAction>([item tag] - 1) != island::KeyAction::kStopLoading) {
+        return YES;
+    }
+    if ([[item keyEquivalent] isEqualToString:@"\x1B"]) {
+        return app_->CanStopLoadingWithEscape() ? YES : NO;
+    }
+    return app_->CanStopLoading() ? YES : NO;
+}
 @end
 
 namespace {
@@ -333,6 +368,9 @@ void ApplyKeyBinding(NSMenuItem* item, island::KeyAction action, const island::K
     if (equivalent->command) {
         mask |= NSEventModifierFlagCommand;
     }
+    if (equivalent->control) {
+        mask |= NSEventModifierFlagControl;
+    }
     if (equivalent->shift) {
         mask |= NSEventModifierFlagShift;
     }
@@ -341,6 +379,16 @@ void ApplyKeyBinding(NSMenuItem* item, island::KeyAction action, const island::K
     }
     [item setKeyEquivalent:[NSString stringWithUTF8String:equivalent->key.c_str()]];
     [item setKeyEquivalentModifierMask:mask];
+}
+
+// Creates a Browser-menu item that runs |action| and takes its key equivalent
+// from the keymap. The caller releases the returned item once the menu owns it.
+NSMenuItem* AddKeyActionMenuItem(NSMenu* menu, IslandMenuActions* menu_actions, NSString* title,
+                                 island::KeyAction action, const island::Keymap& keymap) {
+    NSMenuItem* item = AddBrowserMenuItem(menu, menu_actions, title, @selector(runKeyAction:), @"",
+                                          0, static_cast<NSInteger>(action) + 1);
+    ApplyKeyBinding(item, action, keymap);
+    return item;
 }
 
 void InstallMainMenu(IslandMenuActions* menu_actions) {
@@ -415,6 +463,45 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
         AddBrowserMenuItem(browser_menu, menu_actions, @"All Tabs", @selector(openTabOverview:),
                            @"a", NSEventModifierFlagCommand | NSEventModifierFlagShift, 0);
     [browser_menu addItem:[NSMenuItem separatorItem]];
+    // Phase 4 shortcuts: closed-tab reopen, reload and stop, zoom, spaces, and
+    // the alternate tab keys. Each follows the keymap via ApplyKeyBinding.
+    NSMutableArray<NSMenuItem*>* keymap_items = [NSMutableArray array];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Reopen Closed Tab",
+                                                 island::KeyAction::kReopenClosedTab, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Copy Tab URL",
+                                                 island::KeyAction::kCopyTabUrl, keymap)];
+    [keymap_items
+        addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Reload Ignoring Cache",
+                                       island::KeyAction::kReloadIgnoringCache, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Stop Loading",
+                                                 island::KeyAction::kStopLoading, keymap)];
+    // Escape is fixed rather than configurable (it is not a valid keymap
+    // binding), and validateMenuItem: keeps it off while overlays own it.
+    NSMenuItem* stop_escape_menu_item =
+        AddKeyActionMenuItem(browser_menu, menu_actions, @"Stop Loading (Escape)",
+                             island::KeyAction::kStopLoading, keymap);
+    [stop_escape_menu_item setKeyEquivalent:@"\x1B"];
+    [stop_escape_menu_item setKeyEquivalentModifierMask:0];
+    [keymap_items addObject:stop_escape_menu_item];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Zoom In",
+                                                 island::KeyAction::kZoomIn, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Zoom In (Alternate)",
+                                                 island::KeyAction::kZoomInAlternate, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Zoom Out",
+                                                 island::KeyAction::kZoomOut, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Actual Size",
+                                                 island::KeyAction::kZoomReset, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Next Space",
+                                                 island::KeyAction::kNextSpace, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Previous Space",
+                                                 island::KeyAction::kPreviousSpace, keymap)];
+    [keymap_items
+        addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Select Next Tab (Alternate)",
+                                       island::KeyAction::kNextTabAlternate, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions,
+                                                 @"Select Previous Tab (Alternate)",
+                                                 island::KeyAction::kPreviousTabAlternate, keymap)];
+    [browser_menu addItem:[NSMenuItem separatorItem]];
 
     NSMenuItem* new_tab_menu_item =
         AddBrowserMenuItem(browser_menu, menu_actions, @"New Tab", @selector(newTab:), @"t",
@@ -435,12 +522,16 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     // space; out-of-range positions are a no-op.
     NSMutableArray<NSMenuItem*>* numbered_tab_items = [NSMutableArray arrayWithCapacity:9];
     for (NSInteger position = 1; position <= 9; ++position) {
+        // Cmd+9 is the last tab, not a fixed index.
+        const bool last = position == 9;
         NSString* title =
-            [NSString stringWithFormat:@"Select Tab %ld", static_cast<long>(position)];
+            last ? @"Select Last Tab"
+                 : [NSString stringWithFormat:@"Select Tab %ld", static_cast<long>(position)];
         NSString* key = [NSString stringWithFormat:@"%ld", static_cast<long>(position)];
-        [numbered_tab_items addObject:AddBrowserMenuItem(browser_menu, menu_actions, title,
-                                                         @selector(selectNumberedTab:), key,
-                                                         NSEventModifierFlagCommand, position)];
+        SEL select_action = last ? @selector(selectLastTab:) : @selector(selectNumberedTab:);
+        [numbered_tab_items
+            addObject:AddBrowserMenuItem(browser_menu, menu_actions, title, select_action, key,
+                                         NSEventModifierFlagCommand, position)];
     }
     [browser_menu addItem:[NSMenuItem separatorItem]];
     NSMenuItem* new_space_menu_item =
@@ -535,6 +626,9 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [close_space_menu_item release];
     [new_space_menu_item release];
     for (NSMenuItem* item in numbered_tab_items) {
+        [item release];
+    }
+    for (NSMenuItem* item in keymap_items) {
         [item release];
     }
     [next_tab_menu_item release];

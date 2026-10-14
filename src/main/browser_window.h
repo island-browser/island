@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -19,6 +20,7 @@
 #include "browser_command.h"
 #include "browser_import.h"
 #include "chrome_snapshot.h"
+#include "clipboard.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
 #include "include/cef_client.h"
@@ -197,6 +199,21 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool MoveTabToSpace(std::size_t from_space, std::size_t tab,
                                       std::size_t to_space);
     bool ResetKeyBinding(KeyAction action);
+    // Reopens the most recently closed tab (URL) in the active space. False
+    // when nothing was closed or the window is closing.
+    [[nodiscard]] bool ReopenClosedTab();
+    // Stop-loading availability for the macOS menu validation. The Escape
+    // variant also needs no overlay (palettes, Settings, address editing).
+    [[nodiscard]] bool CanStopLoading() const;
+    [[nodiscard]] bool CanStopLoadingWithEscape() const;
+    // Closed-tab stack depth, for tests.
+    [[nodiscard]] std::size_t closed_tab_count() const noexcept { return closed_tab_urls_.size(); }
+    // Test seam: copy-URL writes go to `writer` instead of the system
+    // clipboard.
+    using ClipboardWriter = std::function<bool(std::string_view)>;
+    void SetClipboardWriterForTest(ClipboardWriter writer) {
+        clipboard_writer_ = std::move(writer);
+    }
 
     // In-browser updates (Settings > Updates). CheckForUpdates starts a
     // GitHub Releases check unless ISLAND_DISABLE_UPDATES is set; the
@@ -365,9 +382,9 @@ class BrowserWindow : public CefClient,
         kSelectTab7Accelerator,
         kSelectTab8Accelerator,
         kSelectTab9Accelerator,
-        // Welcome flow: Escape dismisses ("just start browsing") while the
-        // overlay is visible and is otherwise untouched.
-        kWelcomeDismissAccelerator,
+        // Escape: dismisses the welcome flow while it is visible, otherwise
+        // stops loading when no overlay is open. It passes through otherwise.
+        kEscapeAccelerator,
         kKeymapAcceleratorBase = 100,
     };
 
@@ -479,6 +496,13 @@ class BrowserWindow : public CefClient,
     void UninstallHoverSeam();
     void UpdateWindowTitle();
     void CloseNavigationAndQuitMessageLoop();
+    // The URL a tab would reopen at: its committed page, else its startup URL.
+    // Web URLs only; anything else reopens at the startup page.
+    [[nodiscard]] static std::string WebUrlOf(const Tab& tab);
+    void RememberClosedTab(const Tab& tab);
+    // True while a welcome flow, palette, rename overlay, Settings or All-tabs
+    // page, or address editing owns the keyboard.
+    [[nodiscard]] bool OverlayShown() const noexcept;
 
     std::string initial_url_;
     AddressBarModel address_bar_model_;
@@ -540,6 +564,10 @@ class BrowserWindow : public CefClient,
     // A one-shot Settings section to scroll to on the next render.
     std::string settings_focus_;
     std::unique_ptr<update::Updater> updater_;
+    // Most recent closed tabs, newest last (reopenable URLs), capped at
+    // kClosedTabLimit.
+    std::vector<std::string> closed_tab_urls_;
+    ClipboardWriter clipboard_writer_ = CopyTextToClipboard;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).

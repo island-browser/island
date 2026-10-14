@@ -52,6 +52,26 @@ void IslandApp::ExecuteCommand(BrowserCommand command) {
     }
 }
 
+void IslandApp::RunKeyAction(KeyAction action) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->RunKeyAction(action);
+    }
+}
+
+bool IslandApp::CanStopLoading() const {
+    CEF_REQUIRE_UI_THREAD();
+
+    return browser_window_ != nullptr && browser_window_->CanStopLoading();
+}
+
+bool IslandApp::CanStopLoadingWithEscape() const {
+    CEF_REQUIRE_UI_THREAD();
+
+    return browser_window_ != nullptr && browser_window_->CanStopLoadingWithEscape();
+}
+
 void IslandApp::ShowWelcomeFlow() {
     CEF_REQUIRE_UI_THREAD();
 

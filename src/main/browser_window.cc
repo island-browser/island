@@ -15,6 +15,7 @@
 #include "browser_import.h"
 #include "cef_address_parser.h"
 #include "cef_update_fetcher.h"
+#include "clipboard.h"
 #include "design_tokens.h"
 #include "download_path.h"
 #include "include/base/cef_bind.h"
@@ -39,6 +40,7 @@
 #include "runtime_style.h"
 #include "session_store.h"
 #include "window_agent_host.h"
+#include "zoom_policy.h"
 
 namespace island {
 namespace {
@@ -95,6 +97,9 @@ std::string TrimmedCopy(std::string_view text) {
 bool IsWebUrl(std::string_view url) {
     return url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0;
 }
+
+// Closed tabs kept for Reopen Closed Tab; the oldest drops first.
+constexpr std::size_t kClosedTabLimit = 20;
 
 // The stdio MCP bridge ships next to the browser binary; agents without MCP
 // over HTTP launch it. Empty when it is not there.
@@ -380,6 +385,66 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             if (space.has_active_tab()) {
                 const std::size_t index = space.active_tab_index();
                 static_cast<void>(SetActiveSpaceTabPinned(index, !space.tabs()[index].pinned()));
+            }
+            return;
+        }
+        case BrowserCommand::kSelectLastTab: {
+            const std::size_t count = active_space().tab_count();
+            if (count > 0) {
+                static_cast<void>(SelectActiveSpaceTabIndex(count - 1));
+            }
+            return;
+        }
+        case BrowserCommand::kReopenClosedTab:
+            static_cast<void>(ReopenClosedTab());
+            return;
+        case BrowserCommand::kZoomIn:
+        case BrowserCommand::kZoomOut:
+        case BrowserCommand::kZoomReset: {
+            Tab* tab = active_tab();
+            if (tab == nullptr || tab->browser() == nullptr) {
+                return;
+            }
+            CefRefPtr<CefBrowserHost> host = tab->browser()->GetHost();
+            if (command == BrowserCommand::kZoomReset) {
+                host->SetZoomLevel(0.0);
+            } else {
+                const int steps = command == BrowserCommand::kZoomIn ? 1 : -1;
+                host->SetZoomLevel(SteppedZoomLevel(host->GetZoomLevel(), steps));
+            }
+            return;
+        }
+        case BrowserCommand::kReloadIgnoringCache: {
+            Tab* tab = active_tab();
+            if (tab != nullptr && tab->browser() != nullptr) {
+                tab->browser()->ReloadIgnoreCache();
+            }
+            return;
+        }
+        case BrowserCommand::kStopLoading: {
+            Tab* tab = active_tab();
+            if (tab != nullptr && tab->browser() != nullptr) {
+                tab->browser()->StopLoad();
+            }
+            return;
+        }
+        case BrowserCommand::kNextSpace:
+        case BrowserCommand::kPreviousSpace: {
+            const std::size_t count = spaces_.size();
+            if (count < 2) {
+                return;
+            }
+            const std::size_t next = command == BrowserCommand::kNextSpace
+                                         ? (active_space_index_ + 1) % count
+                                         : (active_space_index_ + count - 1) % count;
+            static_cast<void>(SelectSpaceIndex(next));
+            return;
+        }
+        case BrowserCommand::kCopyTabUrl: {
+            const Tab* tab = active_tab();
+            const std::string url = tab != nullptr ? WebUrlOf(*tab) : std::string();
+            if (!url.empty()) {
+                static_cast<void>(clipboard_writer_(url));
             }
             return;
         }
@@ -1196,11 +1261,13 @@ bool BrowserWindow::CloseTabAt(std::size_t space_index, std::size_t tab) {
         closed = CloseActiveSpaceTabIndex(tab);
     } else if (spaces_[space_index].tab_count() == 1) {
         // The space's last tab: the space goes with it, like in the rail.
+        RememberClosedTab(spaces_[space_index].tabs()[tab]);
         Space removed = RemoveSpaceAtIndex(space_index);
         AttachActiveTabObservers();
         CloseSpaceBrowsers(removed);
     } else {
         Space& space = spaces_[space_index];
+        RememberClosedTab(space.tabs()[tab]);
         std::optional<Tab> removed = space.RemoveTab(space.tabs()[tab].id());
         if (removed.has_value() && removed->browser() != nullptr) {
             removed->browser()->GetHost()->CloseBrowser(true);
@@ -1364,6 +1431,47 @@ std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
                             ". Find them in the command palette.";
 }
 
+bool BrowserWindow::ReopenClosedTab() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || closed_tab_urls_.empty()) {
+        return false;
+    }
+    std::string url = std::move(closed_tab_urls_.back());
+    closed_tab_urls_.pop_back();
+    AppendTabToActiveSpace(std::move(url));
+    return true;
+}
+
+bool BrowserWindow::CanStopLoading() const {
+    const Tab* tab = active_tab();
+    return !closing_ && tab != nullptr && tab->browser() != nullptr && tab->browser()->IsLoading();
+}
+
+bool BrowserWindow::CanStopLoadingWithEscape() const { return CanStopLoading() && !OverlayShown(); }
+
+bool BrowserWindow::OverlayShown() const noexcept {
+    return (welcome_ != nullptr && welcome_->visible()) ||
+           (search_palette_ != nullptr && search_palette_->visible()) ||
+           (command_palette_ != nullptr && command_palette_->visible()) ||
+           (space_rename_overlay_ != nullptr && space_rename_overlay_->visible()) ||
+           internal_page_.has_value() ||
+           address_bar_model_.snapshot().mode == AddressBarMode::kEditing;
+}
+
+std::string BrowserWindow::WebUrlOf(const Tab& tab) {
+    const std::string& committed = tab.navigation_state().snapshot().url;
+    const std::string& url = committed.empty() ? tab.startup_url() : committed;
+    return IsWebUrl(url) ? url : std::string();
+}
+
+void BrowserWindow::RememberClosedTab(const Tab& tab) {
+    // Non-web pages reopen at the startup page rather than a stored URL.
+    closed_tab_urls_.push_back(WebUrlOf(tab));
+    if (closed_tab_urls_.size() > kClosedTabLimit) {
+        closed_tab_urls_.erase(closed_tab_urls_.begin());
+    }
+}
+
 bool BrowserWindow::ResetKeyBinding(KeyAction action) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
@@ -1497,6 +1605,7 @@ bool BrowserWindow::CloseActiveSpaceTabIndex(std::size_t index) {
         return false;
     }
 
+    RememberClosedTab(space.tabs()[index]);
     if (space.tab_count() == 1) {
         // Encoded fallback: closing the last tab of a space closes that space,
         // which may in turn recreate a fresh default space when it was the
@@ -2157,16 +2266,26 @@ bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
         case kReloadAccelerator:
             ExecuteCommand(BrowserCommand::kReload);
             return true;
-        case kWelcomeDismissAccelerator: {
-            const bool consumed = welcome_ != nullptr && welcome_->visible();
-            if (consumed) {
+        case kEscapeAccelerator:
+            if (welcome_ != nullptr && welcome_->visible()) {
                 // Escape on the welcome flow means "just start browsing".
                 OnWelcomeCompleted({});
+                return true;
             }
-            return consumed;
-        }
+            // Escape stops a loading page only while no overlay owns the key;
+            // otherwise it passes through to the palette, Settings, or field.
+            if (CanStopLoadingWithEscape()) {
+                ExecuteCommand(BrowserCommand::kStopLoading);
+                return true;
+            }
+            return false;
         default:
             if (command_id >= kSelectTab1Accelerator && command_id <= kSelectTab9Accelerator) {
+                if (command_id == kSelectTab9Accelerator) {
+                    // Ctrl/Cmd+9 selects the last tab whatever the tab count.
+                    ExecuteCommand(BrowserCommand::kSelectLastTab);
+                    return true;
+                }
                 static_cast<void>(SelectActiveSpaceTabIndex(
                     static_cast<std::size_t>(command_id - kSelectTab1Accelerator)));
                 return true;
@@ -2191,18 +2310,17 @@ void BrowserWindow::ApplyKeymap() {
             continue;
         }
         window_->SetAccelerator(kKeymapAcceleratorBase + static_cast<int>(info.action),
-                                binding->key_code, binding->shift, binding->primary, binding->alt,
-                                true);
+                                binding->key_code, binding->shift,
+                                binding->primary || binding->control, binding->alt, true);
     }
-    // Fixed bindings: F5 reloads, Cmd/Ctrl+1..9 select tabs, and Escape
-    // dismisses the welcome flow while it is visible.
+    // Fixed bindings: F5 reloads, Cmd/Ctrl+1..9 select tabs (9 is the last
+    // tab), and Escape dismisses the welcome flow or stops loading.
     window_->SetAccelerator(kReloadAccelerator, kVirtualKeyF5, false, false, false, true);
     for (int position = 0; position < 9; ++position) {
         window_->SetAccelerator(kSelectTab1Accelerator + position, '1' + position, false, true,
                                 false, true);
     }
-    window_->SetAccelerator(kWelcomeDismissAccelerator, kVirtualKeyEscape, false, false, false,
-                            true);
+    window_->SetAccelerator(kEscapeAccelerator, kVirtualKeyEscape, false, false, false, true);
 }
 
 void BrowserWindow::RunKeyAction(KeyAction action) {
@@ -2274,6 +2392,40 @@ void BrowserWindow::RunKeyAction(KeyAction action) {
             return;
         case KeyAction::kSettings:
             ToggleInternalPage(LocalPageKind::kSettings);
+            return;
+        case KeyAction::kReopenClosedTab:
+            ExecuteCommand(BrowserCommand::kReopenClosedTab);
+            return;
+        case KeyAction::kZoomIn:
+        case KeyAction::kZoomInAlternate:
+            ExecuteCommand(BrowserCommand::kZoomIn);
+            return;
+        case KeyAction::kZoomOut:
+            ExecuteCommand(BrowserCommand::kZoomOut);
+            return;
+        case KeyAction::kZoomReset:
+            ExecuteCommand(BrowserCommand::kZoomReset);
+            return;
+        case KeyAction::kReloadIgnoringCache:
+            ExecuteCommand(BrowserCommand::kReloadIgnoringCache);
+            return;
+        case KeyAction::kStopLoading:
+            ExecuteCommand(BrowserCommand::kStopLoading);
+            return;
+        case KeyAction::kNextSpace:
+            ExecuteCommand(BrowserCommand::kNextSpace);
+            return;
+        case KeyAction::kPreviousSpace:
+            ExecuteCommand(BrowserCommand::kPreviousSpace);
+            return;
+        case KeyAction::kCopyTabUrl:
+            ExecuteCommand(BrowserCommand::kCopyTabUrl);
+            return;
+        case KeyAction::kNextTabAlternate:
+            ExecuteCommand(BrowserCommand::kNextTab);
+            return;
+        case KeyAction::kPreviousTabAlternate:
+            ExecuteCommand(BrowserCommand::kPreviousTab);
             return;
     }
 }
