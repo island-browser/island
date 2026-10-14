@@ -19,6 +19,7 @@ add_library(island_browser_core STATIC
     command_palette_view.cc
     design_tokens.cc
     devtools_bridge.cc
+    download_path.cc
     icon_catalog.cc
     island_app.cc
     keymap.cc

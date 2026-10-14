@@ -16,6 +16,7 @@
 #include "cef_address_parser.h"
 #include "cef_update_fetcher.h"
 #include "design_tokens.h"
+#include "download_path.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
 #include "include/base/cef_callback.h"
@@ -1752,6 +1753,8 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
 
 CefRefPtr<CefDisplayHandler> BrowserWindow::GetDisplayHandler() { return this; }
 
+CefRefPtr<CefDownloadHandler> BrowserWindow::GetDownloadHandler() { return this; }
+
 CefRefPtr<CefLifeSpanHandler> BrowserWindow::GetLifeSpanHandler() { return this; }
 
 CefRefPtr<CefLoadHandler> BrowserWindow::GetLoadHandler() { return this; }
@@ -1849,6 +1852,31 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     if (owner != nullptr) {
         owner->SetBrowser(browser);
     }
+}
+
+bool BrowserWindow::CanDownload(CefRefPtr<CefBrowser>, const CefString&, const CefString&) {
+    CEF_REQUIRE_UI_THREAD();
+    return true;
+}
+
+// Alloy style cancels a download that nobody handles, so Island saves it
+// itself: straight into the Downloads folder, no dialog, never overwriting an
+// existing file (CEF does not de-duplicate names). With no known home
+// directory CEF's own default (suggested name in its temp directory) applies.
+bool BrowserWindow::OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>,
+                                     const CefString& suggested_name,
+                                     CefRefPtr<CefBeforeDownloadCallback> callback) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::filesystem::path directory = DefaultDownloadsDirectory();
+    if (directory.empty()) {
+        callback->Continue(CefString(), false);
+        return true;
+    }
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    const std::filesystem::path target = ResolveDownloadPath(directory, suggested_name.ToString());
+    callback->Continue(CefString(target.string()), false);
+    return true;
 }
 
 bool BrowserWindow::DoClose(CefRefPtr<CefBrowser>) {

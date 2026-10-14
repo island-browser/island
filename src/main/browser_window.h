@@ -63,6 +63,7 @@ class WindowAgentHost;
 
 class BrowserWindow : public CefClient,
                       public CefDisplayHandler,
+                      public CefDownloadHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
                       public CefWindowDelegate,
@@ -296,6 +297,7 @@ class BrowserWindow : public CefClient,
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
+    CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
     CefRefPtr<CefLoadHandler> GetLoadHandler() override;
 
@@ -315,6 +317,11 @@ class BrowserWindow : public CefClient,
                        CefRefPtr<CefDictionaryValue>& extra_info,
                        bool* no_javascript_access) override;
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
+    bool CanDownload(CefRefPtr<CefBrowser> browser, const CefString& url,
+                     const CefString& request_method) override;
+    bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                          const CefString& suggested_name,
+                          CefRefPtr<CefBeforeDownloadCallback> callback) override;
     bool DoClose(CefRefPtr<CefBrowser> browser) override;
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
 

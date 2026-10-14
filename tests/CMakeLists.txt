@@ -26,6 +26,7 @@ add_executable(island_tests
     chrome/browser_chrome_style_test.cpp
     command_palette_test.cpp
     design_tokens_test.cpp
+    download_path_test.cpp
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
@@ -57,6 +58,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"

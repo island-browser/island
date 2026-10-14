@@ -19,6 +19,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   quit). The window and every browser view now use CEF's Alloy runtime style; Island hosts several
   browser views in one window, which CEF supports only for Alloy style views.
 
+### Changed
+
+- Downloads are saved straight into your Downloads folder under the suggested name, without a
+  dialog; an existing file is never overwritten (`name (1).ext`, `name (2).ext`, ...). Alloy
+  style cancels downloads nobody handles, so Island now handles them itself.
+- Site permission requests (camera, microphone, location, notifications) are declined, because
+  Alloy style has no built-in prompt and Island does not show one yet.
+
 ## [0.5.1] - 2026-10-06
 
 ### Added
