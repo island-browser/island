@@ -1,6 +1,7 @@
 #include "browser_chrome.h"
 
 #include <cmath>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -45,9 +46,17 @@ std::size_t AdvanceUtf8Character(const std::string& text, std::size_t byte_index
     return byte_index;
 }
 
+// Every rail control (icon button, address pill, tab row, space chip, footer
+// button) shares this height so the column reads on one rhythm: 32 DIP.
 int ControlHeight(const ChromeTokens& tokens) {
-    return tokens.spacing_6_dip + tokens.spacing_4_dip;
+    return tokens.spacing_6_dip + tokens.spacing_2_dip;
 }
+
+// Outline thickness of a hairline-defined surface (address pill, active tab,
+// active space chip). CEF views have no border or corner-radius API, so an
+// outlined control is a panel painted with the hairline color that insets its
+// single child by this many DIP.
+constexpr int kHairlineDip = 1;
 
 int DividerHeight(const ChromeTokens& tokens) {
     return tokens.spacing_1_dip / tokens.spacing_1_dip;
@@ -64,12 +73,24 @@ void SelectAllWhenFocused(CefRefPtr<CefTextfield> textfield) {
     }
 }
 
+// A horizontal run of controls with no inside border: the rail owns the gutter, so
+// rows of controls never add their own padding.
 CefBoxLayoutSettings HorizontalLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(true);
-    settings.between_child_spacing = tokens.spacing_2_dip;
-    settings.inside_border_horizontal_spacing = tokens.spacing_3_dip;
-    settings.inside_border_vertical_spacing = tokens.spacing_2_dip;
+    settings.between_child_spacing = tokens.spacing_1_dip / 2;
+    settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    return settings;
+}
+
+// A hairline-outlined control: the panel paints the outline color and insets its
+// children by kHairlineDip, so a child painted with the surface color reads as a
+// bordered field.
+CefBoxLayoutSettings OutlinedLayout(int outline_dip) {
+    CefBoxLayoutSettings settings;
+    settings.horizontal = static_cast<int>(true);
+    settings.between_child_spacing = 0;
+    settings.inside_border_insets = CefInsets(outline_dip, outline_dip, outline_dip, outline_dip);
     return settings;
 }
 
@@ -87,10 +108,9 @@ CefBoxLayoutSettings FloatingCanvasLayout(const ChromeTokens& tokens) {
     return settings;
 }
 
-// The rail uses a dedicated layout: a top inset (RailTopInsetDip) reserves the
-// platform title-bar / traffic-light region, and a calmer between-section step
-// (RailSectionSpacingDip) replaces the cramped generic cadence. Side and bottom
-// insets stay on spacing_3 so the rail padding stays consistent.
+// The rail uses a dedicated layout: a top inset (RailTopInsetDip), the shared
+// between-section step (RailSectionSpacingDip), and spacing_3 side and bottom
+// insets so the whole column sits on one gutter.
 CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(false);
@@ -114,8 +134,8 @@ CefBoxLayoutSettings CollectionLayout(const ChromeTokens& tokens) {
     return settings;
 }
 
-// The tab list packs rows tighter than the generic collection cadence so the
-// active row reads as one raised card in a calm column (Arc's rhythm).
+// The tab list packs rows 2 DIP apart so the selected row reads as one outlined
+// row in a calm column (Arc's rhythm).
 CefBoxLayoutSettings TabListLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings = CollectionLayout(tokens);
     settings.between_child_spacing = tokens.spacing_1_dip / 2;
@@ -146,19 +166,33 @@ std::string AddressErrorMessage(const std::optional<AddressError>& error) {
 
 }  // namespace
 
+// CEF resets every view's custom background (and the text colors derived from the
+// theme) whenever CefViewDelegate::OnThemeChanged fires, and CefWindow::ThemeChanged()
+// fires it after the chrome has painted. A view cannot know its own intended color, so
+// every delegate reports the reset to the chrome, which coalesces the reports into one
+// ReapplyThemeColors() pass that repaints every view from the resolved tokens and each
+// entry's current state (selected tab, open agent panel, address focus).
 class BrowserChrome::PanelDelegate final : public CefPanelDelegate {
   public:
-    PanelDelegate(CefSize preferred_size, CefSize minimum_size = CefSize(),
+    PanelDelegate(BrowserChrome* chrome, CefSize preferred_size, CefSize minimum_size = CefSize(),
                   CefSize maximum_size = CefSize())
-        : preferred_size_(preferred_size),
+        : alive_(chrome->alive_),
+          preferred_size_(preferred_size),
           minimum_size_(minimum_size),
           maximum_size_(maximum_size) {}
+
+    void OnThemeChanged(CefRefPtr<CefView>) override {
+        if (BrowserChrome* chrome = *alive_) {
+            chrome->HandleViewThemeReset();
+        }
+    }
 
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
     CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
     CefSize GetMaximumSize(CefRefPtr<CefView>) override { return maximum_size_; }
 
   private:
+    std::shared_ptr<BrowserChrome*> alive_;
     CefSize preferred_size_;
     CefSize minimum_size_;
     CefSize maximum_size_;
@@ -201,6 +235,7 @@ class BrowserChrome::SurfacePanelDelegate final : public CefPanelDelegate {
     void OnThemeChanged(CefRefPtr<CefView> view) override {
         if (chrome_ != nullptr) {
             view->SetBackgroundColor(chrome_->ResolveSurfaceColor(slot_).argb);
+            chrome_->HandleViewThemeReset();
         }
     }
 
@@ -282,6 +317,12 @@ class BrowserChrome::ButtonDelegate final : public CefButtonDelegate {
         }
     }
 
+    void OnThemeChanged(CefRefPtr<CefView>) override {
+        if (chrome_ != nullptr) {
+            chrome_->HandleViewThemeReset();
+        }
+    }
+
   private:
     BrowserChrome* chrome_;
 
@@ -306,6 +347,12 @@ class BrowserChrome::CollectionButtonDelegate final : public CefButtonDelegate {
         }
     }
 
+    void OnThemeChanged(CefRefPtr<CefView>) override {
+        if (chrome_ != nullptr) {
+            chrome_->HandleViewThemeReset();
+        }
+    }
+
   private:
     BrowserChrome* chrome_;
     CollectionButtonAction action_;
@@ -322,6 +369,12 @@ class BrowserChrome::TextfieldDelegate final : public CefTextfieldDelegate {
     void Detach() { chrome_ = nullptr; }
 
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
+
+    void OnThemeChanged(CefRefPtr<CefView>) override {
+        if (chrome_ != nullptr) {
+            chrome_->HandleViewThemeReset();
+        }
+    }
 
     bool OnKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event) override {
         CEF_REQUIRE_UI_THREAD();
@@ -361,6 +414,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     : host_(&host),
       tokens_(tokens),
       icon_catalog_(std::move(icon_resource_root)),
+      alive_(std::make_shared<BrowserChrome*>(this)),
       browser_view_(browser_view) {
     CEF_REQUIRE_UI_THREAD();
 
@@ -379,7 +433,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<CefBoxLayout> rail_layout = sidebar_->SetToBoxLayout(RailLayout(tokens_));
 
     CefRefPtr<SurfacePanelDelegate> navigation_row_delegate =
-        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail, CefSize(0, control_height));
     surface_delegates_.push_back(navigation_row_delegate);
     CefRefPtr<CefPanel> navigation_row = CefPanel::CreatePanel(navigation_row_delegate);
     navigation_row->SetID(static_cast<int>(ChromeViewId::kNavigationRow));
@@ -405,41 +459,56 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     sidebar_->AddChildView(navigation_row);
 
     CefRefPtr<SurfacePanelDelegate> address_row_delegate =
-        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+        new SurfacePanelDelegate(this, SurfaceSlot::kAddressOutline, CefSize(0, control_height));
     surface_delegates_.push_back(address_row_delegate);
     CefRefPtr<CefPanel> address_row = CefPanel::CreatePanel(address_row_delegate);
     address_row->SetID(static_cast<int>(ChromeViewId::kAddressRow));
     address_row_ = address_row;
-    CefRefPtr<CefBoxLayout> address_layout = address_row->SetToBoxLayout(HorizontalLayout(tokens_));
-
-    address_focus_leading_edge_ = CefPanel::CreatePanel(
-        new PanelDelegate(CefSize(AddressFocusLeadingEdgeDip(), control_height)));
-    address_row->AddChildView(address_focus_leading_edge_);
+    // The address row is the one integrated pill: it paints the hairline color (the
+    // accent while the field has focus) and insets the location glyph, the field,
+    // and the reload control, all painted with the surface color, so together they
+    // read as a single outlined field.
+    address_layout_ = address_row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+    CefRefPtr<CefBoxLayout> address_layout = address_layout_;
 
     address_location_icon_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     address_location_icon_->SetID(static_cast<int>(ChromeViewId::kAddressLocationIcon));
     address_location_icon_->SetAccessibleName("Location");
     address_location_icon_->SetTooltipText("Location");
     address_location_icon_->SetFocusable(false);
-    address_location_icon_->SetMinimumSize(CefSize(control_height, control_height));
+    address_location_icon_->SetMinimumSize(
+        CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
     address_row->AddChildView(address_location_icon_);
 
-    textfield_delegate_ =
-        new TextfieldDelegate(this, CefSize(tokens_.spacing_6_dip * 4, control_height));
+    textfield_delegate_ = new TextfieldDelegate(
+        this, CefSize(tokens_.spacing_6_dip * 4, control_height - kHairlineDip * 2));
     address_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
     address_field_->SetID(static_cast<int>(ChromeViewId::kAddress));
     address_field_->SetAccessibleName("Address");
     address_field_->SetPlaceholderText("Enter address");
     address_field_->SetFocusable(true);
-    address_row->AddChildView(address_field_);
-    address_layout->SetFlexForView(address_field_, 1);
+    // The native textfield paints its own rounded corners; the surface-colored holder
+    // behind it fills those corners so the field reads as one flat, square-edged cell
+    // of the pill instead of showing the hairline through four small notches.
+    address_field_holder_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    {
+        CefBoxLayoutSettings holder_settings;
+        holder_settings.horizontal = static_cast<int>(true);
+        CefRefPtr<CefBoxLayout> holder_layout =
+            address_field_holder_->SetToBoxLayout(holder_settings);
+        address_field_holder_->AddChildView(address_field_);
+        holder_layout->SetFlexForView(address_field_, 1);
+    }
+    address_row->AddChildView(address_field_holder_);
+    address_layout->SetFlexForView(address_field_holder_, 1);
 
     reload_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     reload_button_->SetID(static_cast<int>(ChromeViewId::kReload));
     reload_button_->SetAccessibleName("Reload");
     reload_button_->SetTooltipText("Reload");
     reload_button_->SetFocusable(true);
-    reload_button_->SetMinimumSize(CefSize(control_height, control_height));
+    reload_button_->SetMinimumSize(
+        CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
     address_row->AddChildView(reload_button_);
     sidebar_->AddChildView(address_row);
 
@@ -491,7 +560,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     sidebar_->AddChildView(spacer);
 
     CefRefPtr<CefPanel> divider = CefPanel::CreatePanel(
-        new PanelDelegate(CefSize(tokens_.rail_width_dip, DividerHeight(tokens_))));
+        new PanelDelegate(this, CefSize(tokens_.rail_width_dip, DividerHeight(tokens_))));
     divider->SetID(static_cast<int>(ChromeViewId::kDivider));
     divider_ = divider;
     sidebar_->AddChildView(divider);
@@ -505,9 +574,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     {
         CefBoxLayoutSettings settings = CollectionLayout(tokens_);
         settings.horizontal = static_cast<int>(true);
-        settings.between_child_spacing = tokens_.spacing_1_dip + 2;
-        settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
-        space_switcher_->SetToBoxLayout(settings);
+        settings.between_child_spacing = tokens_.spacing_1_dip;
+        space_switcher_layout_ = space_switcher_->SetToBoxLayout(settings);
     }
     sidebar_->AddChildView(space_switcher_);
 
@@ -519,8 +587,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     rail_footer_->SetID(static_cast<int>(ChromeViewId::kRailFooter));
     CefBoxLayoutSettings footer_settings;
     footer_settings.horizontal = static_cast<int>(true);
-    footer_settings.between_child_spacing = tokens_.spacing_2_dip;
-    footer_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    footer_settings.between_child_spacing = tokens_.spacing_1_dip / 2;
     CefRefPtr<CefBoxLayout> footer_layout = rail_footer_->SetToBoxLayout(footer_settings);
     agent_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Agent");
     agent_button_->SetID(static_cast<int>(ChromeViewId::kRailAgentButton));
@@ -584,7 +651,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     active_page_layout->SetFlexForView(active_tab_, 1);
 
     active_page_indicator_ = CefPanel::CreatePanel(
-        new PanelDelegate(CefSize(ActivePageIndicatorWidthDip(), control_height)));
+        new PanelDelegate(this, CefSize(ActivePageIndicatorWidthDip(), control_height)));
     active_page_indicator_->SetID(static_cast<int>(ChromeViewId::kActivePageIndicator));
     active_page_->AddChildView(active_page_indicator_);
     // Arc's sidebar has no separate current-page card: the active tab row is
@@ -594,7 +661,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     sidebar_->AddChildView(active_page_);
 
     browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
-        CefSize(control_height, control_height), CefSize(control_height, control_height)));
+        this, CefSize(control_height, control_height), CefSize(control_height, control_height)));
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
     browser_content_layout_ = browser_content_->SetToBoxLayout(FloatingCanvasLayout(tokens_));
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
@@ -604,7 +671,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     // The agent panel column floats on the same canvas as the page card: the
     // gutter on its top, right, and bottom matches the content gutter, and the
     // content's own right gutter separates the two.
-    agent_panel_ = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, 0)));
+    agent_panel_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, 0)));
     agent_panel_->SetID(static_cast<int>(ChromeViewId::kAgentPanel));
     {
         const int pad = BrowserContentPaddingDip();
@@ -756,27 +823,33 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const TabStripEntrySnapshot& entry = entries[index];
         TabEntryViews views;
-        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, row_height)));
+        // The row is the outline (hairline when selected, rail otherwise); the inner
+        // panel is the fill that carries the favicon, title, and trailing control.
+        views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, row_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kTabStripEntry));
+        CefRefPtr<CefBoxLayout> outline_layout =
+            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
         CefBoxLayoutSettings row_settings;
         row_settings.horizontal = static_cast<int>(true);
-        row_settings.between_child_spacing = tokens_.spacing_1_dip;
-        row_settings.inside_border_horizontal_spacing = tokens_.spacing_1_dip;
-        row_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
-        CefRefPtr<CefBoxLayout> row_layout = views.row->SetToBoxLayout(row_settings);
+        row_settings.between_child_spacing = 0;
+        CefRefPtr<CefBoxLayout> row_layout = views.inner->SetToBoxLayout(row_settings);
+        views.row->AddChildView(views.inner);
+        outline_layout->SetFlexForView(views.inner, 1);
+        const int slot = row_height - 2 * kHairlineDip;
 
         views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
         views.favicon->SetAccessibleName(entry.favicon != nullptr ? "Tab favicon"
                                                                   : "Tab favicon placeholder");
         views.favicon->SetFocusable(false);
-        views.favicon->SetMinimumSize(CefSize(row_height - 6, row_height - 6));
+        views.favicon->SetMinimumSize(CefSize(slot, slot));
         if (entry.favicon != nullptr) {
             views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
         } else if (fallback_icon.has_value()) {
             views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
         }
-        views.row->AddChildView(views.favicon);
+        views.inner->AddChildView(views.favicon);
 
         CefRefPtr<CollectionButtonDelegate> title_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateTab, index);
@@ -788,9 +861,9 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.title->SetTooltipText(entry.title);
         views.title->SetFocusable(true);
         views.title->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-        views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, row_height));
+        views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, slot));
         views.title->SetFontList(entry.active ? "Geist, Medium 13px" : "Geist, 13px");
-        views.row->AddChildView(views.title);
+        views.inner->AddChildView(views.title);
         row_layout->SetFlexForView(views.title, 1);
 
         // Regular tabs close; pinned tabs unpin (Arc keeps pinned tabs until
@@ -806,14 +879,14 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
                                                     : TabCloseAccessibleName(entry));
         views.close->SetTooltipText(entry.pinned ? "Unpin tab" : "Close tab");
         views.close->SetFocusable(true);
-        views.close->SetMinimumSize(CefSize(row_height - 6, row_height - 6));
+        views.close->SetMinimumSize(CefSize(slot, slot));
         const std::optional<CefRefPtr<CefImage>>& trailing = entry.pinned ? pin_icon : close_icon;
         if (trailing.has_value()) {
             views.close->SetImage(CEF_BUTTON_STATE_NORMAL, *trailing);
         } else {
             views.close->SetText(entry.pinned ? "-" : "\xC3\x97");
         }
-        views.row->AddChildView(views.close);
+        views.inner->AddChildView(views.close);
 
         for (const CefRefPtr<CefLabelButton>& button : {views.favicon, views.title, views.close}) {
             button->SetInkDropEnabled(true);
@@ -844,20 +917,26 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         SpaceEntryViews views;
-        views.row = CefPanel::CreatePanel(new PanelDelegate(CefSize(0, pill_height)));
+        views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, pill_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry));
+        CefRefPtr<CefBoxLayout> outline_layout =
+            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
         CefBoxLayoutSettings pill_settings;
         pill_settings.horizontal = static_cast<int>(true);
         pill_settings.between_child_spacing = tokens_.spacing_1_dip;
         pill_settings.inside_border_horizontal_spacing = tokens_.spacing_2_dip;
         pill_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
-        views.row->SetToBoxLayout(pill_settings);
+        views.inner->SetToBoxLayout(pill_settings);
+        views.row->AddChildView(views.inner);
+        outline_layout->SetFlexForView(views.inner, 1);
 
-        // The color mark is the space's dot; a larger dot marks the active one.
-        const int dot = entry.active ? tokens_.spacing_3_dip - 2 : tokens_.spacing_2_dip + 1;
-        views.color_mark = CefPanel::CreatePanel(new PanelDelegate(CefSize(dot, dot)));
+        // The color mark is the space's dot: the same size for every chip, so the
+        // active one is told apart by its outline and label, not by a bigger dot.
+        const int dot = tokens_.spacing_2_dip;
+        views.color_mark = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(dot, dot)));
         views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
-        views.row->AddChildView(views.color_mark);
+        views.inner->AddChildView(views.color_mark);
 
         CefRefPtr<CollectionButtonDelegate> name_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
@@ -869,11 +948,18 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         views.name->SetFocusable(true);
         views.name->SetInkDropEnabled(true);
         views.name->SetFontList(entry.active ? "Geist, Medium 12px" : "Geist, 12px");
-        views.name->SetMinimumSize(CefSize(pill_height - 6, pill_height - 6));
-        views.row->AddChildView(views.name);
+        views.name->SetMinimumSize(
+            CefSize(pill_height - 2 * kHairlineDip - 2 * tokens_.spacing_2_dip,
+                    pill_height - 2 * kHairlineDip));
+        views.inner->AddChildView(views.name);
 
         space_entry_views_.push_back(views);
         space_switcher_->AddChildView(views.row);
+        // The active chip takes the remaining width and shows the full name; inactive
+        // chips hug their initial.
+        if (space_switcher_layout_ != nullptr) {
+            space_switcher_layout_->SetFlexForView(views.row, entry.active ? 1 : 0);
+        }
     }
     ApplyCollectionTheme();
     sidebar_->Layout();
@@ -1059,6 +1145,7 @@ void BrowserChrome::Detach() {
     }
     detached_ = true;
     host_ = nullptr;
+    *alive_ = nullptr;
     button_delegate_->Detach();
     textfield_delegate_->Detach();
     for (const CefRefPtr<CollectionButtonDelegate>& delegate : tab_button_delegates_) {
@@ -1215,6 +1302,46 @@ void BrowserChrome::ScheduleAddressSelection() {
     CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(SelectAllWhenFocused, address_field_)));
 }
 
+namespace {
+
+// One posted pass after a burst of theme resets; holds the chrome through the shared
+// alive handle so a task outliving the chrome is a no-op.
+class ThemeReapplyTask final : public CefTask {
+  public:
+    explicit ThemeReapplyTask(std::shared_ptr<BrowserChrome*> alive) : alive_(std::move(alive)) {}
+
+    void Execute() override {
+        if (BrowserChrome* chrome = *alive_) {
+            chrome->ReapplyThemeColors();
+        }
+    }
+
+  private:
+    std::shared_ptr<BrowserChrome*> alive_;
+
+    IMPLEMENT_REFCOUNTING(ThemeReapplyTask);
+};
+
+}  // namespace
+
+void BrowserChrome::HandleViewThemeReset() {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || theme_reapply_pending_) {
+        return;
+    }
+    theme_reapply_pending_ = true;
+    CefPostTask(TID_UI, new ThemeReapplyTask(alive_));
+}
+
+void BrowserChrome::ReapplyThemeColors() {
+    CEF_REQUIRE_UI_THREAD();
+    theme_reapply_pending_ = false;
+    if (detached_) {
+        return;
+    }
+    ApplyControlTheme();
+}
+
 void BrowserChrome::ApplyControlTheme() {
     const ArgbColor background = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRoot);
     const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
@@ -1222,7 +1349,6 @@ void BrowserChrome::ApplyControlTheme() {
         ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kBrowserContent);
     const ArgbColor hairline = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kHairline);
     const ArgbColor address_well = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAddressWell);
-    const ArgbColor nav_control = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kNavControl);
     const ArgbColor active_page_fill = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
     const ArgbColor accent = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAccent);
 
@@ -1241,23 +1367,22 @@ void BrowserChrome::ApplyControlTheme() {
     rail_footer_->SetBackgroundColor(rail.argb);
     spacer_->SetBackgroundColor(rail.argb);
     divider_->SetBackgroundColor(hairline.argb);
-    // The address unit is one raised surface pill: the location glyph, field, and
-    // reload chip all carry the same surface fill so they read as a single control
-    // group with consistent padding, matching the canonical .rail-address /
-    // .rail-reload anatomy.
+    // The address pill's three parts (location glyph, field, reload) share the
+    // surface fill; the row around them paints the hairline (accent on focus).
     address_location_icon_->SetBackgroundColor(address_well.argb);
     address_field_->SetBackgroundColor(address_well.argb);
+    address_field_holder_->SetBackgroundColor(address_well.argb);
     reload_button_->SetBackgroundColor(address_well.argb);
-    // Back and Forward are quiet icon chips on the same raised step; CEF layers the
-    // native hover/pressed ring over this base fill when targeted.
-    back_button_->SetBackgroundColor(nav_control.argb);
-    forward_button_->SetBackgroundColor(nav_control.argb);
+    // Back and Forward are ghost icon buttons: no fill of their own, so only the
+    // native hover/pressed ink shows when targeted.
+    back_button_->SetBackgroundColor(rail.argb);
+    forward_button_->SetBackgroundColor(rail.argb);
     // The active-page card lifts to the primary surface against the tinted rail.
     active_page_->SetBackgroundColor(active_page_fill.argb);
     active_page_indicator_->SetBackgroundColor(accent.argb);
     UpdateAddressFocusLeadingEdge();
-    address_field_->SetFontList("Geist Mono, 14px");
-    active_tab_->SetFontList("Geist, 14px");
+    address_field_->SetFontList("Geist, 13px");
+    active_tab_->SetFontList("Geist, 13px");
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
@@ -1338,48 +1463,54 @@ void BrowserChrome::ApplyRailButtonTheme() {
                                                           : tokens_.text_secondary.argb);
 }
 
-// Entry rows tint like the rail when inactive and lift to the active-page
-// surface when active, so the current tab and current space read as the raised
-// rows the same way the active-page card does. Re-asserted here (not through a
+// Entry rows sit on the rail when inactive; the active tab and space take the
+// surface fill with a hairline outline (DESIGN.md §5). Re-asserted here (not through a
 // SurfacePanelDelegate) because the tint depends on the entry's active state,
 // which changes independently of the theme.
 void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
-    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
-    const ArgbColor surface = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
     for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
          ++index) {
         const TabStripEntrySnapshot& entry = tab_entries_[index];
         const TabEntryViews& views = tab_entry_views_[index];
-        // Active rows are the raised surface card; pinned rows sit on a half
-        // step toward it so the pinned group reads as its own tray.
-        const ArgbColor row_fill =
-            entry.active ? surface : (entry.pinned ? MixColor(rail, surface, 0.45) : rail);
-        views.row->SetBackgroundColor(row_fill.argb);
-        views.favicon->SetBackgroundColor(row_fill.argb);
-        views.title->SetBackgroundColor(row_fill.argb);
-        views.close->SetBackgroundColor(row_fill.argb);
-        views.title->SetEnabledTextColors(tokens_.text.argb);
-        views.close->SetEnabledTextColors(tokens_.text_secondary.argb);
+        const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+        views.row->SetBackgroundColor(colors.outline.argb);
+        views.inner->SetBackgroundColor(colors.fill.argb);
+        views.favicon->SetBackgroundColor(colors.fill.argb);
+        views.title->SetBackgroundColor(colors.fill.argb);
+        views.close->SetBackgroundColor(colors.fill.argb);
+        views.title->SetEnabledTextColors(colors.title.argb);
+        views.close->SetEnabledTextColors(colors.trailing.argb);
     }
     for (std::size_t index = 0; index < space_entry_views_.size() && index < space_entries_.size();
          ++index) {
         const SpaceSwitcherEntrySnapshot& entry = space_entries_[index];
         const SpaceEntryViews& views = space_entry_views_[index];
-        views.row->SetBackgroundColor(entry.active ? surface.argb : rail.argb);
-        views.name->SetBackgroundColor(entry.active ? surface.argb : rail.argb);
+        const EntryColors colors = SpaceChipColors(tokens_, entry.active);
+        views.row->SetBackgroundColor(colors.outline.argb);
+        views.inner->SetBackgroundColor(colors.fill.argb);
+        views.name->SetBackgroundColor(colors.fill.argb);
         views.color_mark->SetBackgroundColor(entry.color.argb);
-        views.name->SetEnabledTextColors(entry.active ? tokens_.text.argb
-                                                      : tokens_.text_secondary.argb);
+        views.name->SetEnabledTextColors(colors.title.argb);
     }
 }
 
+// The address outline is the hairline at rest and the accent while the field has
+// focus (DESIGN.md §8: visible accent focus ring).
 void BrowserChrome::UpdateAddressFocusLeadingEdge() {
     CEF_REQUIRE_UI_THREAD();
-    const ArgbColor accent = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAccent);
-    const ArgbColor well = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAddressWell);
-    address_focus_leading_edge_->SetBackgroundColor(address_field_->HasFocus() ? accent.argb
-                                                                               : well.argb);
+    if (address_row_ == nullptr) {
+        return;
+    }
+    address_row_->SetBackgroundColor(ResolveSurfaceColor(SurfaceSlot::kAddressOutline).argb);
+}
+
+ArgbColor BrowserChrome::ResolveSurfaceColor(SurfaceSlot slot) const {
+    if (slot == SurfaceSlot::kAddressOutline && address_field_ != nullptr &&
+        address_field_->HasFocus()) {
+        return tokens_.accent;
+    }
+    return ChromeSurfaceRoleForResolvedTokens(slot);
 }
 
 }  // namespace island

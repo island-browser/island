@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -199,23 +200,21 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
     [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
 
-    // Address-editing leading edge and ActivePageIndicator thickness in DIP;
-    // both are 2 so the rail accent and the address accent read as one mark.
+    // Focus-ring thickness of the address pill and ActivePageIndicator thickness in
+    // DIP; both are 2 so the accent marks read as one weight.
     [[nodiscard]] static constexpr int AddressFocusLeadingEdgeDip() { return 2; }
     [[nodiscard]] static constexpr int ActivePageIndicatorWidthDip() {
         return AddressFocusLeadingEdgeDip();
     }
 
-    // Top inset reserving the platform title-bar / traffic-light region so the
-    // navigation row clears the window controls instead of colliding with them. The
-    // window uses a hidden title bar (content extends into the title region), so the
-    // controls overlay the top of the rail. Token-derived: spacing_6 (24) +
-    // spacing_3 (12) = 36 DIP.
-    [[nodiscard]] static constexpr int RailTopInsetDip() { return 36; }
+    // Top inset above the navigation row. The window keeps the platform's standard
+    // title bar, which already clears the window controls, so the rail starts on
+    // the same spacing_3 (12) gutter as its sides.
+    [[nodiscard]] static constexpr int RailTopInsetDip() { return 12; }
 
-    // Vertical cadence between rail sections. A calm spacing_4 (16) step instead of
-    // the cramped spacing_2 (8) so the cluster reads as composed ledger sections.
-    [[nodiscard]] static constexpr int RailSectionSpacingDip() { return 16; }
+    // Vertical cadence between rail sections: one spacing_2 (8) step, so the
+    // controls read as one dense, even column (Graphite, "Linear-calm").
+    [[nodiscard]] static constexpr int RailSectionSpacingDip() { return 8; }
 
     // Uniform gutter padding the browser_content panel on every side so the single
     // CefBrowserView reads as a floating card over the tinted canvas. spacing_3 (12)
@@ -236,6 +235,9 @@ class BrowserChrome final : public NavigationObserver {
         kBrowserContent,
         kHairline,
         kAddressWell,
+        // The hairline (accent while focused) the address pill paints around its
+        // surface-colored children.
+        kAddressOutline,
         kNavControl,
         kActivePage,
         kAccent,
@@ -251,6 +253,7 @@ class BrowserChrome final : public NavigationObserver {
                 // browser card separates from it.
                 return tokens.surface_secondary;
             case SurfaceSlot::kHairline:
+            case SurfaceSlot::kAddressOutline:
                 return tokens.border;
             case SurfaceSlot::kAddressWell:
                 // The address pill lifts to the primary surface so it reads as a raised
@@ -278,6 +281,7 @@ class BrowserChrome final : public NavigationObserver {
             case SurfaceSlot::kRail:
                 return tokens_.surface_secondary;
             case SurfaceSlot::kHairline:
+            case SurfaceSlot::kAddressOutline:
                 return tokens_.border;
             case SurfaceSlot::kAddressWell:
                 return tokens_.surface;
@@ -289,6 +293,32 @@ class BrowserChrome final : public NavigationObserver {
                 return tokens_.accent;
         }
         return tokens_.background;
+    }
+
+    // Resolved colors of one collection row. `outline` is the hairline painted
+    // around the selected row (the rail color otherwise, so the row has no edge),
+    // `fill` the row surface, `title` the label and `trailing` the favicon/close
+    // glyph color. Resolved per entry state so a theme reset can repaint every row.
+    struct EntryColors {
+        ArgbColor outline;
+        ArgbColor fill;
+        ArgbColor title;
+        ArgbColor trailing;
+    };
+    // The selected row is surface-filled and hairline-outlined (DESIGN.md §5);
+    // pinned rows sit half a step toward the surface; every other row is the rail.
+    [[nodiscard]] static EntryColors TabRowColors(const ChromeTokens& tokens, bool active,
+                                                  bool pinned) {
+        const ArgbColor rail = tokens.surface_secondary;
+        return {
+            .outline = active ? tokens.border : rail,
+            .fill = active ? tokens.surface : (pinned ? MixColor(rail, tokens.surface, 0.5) : rail),
+            .title = active ? tokens.text : tokens.text_secondary,
+            .trailing = tokens.text_secondary,
+        };
+    }
+    [[nodiscard]] static EntryColors SpaceChipColors(const ChromeTokens& tokens, bool active) {
+        return TabRowColors(tokens, active, /*pinned=*/false);
     }
 
     // Justified: navigation, location, and the favicon placeholder use the
@@ -479,9 +509,10 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr double SplitRatioStep() { return 0.05; }
     [[nodiscard]] static constexpr int SplitDividerWidthDip() { return 2; }
 
-    // Arc-style rail metrics: compact 34 DIP tab rows, 30 DIP space pills.
-    [[nodiscard]] static constexpr int TabRowHeightDip() { return 34; }
-    [[nodiscard]] static constexpr int SpacePillHeightDip() { return 30; }
+    // Rail metrics: every control row is one 32 DIP height (spacing_6 + spacing_2),
+    // so tab rows, space chips, footer buttons, and the address pill align.
+    [[nodiscard]] static constexpr int TabRowHeightDip() { return 32; }
+    [[nodiscard]] static constexpr int SpacePillHeightDip() { return 32; }
     // The tab list scrolls inside the rail; its rows stop short of the rail's
     // right inset by this gutter so a classic scrollbar never forces a
     // horizontal one.
@@ -506,13 +537,15 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] const std::string& update_notice() const noexcept { return update_notice_; }
     void BeginAddressEditing();
     void Detach();
+    // Repaints every chrome view from the resolved tokens and each entry's current
+    // state. Runs after CEF's asynchronous theme reset has wiped the custom colors.
+    void ReapplyThemeColors();
 
     // Resolves the current tokens' color for a chrome surface slot. Exposed so the
     // surface-panel delegate can re-assert the color when CEF resets custom view
     // backgrounds on theme change.
-    [[nodiscard]] ArgbColor ResolveSurfaceColor(SurfaceSlot slot) const {
-        return ChromeSurfaceRoleForResolvedTokens(slot);
-    }
+    // The address outline resolves to the accent while the field has focus.
+    [[nodiscard]] ArgbColor ResolveSurfaceColor(SurfaceSlot slot) const;
 
   private:
     class PanelDelegate;
@@ -522,6 +555,9 @@ class BrowserChrome final : public NavigationObserver {
     class CollectionButtonDelegate;
     class TextfieldDelegate;
 
+    // Called by every chrome delegate when CEF resets a view's colors on a theme
+    // change; schedules one ReapplyThemeColors() pass.
+    void HandleViewThemeReset();
     void HandleButtonPressed(ChromeViewId view_id);
     void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
     void UpdateTabStripPreferredSize();
@@ -540,6 +576,9 @@ class BrowserChrome final : public NavigationObserver {
     BrowserChromeHost* host_;
     ChromeTokens tokens_;
     IconCatalog icon_catalog_;
+    // Shared with the delegates and the posted reapply task; nulled on Detach.
+    std::shared_ptr<BrowserChrome*> alive_;
+    bool theme_reapply_pending_ = false;
     CefRefPtr<CefPanel> root_;
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
@@ -556,7 +595,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> navigation_row_;
     CefRefPtr<CefPanel> address_row_;
     CefRefPtr<CefPanel> spacer_;
-    CefRefPtr<CefPanel> address_focus_leading_edge_;
+    CefRefPtr<CefBoxLayout> address_layout_;
+    CefRefPtr<CefPanel> address_field_holder_;
+    CefRefPtr<CefBoxLayout> space_switcher_layout_;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
@@ -577,12 +618,14 @@ class BrowserChrome final : public NavigationObserver {
     // Per-entry runtime views, index-aligned with tab_entries_/space_entries_.
     struct TabEntryViews {
         CefRefPtr<CefPanel> row;
+        CefRefPtr<CefPanel> inner;
         CefRefPtr<CefLabelButton> favicon;
         CefRefPtr<CefLabelButton> title;
         CefRefPtr<CefLabelButton> close;
     };
     struct SpaceEntryViews {
         CefRefPtr<CefPanel> row;
+        CefRefPtr<CefPanel> inner;
         CefRefPtr<CefPanel> color_mark;
         CefRefPtr<CefLabelButton> name;
     };

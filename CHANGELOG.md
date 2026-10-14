@@ -18,6 +18,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Island no longer crashes with "quit unexpectedly" when you switch to another app or window (and on
   quit). The window and every browser view now use CEF's Alloy runtime style; Island hosts several
   browser views in one window, which CEF supports only for Alloy style views.
+- The sidebar no longer shows every control as its own light box: CEF wipes custom view colors
+  when a theme change lands, and only some chrome views repainted afterwards. Every chrome view now
+  reports the reset and the chrome repaints from the design tokens, which also removes the white
+  panel behind the tab list.
 
 ### Changed
 
@@ -26,6 +30,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   style cancels downloads nobody handles, so Island now handles them itself.
 - Site permission requests (camera, microphone, location, notifications) are declined, because
   Alloy style has no built-in prompt and Island does not show one yet.
+- Sidebar redesigned to the Graphite spec: ghost back/forward and footer buttons, the address as
+  one outlined pill (site glyph, field, reload) that takes the accent outline while focused, tabs
+  as rows on the sidebar with a hairline-outlined selected row, one 32 DIP control height and an
+  even 8 DIP rhythm, Geist instead of mono in the address field.
+- The first-run welcome card is a real card: title and lede, a segmented System/Light/Dark control,
+  outlined import rows, a wrapped note for unreadable browsers instead of an ellipsized line, and
+  Import / Start browsing buttons.
+- The start page is styled with the design tokens and the Geist stack (still a local `data:`
+  document with no external requests).
 
 ## [0.5.1] - 2026-10-06
 

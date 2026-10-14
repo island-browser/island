@@ -163,8 +163,26 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
 
 ## 5. Components
 
-- **Sidebar (native):** `--surface-2` with the space cast; compact address field, pinned-tab tray,
-  tab list (active tab = `--surface` with a hairline), footer with space dots and icon buttons.
+- **Sidebar (native):** one `--surface-2` surface with the space cast. Controls are ghost by
+  default (no fill, hover/pressed ink only) at one 32 DIP height and 16px icons on a 4/8/12 DIP
+  rhythm: back/forward, then the address as one hairline-outlined pill (site glyph, field, reload,
+  all `--surface`; the outline turns `--accent` while the field has focus), then a quiet New Tab
+  row, then the tab list — tabs are rows on the sidebar itself, the selected tab `--surface` with a
+  1px `--border` outline — and a footer with the space chip (same row style) and evenly spaced
+  icon buttons. Chrome text is Geist 13px; mono is not used in the sidebar. CEF `cef_views` has no
+  corner-radius or border API, so native outlined controls are square (a 1px hairline panel
+  around surface-filled children); `--radius-sm` applies to web surfaces. CEF resets custom view
+  colors on every theme change, so each chrome view reports the reset and the chrome repaints from
+  the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`, `SpaceChipColors`).
+- **Welcome card (native overlay):** a `--surface` card with a 1px `--border` outline and
+  spacing_6 padding: Geist title and lede, mono uppercase section labels (APPEARANCE, IMPORT), a
+  three-segment appearance control (selected = `--surface-2` fill, `--accent` text), one outlined
+  toggle row per readable browser (checked state is a check mark as well as the fill), a wrapped
+  muted note for unreadable browsers, and a right-aligned footer with a secondary Import button
+  and the primary Start browsing button (`--text` fill, `--surface` text).
+- **Start page:** the fixed local `data:` document in `src/main/startup_options.h`: `--surface`
+  page, Geist stack, mono label, keycap hints, system light/dark scheme; no script or external
+  reference.
 - **Page card (native):** `--surface` with a 1px `--border` and radius `--radius-md`.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
@@ -201,4 +219,4 @@ both low-opacity neutral. No glass stacks, no glow, no gradients.
 | Item | Location | Why accepted | Owner / Exit |
 | --- | --- | --- | --- |
 | CEF theme parity gap | `src/main/browser_window.cc` dark detection | The chrome derives light/dark from the OS via the CEF window theme, which has no automated visual verification yet. Values are drift-guarded by `tests/design_tokens_test.cpp` and `tests/design/test_token_contract.py`. | Close with native visual acceptance evidence on real hardware. |
-| Native Graphite pass unverified | `src/main/browser_chrome.cc` | The Graphite recolor reaches the native chrome through tokens only; it has not been looked at in a running build (CEF downloads are blocked in the authoring environment). | Visual pass on the first native build. |
+| Native Graphite pass partly verified | `src/main/browser_chrome.cc`, `src/main/welcome_flow.cc`, `src/main/startup_options.h` | The macOS light-theme sidebar was inspected in a running build through an in-process window capture (the sandbox cannot use screen recording), up to the theme-reset repaint. The final address-field holder, space-chip widths, the restyled welcome card, and the styled start page were built and unit-tested but not looked at; dark theme, Windows, and Linux were verified only through the token tests. | Visual pass of the welcome card, start page, dark theme, and the other platforms. |

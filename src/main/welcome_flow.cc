@@ -4,6 +4,8 @@
 #include <string>
 #include <utility>
 
+#include "include/base/cef_callback.h"
+#include "include/cef_task.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_button_delegate.h"
 #include "include/views/cef_label_button.h"
@@ -15,27 +17,130 @@
 namespace island {
 namespace {
 
-constexpr int kWelcomeWidthDip = 560;
-constexpr int kChoiceRowHeightDip = 32;
-constexpr int kNoteRowHeightDip = 24;
-constexpr int kActionRowHeightDip = 40;
-constexpr int kTitleHeightDip = 44;
-constexpr int kSectionGapDip = 12;
+// Metrics in DIP. The card is a hairline-outlined surface; its text and controls sit on
+// the spacing grid (4 / 8 / 24) with 32 DIP controls, like the rail.
+constexpr int kHairlineDip = 1;
+constexpr int kCardPaddingVerticalDip = 24;
+// 24 DIP of padding plus the 6 DIP of internal inset a label button adds on its
+// leading edge, so text and the outlined controls share one left edge.
+constexpr int kCardPaddingHorizontalDip = 30;
+constexpr int kSectionGapDip = 24;
+constexpr int kItemGapDip = 8;
+constexpr int kTitleHeightDip = 36;
+constexpr int kLedeHeightDip = 24;
+constexpr int kLabelHeightDip = 16;
+constexpr int kControlHeightDip = 32;
+constexpr int kNoteLineHeightDip = 20;
+constexpr std::size_t kNoteLineChars = 64;
+// Paints a little slack so a font-metric rounding never clips the footer.
+constexpr int kHeightSlackDip = 8;
 
-CefBoxLayoutSettings WelcomePanelLayout(const ChromeTokens& tokens) {
+CefBoxLayoutSettings VerticalLayout(int spacing, const CefInsets& insets = CefInsets()) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(false);
-    settings.between_child_spacing = tokens.spacing_2_dip;
-    settings.inside_border_insets = CefInsets(tokens.spacing_6_dip, tokens.spacing_6_dip,
-                                              tokens.spacing_6_dip, tokens.spacing_6_dip);
+    settings.between_child_spacing = spacing;
+    settings.inside_border_insets = insets;
     return settings;
 }
 
+CefBoxLayoutSettings HorizontalLayout(int spacing, const CefInsets& insets = CefInsets()) {
+    CefBoxLayoutSettings settings;
+    settings.horizontal = static_cast<int>(true);
+    settings.between_child_spacing = spacing;
+    settings.inside_border_insets = insets;
+    return settings;
+}
+
+CefInsets Uniform(int dip) { return CefInsets(dip, dip, dip, dip); }
+
+// Posts one repaint after a burst of theme resets; the shared handle makes a task
+// that outlives the flow a no-op.
+class ReapplyTask final : public CefTask {
+  public:
+    ReapplyTask(std::shared_ptr<WelcomeFlow*> alive, void (*run)(WelcomeFlow*))
+        : alive_(std::move(alive)), run_(run) {}
+
+    void Execute() override {
+        if (WelcomeFlow* flow = *alive_) {
+            run_(flow);
+        }
+    }
+
+  private:
+    std::shared_ptr<WelcomeFlow*> alive_;
+    void (*run_)(WelcomeFlow*);
+
+    IMPLEMENT_REFCOUNTING(ReapplyTask);
+};
+
 }  // namespace
+
+std::vector<std::string> WelcomeFlow::WrapUnreadableNote(const std::vector<std::string>& names,
+                                                         std::size_t max_chars) {
+    std::vector<std::string> lines;
+    if (names.empty()) {
+        return lines;
+    }
+    std::string current = "Not readable on this machine: ";
+    bool line_has_name = false;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const std::string piece = names[index] + (index + 1 < names.size() ? "," : "");
+        const std::size_t needed = current.size() + (line_has_name ? 1 : 0) + piece.size();
+        if (line_has_name && needed > max_chars) {
+            lines.push_back(current);
+            current = piece;
+        } else {
+            current += (line_has_name ? " " : "") + piece;
+        }
+        line_has_name = true;
+    }
+    lines.push_back(current);
+    return lines;
+}
+
+int WelcomeFlow::ContentHeightDip(int readable_sources, int note_lines) {
+    // Import section: label, one 34 DIP outlined row per readable source, and the
+    // wrapped note block, separated by kItemGapDip.
+    int items = 1;
+    int import_height = kLabelHeightDip;
+    for (int row = 0; row < readable_sources; ++row) {
+        import_height += kControlHeightDip + 2 * kHairlineDip;
+        ++items;
+    }
+    if (note_lines > 0) {
+        import_height += note_lines * kNoteLineHeightDip;
+        ++items;
+    }
+    import_height += kItemGapDip * (items - 1);
+
+    const int header = kTitleHeightDip + kLedeHeightDip;
+    const int appearance = kLabelHeightDip + kItemGapDip + kControlHeightDip + 2 * kHairlineDip;
+    const int actions = kControlHeightDip + 2 * kHairlineDip;
+    return 2 * kHairlineDip + 2 * kCardPaddingVerticalDip + header + kSectionGapDip + appearance +
+           kSectionGapDip + import_height + kSectionGapDip + actions + kHeightSlackDip;
+}
+
+WelcomeFlow::ButtonColors WelcomeFlow::SegmentColors(const ChromeTokens& tokens, bool selected) {
+    // The selected segment steps to the secondary surface and takes the accent: the
+    // accent marks active state only. Unselected segments are plain surface.
+    if (selected) {
+        return {.fill = tokens.surface_secondary, .text = tokens.accent};
+    }
+    return {.fill = tokens.surface, .text = tokens.text};
+}
+
+WelcomeFlow::ButtonColors WelcomeFlow::SecondaryButtonColors(const ChromeTokens& tokens) {
+    return {.fill = tokens.surface, .text = tokens.text};
+}
+
+WelcomeFlow::ButtonColors WelcomeFlow::PrimaryButtonColors(const ChromeTokens& tokens) {
+    // DESIGN.md §5: primary buttons use --text as background with --surface foreground.
+    return {.fill = tokens.text, .text = tokens.surface};
+}
 
 // CefView drops custom background colors on theme changes, so every welcome
 // surface re-asserts its token color from OnThemeChanged, mirroring the
-// palettes.
+// palettes, and reports the reset so the buttons repaint too.
 class WelcomeFlow::WelcomeSurfaceDelegate final : public CefPanelDelegate {
   public:
     WelcomeSurfaceDelegate(WelcomeFlow* flow, SurfaceSlot slot, CefSize preferred_size)
@@ -48,6 +153,7 @@ class WelcomeFlow::WelcomeSurfaceDelegate final : public CefPanelDelegate {
     void OnThemeChanged(CefRefPtr<CefView> view) override {
         if (flow_ != nullptr) {
             view->SetBackgroundColor(flow_->ResolveColor(slot_).argb);
+            flow_->HandleViewThemeReset();
         }
     }
 
@@ -72,6 +178,12 @@ class WelcomeFlow::WelcomeButtonDelegate final : public CefButtonDelegate {
         }
     }
 
+    void OnThemeChanged(CefRefPtr<CefView>) override {
+        if (flow_ != nullptr) {
+            flow_->HandleViewThemeReset();
+        }
+    }
+
   private:
     WelcomeFlow* flow_;
 
@@ -84,7 +196,8 @@ WelcomeFlow::WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, Chr
       window_(std::move(window)),
       tokens_(tokens),
       sources_(std::move(sources)),
-      chosen_theme_(current_theme) {
+      chosen_theme_(current_theme),
+      alive_(std::make_shared<WelcomeFlow*>(this)) {
     CEF_REQUIRE_UI_THREAD();
     source_checked_.assign(sources_.size(), true);
     BuildViews();
@@ -92,100 +205,180 @@ WelcomeFlow::WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, Chr
     if (overlay_ != nullptr) {
         overlay_->SetVisible(false);
     }
-    ApplySurfaceColors();
-    ProjectThemeChoice();
-    ProjectSourceChecks();
+    ApplyColors();
 }
 
 WelcomeFlow::~WelcomeFlow() { Detach(); }
 
+CefRefPtr<CefPanel> WelcomeFlow::MakePanel(SurfaceSlot slot) {
+    CefRefPtr<WelcomeSurfaceDelegate> delegate = new WelcomeSurfaceDelegate(this, slot, CefSize());
+    surface_delegates_.push_back(delegate);
+    CefRefPtr<CefPanel> panel = CefPanel::CreatePanel(delegate);
+    panels_.emplace_back(panel, slot);
+    return panel;
+}
+
+CefRefPtr<CefLabelButton> WelcomeFlow::MakeText(const std::string& text, TextRole role) {
+    CefRefPtr<CefLabelButton> label = CefLabelButton::CreateLabelButton(button_delegate_, text);
+    label->SetID(kThemeSystemId - 1);
+    label->SetAccessibleName(text);
+    label->SetFocusable(false);
+    label->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    int height = kLabelHeightDip;
+    switch (role) {
+        case TextRole::kTitle:
+            height = kTitleHeightDip;
+            break;
+        case TextRole::kLede:
+            height = kLedeHeightDip;
+            break;
+        case TextRole::kSectionLabel:
+            height = kLabelHeightDip;
+            break;
+        case TextRole::kNote:
+            height = kNoteLineHeightDip;
+            break;
+    }
+    label->SetMinimumSize(CefSize(0, height));
+    texts_.push_back({label, role});
+    return label;
+}
+
 void WelcomeFlow::BuildViews() {
-    panel_delegate_ =
-        new WelcomeSurfaceDelegate(this, SurfaceSlot::kPanel, CefSize(kWelcomeWidthDip, 0));
+    panel_delegate_ = new WelcomeSurfaceDelegate(this, SurfaceSlot::kOutline, CefSize());
     surface_delegates_.push_back(panel_delegate_);
     panel_ = CefPanel::CreatePanel(panel_delegate_);
+    panels_.emplace_back(panel_, SurfaceSlot::kOutline);
     panel_->SetID(static_cast<int>(ChromeViewId::kWelcome));
-    panel_->SetToBoxLayout(WelcomePanelLayout(tokens_));
+    // The overlay root paints the hairline and insets the card by its thickness.
+    CefRefPtr<CefBoxLayout> outline_layout =
+        panel_->SetToBoxLayout(VerticalLayout(0, Uniform(kHairlineDip)));
 
     button_delegate_ = new WelcomeButtonDelegate(this);
 
-    CefRefPtr<CefLabelButton> title =
-        CefLabelButton::CreateLabelButton(button_delegate_, "Welcome to Island");
-    title->SetID(kThemeSystemId - 1);
-    title->SetAccessibleName("Welcome to Island");
-    title->SetFocusable(false);
-    title->SetMinimumSize(CefSize(0, kTitleHeightDip));
-    title->SetEnabledTextColors(tokens_.text.argb);
-    panel_->AddChildView(title);
+    card_ = MakePanel(SurfaceSlot::kCard);
+    card_->SetToBoxLayout(VerticalLayout(
+        kSectionGapDip, CefInsets(kCardPaddingVerticalDip, kCardPaddingHorizontalDip,
+                                  kCardPaddingVerticalDip, kCardPaddingHorizontalDip)));
+    panel_->AddChildView(card_);
+    outline_layout->SetFlexForView(card_, 1);
 
-    CefRefPtr<CefLabelButton> lede = CefLabelButton::CreateLabelButton(
-        button_delegate_, "Choose how Island looks and import your bookmarks.");
-    lede->SetID(kThemeSystemId - 1);
-    lede->SetAccessibleName(lede->GetText());
-    lede->SetFocusable(false);
-    lede->SetEnabledTextColors(tokens_.text.argb);
-    panel_->AddChildView(lede);
+    // Header: title and lede.
+    CefRefPtr<CefPanel> header = MakePanel(SurfaceSlot::kCard);
+    header->SetToBoxLayout(VerticalLayout(0));
+    header->AddChildView(MakeText("Welcome to Island", TextRole::kTitle));
+    header->AddChildView(
+        MakeText("Choose how Island looks and import your bookmarks.", TextRole::kLede));
+    card_->AddChildView(header);
 
-    // Appearance: three radio-style rows; the selected one leads with a filled
-    // dot and renders in the accent (LabelButton in this CEF distribution has
-    // no native button chrome, so state lives in the glyph and the color).
+    // Appearance: a three-segment control. The outline panel paints the hairline and
+    // shows it through the 1 DIP gaps between equal-width segments.
+    CefRefPtr<CefPanel> appearance = MakePanel(SurfaceSlot::kCard);
+    appearance->SetToBoxLayout(VerticalLayout(kItemGapDip));
+    appearance->AddChildView(MakeText("APPEARANCE", TextRole::kSectionLabel));
+    CefRefPtr<CefPanel> segments = MakePanel(SurfaceSlot::kOutline);
+    CefRefPtr<CefBoxLayout> segments_layout =
+        segments->SetToBoxLayout(HorizontalLayout(kHairlineDip, Uniform(kHairlineDip)));
     const char* const theme_labels[3] = {"System", "Light", "Dark"};
     const int theme_ids[3] = {kThemeSystemId, kThemeLightId, kThemeDarkId};
     for (int index = 0; index < 3; ++index) {
-        CefRefPtr<CefLabelButton> button = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        CefRefPtr<CefLabelButton> button =
+            CefLabelButton::CreateLabelButton(button_delegate_, theme_labels[index]);
         button->SetID(theme_ids[index]);
         button->SetAccessibleName(std::string("Appearance: ") + theme_labels[index]);
-        button->SetMinimumSize(CefSize(0, kChoiceRowHeightDip));
-        panel_->AddChildView(button);
+        button->SetTooltipText(std::string("Appearance: ") + theme_labels[index]);
+        button->SetFocusable(true);
+        button->SetInkDropEnabled(true);
+        button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+        button->SetMinimumSize(CefSize(150, kControlHeightDip));
+        segments->AddChildView(button);
+        segments_layout->SetFlexForView(button, 1);
         theme_buttons_[index] = button;
     }
+    appearance->AddChildView(segments);
+    card_->AddChildView(appearance);
 
-    // Import sources: one toggle row per READABLE browser. Unreadable sources
-    // collapse into one muted note instead of dominating the card.
+    // Import: one outlined toggle row per READABLE browser; unreadable sources become a
+    // wrapped, muted note (never ellipsized).
+    CefRefPtr<CefPanel> import_section = MakePanel(SurfaceSlot::kCard);
+    import_section->SetToBoxLayout(VerticalLayout(kItemGapDip));
+    import_section->AddChildView(MakeText("IMPORT", TextRole::kSectionLabel));
     std::vector<std::string> unreadable;
-    source_buttons_.reserve(sources_.size());
     for (std::size_t index = 0; index < sources_.size(); ++index) {
         if (!sources_[index].available) {
             unreadable.push_back(sources_[index].display_name);
             continue;
         }
-        CefRefPtr<CefLabelButton> source = CefLabelButton::CreateLabelButton(button_delegate_, "");
-        source->SetID(kSourceIdBase + static_cast<int>(index));
-        source->SetAccessibleName("Import bookmarks from " + sources_[index].display_name);
-        source->SetTooltipText(sources_[index].bookmarks_path.generic_string());
-        source->SetMinimumSize(CefSize(0, kChoiceRowHeightDip));
-        panel_->AddChildView(source);
-        source_buttons_.push_back(source);
+        SourceRow row;
+        row.source_index = index;
+        row.outline = MakePanel(SurfaceSlot::kOutline);
+        CefRefPtr<CefBoxLayout> row_layout =
+            row.outline->SetToBoxLayout(HorizontalLayout(0, Uniform(kHairlineDip)));
+        row.button = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        row.button->SetID(kSourceIdBase + static_cast<int>(index));
+        row.button->SetAccessibleName("Import bookmarks from " + sources_[index].display_name);
+        row.button->SetTooltipText(sources_[index].bookmarks_path.generic_string());
+        row.button->SetFocusable(true);
+        row.button->SetInkDropEnabled(true);
+        row.button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+        row.button->SetMinimumSize(CefSize(0, kControlHeightDip));
+        row.outline->AddChildView(row.button);
+        row_layout->SetFlexForView(row.button, 1);
+        import_section->AddChildView(row.outline);
+        source_rows_.push_back(row);
     }
-    if (!unreadable.empty()) {
-        std::string note = "Not readable on this machine: ";
-        for (std::size_t i = 0; i < unreadable.size(); ++i) {
-            note += unreadable[i];
-            if (i + 1 < unreadable.size()) {
-                note += ", ";
-            }
-        }
-        CefRefPtr<CefLabelButton> note_label =
-            CefLabelButton::CreateLabelButton(button_delegate_, note);
-        note_label->SetID(kThemeSystemId - 1);
-        note_label->SetAccessibleName(note);
-        note_label->SetFocusable(false);
-        note_label->SetEnabledTextColors(tokens_.text.argb);
-        panel_->AddChildView(note_label);
-    }
+    readable_count_ = static_cast<int>(source_rows_.size());
 
-    // Actions: glyph-prefixed rows; the import action carries the accent.
-    import_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    std::vector<std::string> note_lines = WrapUnreadableNote(unreadable, kNoteLineChars);
+    if (readable_count_ == 0 && !sources_.empty()) {
+        note_lines.insert(note_lines.begin(), "No readable bookmarks were found on this machine.");
+    }
+    note_line_count_ = static_cast<int>(note_lines.size());
+    if (!note_lines.empty()) {
+        CefRefPtr<CefPanel> notes = MakePanel(SurfaceSlot::kCard);
+        notes->SetToBoxLayout(VerticalLayout(0));
+        for (std::size_t line = 0; line < note_lines.size(); ++line) {
+            CefRefPtr<CefLabelButton> note = MakeText(note_lines[line], TextRole::kNote);
+            if (line == 0) {
+                // Screen readers get the whole note once, from its first line.
+                std::string full;
+                for (std::size_t i = 0; i < note_lines.size(); ++i) {
+                    full += (i == 0 ? "" : " ") + note_lines[i];
+                }
+                note->SetAccessibleName(full);
+            }
+            notes->AddChildView(note);
+        }
+        import_section->AddChildView(notes);
+    }
+    card_->AddChildView(import_section);
+
+    // Footer: secondary Import button, then the primary Start button, right-aligned.
+    CefRefPtr<CefPanel> actions = MakePanel(SurfaceSlot::kCard);
+    CefRefPtr<CefBoxLayout> actions_layout = actions->SetToBoxLayout(HorizontalLayout(kItemGapDip));
+    CefRefPtr<CefPanel> spacer = MakePanel(SurfaceSlot::kCard);
+    actions->AddChildView(spacer);
+    actions_layout->SetFlexForView(spacer, 1);
+
+    import_outline_ = MakePanel(SurfaceSlot::kOutline);
+    import_outline_->SetToBoxLayout(HorizontalLayout(0, Uniform(kHairlineDip)));
+    import_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Import selected");
     import_button_->SetID(kImportButtonId);
     import_button_->SetAccessibleName("Import and start browsing");
-    import_button_->SetMinimumSize(CefSize(0, kActionRowHeightDip));
-    panel_->AddChildView(import_button_);
+    import_button_->SetFocusable(true);
+    import_button_->SetInkDropEnabled(true);
+    import_button_->SetMinimumSize(CefSize(128, kControlHeightDip));
+    import_outline_->AddChildView(import_button_);
+    actions->AddChildView(import_outline_);
 
-    start_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "›  Just start browsing");
+    start_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Start browsing");
     start_button_->SetID(kStartButtonId);
     start_button_->SetAccessibleName("Start browsing without importing");
-    start_button_->SetMinimumSize(CefSize(0, kActionRowHeightDip));
-    panel_->AddChildView(start_button_);
+    start_button_->SetFocusable(true);
+    start_button_->SetInkDropEnabled(true);
+    start_button_->SetMinimumSize(CefSize(128, kControlHeightDip + 2 * kHairlineDip));
+    actions->AddChildView(start_button_);
+    card_->AddChildView(actions);
 }
 
 void WelcomeFlow::HandleButtonPressed(int view_id) {
@@ -197,7 +390,7 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
         chosen_theme_ = view_id == kThemeLightId  ? ThemePreference::kLight
                         : view_id == kThemeDarkId ? ThemePreference::kDark
                                                   : ThemePreference::kSystem;
-        ProjectThemeChoice();
+        ApplyColors();
         if (host_ != nullptr) {
             host_->OnWelcomeThemeChanged(chosen_theme_);
         }
@@ -206,7 +399,7 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
     if (view_id >= kSourceIdBase && view_id < kSourceIdBase + static_cast<int>(sources_.size())) {
         const std::size_t index = static_cast<std::size_t>(view_id - kSourceIdBase);
         source_checked_[index] = !source_checked_[index];
-        ProjectSourceChecks();
+        ApplyColors();
         UpdateImportButtonState();
         return;
     }
@@ -229,13 +422,30 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
     }
 }
 
-void WelcomeFlow::UpdateImportButtonState() {
-    if (import_button_ == nullptr) {
+void WelcomeFlow::HandleViewThemeReset() {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || reapply_pending_) {
         return;
     }
-    const bool any = AnyCheckedAvailableSource();
-    import_button_->SetText(any ? "▸  Import and start" : "No readable bookmarks to import");
-    import_button_->SetEnabledTextColors(any ? tokens_.accent.argb : tokens_.text.argb);
+    reapply_pending_ = true;
+    CefPostTask(TID_UI, new ReapplyTask(alive_, [](WelcomeFlow* flow) { flow->ReapplyColors(); }));
+}
+
+void WelcomeFlow::ReapplyColors() {
+    CEF_REQUIRE_UI_THREAD();
+    reapply_pending_ = false;
+    if (!detached_) {
+        ApplyColors();
+    }
+}
+
+void WelcomeFlow::UpdateImportButtonState() {
+    if (import_outline_ == nullptr) {
+        return;
+    }
+    // Importing with nothing selected would just start browsing, so the button only
+    // shows while at least one readable source is checked.
+    import_outline_->SetVisible(AnyCheckedAvailableSource());
 }
 
 bool WelcomeFlow::AnyCheckedAvailableSource() const {
@@ -255,8 +465,8 @@ void WelcomeFlow::Show() {
     visible_ = true;
     UpdateBounds();
     overlay_->SetVisible(true);
-    ProjectThemeChoice();
-    ProjectSourceChecks();
+    ApplyColors();
+    UpdateImportButtonState();
     if (theme_buttons_[0] != nullptr) {
         theme_buttons_[0]->RequestFocus();
     }
@@ -273,30 +483,16 @@ void WelcomeFlow::Hide() {
     }
 }
 
-int WelcomeFlow::PreferredContentHeightDip() const {
-    int readable = 0;
-    int unreadable = 0;
-    for (const ImportSourceInfo& info : sources_) {
-        info.available ? ++readable : ++unreadable;
-    }
-    // Title + lede + 3 theme rows + readable source rows + optional unreadable
-    // note + 2 action rows, plus the panel's vertical insets.
-    const int rows = 1 + 3 + readable + (unreadable > 0 ? 1 : 0) + 2;
-    return kTitleHeightDip + kChoiceRowHeightDip * (3 + readable) + kActionRowHeightDip * 2 +
-           (unreadable > 0 ? kNoteRowHeightDip : 0) + kSectionGapDip * (rows + 1) +
-           static_cast<int>(tokens_.spacing_6_dip) * 2;
-}
-
 void WelcomeFlow::UpdateBounds() {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || overlay_ == nullptr || window_ == nullptr) {
         return;
     }
     const CefSize window_size = window_->GetSize();
-    const int height = PreferredContentHeightDip();
-    const int x = std::max(0, (static_cast<int>(window_size.width) - kWelcomeWidthDip) / 2);
+    const int height = ContentHeightDip(readable_count_, note_line_count_);
+    const int x = std::max(0, (static_cast<int>(window_size.width) - WidthDip()) / 2);
     const int y = std::max(0, (static_cast<int>(window_size.height) - height) / 2);
-    overlay_->SetBounds(CefRect(x, y, kWelcomeWidthDip, height));
+    overlay_->SetBounds(CefRect(x, y, WidthDip(), height));
 }
 
 void WelcomeFlow::ApplyTheme(ChromeTokens tokens) {
@@ -305,9 +501,7 @@ void WelcomeFlow::ApplyTheme(ChromeTokens tokens) {
         return;
     }
     tokens_ = tokens;
-    ApplySurfaceColors();
-    ProjectThemeChoice();
-    ProjectSourceChecks();
+    ApplyColors();
 }
 
 void WelcomeFlow::Detach() {
@@ -317,6 +511,7 @@ void WelcomeFlow::Detach() {
     }
     detached_ = true;
     host_ = nullptr;
+    *alive_ = nullptr;
     if (button_delegate_ != nullptr) {
         button_delegate_->Detach();
     }
@@ -333,16 +528,37 @@ void WelcomeFlow::Detach() {
     window_ = nullptr;
 }
 
-void WelcomeFlow::ApplySurfaceColors() {
+// Paints every welcome view from the tokens and the current selection state. Runs on
+// construction, on every theme/selection change, and after CEF's theme reset.
+void WelcomeFlow::ApplyColors() {
     CEF_REQUIRE_UI_THREAD();
-    if (panel_ != nullptr) {
-        panel_->SetBackgroundColor(ResolveColor(SurfaceSlot::kPanel).argb);
+    for (const std::pair<CefRefPtr<CefPanel>, SurfaceSlot>& entry : panels_) {
+        entry.first->SetBackgroundColor(ResolveColor(entry.second).argb);
     }
-}
 
-void WelcomeFlow::ProjectThemeChoice() {
-    // The filled dot + accent mark the active choice; the others use an open
-    // dot on the text color.
+    for (const StaticText& text : texts_) {
+        switch (text.role) {
+            case TextRole::kTitle:
+                text.view->SetFontList("Geist, Bold 24px");
+                text.view->SetEnabledTextColors(tokens_.text.argb);
+                break;
+            case TextRole::kLede:
+                text.view->SetFontList("Geist, 14px");
+                text.view->SetEnabledTextColors(tokens_.text_secondary.argb);
+                break;
+            case TextRole::kSectionLabel:
+                // Mono uppercase labels, DESIGN.md §3.
+                text.view->SetFontList("Geist Mono, Medium 11px");
+                text.view->SetEnabledTextColors(tokens_.text_secondary.argb);
+                break;
+            case TextRole::kNote:
+                text.view->SetFontList("Geist, 13px");
+                text.view->SetEnabledTextColors(tokens_.text_secondary.argb);
+                break;
+        }
+        text.view->SetBackgroundColor(tokens_.surface.argb);
+    }
+
     for (int index = 0; index < 3; ++index) {
         if (theme_buttons_[index] == nullptr) {
             continue;
@@ -351,37 +567,41 @@ void WelcomeFlow::ProjectThemeChoice() {
                                        : index == 1 ? ThemePreference::kLight
                                                     : ThemePreference::kDark;
         const bool selected = chosen_theme_ == choice;
-        const char* const labels[3] = {"System", "Light", "Dark"};
-        theme_buttons_[index]->SetText(std::string(selected ? "●  " : "○  ") + labels[index]);
-        theme_buttons_[index]->SetEnabledTextColors(selected ? tokens_.accent.argb
-                                                             : tokens_.text.argb);
+        const ButtonColors colors = SegmentColors(tokens_, selected);
+        theme_buttons_[index]->SetBackgroundColor(colors.fill.argb);
+        theme_buttons_[index]->SetEnabledTextColors(colors.text.argb);
+        theme_buttons_[index]->SetFontList(selected ? "Geist, Bold 13px" : "Geist, 13px");
     }
-}
 
-void WelcomeFlow::ProjectSourceChecks() {
-    // source_buttons_ holds only the READABLE sources, in sources_ order.
-    std::size_t row = 0;
-    for (std::size_t index = 0; index < sources_.size() && row < source_buttons_.size(); ++index) {
-        if (!sources_[index].available) {
-            continue;
-        }
-        source_buttons_[row]->SetText(std::string(source_checked_[index] ? "☑  " : "☐  ") +
-                                      sources_[index].display_name);
-        source_buttons_[row]->SetEnabledTextColors(tokens_.text.argb);
-        ++row;
+    for (const SourceRow& row : source_rows_) {
+        const bool checked = source_checked_[row.source_index];
+        const ButtonColors colors = SegmentColors(tokens_, checked);
+        // The check mark is text, so the state never rests on color alone.
+        row.button->SetText(std::string(checked ? "\xE2\x9C\x93  " : "\xE2\x80\x83\xE2\x80\x83") +
+                            sources_[row.source_index].display_name);
+        row.button->SetBackgroundColor(colors.fill.argb);
+        row.button->SetEnabledTextColors(colors.text.argb);
+        row.button->SetFontList(checked ? "Geist, Bold 13px" : "Geist, 13px");
     }
+
+    const ButtonColors secondary = SecondaryButtonColors(tokens_);
+    import_button_->SetBackgroundColor(secondary.fill.argb);
+    import_button_->SetEnabledTextColors(secondary.text.argb);
+    import_button_->SetFontList("Geist, Medium 13px");
+    const ButtonColors primary = PrimaryButtonColors(tokens_);
+    start_button_->SetBackgroundColor(primary.fill.argb);
+    start_button_->SetEnabledTextColors(primary.text.argb);
+    start_button_->SetFontList("Geist, Medium 13px");
 }
 
 ArgbColor WelcomeFlow::ResolveColor(SurfaceSlot slot) const {
-    const ChromeTokens tokens = tokens_;
     switch (slot) {
-        case SurfaceSlot::kPanel:
-            return tokens.surface;
-        case SurfaceSlot::kSection:
-        case SurfaceSlot::kRow:
-            return tokens.surface_secondary;
+        case SurfaceSlot::kOutline:
+            return tokens_.border;
+        case SurfaceSlot::kCard:
+            return tokens_.surface;
     }
-    return tokens.surface;
+    return tokens_.surface;
 }
 
 }  // namespace island

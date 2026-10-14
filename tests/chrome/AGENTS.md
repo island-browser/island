@@ -13,13 +13,14 @@ layout structure, and token-derived styling stable across changes to `src/main/b
 | File | Description |
 |------|-------------|
 | `browser_chrome_contract_test.cpp` | Structural contract: view hierarchy and `ChromeViewId` assignments |
-| `browser_chrome_style_test.cpp` | Styling derived from `design_tokens` (colors, insets, tint) |
+| `browser_chrome_style_test.cpp` | Styling derived from `design_tokens` (colors, insets, tint, per-row color resolution, contrast) |
+| `welcome_flow_style_test.cpp` | Welcome card: note wrapping, overlay height, button color roles and contrast |
 
 ## For AI Agents
 
 ### Working In This Directory
 
-- Both files are compiled into `island_tests` (listed as `chrome/...` in `../CMakeLists.txt`).
+- All files are compiled into `island_tests` (listed as `chrome/...` in `../CMakeLists.txt`).
 - These tests pull in CEF headers, which is why `island_tests` defines `NOMINMAX` and
   `WIN32_LEAN_AND_MEAN` on Windows.
 - The `ChromeViewId` range `1001`–`1027` is a hard invariant. A failure here after renumbering is a

@@ -24,6 +24,7 @@ add_executable(island_tests
     browser_window_pages_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
+    chrome/welcome_flow_style_test.cpp
     command_palette_test.cpp
     design_tokens_test.cpp
     download_path_test.cpp
