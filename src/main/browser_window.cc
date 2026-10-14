@@ -982,8 +982,8 @@ std::string BrowserWindow::TabOverviewStateJson() const {
                     .Set("index", Value::Int(static_cast<std::int64_t>(tab_index)))
                     .Set("title", Value::String(nav.page_title.empty() ? std::string("New Tab")
                                                                        : nav.page_title))
-                    .Set("url", Value::String(OverviewUrl(nav.url.empty() ? tab.startup_url()
-                                                                          : nav.url)))
+                    .Set("url",
+                         Value::String(OverviewUrl(nav.url.empty() ? tab.startup_url() : nav.url)))
                     .Set("active", Value::Bool(space.has_active_tab() &&
                                                space.active_tab_index() == tab_index))
                     .Set("pinned", Value::Bool(tab.pinned()))
