@@ -180,9 +180,12 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
   toggle row per readable browser (checked state is a check mark as well as the fill), a wrapped
   muted note for unreadable browsers, and a right-aligned footer with a secondary Import button
   and the primary Start browsing button (`--text` fill, `--surface` text).
-- **Start page:** the fixed local `data:` document in `src/main/startup_options.h`: `--surface`
-  page, Geist stack, mono label, keycap hints, system light/dark scheme; no script or external
-  reference.
+- **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
+  document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
+  on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),
+  a `--text` submit button, mono uppercase label and keycap hints. It follows the app theme once
+  the native side sends it (system light/dark before that) and requests nothing until a search
+  is submitted.
 - **Page card (native):** `--surface` with a 1px `--border` and radius `--radius-md`.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
@@ -219,4 +222,4 @@ both low-opacity neutral. No glass stacks, no glow, no gradients.
 | Item | Location | Why accepted | Owner / Exit |
 | --- | --- | --- | --- |
 | CEF theme parity gap | `src/main/browser_window.cc` dark detection | The chrome derives light/dark from the OS via the CEF window theme, which has no automated visual verification yet. Values are drift-guarded by `tests/design_tokens_test.cpp` and `tests/design/test_token_contract.py`. | Close with native visual acceptance evidence on real hardware. |
-| Native Graphite pass partly verified | `src/main/browser_chrome.cc`, `src/main/welcome_flow.cc`, `src/main/startup_options.h` | The macOS light-theme sidebar was inspected in a running build through an in-process window capture (the sandbox cannot use screen recording), up to the theme-reset repaint. The final address-field holder, space-chip widths, the restyled welcome card, and the styled start page were built and unit-tested but not looked at; dark theme, Windows, and Linux were verified only through the token tests. | Visual pass of the welcome card, start page, dark theme, and the other platforms. |
+| Native Graphite pass partly verified | `src/main/browser_chrome.cc`, `src/main/welcome_flow.cc`, `src/main/pages/start.html` | The macOS light-theme sidebar was inspected in a running build through an in-process window capture (the sandbox cannot use screen recording), up to the theme-reset repaint. The final address-field holder, space-chip widths, the restyled welcome card, and the styled start page were built and unit-tested but not looked at; dark theme, Windows, and Linux were verified only through the token tests. | Visual pass of the welcome card, start page, dark theme, and the other platforms. |

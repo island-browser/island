@@ -22,6 +22,7 @@ Two independent test systems live side by side here:
 | `address_policy_test.cpp` | Typed-input policy decisions (CEF-free) |
 | `cef_address_parser_test.cpp` | CEF-linked URL parsing (`island_cef_tests`) |
 | `design_tokens_test.cpp` | Token palette values |
+| `address_input_test.cpp`, `search_engine_test.cpp` | Address-bar URL-vs-search heuristic and the search engine table |
 | `lifecycle_config_test.cpp` | Shutdown/lifecycle constants |
 | `navigation_state_test.cpp` | Back/forward/reload availability |
 | `space_test.cpp` | `Space`, ordering, active selection, `SplitPairing` |

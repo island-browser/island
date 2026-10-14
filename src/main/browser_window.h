@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "active_tab_provider.h"
+#include "address_input.h"
 #include "agent_navigation.h"
 #include "agent_providers.h"
 #include "agent_session.h"
@@ -31,6 +32,7 @@
 #include "local_page.h"
 #include "navigation_state.h"
 #include "prefs_store.h"
+#include "search_engine.h"
 #include "search_palette.h"
 #include "sidebar_state.h"
 #include "space.h"
@@ -137,6 +139,25 @@ class BrowserWindow : public CefClient,
     void SetAddressValidatorForTest(AddressValidator validator) {
         address_validator_ = std::move(validator);
     }
+
+    // What the address bar does with typed text: a search on the configured
+    // engine when it is not a URL (address_input.h), else the validator's
+    // verdict on the URL (an https:// prefix is added to bare hosts).
+    [[nodiscard]] ValidatedAddress ResolveAddressInput(std::string_view text) const;
+    [[nodiscard]] const SearchEngine& search_engine() const noexcept {
+        return SearchEngineForKey(prefs_.search_engine);
+    }
+    [[nodiscard]] std::string_view start_mode() const noexcept {
+        return NormalizeStartMode(prefs_.start_mode);
+    }
+    // The data: URL of Island's own start page, which a tab with no startup
+    // URL loads. Computed on first use (it needs CEF's base64 encoder).
+    [[nodiscard]] const std::string& StartPageUrl() const;
+    // The state the start page renders, exposed for tests.
+    [[nodiscard]] std::string StartPageStateJson() const;
+    // Applies one start page message ({search}, {ask_agent}, {set_start_mode})
+    // coming from the tab `source` (nullptr in tests: the active tab).
+    void HandleStartPageMessage(const json::Value& message, CefRefPtr<CefBrowser> source = nullptr);
 
     // The ACP agent panel (Cmd/Ctrl+J): opens/closes the right-hand column,
     // creating the panel and its session on first use. No-op without chrome.
@@ -321,6 +342,9 @@ class BrowserWindow : public CefClient,
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                          const CefString& url) override;
     void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override;
+    // The start page's only channel back to native (see HandleStartPageMessage).
+    bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level,
+                          const CefString& message, const CefString& source, int line) override;
     void OnFaviconURLChange(CefRefPtr<CefBrowser> browser,
                             const std::vector<CefString>& icon_urls) override;
     // Delivered by the favicon download started in OnFaviconURLChange.
@@ -450,6 +474,10 @@ class BrowserWindow : public CefClient,
     void ScheduleLocalPagesRender();
     void FlushLocalPagesRender();
     void HandleAgentPageMessage(const json::Value& message);
+    // The panel's "send" path, shared by the start page's Ask agent mode.
+    void SubmitAgentPrompt(std::string text, bool include_context);
+    // Pushes StartPageStateJson to every tab currently showing the start page.
+    void RenderStartPages();
     void HandleSettingsMessage(const json::Value& message);
     void HandleOverviewMessage(const json::Value& message);
     // Settings > Updates: the page's update messages, the state it renders,
@@ -505,6 +533,7 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool OverlayShown() const noexcept;
 
     std::string initial_url_;
+    mutable std::string start_page_url_;
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
     std::unique_ptr<SearchPalette> search_palette_;

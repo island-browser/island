@@ -1,8 +1,8 @@
 #ifndef ISLAND_LOCAL_PAGE_H_
 #define ISLAND_LOCAL_PAGE_H_
 
-// Island's built-in pages (the agent panel, Settings, and the all-tabs
-// overview): each is an embedded HTML document shown in its own
+// Island's built-in pages (the agent panel, Settings, the all-tabs
+// overview, and the start page): each is an embedded HTML document shown in its own
 // CefBrowserView. Native -> page goes through ExecuteJavaScript
 // (window.islandRender(state)); page -> native goes through console messages
 // carrying a fixed prefix, which only these pages' client listens to. The
@@ -22,6 +22,11 @@ enum class LocalPageKind : std::uint8_t {
     kAgent,
     kSettings,
     kTabOverview,
+    // Island's own start/search page. Unlike the others it is not shown in a
+    // LocalPage view: it is the document a tab's own browser loads, so a
+    // search can navigate that tab. Its messages reach the window through the
+    // tab client's console handler, only from the main frame at this page's URL.
+    kStart,
 };
 
 class LocalPageDelegate {

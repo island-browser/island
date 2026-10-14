@@ -41,6 +41,12 @@ struct PrefsState {
     bool auto_check_updates = true;
     std::int64_t last_update_check = 0;
     bool include_prereleases = false;
+    // The web search engine key (search_engine.h: "google", "duckduckgo",
+    // "yandex") used by the address bar and the start page, and the start
+    // page's last-used mode ("search" or "agent"). Optional keys; unknown
+    // values are resolved to the defaults where they are read.
+    std::string search_engine = "google";
+    std::string start_mode = "search";
 
     bool operator==(const PrefsState&) const = default;
 };

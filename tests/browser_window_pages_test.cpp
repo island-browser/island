@@ -411,6 +411,83 @@ TEST(BrowserWindowPagesTest, SettingsListsAgentProvidersAndSwitchesThem) {
     EXPECT_EQ(SpaceAt(*window, 0).tabs()[1].startup_url(), "https://block.github.io/goose/");
 }
 
+void SendStart(BrowserWindow& window, std::string_view json_text) {
+    const std::optional<Value> message = json::Parse(json_text);
+    ASSERT_TRUE(message.has_value()) << json_text;
+    window.OnLocalPageMessage(LocalPageKind::kStart, *message);
+}
+
+TEST(BrowserWindowPagesTest, AddressBarSearchesInsteadOfRejectingNonUrls) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_EQ(window->search_engine().key, "google");
+    EXPECT_EQ(window->ResolveAddressInput("google").url, "https://www.google.com/search?q=google");
+    EXPECT_EQ(window->ResolveAddressInput("  island browser  ").url,
+              "https://www.google.com/search?q=island%20browser");
+    EXPECT_TRUE(window->ResolveAddressInput("what is 2+2?").is_valid());
+    // Hosts get https:// and go through the validator; explicit URLs are unchanged.
+    EXPECT_EQ(window->ResolveAddressInput("example.com/a").url, "https://example.com/a");
+    EXPECT_EQ(window->ResolveAddressInput("http://example.com/").url, "http://example.com/");
+    // Validation still rejects what it always rejected.
+    EXPECT_EQ(window->ResolveAddressInput("javascript:alert(1)").error, AddressError::kNotAbsolute);
+    EXPECT_FALSE(window->ResolveAddressInput("").is_valid());
+
+    SendSettings(*window, R"({"type":"set_search_engine","id":"yandex"})");
+    EXPECT_EQ(window->ResolveAddressInput("cats").url, "https://yandex.com/search/?text=cats");
+    SendSettings(*window, R"({"type":"set_search_engine","id":"bing"})");
+    EXPECT_EQ(window->search_engine().key, "yandex");
+    SendSettings(*window, R"({"type":"set_search_engine","id":"duckduckgo"})");
+    EXPECT_EQ(window->ResolveAddressInput("cats").url, "https://duckduckgo.com/?q=cats");
+
+    const std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    const Value* search = state->FindMember("settings")->FindMember("search");
+    ASSERT_NE(search, nullptr);
+    EXPECT_EQ(search->StringOr("engine", ""), "duckduckgo");
+    EXPECT_EQ(search->FindMember("engines")->array_val.size(), 3U);
+}
+
+TEST(BrowserWindowPagesTest, TheStartPageRemembersItsModeAndStatesTheEngine) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_EQ(window->start_mode(), "search");
+    SendStart(*window, R"({"type":"set_start_mode","mode":"agent"})");
+    EXPECT_EQ(window->start_mode(), "agent");
+    SendStart(*window, R"({"type":"set_start_mode","mode":"bogus"})");
+    EXPECT_EQ(window->start_mode(), "search");
+
+    SendSettings(*window, R"({"type":"set_search_engine","id":"yandex"})");
+    SendStart(*window, R"({"type":"set_start_mode","mode":"agent"})");
+    const std::optional<Value> state = json::Parse(window->StartPageStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->FindMember("start")->StringOr("mode", ""), "agent");
+    EXPECT_EQ(state->FindMember("start")->StringOr("engine", ""), "Yandex");
+    EXPECT_NE(state->FindMember("theme"), nullptr);
+
+    // A search with no live tab browser is a harmless no-op that still records the mode.
+    SendStart(*window, R"({"type":"search","query":"cats"})");
+    EXPECT_EQ(window->start_mode(), "search");
+    SendStart(*window, R"({"type":"search","query":"   "})");
+    SendStart(*window, R"({"type":"bogus"})");
+    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, AskingTheAgentFromTheStartPageUsesThePanelSendPath) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    // A command that cannot launch, so the headless test never spawns a process.
+    SendSettings(*window, R"({"type":"set_agent_command","command":"\"unbalanced"})");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    EXPECT_EQ(window->agent_session(), nullptr);
+
+    SendStart(*window, R"({"type":"ask_agent","prompt":"   "})");
+    EXPECT_EQ(window->agent_session(), nullptr);
+
+    SendStart(*window, R"({"type":"ask_agent","prompt":"summarize my tabs"})");
+    EXPECT_EQ(window->start_mode(), "agent");
+    ASSERT_NE(window->agent_session(), nullptr);
+    // The turn reached AgentSession::Send, which tried to start the agent.
+    EXPECT_FALSE(window->agent_session()->error().empty());
+    EXPECT_EQ(window->spaces()[0].tab_count(), 1U);
+}
+
 void SendAgent(BrowserWindow& window, std::string_view json_text) {
     const std::optional<Value> message = json::Parse(json_text);
     ASSERT_TRUE(message.has_value()) << json_text;

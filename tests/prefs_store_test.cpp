@@ -178,6 +178,34 @@ TEST(PrefsStoreTest, GivenAFutureSchemaWhenLoadedThenSchemaErrorAndDefaults) {
     EXPECT_EQ(loaded.state, PrefsState{});
 }
 
+TEST(PrefsStoreTest, GivenSearchSettingsWhenSavedThenTheyRoundTripAndStayOptional) {
+    PrefsState defaults;
+    EXPECT_EQ(defaults.search_engine, "google");
+    EXPECT_EQ(defaults.start_mode, "search");
+
+    PrefsState state;
+    state.search_engine = "duckduckgo";
+    state.start_mode = "agent";
+    const std::filesystem::path path = TempPath("search.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state, state);
+
+    // Files from before the search keys existed keep the defaults.
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
+    const PrefsLoadResult legacy = PrefsStore::Load(path);
+    EXPECT_EQ(legacy.error, PrefsError::kNone);
+    EXPECT_EQ(legacy.state.search_engine, "google");
+    EXPECT_EQ(legacy.state.start_mode, "search");
+
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","search_engine":3})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark","start_mode":[]})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
 TEST(PrefsStoreTest, GivenThemeTokensWhenConvertedThenTheyRoundTripStrictly) {
     ThemePreference parsed = ThemePreference::kSystem;
     EXPECT_TRUE(ThemePreferenceFromString("system", parsed));
