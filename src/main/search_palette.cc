@@ -137,15 +137,17 @@ SearchPalette::SearchPalette(SearchPaletteHost& host, CefRefPtr<CefWindow> windo
     : host_(&host), window_(std::move(window)), tokens_(tokens) {
     CEF_REQUIRE_UI_THREAD();
     BuildViews();
-    // The palette is one overlay on the one existing CefWindow. can_activate is
-    // true so the query field can take keyboard focus; the overlay starts hidden
-    // and is only ever shown and hidden from here on.
-    overlay_ = window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true);
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
-    }
     ApplySurfaceColors();
     ProjectHighlight();
+}
+
+void SearchPalette::CreateOverlay() {
+    // can_activate is true so the text field can take keyboard focus. The overlay only exists
+    // while shown (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
+    overlay_.Adopt(window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
+    if (overlay_.has_overlay()) {
+        overlay_.get()->SetVisible(false);
+    }
 }
 
 SearchPalette::~SearchPalette() { Detach(); }
@@ -207,13 +209,19 @@ int SearchPalette::PreferredContentHeightDip() const {
 
 void SearchPalette::Show() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr) {
+    if (detached_ || window_ == nullptr) {
+        return;
+    }
+    if (overlay_lifetime_.Show() == OverlayStep::kCreate) {
+        CreateOverlay();
+    }
+    if (!overlay_.has_overlay()) {
         return;
     }
     model_.Open();
     query_field_->SetText("");
     UpdateBounds();
-    overlay_->SetVisible(true);
+    overlay_.get()->SetVisible(true);
     ProjectHighlight();
     query_field_->RequestFocus();
 }
@@ -224,21 +232,21 @@ void SearchPalette::Hide() {
         return;
     }
     model_.Close();
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
+    if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+        overlay_.Release();
     }
 }
 
 void SearchPalette::UpdateBounds() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr || window_ == nullptr) {
+    if (detached_ || !overlay_.has_overlay() || window_ == nullptr) {
         return;
     }
     const CefSize window_size = window_->GetSize();
     const DipRect bounds = SearchPaletteBounds(
         {.x = 0, .y = 0, .width = window_size.width, .height = window_size.height},
         PreferredContentHeightDip());
-    overlay_->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
+    overlay_.get()->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
 }
 
 void SearchPalette::ApplyTheme(ChromeTokens tokens) {
@@ -268,13 +276,8 @@ void SearchPalette::Detach() {
     for (const CefRefPtr<PaletteSurfaceDelegate>& delegate : surface_delegates_) {
         delegate->Detach();
     }
-    if (overlay_ != nullptr) {
-        if (overlay_->IsValid()) {
-            overlay_->SetVisible(false);
-            overlay_->Destroy();
-        }
-        overlay_ = nullptr;
-    }
+    static_cast<void>(overlay_lifetime_.Detach());
+    overlay_.DestroyNow();
     window_ = nullptr;
 }
 
@@ -345,8 +348,8 @@ void SearchPalette::SubmitHighlighted() {
         // stays open.
         return;
     }
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
+    if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+        overlay_.Release();
     }
     if (host_ != nullptr) {
         host_->OnSearchPaletteSubmitted(*submission);

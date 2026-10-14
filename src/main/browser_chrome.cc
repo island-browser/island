@@ -254,10 +254,11 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
 
     void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> browser_content,
-                     CefRefPtr<CefPanel> agent_panel) {
+                     CefRefPtr<CefPanel> agent_panel, CefRefPtr<CefPanel> hover_sliver) {
         rail_ = rail;
         browser_content_ = browser_content;
         agent_panel_ = agent_panel;
+        hover_sliver_ = hover_sliver;
     }
 
     void SetTokens(ChromeTokens tokens) { tokens_ = tokens; }
@@ -284,6 +285,15 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
             ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
             agent_panel_->Layout();
         }
+        if (hover_sliver_ != nullptr) {
+            // The edge marker sits on the window's left edge, inside the content gutter, and
+            // only exists visually while the rail is hidden.
+            ApplyBounds(hover_sliver_, {.x = new_bounds.x,
+                                        .y = new_bounds.y,
+                                        .width = kHoverSliverWidthDip,
+                                        .height = new_bounds.height});
+            hover_sliver_->SetVisible(!sidebar_revealed_);
+        }
     }
 
   private:
@@ -300,6 +310,7 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<CefPanel> hover_sliver_;
 
     IMPLEMENT_REFCOUNTING(RootPanelDelegate);
 };
@@ -685,7 +696,13 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_->AddChildView(sidebar_);
     root_->AddChildView(browser_content_);
     root_->AddChildView(agent_panel_);
-    root_delegate_->SetChildren(sidebar_, browser_content_, agent_panel_);
+    // Last child so it paints above the rail and the content card.
+    hover_sliver_ =
+        CefPanel::CreatePanel(new PanelDelegate(this, CefSize(kHoverSliverWidthDip, 0)));
+    hover_sliver_->SetID(static_cast<int>(ChromeViewId::kHoverSliver));
+    hover_sliver_->SetVisible(false);
+    root_->AddChildView(hover_sliver_);
+    root_delegate_->SetChildren(sidebar_, browser_content_, agent_panel_, hover_sliver_);
     ApplyControlTheme();
     // Apply the hidden-by-default reveal state before the first layout so no
     // frame ever shows a rail the sidebar state says is collapsed.
@@ -1349,6 +1366,7 @@ void BrowserChrome::ApplyControlTheme() {
     sidebar_->SetBackgroundColor(rail.argb);
     browser_content_->SetBackgroundColor(browser_content.argb);
     agent_panel_->SetBackgroundColor(browser_content.argb);
+    hover_sliver_->SetBackgroundColor(accent.argb);
     // Rail-descendant panels are created with no delegate and would otherwise inherit
     // the window's primary background; painting them the rail color keeps the whole
     // column one uniform tinted surface so the floating card separates cleanly.

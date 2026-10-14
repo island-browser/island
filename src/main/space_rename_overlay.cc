@@ -106,11 +106,16 @@ SpaceRenameOverlay::SpaceRenameOverlay(SpaceRenameOverlayHost& host, CefRefPtr<C
       current_name_(std::move(current_name)) {
     CEF_REQUIRE_UI_THREAD();
     BuildViews();
-    overlay_ = window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true);
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
-    }
     ApplySurfaceColors();
+}
+
+void SpaceRenameOverlay::CreateOverlay() {
+    // can_activate is true so the text field can take keyboard focus. The overlay only exists
+    // while shown (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
+    overlay_.Adopt(window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
+    if (overlay_.has_overlay()) {
+        overlay_.get()->SetVisible(false);
+    }
 }
 
 SpaceRenameOverlay::~SpaceRenameOverlay() { Detach(); }
@@ -139,12 +144,18 @@ void SpaceRenameOverlay::BuildViews() {
 
 void SpaceRenameOverlay::Show() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr) {
+    if (detached_ || window_ == nullptr) {
+        return;
+    }
+    if (overlay_lifetime_.Show() == OverlayStep::kCreate) {
+        CreateOverlay();
+    }
+    if (!overlay_.has_overlay()) {
         return;
     }
     name_field_->SetText(current_name_);
     UpdateBounds();
-    overlay_->SetVisible(true);
+    overlay_.get()->SetVisible(true);
     visible_ = true;
     name_field_->RequestFocus();
     name_field_->SelectAll(/*reversed=*/false);
@@ -155,21 +166,21 @@ void SpaceRenameOverlay::Hide() {
     if (detached_) {
         return;
     }
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
+    if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+        overlay_.Release();
     }
     visible_ = false;
 }
 
 void SpaceRenameOverlay::UpdateBounds() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr || window_ == nullptr) {
+    if (detached_ || !overlay_.has_overlay() || window_ == nullptr) {
         return;
     }
     const CefSize window_size = window_->GetSize();
     const DipRect bounds = SpaceRenameBounds(
         {.x = 0, .y = 0, .width = window_size.width, .height = window_size.height});
-    overlay_->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
+    overlay_.get()->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
 }
 
 void SpaceRenameOverlay::ApplyTheme(ChromeTokens tokens) {
@@ -194,13 +205,8 @@ void SpaceRenameOverlay::Detach() {
     if (panel_delegate_ != nullptr) {
         panel_delegate_->Detach();
     }
-    if (overlay_ != nullptr) {
-        if (overlay_->IsValid()) {
-            overlay_->SetVisible(false);
-            overlay_->Destroy();
-        }
-        overlay_ = nullptr;
-    }
+    static_cast<void>(overlay_lifetime_.Detach());
+    overlay_.DestroyNow();
     window_ = nullptr;
 }
 

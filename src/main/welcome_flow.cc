@@ -201,11 +201,16 @@ WelcomeFlow::WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, Chr
     CEF_REQUIRE_UI_THREAD();
     source_checked_.assign(sources_.size(), true);
     BuildViews();
-    overlay_ = window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true);
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
-    }
     ApplyColors();
+}
+
+void WelcomeFlow::CreateOverlay() {
+    // can_activate is true so the text field can take keyboard focus. The overlay only exists
+    // while shown (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
+    overlay_.Adopt(window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
+    if (overlay_.has_overlay()) {
+        overlay_.get()->SetVisible(false);
+    }
 }
 
 WelcomeFlow::~WelcomeFlow() { Detach(); }
@@ -413,8 +418,8 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
             }
         }
         visible_ = false;
-        if (overlay_ != nullptr) {
-            overlay_->SetVisible(false);
+        if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+            overlay_.Release();
         }
         if (host_ != nullptr) {
             host_->OnWelcomeCompleted(checked);
@@ -459,12 +464,18 @@ bool WelcomeFlow::AnyCheckedAvailableSource() const {
 
 void WelcomeFlow::Show() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr) {
+    if (detached_ || window_ == nullptr) {
+        return;
+    }
+    if (overlay_lifetime_.Show() == OverlayStep::kCreate) {
+        CreateOverlay();
+    }
+    if (!overlay_.has_overlay()) {
         return;
     }
     visible_ = true;
     UpdateBounds();
-    overlay_->SetVisible(true);
+    overlay_.get()->SetVisible(true);
     ApplyColors();
     UpdateImportButtonState();
     if (theme_buttons_[0] != nullptr) {
@@ -478,21 +489,21 @@ void WelcomeFlow::Hide() {
         return;
     }
     visible_ = false;
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
+    if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+        overlay_.Release();
     }
 }
 
 void WelcomeFlow::UpdateBounds() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr || window_ == nullptr) {
+    if (detached_ || !overlay_.has_overlay() || window_ == nullptr) {
         return;
     }
     const CefSize window_size = window_->GetSize();
     const int height = ContentHeightDip(readable_count_, note_line_count_);
     const int x = std::max(0, (static_cast<int>(window_size.width) - WidthDip()) / 2);
     const int y = std::max(0, (static_cast<int>(window_size.height) - height) / 2);
-    overlay_->SetBounds(CefRect(x, y, WidthDip(), height));
+    overlay_.get()->SetBounds(CefRect(x, y, WidthDip(), height));
 }
 
 void WelcomeFlow::ApplyTheme(ChromeTokens tokens) {
@@ -518,13 +529,8 @@ void WelcomeFlow::Detach() {
     for (const CefRefPtr<WelcomeSurfaceDelegate>& delegate : surface_delegates_) {
         delegate->Detach();
     }
-    if (overlay_ != nullptr) {
-        if (overlay_->IsValid()) {
-            overlay_->SetVisible(false);
-            overlay_->Destroy();
-        }
-        overlay_ = nullptr;
-    }
+    static_cast<void>(overlay_lifetime_.Detach());
+    overlay_.DestroyNow();
     window_ = nullptr;
 }
 

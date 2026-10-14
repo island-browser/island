@@ -66,9 +66,9 @@ enum class ChromeViewId : int {
     kSpaceSwitcherEntry = 1025,
     kSpaceSwitcherEntryColorMark = 1026,
     kSpaceSwitcherEntryName = 1027,
-    // Window-level overlay regions. These are reported through
-    // CefOverlayController and are deliberately absent from ViewTreeContract():
-    // they are children of the CefWindow, not of the rail or the root panel.
+    // Window-level regions. The palettes are reported through CefOverlayController
+    // and the hover sliver is a plain child of the root panel; all of them are
+    // deliberately absent from ViewTreeContract().
     kHoverSliver = 1028,
     kSearchPalette = 1029,
     kSearchPaletteQuery = 1030,
@@ -618,6 +618,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> space_switcher_;
     CefRefPtr<CefLabelButton> new_tab_button_;
     CefRefPtr<CefPanel> rail_footer_;
+    // The 2-DIP edge marker shown while the rail is hidden. A plain child of the root, never
+    // a CefOverlayController: on macOS any live overlay widget swallows every mouse press.
+    CefRefPtr<CefPanel> hover_sliver_;
     CefRefPtr<CefLabelButton> agent_button_;
     CefRefPtr<CefLabelButton> new_space_button_;
     CefRefPtr<CefLabelButton> tabs_button_;

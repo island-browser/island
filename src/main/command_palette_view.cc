@@ -188,13 +188,16 @@ CommandPaletteView::CommandPaletteView(CommandPaletteHost& host, CefRefPtr<CefWi
     : host_(&host), window_(std::move(window)), tokens_(tokens), model_(std::move(validator)) {
     CEF_REQUIRE_UI_THREAD();
     BuildViews();
-    // can_activate is true so the query field can take keyboard focus; the
-    // overlay starts hidden and is only ever shown and hidden from here on.
-    overlay_ = window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true);
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
-    }
     ApplySurfaceColors();
+}
+
+void CommandPaletteView::CreateOverlay() {
+    // can_activate is true so the text field can take keyboard focus. The overlay only exists
+    // while shown (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
+    overlay_.Adopt(window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
+    if (overlay_.has_overlay()) {
+        overlay_.get()->SetVisible(false);
+    }
 }
 
 CommandPaletteView::~CommandPaletteView() { Detach(); }
@@ -270,7 +273,13 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
                               std::vector<PaletteSpaceEntry> spaces,
                               std::vector<PaletteBookmarkEntry> bookmarks) {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr) {
+    if (detached_ || window_ == nullptr) {
+        return;
+    }
+    if (overlay_lifetime_.Show() == OverlayStep::kCreate) {
+        CreateOverlay();
+    }
+    if (!overlay_.has_overlay()) {
         return;
     }
     const std::size_t pool_size = tabs.size() + spaces.size() + 1;
@@ -283,7 +292,7 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     model_.Open();
     query_field_->SetText("");
     UpdateBounds();
-    overlay_->SetVisible(true);
+    overlay_.get()->SetVisible(true);
     ProjectResults();
     query_field_->RequestFocus();
 }
@@ -294,14 +303,14 @@ void CommandPaletteView::Hide() {
         return;
     }
     model_.Close();
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
+    if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+        overlay_.Release();
     }
 }
 
 void CommandPaletteView::UpdateBounds() {
     CEF_REQUIRE_UI_THREAD();
-    if (detached_ || overlay_ == nullptr || window_ == nullptr) {
+    if (detached_ || !overlay_.has_overlay() || window_ == nullptr) {
         return;
     }
     const CefSize window_size = window_->GetSize();
@@ -310,7 +319,7 @@ void CommandPaletteView::UpdateBounds() {
     const DipRect bounds = SearchPaletteBounds(
         {.x = 0, .y = 0, .width = window_size.width, .height = window_size.height},
         PreferredContentHeightDip());
-    overlay_->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
+    overlay_.get()->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
 }
 
 void CommandPaletteView::ApplyTheme(ChromeTokens tokens) {
@@ -340,13 +349,8 @@ void CommandPaletteView::Detach() {
     for (const CefRefPtr<PaletteSurfaceDelegate>& delegate : surface_delegates_) {
         delegate->Detach();
     }
-    if (overlay_ != nullptr) {
-        if (overlay_->IsValid()) {
-            overlay_->SetVisible(false);
-            overlay_->Destroy();
-        }
-        overlay_ = nullptr;
-    }
+    static_cast<void>(overlay_lifetime_.Detach());
+    overlay_.DestroyNow();
     window_ = nullptr;
 }
 
@@ -418,8 +422,8 @@ void CommandPaletteView::SubmitHighlighted() {
         // the palette stays open, and nothing is consumed.
         return;
     }
-    if (overlay_ != nullptr) {
-        overlay_->SetVisible(false);
+    if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
+        overlay_.Release();
     }
     if (host_ != nullptr) {
         host_->OnCommandPaletteSubmitted(*selection, query);

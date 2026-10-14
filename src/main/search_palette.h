@@ -5,11 +5,11 @@
 
 #include "browser_chrome.h"
 #include "design_tokens.h"
+#include "overlay_lifetime.h"
 #include "search_palette_model.h"
 #include "search_provider.h"
 
 class CefLabelButton;
-class CefOverlayController;
 class CefPanel;
 class CefTextfield;
 class CefWindow;
@@ -60,6 +60,7 @@ class SearchPalette final {
     class PaletteTextfieldDelegate;
 
     void BuildViews();
+    void CreateOverlay();
     [[nodiscard]] int PreferredContentHeightDip() const;
     bool HandleQueryKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void HandleQueryChanged(CefRefPtr<CefTextfield> textfield);
@@ -77,7 +78,8 @@ class SearchPalette final {
     CefRefPtr<CefTextfield> query_field_;
     std::vector<CefRefPtr<CefPanel>> provider_rows_;
     std::vector<CefRefPtr<CefLabelButton>> provider_labels_;
-    CefRefPtr<CefOverlayController> overlay_;
+    OverlaySlot overlay_;
+    OverlayLifetime overlay_lifetime_;
     CefRefPtr<PaletteSurfaceDelegate> panel_delegate_;
     std::vector<CefRefPtr<PaletteSurfaceDelegate>> surface_delegates_;
     std::vector<CefRefPtr<PaletteSurfaceDelegate>> row_delegates_;

@@ -32,6 +32,7 @@ add_executable(island_tests
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
+    overlay_lifetime_test.cpp
     prefs_store_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp

@@ -519,7 +519,6 @@ class BrowserWindow : public CefClient,
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
-    void CreateHoverSliver();
     void ApplySidebarState();
     void UninstallHoverSeam();
     void UpdateWindowTitle();
@@ -540,8 +539,6 @@ class BrowserWindow : public CefClient,
     std::unique_ptr<CommandPaletteView> command_palette_;
     std::unique_ptr<SpaceRenameOverlay> space_rename_overlay_;
     SidebarState sidebar_state_;
-    CefRefPtr<CefPanel> hover_sliver_;
-    CefRefPtr<CefOverlayController> hover_sliver_overlay_;
     void* hover_seam_ = nullptr;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;

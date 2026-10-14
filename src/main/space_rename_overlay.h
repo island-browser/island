@@ -5,8 +5,8 @@
 
 #include "browser_chrome.h"
 #include "design_tokens.h"
+#include "overlay_lifetime.h"
 
-class CefOverlayController;
 class CefPanel;
 class CefTextfield;
 class CefWindow;
@@ -52,6 +52,7 @@ class SpaceRenameOverlay final {
     class RenameTextfieldDelegate;
 
     void BuildViews();
+    void CreateOverlay();
     bool HandleFieldKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void Commit();
     void ApplySurfaceColors();
@@ -62,7 +63,8 @@ class SpaceRenameOverlay final {
     std::string current_name_;
     CefRefPtr<CefPanel> panel_;
     CefRefPtr<CefTextfield> name_field_;
-    CefRefPtr<CefOverlayController> overlay_;
+    OverlaySlot overlay_;
+    OverlayLifetime overlay_lifetime_;
     CefRefPtr<RenameSurfaceDelegate> panel_delegate_;
     CefRefPtr<RenameTextfieldDelegate> textfield_delegate_;
     bool visible_ = false;

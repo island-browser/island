@@ -139,19 +139,6 @@ void RunAgentTask(std::function<void()> task) {
     }
 }
 
-// The edge sliver is a bare fill panel; it only needs a preferred size so the
-// overlay controller does not collapse it to nothing before SetBounds applies.
-class HoverSliverDelegate final : public CefPanelDelegate {
-  public:
-    CefSize GetPreferredSize(CefRefPtr<CefView>) override {
-        return CefSize(kHoverSliverWidthDip, kChromeWindowHeight);
-    }
-    CefSize GetMinimumSize(CefRefPtr<CefView>) override { return CefSize(kHoverSliverWidthDip, 0); }
-
-  private:
-    IMPLEMENT_REFCOUNTING(HoverSliverDelegate);
-};
-
 }  // namespace
 
 CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url, bool persist_session) {
@@ -2271,7 +2258,6 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
 
     ApplyKeymap();
 
-    CreateHoverSliver();
     ApplySidebarState();
     // Fresh install: offer the import/appearance welcome once, without
     // blocking browsing (Escape dismisses). The smoke run skips it so the
@@ -2887,14 +2873,6 @@ void BrowserWindow::DetachChromeAndObservers() {
     navigation_observer_ = nullptr;
     chrome_observer_ = nullptr;
     UninstallHoverSeam();
-    if (hover_sliver_overlay_ != nullptr) {
-        if (hover_sliver_overlay_->IsValid()) {
-            hover_sliver_overlay_->SetVisible(false);
-            hover_sliver_overlay_->Destroy();
-        }
-        hover_sliver_overlay_ = nullptr;
-    }
-    hover_sliver_ = nullptr;
     if (search_palette_ != nullptr) {
         search_palette_->Detach();
         search_palette_.reset();
@@ -3253,19 +3231,6 @@ void BrowserWindow::OnSidebarHoverPointer(int x_dip) {
     }
 }
 
-void BrowserWindow::CreateHoverSliver() {
-    CEF_REQUIRE_UI_THREAD();
-    if (window_ == nullptr || hover_sliver_ != nullptr) {
-        return;
-    }
-    hover_sliver_ = CefPanel::CreatePanel(new HoverSliverDelegate());
-    hover_sliver_->SetID(static_cast<int>(ChromeViewId::kHoverSliver));
-    hover_sliver_->SetBackgroundColor(ResolvedTokens(chrome_snapshot_.theme).accent.argb);
-    // can_activate is false: a 2-DIP edge marker must never take keyboard focus.
-    hover_sliver_overlay_ =
-        window_->AddOverlayView(hover_sliver_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/false);
-}
-
 void BrowserWindow::ApplySidebarState() {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
@@ -3274,15 +3239,6 @@ void BrowserWindow::ApplySidebarState() {
     const bool revealed = sidebar_state_.revealed();
     if (chrome_ != nullptr) {
         chrome_->SetSidebarRevealed(revealed);
-    }
-    if (hover_sliver_overlay_ != nullptr && window_ != nullptr) {
-        const CefSize window_size = window_->GetSize();
-        hover_sliver_->SetVisible(sidebar_state_.sliver_visible());
-        hover_sliver_overlay_->SetVisible(sidebar_state_.sliver_visible());
-        hover_sliver_overlay_->SetBounds(CefRect(0, 0, kHoverSliverWidthDip, window_size.height));
-    }
-    if (hover_sliver_ != nullptr) {
-        hover_sliver_->SetBackgroundColor(ResolvedTokens(chrome_snapshot_.theme).accent.argb);
     }
     // Keep the published snapshot's rail/content split in step with the reveal
     // state so observers never read a stale 286 DIP rail.

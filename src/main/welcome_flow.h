@@ -10,10 +10,10 @@
 #include "bookmark_import.h"
 #include "browser_chrome.h"
 #include "design_tokens.h"
+#include "overlay_lifetime.h"
 #include "prefs_store.h"
 
 class CefLabelButton;
-class CefOverlayController;
 class CefPanel;
 class CefWindow;
 
@@ -109,6 +109,7 @@ class WelcomeFlow final {
     };
 
     void BuildViews();
+    void CreateOverlay();
     CefRefPtr<CefPanel> MakePanel(SurfaceSlot slot);
     CefRefPtr<CefLabelButton> MakeText(const std::string& text, TextRole role);
     void HandleButtonPressed(int view_id);
@@ -144,7 +145,8 @@ class WelcomeFlow final {
     CefRefPtr<CefPanel> import_outline_;
     CefRefPtr<CefLabelButton> import_button_;
     CefRefPtr<CefLabelButton> start_button_;
-    CefRefPtr<CefOverlayController> overlay_;
+    OverlaySlot overlay_;
+    OverlayLifetime overlay_lifetime_;
     CefRefPtr<WelcomeSurfaceDelegate> panel_delegate_;
     std::vector<CefRefPtr<WelcomeSurfaceDelegate>> surface_delegates_;
     CefRefPtr<WelcomeButtonDelegate> button_delegate_;
