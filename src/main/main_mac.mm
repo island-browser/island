@@ -348,6 +348,10 @@ bool CaptureOwnWindows(const std::string& path) {
     const NSRect frame = main_window.frame;
     const CGRect bounds = CGRectMake(frame.origin.x, screen_height - NSMaxY(frame),
                                      frame.size.width, frame.size.height);
+    // The array is composited front to back, so the browser window goes last
+    // and its overlay child windows stay on top of it.
+    [window_ids removeObject:@([main_window windowNumber])];
+    [window_ids addObject:@([main_window windowNumber])];
     CFMutableArrayRef ids = CFArrayCreateMutable(kCFAllocatorDefault, 0, nullptr);
     for (NSNumber* number in window_ids) {
         CFArrayAppendValue(
@@ -408,6 +412,9 @@ void ScheduleDevCapture(IslandMenuActions* menu_actions, island::DevCaptureOptio
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(kStartupSeconds * NSEC_PER_SEC)),
         dispatch_get_main_queue(), ^{
+          // Overlays such as the palettes dismiss when the window loses focus,
+          // and a process launched from a shell does not start frontmost.
+          [NSApp activateIgnoringOtherApps:YES];
           RunDevStep(menu_actions, options, 0);
         });
 }
