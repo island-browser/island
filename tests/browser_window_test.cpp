@@ -20,6 +20,7 @@
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
 #include "navigation_state.h"
+#include "runtime_style.h"
 #include "space.h"
 #include "tab.h"
 #include "tab_id.h"
@@ -756,6 +757,17 @@ TEST(BrowserWindowTest, GivenTheHeadlessSeamWhenWelcomeAndThemeSeamsRunThenTheyA
     EXPECT_TRUE(window->SetThemePreference(ThemePreference::kLight));
     EXPECT_EQ(window->theme_preference(), ThemePreference::kLight);
     EXPECT_EQ(window->space_count(), 1U);
+}
+
+// Regression: the window hosts several CefBrowserViews (tabs, split view, agent
+// panel, local pages), which CEF only supports for Alloy style views. The Chrome
+// default crashed inside CEF when the app was deactivated (NSWindow resign-key)
+// and on quit, so the window and its browser views must never fall back to it.
+TEST(BrowserWindowTest, GivenAHeadlessWindowWhenTheRuntimeStyleIsRequestedThenItIsAlloyNotChrome) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_EQ(kIslandRuntimeStyle, CEF_RUNTIME_STYLE_ALLOY);
+    EXPECT_EQ(window->GetWindowRuntimeStyle(), CEF_RUNTIME_STYLE_ALLOY);
+    EXPECT_EQ(window->GetBrowserRuntimeStyle(), CEF_RUNTIME_STYLE_ALLOY);
 }
 
 }  // namespace

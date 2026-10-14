@@ -10,6 +10,7 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/wrapper/cef_helpers.h"
 #include "local_pages_html.h"
+#include "runtime_style.h"
 
 namespace island {
 
@@ -95,6 +96,7 @@ class LocalPage::Client final : public CefClient,
     ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView>) override {
         return CEF_CTT_NONE;
     }
+    cef_runtime_style_t GetBrowserRuntimeStyle() override { return kIslandRuntimeStyle; }
 
   private:
     void Execute(const std::string& script) {

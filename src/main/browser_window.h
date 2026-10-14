@@ -333,6 +333,7 @@ class BrowserWindow : public CefClient,
     void OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool chrome_theme) override;
     CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
     bool CanClose(CefRefPtr<CefWindow> window) override;
+    cef_runtime_style_t GetWindowRuntimeStyle() override;
     bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override;
 
     void OnBrowserCreated(CefRefPtr<CefBrowserView> browser_view,
@@ -340,6 +341,7 @@ class BrowserWindow : public CefClient,
     void OnBrowserDestroyed(CefRefPtr<CefBrowserView> browser_view,
                             CefRefPtr<CefBrowser> browser) override;
     ChromeToolbarType GetChromeToolbarType(CefRefPtr<CefBrowserView> browser_view) override;
+    cef_runtime_style_t GetBrowserRuntimeStyle() override;
     void OnFocus(CefRefPtr<CefView> view) override;
 
   private:

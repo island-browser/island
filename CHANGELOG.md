@@ -13,6 +13,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Fixed
+
+- Island no longer crashes with "quit unexpectedly" when you switch to another app or window (and on
+  quit). The window and every browser view now use CEF's Alloy runtime style; Island hosts several
+  browser views in one window, which CEF supports only for Alloy style views.
+
 ## [0.5.1] - 2026-10-06
 
 ### Added

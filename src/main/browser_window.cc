@@ -35,6 +35,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "runtime_style.h"
 #include "session_store.h"
 #include "window_agent_host.h"
 
@@ -2295,6 +2296,10 @@ void BrowserWindow::OnBrowserDestroyed(CefRefPtr<CefBrowserView>, CefRefPtr<CefB
 BrowserWindow::ChromeToolbarType BrowserWindow::GetChromeToolbarType(CefRefPtr<CefBrowserView>) {
     return CEF_CTT_NONE;
 }
+
+cef_runtime_style_t BrowserWindow::GetBrowserRuntimeStyle() { return kIslandRuntimeStyle; }
+
+cef_runtime_style_t BrowserWindow::GetWindowRuntimeStyle() { return kIslandRuntimeStyle; }
 
 void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
     CEF_REQUIRE_UI_THREAD();
