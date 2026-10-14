@@ -77,6 +77,16 @@ TEST_F(DownloadPathTest, KeepsNonAsciiNames) {
     EXPECT_EQ(SanitizeDownloadFileName("отчёт.pdf"), "отчёт.pdf");
 }
 
+TEST_F(DownloadPathTest, NumbersNonAsciiNamesWithoutChangingTheirBytes) {
+    // The path must carry the UTF-8 name unchanged on every platform, including
+    // Windows, where a narrow std::string would be read in the ANSI code page.
+    const std::filesystem::path first = ResolveDownloadPath(dir_, "отчёт.pdf");
+    EXPECT_EQ(first.filename().u8string(), u8"отчёт.pdf");
+    std::ofstream(first).put('x');
+    const std::filesystem::path second = ResolveDownloadPath(dir_, "отчёт.pdf");
+    EXPECT_EQ(second.filename().u8string(), u8"отчёт (1).pdf");
+}
+
 TEST(DownloadsDirectoryTest, EndsWithDownloadsWhenTheHomeDirectoryIsKnown) {
     const std::filesystem::path dir = DefaultDownloadsDirectory();
     if (!dir.empty()) {

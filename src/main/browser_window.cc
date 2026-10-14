@@ -1875,7 +1875,8 @@ bool BrowserWindow::OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloa
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     const std::filesystem::path target = ResolveDownloadPath(directory, suggested_name.ToString());
-    callback->Continue(CefString(target.string()), false);
+    // native() is UTF-8 on POSIX and UTF-16 on Windows; CefString takes both.
+    callback->Continue(CefString(target.native()), false);
     return true;
 }
 
