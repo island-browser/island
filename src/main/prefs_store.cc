@@ -83,6 +83,15 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             *field = value->bool_val;
         }
     }
+    for (const auto& [key, field] : {std::pair{"search_engine", &state.search_engine},
+                                     std::pair{"start_mode", &state.start_mode}}) {
+        if (const json::Value* value = root.FindMember(key)) {
+            if (!value->IsString()) {
+                return Fail(PrefsError::kSchemaError);
+            }
+            *field = value->string_val;
+        }
+    }
     if (const json::Value* last_check = root.FindMember("last_update_check")) {
         if (!last_check->IsInt()) {
             return Fail(PrefsError::kSchemaError);
@@ -124,6 +133,10 @@ std::string SerializeToJson(const PrefsState& state) {
     w.BoolValue(state.auto_check_updates);
     w.Key("include_prereleases");
     w.BoolValue(state.include_prereleases);
+    w.Key("search_engine");
+    w.StringValue(state.search_engine);
+    w.Key("start_mode");
+    w.StringValue(state.start_mode);
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);

@@ -180,9 +180,12 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
   toggle row per readable browser (checked state is a check mark as well as the fill), a wrapped
   muted note for unreadable browsers, and a right-aligned footer with a secondary Import button
   and the primary Start browsing button (`--text` fill, `--surface` text).
-- **Start page:** the fixed local `data:` document in `src/main/startup_options.h`: `--surface`
-  page, Geist stack, mono label, keycap hints, system light/dark scheme; no script or external
-  reference.
+- **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
+  document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
+  on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),
+  a `--text` submit button, mono uppercase label and keycap hints. It follows the app theme once
+  the native side sends it (system light/dark before that) and requests nothing until a search
+  is submitted.
 - **Page card (native):** `--surface` with a 1px `--border` and radius `--radius-md`.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary

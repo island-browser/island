@@ -3,6 +3,7 @@ add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 add_library(island_browser_core STATIC
     ${ISLAND_LOCAL_PAGE_SOURCES}
     address_bar_model.cc
+    address_input.cc
     agent_navigation.cc
     local_page.cc
     address_policy.cc
@@ -27,6 +28,7 @@ add_library(island_browser_core STATIC
     prefs_store.cc
     search_palette.cc
     search_palette_model.cc
+    search_engine.cc
     search_provider.cc
     session_store.cc
     sha256.cc

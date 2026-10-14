@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Island</title>
+<style>
+:root {
+  --bg: #FAFAFA; --surface: #FFFFFF; --surface-2: #F2F2F2; --text: #0A0A0A; --text-2: #666666;
+  --border: #E5E5E5; --accent: #0068D6;
+  --radius: 10px; --radius-sm: 6px;
+  --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+/* Before the first state arrives the page follows the system scheme; once the
+   app sends its theme, data-theme wins so the page matches the app. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { --bg: #0A0A0A; --surface: #111111; --surface-2: #1A1A1A;
+    --text: #EDEDED; --text-2: #A1A1A1; --border: #2A2A2A; --accent: #3291FF; color-scheme: dark; }
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--surface); color: var(--text); font: 15px/1.55 var(--font);
+  -webkit-font-smoothing: antialiased; display: flex; justify-content: center; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+main { width: 100%; max-width: 640px; padding: 0 24px; margin-top: 22vh; align-self: flex-start;
+  animation: rise .48s cubic-bezier(.16, 1, .3, 1); }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { main { animation: none; } * { transition: none !important; } }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.label { margin: 0; color: var(--text-2); font: 500 11px/1.4 var(--mono); letter-spacing: .08em;
+  text-transform: uppercase; }
+.modes { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px; }
+.modes button { border: 0; background: transparent; padding: 4px 12px; border-radius: 4px;
+  font-size: 13px; color: var(--text-2); transition: color .16s, background .16s; }
+.modes button:hover { color: var(--text); }
+.modes button[aria-checked="true"] { background: var(--surface); color: var(--text); font-weight: 500;
+  box-shadow: 0 0 0 1px var(--border); }
+.field { display: flex; align-items: center; gap: 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0 8px 0 16px; transition: border-color .16s; }
+.field:focus-within { border-color: var(--accent); }
+.field input { flex: 1; min-width: 0; height: 52px; border: 0; background: transparent; outline: none;
+  font-size: 17px; letter-spacing: -.01em; }
+.field input::placeholder { color: var(--text-2); }
+.go { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 0; background: var(--text);
+  color: var(--surface); display: grid; place-items: center; flex: none; transition: opacity .16s; }
+.go:disabled { opacity: .25; cursor: default; }
+.go svg { width: 16px; height: 16px; }
+.note { margin: 10px 2px 0; min-height: 22px; color: var(--text-2); font-size: 13px; }
+ul { margin: 28px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+li { display: flex; align-items: center; justify-content: space-between; padding: 10px 0;
+  border-bottom: 1px solid var(--border); font-size: 14px; }
+kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px;
+  color: var(--text-2); font: 500 12px/1.4 var(--mono); }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <p class="label">Island</p>
+    <div class="modes" role="radiogroup" aria-label="Input mode" id="modes">
+      <button type="button" role="radio" data-mode="search" aria-checked="true">Search</button>
+      <button type="button" role="radio" data-mode="agent" aria-checked="false">Ask agent</button>
+    </div>
+  </div>
+  <form class="field" id="form" autocomplete="off">
+    <input id="q" type="text" autofocus spellcheck="false" autocomplete="off" aria-label="Search or ask the agent">
+    <button class="go" id="go" type="submit" aria-label="Go" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </form>
+  <p class="note" id="note" aria-live="polite"></p>
+  <ul>
+    <li>New tab<kbd>Cmd/Ctrl T</kbd></li>
+    <li>Focus address<kbd>Cmd/Ctrl L</kbd></li>
+    <li>Command palette<kbd>Cmd/Ctrl K</kbd></li>
+  </ul>
+</main>
+<script>
+"use strict";
+(function () {
+  var MESSAGE_PREFIX = "\u0001island:";
+  var state = { mode: "search", engine: "Google" };
+  var input = document.getElementById("q");
+  var go = document.getElementById("go");
+  var note = document.getElementById("note");
+  var modes = Array.prototype.slice.call(document.querySelectorAll("#modes button"));
+
+  function post(message) { console.log(MESSAGE_PREFIX + JSON.stringify(message)); }
+
+  function render() {
+    var agent = state.mode === "agent";
+    modes.forEach(function (button) {
+      var on = button.getAttribute("data-mode") === state.mode;
+      button.setAttribute("aria-checked", on ? "true" : "false");
+      button.tabIndex = on ? 0 : -1;
+    });
+    input.placeholder = agent ? "Ask the agent to do something" : "Search " + state.engine + " or type an address";
+    go.setAttribute("aria-label", agent ? "Ask agent" : "Search");
+    go.disabled = !input.value.trim();
+  }
+
+  function setMode(mode, remember) {
+    if (mode !== "search" && mode !== "agent") return;
+    if (mode !== state.mode) {
+      state.mode = mode;
+      if (remember) post({ type: "set_start_mode", mode: mode });
+    }
+    note.textContent = "";
+    render();
+  }
+
+  function submit() {
+    var text = input.value.trim();
+    if (!text) return;
+    if (state.mode === "agent") {
+      post({ type: "ask_agent", prompt: text });
+      input.value = "";
+      note.textContent = "Sent to the agent. Follow along in the agent panel.";
+    } else {
+      post({ type: "search", query: text });
+    }
+    render();
+  }
+
+  modes.forEach(function (button, index) {
+    button.addEventListener("click", function () { setMode(button.getAttribute("data-mode"), true); input.focus(); });
+    button.addEventListener("keydown", function (event) {
+      var step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+      if (!step) return;
+      event.preventDefault();
+      var next = modes[(index + step + modes.length) % modes.length];
+      setMode(next.getAttribute("data-mode"), true);
+      next.focus();
+    });
+  });
+  document.getElementById("form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (!event.isComposing) submit();
+  });
+  input.addEventListener("input", function () { note.textContent = ""; render(); });
+
+  function applyTheme(theme) {
+    if (!theme) return;
+    var root = document.documentElement;
+    ["bg", "surface", "surface-2", "text", "text-2", "border", "accent"].forEach(function (key) {
+      var value = theme[key.replace("-", "_")];
+      if (value) root.style.setProperty("--" + key, value);
+    });
+    root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+  }
+
+  window.islandRender = function (next) {
+    if (next.theme) applyTheme(next.theme);
+    if (next.start) {
+      state.mode = next.start.mode === "agent" ? "agent" : "search";
+      state.engine = next.start.engine || "Google";
+    }
+    render();
+  };
+  window.islandFocus = function () { input.focus(); };
+
+  render();
+  input.focus();
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

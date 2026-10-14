@@ -22,20 +22,22 @@ platform executable links.
 | `browser_command.h` | The Back / Forward / Reload command enum |
 | `navigation_state.{h,cc}` | Back/forward/reload availability and navigation snapshot |
 | `address_bar_model.{h,cc}` | Address field text/editing state |
-| `address_policy.{h,cc}` | Decides how typed input is treated (navigate vs. search vs. reject) |
+| `address_policy.{h,cc}` | Validates an already-parsed absolute http/https address (allowed schemes, hosts, ports) |
+| `address_input.{h,cc}` | CEF-free address-bar heuristic: explicit scheme / host-like text becomes a URL (bare hosts get `https://`), everything else is a web search. Used only by `BrowserWindow::ResolveAddressInput` |
+| `search_engine.{h,cc}` | CEF-free table of web search engines (Google default, DuckDuckGo, Yandex), `BuildSearchUrl`, and the start page's remembered mode |
 | `cef_address_parser.{h,cc}` | CEF-dependent URL parsing behind the policy seam |
 | `design_tokens.{h,cc}` | `ArgbColor` and the token palette shared with `tests/design/` |
 | `icon_catalog.{h,cc}` | Resolves icon names/sizes/scales against `resources/island/icons/manifest.json` |
 | `app_resources.{h,cc}` | Runtime resource-directory resolution (fonts, icons) |
 | `font_registry.h` | Font registration seam, implemented per platform |
 | `app_runtime.{h,cc}` | Runtime seam shared by the app and tests |
-| `startup_options.{h,cc}` | Command-line parsing, including `--island-smoke-test` |
+| `startup_options.{h,cc}` | Command-line parsing, including `--island-smoke-test`; production leaves the initial URL empty so `BrowserWindow` opens the embedded start page |
 | `lifecycle_config.h` | Shutdown/lifecycle constants |
 | `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam |
 | `space.{h,cc}` | Named, colored space owning ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
-| `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
+| `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; `pages/start.html` (`LocalPageKind::kStart`) is the exception: it is the document each new tab loads, and `BrowserWindow::OnConsoleMessage` accepts its `search` / `ask_agent` / `set_start_mode` messages only from a tab whose main frame is exactly that URL; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
 | `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping |
 | `prefs_store.{h,cc}` | Preferences JSON (theme, agent provider + custom command with migration from the old single command, agent panel state, shortcut overrides, update checks) |
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |

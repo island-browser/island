@@ -147,7 +147,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     </button>
   </div>
   <nav aria-label="Sections">
-    <a href="#appearance">Appearance</a><a href="#agent">Agent &amp; tools</a>
+    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#agent">Agent &amp; tools</a>
     <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
@@ -159,6 +159,15 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       <div class="segmented" role="group" aria-label="Theme" id="theme">
         <button data-value="system">System</button><button data-value="light">Light</button><button data-value="dark">Dark</button>
       </div>
+    </div>
+  </section>
+
+  <section id="search">
+    <h2>Search</h2>
+    <p class="lead">Used when you type something that is not an address in the address bar, and by the search box on the start page.</p>
+    <div class="row">
+      <div class="label">Search engine<small id="engine-hint">Google is the default.</small></div>
+      <div class="segmented" role="group" aria-label="Search engine" id="engine"></div>
     </div>
   </section>
 
@@ -467,12 +476,32 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("update-note").hidden = !note;
   }
 
+  function renderSearch(search) {
+    var box = $("engine");
+    var engines = search.engines || [];
+    var signature = JSON.stringify(engines);
+    if (box.getAttribute("data-signature") !== signature) {
+      box.setAttribute("data-signature", signature);
+      box.textContent = "";
+      engines.forEach(function (engine) {
+        var button = el("button", "", engine.name);
+        button.setAttribute("data-value", engine.id);
+        button.addEventListener("click", function () { post({ type: "set_search_engine", id: engine.id }); });
+        box.appendChild(button);
+      });
+    }
+    Array.prototype.forEach.call(box.querySelectorAll("button"), function (button) {
+      button.setAttribute("aria-pressed", button.getAttribute("data-value") === search.engine ? "true" : "false");
+    });
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
     Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-value") === s.theme_pref ? "true" : "false");
     });
+    renderSearch(s.search || {});
     renderAgent(s.agent || {});
     var endpoint = s.endpoint || {};
     $("endpoint-dot").className = "dot" + (endpoint.running ? " on" : "");

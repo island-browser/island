@@ -108,8 +108,8 @@ TEST(LocalPageTest, AgentCommandResolutionPrefersTheEnvironment) {
 }
 
 TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
-    for (const LocalPageKind kind :
-         {LocalPageKind::kAgent, LocalPageKind::kSettings, LocalPageKind::kTabOverview}) {
+    for (const LocalPageKind kind : {LocalPageKind::kAgent, LocalPageKind::kSettings,
+                                     LocalPageKind::kTabOverview, LocalPageKind::kStart}) {
         const std::string html(LocalPageHtml(kind));
         EXPECT_EQ(html.rfind("<!doctype html>", 0), 0U);
         EXPECT_NE(html.find("window.islandRender = function"), std::string::npos);

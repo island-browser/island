@@ -16,6 +16,7 @@ The product site's CSS parity check lives in the site repository
 | File | Description |
 |------|-------------|
 | `test_token_contract.py` | Contract completeness plus native parity checks |
+| `test_local_pages.py` | Built-in pages (`src/main/pages/`): no external resources, shared bridge, start page and Settings contract, and the agent panel Markdown renderer's escaping (run through Node when installed) |
 
 ## For AI Agents
 

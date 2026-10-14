@@ -125,7 +125,7 @@ find_package(CEF REQUIRED)
 # literals hit MSVC's length limit). Reconfigures when a page changes.
 set(ISLAND_LOCAL_PAGE_SOURCES)
 foreach(_island_page IN ITEMS "agent.html:AgentPageHtml" "settings.html:SettingsPageHtml"
-                              "tab_overview.html:TabOverviewPageHtml")
+                              "tab_overview.html:TabOverviewPageHtml" "start.html:StartPageHtml")
     string(REPLACE ":" ";" _island_page "${_island_page}")
     list(GET _island_page 0 ISLAND_PAGE_FILE)
     list(GET _island_page 1 ISLAND_PAGE_FUNCTION)

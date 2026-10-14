@@ -37,6 +37,7 @@
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
 #include "runtime_style.h"
+#include "search_provider.h"
 #include "session_store.h"
 #include "window_agent_host.h"
 
@@ -293,7 +294,28 @@ void BrowserWindow::SaveSession() const {
 }
 
 std::string BrowserWindow::StartupUrlForTab(const Tab& tab) const {
-    return tab.startup_url().empty() ? initial_url_ : tab.startup_url();
+    if (!tab.startup_url().empty()) {
+        return tab.startup_url();
+    }
+    // An empty window URL means the production start page (the smoke run and
+    // tests pass their own fixed document).
+    return initial_url_.empty() ? StartPageUrl() : initial_url_;
+}
+
+const std::string& BrowserWindow::StartPageUrl() const {
+    if (start_page_url_.empty()) {
+        start_page_url_ = LocalPage::PageUrl(LocalPageKind::kStart);
+    }
+    return start_page_url_;
+}
+
+ValidatedAddress BrowserWindow::ResolveAddressInput(std::string_view text) const {
+    const AddressInput input = ClassifyAddressInput(text);
+    if (input.kind == AddressInputKind::kSearch) {
+        return ValidatedAddress{.url = BuildSearchUrl(search_engine(), input.text),
+                                .error = std::nullopt};
+    }
+    return address_validator_ ? address_validator_(input.text) : ParseAndValidate(input.text);
 }
 
 void BrowserWindow::ExecuteCommand(BrowserCommand command) {
@@ -742,6 +764,9 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
         case LocalPageKind::kAgent:
             HandleAgentPageMessage(message);
             return;
+        case LocalPageKind::kStart:
+            HandleStartPageMessage(message);
+            return;
         case LocalPageKind::kSettings:
             HandleSettingsMessage(message);
             return;
@@ -771,6 +796,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
         case LocalPageKind::kTabOverview:
             return overview_page_.get();
         case LocalPageKind::kAgent:
+        case LocalPageKind::kStart:
             return nullptr;
     }
     return nullptr;
@@ -782,7 +808,8 @@ void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettin
 
 void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CEF_REQUIRE_UI_THREAD();
-    if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent) {
+    if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent ||
+        kind == LocalPageKind::kStart) {
         return;
     }
     if (internal_page_ == kind) {
@@ -886,17 +913,27 @@ std::string BrowserWindow::SettingsStateJson() const {
     const std::string_view theme_pref = prefs_.theme == ThemePreference::kLight  ? "light"
                                         : prefs_.theme == ThemePreference::kDark ? "dark"
                                                                                  : "system";
-    Value settings = Value::MakeObject()
-                         .Set("theme_pref", Value::String(std::string(theme_pref)))
-                         .Set("platform", Value::String(platform))
-                         .Set("agent", std::move(agent))
-                         .Set("endpoint", std::move(endpoint))
-                         .Set("shortcuts", std::move(shortcuts))
-                         .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
-                         .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
-                         .Set("update", UpdateStateJson())
-                         .Set("message", Value::String(settings_message_))
-                         .Set("focus", Value::String(settings_focus_));
+    Value engines = Value::MakeArray();
+    for (const SearchEngine& engine : SearchEngines()) {
+        engines.Push(Value::MakeObject()
+                         .Set("id", Value::String(std::string(engine.key)))
+                         .Set("name", Value::String(std::string(engine.display_name))));
+    }
+    Value settings =
+        Value::MakeObject()
+            .Set("theme_pref", Value::String(std::string(theme_pref)))
+            .Set("search", Value::MakeObject()
+                               .Set("engine", Value::String(std::string(search_engine().key)))
+                               .Set("engines", std::move(engines)))
+            .Set("platform", Value::String(platform))
+            .Set("agent", std::move(agent))
+            .Set("endpoint", std::move(endpoint))
+            .Set("shortcuts", std::move(shortcuts))
+            .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
+            .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
+            .Set("update", UpdateStateJson())
+            .Set("message", Value::String(settings_message_))
+            .Set("focus", Value::String(settings_focus_));
     return json::Serialize(
         Value::MakeObject().Set("theme", ThemeJson()).Set("settings", std::move(settings)));
 }
@@ -921,6 +958,16 @@ std::string FaviconDataUrl(const CefRefPtr<CefImage>& favicon) {
 
 }  // namespace
 
+namespace {
+
+// Island's own pages are base64 data: documents; the overview neither shows nor
+// searches that blob.
+std::string OverviewUrl(const std::string& url) {
+    return url.rfind("data:", 0) == 0 ? std::string() : url;
+}
+
+}  // namespace
+
 std::string BrowserWindow::TabOverviewStateJson() const {
     using json::Value;
     Value spaces = Value::MakeArray();
@@ -935,7 +982,8 @@ std::string BrowserWindow::TabOverviewStateJson() const {
                     .Set("index", Value::Int(static_cast<std::int64_t>(tab_index)))
                     .Set("title", Value::String(nav.page_title.empty() ? std::string("New Tab")
                                                                        : nav.page_title))
-                    .Set("url", Value::String(nav.url.empty() ? tab.startup_url() : nav.url))
+                    .Set("url", Value::String(OverviewUrl(nav.url.empty() ? tab.startup_url()
+                                                                          : nav.url)))
                     .Set("active", Value::Bool(space.has_active_tab() &&
                                                space.active_tab_index() == tab_index))
                     .Set("pinned", Value::Bool(tab.pinned()))
@@ -972,6 +1020,13 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         ThemePreference preference = ThemePreference::kSystem;
         if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
             static_cast<void>(SetThemePreference(preference));
+        }
+    } else if (type == "set_search_engine") {
+        const std::string_view id = message.StringOr("id", "");
+        if (IsSearchEngineKey(id)) {
+            prefs_.search_engine = std::string(id);
+            SavePrefs();
+            RenderStartPages();
         }
     } else if (type == "set_agent_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
@@ -1400,9 +1455,8 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
     }
     EnsureAgentSession();
     if (type == "send") {
-        const std::string context =
-            message.BoolOr("include_context", true) ? ActiveTabAgentContext() : std::string();
-        static_cast<void>(agent_session_->Send(std::string(message.StringOr("text", "")), context));
+        SubmitAgentPrompt(std::string(message.StringOr("text", "")),
+                          message.BoolOr("include_context", true));
     } else if (type == "cancel") {
         agent_session_->Cancel();
     } else if (type == "permission") {
@@ -1427,6 +1481,114 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         static_cast<void>(agent_session_->Start(AgentConfig()));
     }
     ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
+    EnsureAgentSession();
+    const std::string context = include_context ? ActiveTabAgentContext() : std::string();
+    static_cast<void>(agent_session_->Send(std::move(text), context));
+    ScheduleLocalPagesRender();
+}
+
+std::string BrowserWindow::StartPageStateJson() const {
+    using json::Value;
+    return json::Serialize(
+        Value::MakeObject()
+            .Set("theme", ThemeJson())
+            .Set("start",
+                 Value::MakeObject()
+                     .Set("mode", Value::String(std::string(start_mode())))
+                     .Set("engine", Value::String(std::string(search_engine().display_name)))));
+}
+
+void BrowserWindow::RenderStartPages() {
+    if (closing_) {
+        return;
+    }
+    std::string script;
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            const CefRefPtr<CefBrowser> browser = tab.browser();
+            const CefRefPtr<CefFrame> frame =
+                browser != nullptr ? browser->GetMainFrame() : nullptr;
+            if (frame == nullptr || frame->GetURL().ToString() != StartPageUrl()) {
+                continue;
+            }
+            if (script.empty()) {
+                script = LocalPage::RenderScript(StartPageStateJson());
+            }
+            frame->ExecuteJavaScript(script, StartPageUrl(), 0);
+        }
+    }
+}
+
+bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t,
+                                     const CefString& message, const CefString&, int) {
+    CEF_REQUIRE_UI_THREAD();
+    // Tabs show arbitrary web pages, so this bridge is closed to everything but
+    // Island's own start page: the message must carry the bridge prefix, come
+    // from a tab, and the tab's main frame must be exactly the start page
+    // document. Anything else logs as ordinary console output. (An ask_agent
+    // message from a site would otherwise be a prompt-injection channel.)
+    const std::string text = message.ToString();
+    if (closing_ || text.rfind(LocalPage::kMessagePrefix, 0) != 0 ||
+        FindTabByBrowser(browser) == nullptr) {
+        return false;
+    }
+    const CefRefPtr<CefFrame> frame = browser->GetMainFrame();
+    if (frame == nullptr || frame->GetURL().ToString() != StartPageUrl()) {
+        return false;
+    }
+    const std::optional<json::Value> decoded = LocalPage::DecodeMessage(text);
+    if (!decoded) {
+        return false;
+    }
+    HandleStartPageMessage(*decoded, browser);
+    return true;
+}
+
+void BrowserWindow::HandleStartPageMessage(const json::Value& message,
+                                           CefRefPtr<CefBrowser> source) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    // The last-used mode is remembered when the user switches and, as a
+    // backstop, whenever they submit in a mode.
+    const auto remember_mode = [this](std::string_view mode) {
+        const std::string normalized(NormalizeStartMode(mode));
+        if (prefs_.start_mode != normalized) {
+            prefs_.start_mode = normalized;
+            SavePrefs();
+        }
+    };
+    const std::string_view type = message.StringOr("type", "");
+    if (type == "set_start_mode") {
+        remember_mode(message.StringOr("mode", ""));
+    } else if (type == "search") {
+        const std::string_view query = message.StringOr("query", "");
+        if (!IsSubmittableQuery(query)) {
+            return;
+        }
+        remember_mode(kStartModeSearch);
+        // The tab that hosts the page navigates; tests have no browser and
+        // fall back to the active tab.
+        const CefRefPtr<CefBrowser> target =
+            source != nullptr ? source : BrowserForTab(std::nullopt);
+        const CefRefPtr<CefFrame> frame = target != nullptr ? target->GetMainFrame() : nullptr;
+        if (frame != nullptr) {
+            frame->LoadURL(BuildSearchUrl(search_engine(), query));
+        }
+    } else if (type == "ask_agent") {
+        const std::string_view prompt = message.StringOr("prompt", "");
+        if (!IsSubmittableQuery(prompt)) {
+            return;
+        }
+        remember_mode(kStartModeAgent);
+        // The same path as typing in the panel: open it, then send the turn.
+        SetAgentPanelOpen(true);
+        SubmitAgentPrompt(std::string(prompt), /*include_context=*/true);
+    }
 }
 
 void BrowserWindow::CloseAgentPanelAndSession() {
@@ -1695,7 +1857,7 @@ void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
     }
 
     address_bar_model_.SetEditText(std::string(draft));
-    const std::optional<std::string> url = address_bar_model_.Submit(ParseAndValidate(draft));
+    const std::optional<std::string> url = address_bar_model_.Submit(ResolveAddressInput(draft));
     if (chrome_ != nullptr) {
         chrome_->OnAddressChanged(address_bar_model_.snapshot());
     }
@@ -1942,6 +2104,9 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     }
 
     owner->navigation_state().OnLoadEnd(http_status_code);
+    if (frame->GetURL().ToString() == StartPageUrl()) {
+        frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
+    }
 }
 
 void BrowserWindow::OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -2557,6 +2722,7 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     ApplySidebarState();
     PublishChromeSnapshot();
     ScheduleLocalPagesRender();
+    RenderStartPages();
 }
 
 void BrowserWindow::PublishChromeSnapshot() {

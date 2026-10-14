@@ -15,6 +15,7 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(island_tests
     address_bar_model_test.cpp
+    address_input_test.cpp
     address_policy_test.cpp
     local_page_test.cpp
     bookmark_import_test.cpp
@@ -32,6 +33,7 @@ add_executable(island_tests
     lifecycle_config_test.cpp
     navigation_state_test.cpp
     prefs_store_test.cpp
+    search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
     session_store_test.cpp
@@ -43,6 +45,7 @@ add_executable(island_tests
     window_agent_host_test.cpp
 
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/address_input.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/agent_navigation.cc"
     "${CMAKE_SOURCE_DIR}/src/main/local_page.cc"
@@ -66,6 +69,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
     "${CMAKE_SOURCE_DIR}/src/main/session_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sha256.cc"
