@@ -26,8 +26,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   mode is remembered. The page is a local document and requests nothing until you submit.
 - The address bar searches when the text is not an address: `google`, `weather in oslo` or
   `what is 2+2` open a Google results page instead of showing "Enter an absolute http or https
-  address." Bare hosts (`example.com`, `localhost:3000`) open over https. Explicit schemes are
-  validated exactly as before.
+  address." Bare hosts (`example.com`) open over https. Explicit schemes are
+  validated exactly as before. localhost and IP addresses open over http (dev servers rarely speak
+  TLS); domain names open over https.
 - Settings has a Search section to choose the engine: Google (default), DuckDuckGo or Yandex.
 - Agent replies in the agent panel render as Markdown: headings, bold/italic, inline code, fenced
   code blocks, lists, links, blockquotes and tables. The renderer escapes everything the model

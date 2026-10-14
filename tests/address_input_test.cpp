@@ -40,34 +40,26 @@ TEST(AddressInputTest, GivenWhitespaceWhenClassifiedThenItIsASearch) {
     }
 }
 
-TEST(AddressInputTest, GivenHostsWhenClassifiedThenTheyGetAnHttpsScheme) {
-    for (const std::string_view input : {"localhost",
-                                         "LocalHost",
-                                         "localhost:3000",
-                                         "localhost:8080/path?x=1#frag",
-                                         "example.com",
-                                         "www.example.com",
-                                         "Example.COM/Path",
-                                         "example.com:8080",
-                                         "example.com:8080/a/b",
-                                         "example.com?q=1",
-                                         "example.com#top",
-                                         "sub.domain.example.org",
-                                         "127.0.0.1",
-                                         "127.0.0.1:9222/json",
-                                         "192.168.1.10",
-                                         "[::1]",
-                                         "[::1]:8080/x",
-                                         "[2001:db8::1]",
-                                         "bucher.de",
-                                         "b\xC3\xBC"
-                                         "cher.example",
-                                         "site.\xD1\x80\xD1\x84",
-                                         "example.xn--p1ai",
-                                         "node.js",
-                                         "my_host.example.test",
-                                         "a.b.co"}) {
+TEST(AddressInputTest, GivenDomainNamesWhenClassifiedThenTheyGetAnHttpsScheme) {
+    for (const std::string_view input :
+         {"example.com", "www.example.com", "Example.COM/Path", "example.com:8080",
+          "example.com:8080/a/b", "example.com?q=1", "example.com#top", "sub.domain.example.org",
+          "bucher.de",
+          "b\xC3\xBC"
+          "cher.example",
+          "site.\xD1\x80\xD1\x84", "example.xn--p1ai", "node.js", "my_host.example.test",
+          "a.b.co"}) {
         EXPECT_EQ(ClassifyAddressInput(input), Url("https://" + std::string(input))) << input;
+    }
+}
+
+TEST(AddressInputTest, GivenLocalhostOrIpLiteralsWhenClassifiedThenTheyGetAnHttpScheme) {
+    // Dev servers and LAN devices rarely serve TLS; https://localhost:3000
+    // would fail where http:// works.
+    for (const std::string_view input :
+         {"localhost", "LocalHost", "localhost:3000", "localhost:8080/path?x=1#frag", "127.0.0.1",
+          "127.0.0.1:9222/json", "192.168.1.10", "[::1]", "[::1]:8080/x", "[2001:db8::1]"}) {
+        EXPECT_EQ(ClassifyAddressInput(input), Url("http://" + std::string(input))) << input;
     }
 }
 

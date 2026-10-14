@@ -35,7 +35,9 @@ struct AddressInput {
 //   2. Anything else containing whitespace or control characters is a search.
 //   3. A host (localhost, an IPv4 or bracketed IPv6 literal, or a dotted name
 //      whose last label is alphabetic and at least two characters), with an
-//      optional :port and /path?query#fragment, is the URL "https://" + input.
+//      optional :port and /path?query#fragment, is a URL: "http://" + input for
+//      localhost and IP literals (dev servers and LAN devices rarely speak
+//      TLS), "https://" + input for domain names.
 //   4. Everything else is a search ("google", "3.14", "user@host").
 // Empty input stays a URL so the validator reports it as it always did.
 [[nodiscard]] AddressInput ClassifyAddressInput(std::string_view input);

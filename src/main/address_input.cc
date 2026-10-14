@@ -141,26 +141,37 @@ bool IsBracketedIpv6(std::string_view authority) {
     return tail.empty() || (tail.front() == ':' && IsPort(tail.substr(1)));
 }
 
-bool LooksLikeHost(std::string_view input) {
+enum class HostKind : std::uint8_t {
+    kNotAHost,
+    // localhost and IP literals: development servers and LAN devices that
+    // usually serve plain http, so "localhost:3000" must not be sent to TLS.
+    kLocalOrIp,
+    kDomain,
+};
+
+HostKind ClassifyHost(std::string_view input) {
     const std::string_view authority = input.substr(0, input.find_first_of("/?#"));
     if (authority.empty() || authority.find('@') != std::string_view::npos) {
-        return false;
+        return HostKind::kNotAHost;
     }
     if (authority.front() == '[') {
-        return IsBracketedIpv6(authority);
+        return IsBracketedIpv6(authority) ? HostKind::kLocalOrIp : HostKind::kNotAHost;
     }
     std::string_view host = authority;
     const std::size_t colon = authority.rfind(':');
     if (colon != std::string_view::npos) {
         if (!IsPort(authority.substr(colon + 1))) {
-            return false;
+            return HostKind::kNotAHost;
         }
         host = authority.substr(0, colon);
     }
     if (host.empty() || host.find(':') != std::string_view::npos) {
-        return false;
+        return HostKind::kNotAHost;
     }
-    return Lowercase(host) == "localhost" || IsIpv4Literal(host) || IsDottedName(host);
+    if (Lowercase(host) == "localhost" || IsIpv4Literal(host)) {
+        return HostKind::kLocalOrIp;
+    }
+    return IsDottedName(host) ? HostKind::kDomain : HostKind::kNotAHost;
 }
 
 }  // namespace
@@ -173,8 +184,13 @@ AddressInput ClassifyAddressInput(std::string_view input) {
     if (HasWhitespaceOrControl(input)) {
         return {.kind = AddressInputKind::kSearch, .text = std::string(input)};
     }
-    if (LooksLikeHost(input)) {
-        return {.kind = AddressInputKind::kUrl, .text = "https://" + std::string(input)};
+    switch (ClassifyHost(input)) {
+        case HostKind::kLocalOrIp:
+            return {.kind = AddressInputKind::kUrl, .text = "http://" + std::string(input)};
+        case HostKind::kDomain:
+            return {.kind = AddressInputKind::kUrl, .text = "https://" + std::string(input)};
+        case HostKind::kNotAHost:
+            break;
     }
     return {.kind = AddressInputKind::kSearch, .text = std::string(input)};
 }
