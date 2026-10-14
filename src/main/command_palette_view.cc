@@ -214,6 +214,11 @@ void CommandPaletteView::BuildViews() {
     query_field_->SetPlaceholderText("Switch to tab, space, or type a URL");
     query_field_->SetFocusable(true);
     panel_->AddChildView(query_field_);
+
+    // Every result row is a CefLabelButton, and CEF refuses to create one
+    // without a delegate (CreateLabelButton returns null), so this must exist
+    // before the first RebuildResultRows.
+    button_delegate_ = new RowButtonDelegate(this);
 }
 
 void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
