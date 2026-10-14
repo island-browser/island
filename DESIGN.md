@@ -168,8 +168,8 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
   rhythm: back/forward, then the address as one hairline-outlined pill (site glyph, field, reload,
   all `--surface`; the outline turns `--accent` while the field has focus), then a quiet New Tab
   row, then the tab list — tabs are rows on the sidebar itself, the selected tab `--surface` with a
-  1px `--border` outline — and a footer with the space chip (same row style) and evenly spaced
-  icon buttons. Chrome text is Geist 13px; mono is not used in the sidebar. CEF `cef_views` has no
+  1px `--border` outline — and a footer with a quiet space chip (color dot and name, no box) and
+  evenly spaced icon buttons. Chrome text is Geist 13px; mono is not used in the sidebar. CEF `cef_views` has no
   corner-radius or border API, so native outlined controls are square (a 1px hairline panel
   around surface-filled children); `--radius-sm` applies to web surfaces. CEF resets custom view
   colors on every theme change, so each chrome view reports the reset and the chrome repaints from

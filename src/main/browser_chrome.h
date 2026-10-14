@@ -317,8 +317,16 @@ class BrowserChrome final : public NavigationObserver {
             .trailing = tokens.text_secondary,
         };
     }
+    // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
+    // active chip, carry the state); the active chip's label takes --text.
     [[nodiscard]] static EntryColors SpaceChipColors(const ChromeTokens& tokens, bool active) {
-        return TabRowColors(tokens, active, /*pinned=*/false);
+        const ArgbColor rail = tokens.surface_secondary;
+        return {
+            .outline = rail,
+            .fill = rail,
+            .title = active ? tokens.text : tokens.text_secondary,
+            .trailing = tokens.text_secondary,
+        };
     }
 
     // Justified: navigation, location, and the favicon placeholder use the
@@ -597,7 +605,6 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> spacer_;
     CefRefPtr<CefBoxLayout> address_layout_;
     CefRefPtr<CefPanel> address_field_holder_;
-    CefRefPtr<CefBoxLayout> space_switcher_layout_;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;

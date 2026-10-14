@@ -575,7 +575,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         CefBoxLayoutSettings settings = CollectionLayout(tokens_);
         settings.horizontal = static_cast<int>(true);
         settings.between_child_spacing = tokens_.spacing_1_dip;
-        space_switcher_layout_ = space_switcher_->SetToBoxLayout(settings);
+        space_switcher_->SetToBoxLayout(settings);
     }
     sidebar_->AddChildView(space_switcher_);
 
@@ -919,8 +919,7 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         SpaceEntryViews views;
         views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, pill_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry));
-        CefRefPtr<CefBoxLayout> outline_layout =
-            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
         views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
         CefBoxLayoutSettings pill_settings;
         pill_settings.horizontal = static_cast<int>(true);
@@ -929,10 +928,9 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         pill_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
         views.inner->SetToBoxLayout(pill_settings);
         views.row->AddChildView(views.inner);
-        outline_layout->SetFlexForView(views.inner, 1);
 
         // The color mark is the space's dot: the same size for every chip, so the
-        // active one is told apart by its outline and label, not by a bigger dot.
+        // active one is told apart by its full name and --text label, not by a box.
         const int dot = tokens_.spacing_2_dip;
         views.color_mark = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(dot, dot)));
         views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
@@ -955,11 +953,6 @@ void BrowserChrome::SetSpaceSwitcherEntries(
 
         space_entry_views_.push_back(views);
         space_switcher_->AddChildView(views.row);
-        // The active chip takes the remaining width and shows the full name; inactive
-        // chips hug their initial.
-        if (space_switcher_layout_ != nullptr) {
-            space_switcher_layout_->SetFlexForView(views.row, entry.active ? 1 : 0);
-        }
     }
     ApplyCollectionTheme();
     sidebar_->Layout();

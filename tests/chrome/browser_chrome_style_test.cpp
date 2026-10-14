@@ -191,7 +191,21 @@ TEST(BrowserChromeGraphiteTest, SelectedRowIsSurfaceFilledAndHairlineOutlined) {
         EXPECT_EQ(active.fill, tokens.surface);
         EXPECT_EQ(active.outline, tokens.border);
         EXPECT_EQ(active.title, tokens.text);
-        EXPECT_EQ(BrowserChrome::SpaceChipColors(tokens, true).fill, tokens.surface);
+    }
+}
+
+// The space chip is deliberately quiet: no box, no edge, only the label weight/color.
+TEST(BrowserChromeGraphiteTest, SpaceChipsHaveNoFillOrEdgeAndTheActiveLabelTakesText) {
+    for (const ChromeTokens& tokens : AllTokenSets()) {
+        const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);
+        const BrowserChrome::EntryColors idle = BrowserChrome::SpaceChipColors(tokens, false);
+        EXPECT_EQ(active.fill, tokens.surface_secondary);
+        EXPECT_EQ(active.outline, tokens.surface_secondary);
+        EXPECT_EQ(idle.fill, tokens.surface_secondary);
+        EXPECT_EQ(active.title, tokens.text);
+        EXPECT_EQ(idle.title, tokens.text_secondary);
+        EXPECT_GE(ContrastRatio(active.title, active.fill), 4.5);
+        EXPECT_GE(ContrastRatio(idle.title, idle.fill), 4.5);
     }
 }
 
