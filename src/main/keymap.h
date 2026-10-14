@@ -38,14 +38,29 @@ enum class KeyAction : std::uint8_t {
     kToggleAgentPanel,
     kTabOverview,
     kSettings,
+    kReopenClosedTab,
+    kZoomIn,
+    kZoomInAlternate,
+    kZoomOut,
+    kZoomReset,
+    kReloadIgnoringCache,
+    kStopLoading,
+    kNextSpace,
+    kPreviousSpace,
+    kCopyTabUrl,
+    kNextTabAlternate,
+    kPreviousTabAlternate,
 };
 
-inline constexpr std::size_t kKeyActionCount = 20;
+inline constexpr std::size_t kKeyActionCount = 32;
 
 struct KeyBinding {
     // Windows virtual-key code (CEF's key_code convention).
     int key_code = 0;
     bool primary = false;  // Cmd on macOS, Ctrl elsewhere
+    // The physical Control key. Distinct from `primary` on macOS (Ctrl+Tab);
+    // on Windows and Linux it is the same key as `primary`.
+    bool control = false;
     bool shift = false;
     bool alt = false;
 
@@ -63,12 +78,15 @@ struct KeyActionInfo {
 [[nodiscard]] const KeyActionInfo& KeyActionInfoFor(KeyAction action) noexcept;
 [[nodiscard]] std::optional<KeyAction> KeyActionFromId(std::string_view id) noexcept;
 
-// "Mod+Shift+K", "Alt+Left", "F5", "Mod+,". Case-insensitive; "Cmd",
-// "Ctrl", and "Primary" all mean Mod; "Option" means Alt. A binding needs a
-// modifier unless its key is a function key, so plain typing is never
-// captured.
+// "Mod+Shift+K", "Alt+Left", "F5", "Mod+,", "Control+Tab". Case-insensitive;
+// "Cmd", "Ctrl", and "Primary" all mean Mod (saved overrides keep their
+// meaning); "Control" is the physical Control key; "Option" means Alt. A
+// binding needs a modifier unless its key is a function key, so plain typing
+// is never captured.
 [[nodiscard]] std::optional<KeyBinding> ParseKeyBinding(std::string_view text);
 // Canonical text ("Mod+Shift+K"); `mac` spells Mod/Alt as Cmd/Option.
+// Control is always spelled "Control" so the text parses back to the same
+// binding.
 [[nodiscard]] std::string FormatKeyBinding(const KeyBinding& binding, bool mac = false);
 
 // What NSMenuItem needs: the key equivalent (lowercase letter, punctuation,
@@ -76,6 +94,7 @@ struct KeyActionInfo {
 struct MacKeyEquivalent {
     std::string key;
     bool command = false;
+    bool control = false;
     bool shift = false;
     bool option = false;
 };

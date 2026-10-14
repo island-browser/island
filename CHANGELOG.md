@@ -13,6 +13,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Added
+
+- More keyboard shortcuts, all listed and rebindable in Settings: Ctrl+Tab and Ctrl+Shift+Tab
+  switch tabs (Control is now its own modifier on macOS), Cmd+9 selects the last tab, Cmd+Shift+T
+  reopens the last closed tab, Cmd+=, Cmd+-, and Cmd+0 zoom the page, Cmd+Shift+R reloads ignoring
+  the cache, Cmd+. and Escape stop loading (Escape only when no overlay is open), Cmd+Option+Down
+  and Cmd+Option+Up move between spaces, and Cmd+Shift+C copies the tab's URL (macOS only for now).
+
 ### Fixed
 
 - Island no longer crashes with "quit unexpectedly" when you switch to another app or window (and on

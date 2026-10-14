@@ -4,6 +4,7 @@
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "include/cef_app.h"
+#include "keymap.h"
 #include "prefs_store.h"
 #include "startup_options.h"
 
@@ -23,6 +24,11 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OnContextInitialized() override;
 
     void ExecuteCommand(BrowserCommand command);
+    // Keyboard shortcut dispatch for the macOS menu (the same path the
+    // accelerators take on other platforms).
+    void RunKeyAction(KeyAction action);
+    [[nodiscard]] bool CanStopLoading() const;
+    [[nodiscard]] bool CanStopLoadingWithEscape() const;
     void BeginAddressEditing();
     void ShowSearchPalette();
     void ShowCommandPalette();

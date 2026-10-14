@@ -29,6 +29,19 @@ enum class BrowserCommand : std::uint8_t {
     kMoveDividerRight,
     // Arc-style pinned tabs: pins or unpins the active tab.
     kTogglePinTab,
+    // Keyboard shortcut commands appended in Phase 4: the last tab, reopening
+    // the most recently closed tab, page zoom, stop and hard reload, space
+    // cycling, and copying the active tab's URL.
+    kSelectLastTab,
+    kReopenClosedTab,
+    kZoomIn,
+    kZoomOut,
+    kZoomReset,
+    kReloadIgnoringCache,
+    kStopLoading,
+    kNextSpace,
+    kPreviousSpace,
+    kCopyTabUrl,
 };
 
 }  // namespace island

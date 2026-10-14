@@ -33,6 +33,20 @@ constexpr std::array<KeyActionInfo, kKeyActionCount> kActions = {{
     {KeyAction::kToggleAgentPanel, "toggle_agent", "Show or hide the agent", "Mod+J"},
     {KeyAction::kTabOverview, "tab_overview", "All tabs", "Mod+Shift+A"},
     {KeyAction::kSettings, "settings", "Settings", "Mod+,"},
+    {KeyAction::kReopenClosedTab, "reopen_tab", "Reopen closed tab", "Mod+Shift+T"},
+    {KeyAction::kZoomIn, "zoom_in", "Zoom in", "Mod+="},
+    {KeyAction::kZoomInAlternate, "zoom_in_alt", "Zoom in (alternate)", "Mod+Shift+="},
+    {KeyAction::kZoomOut, "zoom_out", "Zoom out", "Mod+-"},
+    {KeyAction::kZoomReset, "zoom_reset", "Reset zoom", "Mod+0"},
+    {KeyAction::kReloadIgnoringCache, "reload_ignore_cache", "Reload ignoring cache",
+     "Mod+Shift+R"},
+    {KeyAction::kStopLoading, "stop_loading", "Stop loading", "Mod+."},
+    {KeyAction::kNextSpace, "next_space", "Next space", "Mod+Alt+Down"},
+    {KeyAction::kPreviousSpace, "previous_space", "Previous space", "Mod+Alt+Up"},
+    {KeyAction::kCopyTabUrl, "copy_url", "Copy tab URL", "Mod+Shift+C"},
+    {KeyAction::kNextTabAlternate, "next_tab_alt", "Next tab (alternate)", "Control+Tab"},
+    {KeyAction::kPreviousTabAlternate, "previous_tab_alt", "Previous tab (alternate)",
+     "Control+Shift+Tab"},
 }};
 
 struct NamedKey {
@@ -171,9 +185,11 @@ std::optional<KeyBinding> ParseKeyBinding(std::string_view text) {
         const bool last = plus == std::string_view::npos;
         if (!last) {
             if (EqualsIgnoreCase(token, "Mod") || EqualsIgnoreCase(token, "Cmd") ||
-                EqualsIgnoreCase(token, "Ctrl") || EqualsIgnoreCase(token, "Control") ||
-                EqualsIgnoreCase(token, "Primary") || EqualsIgnoreCase(token, "Command")) {
+                EqualsIgnoreCase(token, "Ctrl") || EqualsIgnoreCase(token, "Primary") ||
+                EqualsIgnoreCase(token, "Command")) {
                 binding.primary = true;
+            } else if (EqualsIgnoreCase(token, "Control")) {
+                binding.control = true;
             } else if (EqualsIgnoreCase(token, "Shift")) {
                 binding.shift = true;
             } else if (EqualsIgnoreCase(token, "Alt") || EqualsIgnoreCase(token, "Option")) {
@@ -191,13 +207,16 @@ std::optional<KeyBinding> ParseKeyBinding(std::string_view text) {
     binding.key_code = *key;
     // Plain typing must never be captured: require a modifier other than
     // Shift, except for function keys.
-    if (!binding.primary && !binding.alt && !IsFunctionKey(binding.key_code)) return std::nullopt;
+    if (!binding.primary && !binding.control && !binding.alt && !IsFunctionKey(binding.key_code)) {
+        return std::nullopt;
+    }
     return binding;
 }
 
 std::string FormatKeyBinding(const KeyBinding& binding, bool mac) {
     std::string text;
     if (binding.primary) text += mac ? "Cmd+" : "Mod+";
+    if (binding.control) text += "Control+";
     if (binding.alt) text += mac ? "Option+" : "Alt+";
     if (binding.shift) text += "Shift+";
     text += KeyName(binding.key_code);
@@ -205,10 +224,16 @@ std::string FormatKeyBinding(const KeyBinding& binding, bool mac) {
 }
 
 std::optional<MacKeyEquivalent> ToMacKeyEquivalent(const KeyBinding& binding) {
-    MacKeyEquivalent equivalent{
-        .key = {}, .command = binding.primary, .shift = binding.shift, .option = binding.alt};
+    MacKeyEquivalent equivalent{.key = {},
+                                .command = binding.primary,
+                                .control = binding.control,
+                                .shift = binding.shift,
+                                .option = binding.alt};
     const int code = binding.key_code;
-    if (code >= 'A' && code <= 'Z') {
+    if (code == 0x09 && binding.shift) {
+        // Shift+Tab arrives as the back-tab character, not as Tab.
+        equivalent.key = "\x19";
+    } else if (code >= 'A' && code <= 'Z') {
         equivalent.key = std::string(1, static_cast<char>(code - 'A' + 'a'));
     } else if (code >= '0' && code <= '9') {
         equivalent.key = std::string(1, static_cast<char>(code));

@@ -89,9 +89,11 @@ target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIB
 # the headless tests, but the symbols must link), so mirror src/main's split.
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
                     "${CMAKE_SOURCE_DIR}/src/main/macos/sidebar_hover_mac.mm")
 else()
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"
+                    "${CMAKE_SOURCE_DIR}/src/main/clipboard_stub.cc"
                     "${CMAKE_SOURCE_DIR}/src/main/sidebar_hover_stub.cc")
 endif()
 if(NOT APPLE)

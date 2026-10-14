@@ -101,5 +101,81 @@ TEST(KeymapTest, MacKeyEquivalentsUseMenuConventions) {
     EXPECT_EQ(ToMacKeyEquivalent(*ParseKeyBinding("Alt+Left"))->key, "\xEF\x9C\x82");  // U+F702
 }
 
+TEST(KeymapTest, ControlIsItsOwnModifierAndCtrlStillMeansMod) {
+    EXPECT_EQ(ParseKeyBinding("Control+Tab"), (KeyBinding{.key_code = 0x09, .control = true}));
+    EXPECT_EQ(ParseKeyBinding("Ctrl+Tab"), (KeyBinding{.key_code = 0x09, .primary = true}));
+    EXPECT_EQ(ParseKeyBinding("Control+Shift+Tab"),
+              (KeyBinding{.key_code = 0x09, .control = true, .shift = true}));
+    // Shift alone is still plain typing, Control or not.
+    EXPECT_FALSE(ParseKeyBinding("Shift+Tab").has_value());
+    EXPECT_FALSE(ParseKeyBinding("Control").has_value());
+}
+
+TEST(KeymapTest, FormatsControlAndRoundTripsIt) {
+    EXPECT_EQ(FormatKeyBinding(*ParseKeyBinding("Control+Shift+Tab")), "Control+Shift+Tab");
+    EXPECT_EQ(FormatKeyBinding(*ParseKeyBinding("Control+Tab"), true), "Control+Tab");
+    EXPECT_EQ(FormatKeyBinding(*ParseKeyBinding("Ctrl+Tab"), true), "Cmd+Tab");
+    EXPECT_EQ(ParseKeyBinding(FormatKeyBinding(*ParseKeyBinding("Mod+Control+K"))),
+              ParseKeyBinding("Mod+Control+K"));
+}
+
+TEST(KeymapTest, MacKeyEquivalentsCarryTheControlMaskAndBackTab) {
+    const auto control_tab = ToMacKeyEquivalent(*ParseKeyBinding("Control+Tab"));
+    ASSERT_TRUE(control_tab.has_value());
+    EXPECT_EQ(control_tab->key, "\t");
+    EXPECT_TRUE(control_tab->control);
+    EXPECT_FALSE(control_tab->command);
+    EXPECT_FALSE(control_tab->shift);
+
+    // Shift+Tab arrives on macOS as the back-tab character.
+    const auto back_tab = ToMacKeyEquivalent(*ParseKeyBinding("Control+Shift+Tab"));
+    ASSERT_TRUE(back_tab.has_value());
+    EXPECT_EQ(back_tab->key, "\x19");
+    EXPECT_TRUE(back_tab->control);
+    EXPECT_TRUE(back_tab->shift);
+
+    EXPECT_EQ(ToMacKeyEquivalent(*ParseKeyBinding("Mod+="))->key, "=");
+    EXPECT_EQ(ToMacKeyEquivalent(*ParseKeyBinding("Mod+."))->key, ".");
+    EXPECT_EQ(ToMacKeyEquivalent(*ParseKeyBinding("Mod+Alt+Down"))->key, "\xEF\x9C\x81");
+}
+
+TEST(KeymapTest, PhaseFourDefaultsAreBound) {
+    const Keymap defaults = Keymap::Defaults();
+    EXPECT_EQ(defaults.Binding(KeyAction::kReopenClosedTab), ParseKeyBinding("Mod+Shift+T"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kZoomIn), ParseKeyBinding("Mod+="));
+    EXPECT_EQ(defaults.Binding(KeyAction::kZoomInAlternate), ParseKeyBinding("Mod+Shift+="));
+    EXPECT_EQ(defaults.Binding(KeyAction::kZoomOut), ParseKeyBinding("Mod+-"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kZoomReset), ParseKeyBinding("Mod+0"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kReloadIgnoringCache), ParseKeyBinding("Mod+Shift+R"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kStopLoading), ParseKeyBinding("Mod+."));
+    EXPECT_EQ(defaults.Binding(KeyAction::kNextSpace), ParseKeyBinding("Mod+Alt+Down"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kPreviousSpace), ParseKeyBinding("Mod+Alt+Up"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kCopyTabUrl), ParseKeyBinding("Mod+Shift+C"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kNextTabAlternate), ParseKeyBinding("Control+Tab"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kPreviousTabAlternate),
+              ParseKeyBinding("Control+Shift+Tab"));
+}
+
+TEST(KeymapTest, EveryDefaultBindingIsUniqueIncludingFixedAccelerators) {
+    std::set<std::string> seen;
+    for (const KeyActionInfo& info : KeyActions()) {
+        const std::optional<KeyBinding> binding = Keymap::Defaults().Binding(info.action);
+        if (!binding.has_value()) continue;
+        EXPECT_TRUE(seen.insert(FormatKeyBinding(*binding)).second) << info.id;
+    }
+    // Accelerators BrowserWindow registers outside the keymap: F5 reload,
+    // Mod+1..9 tab selection (9 is the last tab), and Escape (welcome
+    // dismiss / stop loading).
+    for (const std::string fixed : {"F5", "Mod+1", "Mod+2", "Mod+3", "Mod+4", "Mod+5", "Mod+6",
+                                    "Mod+7", "Mod+8", "Mod+9", "Escape"}) {
+        EXPECT_TRUE(seen.insert(fixed).second) << fixed;
+    }
+}
+
+TEST(KeymapTest, ControlBindingsSurviveOverridesAndRoundTrip) {
+    const Keymap keymap = Keymap::WithOverrides({{"next_tab", "Control+Tab"}});
+    EXPECT_EQ(keymap.ActionFor(*ParseKeyBinding("Control+Tab")), KeyAction::kNextTab);
+    EXPECT_EQ(Keymap::WithOverrides(keymap.Overrides()), keymap);
+}
 }  // namespace
 }  // namespace island

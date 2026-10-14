@@ -256,10 +256,10 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     var parts = binding.split("+");
     var key = parts.pop() || "+";
     if (isMac()) {
-      var map = { Mod: "\u2318", Alt: "\u2325", Shift: "\u21e7" };
+      var map = { Control: "\u2303", Mod: "\u2318", Alt: "\u2325", Shift: "\u21e7" };
       var symbols = { Left: "\u2190", Right: "\u2192", Up: "\u2191", Down: "\u2193", Enter: "\u21a9",
                       Backspace: "\u232b", Escape: "\u238b", Tab: "\u21e5", Space: "Space" };
-      var order = ["Alt", "Shift", "Mod"];
+      var order = ["Control", "Alt", "Shift", "Mod"];
       var mods = order.filter(function (m) { return parts.indexOf(m) >= 0; }).map(function (m) { return map[m]; });
       return mods.join("") + (symbols[key] || key);
     }
@@ -281,13 +281,18 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   function bindingFromEvent(event) {
     var key = keyNameFromEvent(event);
     if (!key) return null;
-    var mod = isMac() ? event.metaKey : event.ctrlKey;
+    // On macOS Cmd is Mod and the physical Control key is its own modifier;
+    // elsewhere Ctrl is Mod.
+    var mac = isMac();
+    var mod = mac ? event.metaKey : event.ctrlKey;
+    var control = mac && event.ctrlKey;
     var parts = [];
     if (mod) parts.push("Mod");
+    if (control) parts.push("Control");
     if (event.altKey) parts.push("Alt");
     if (event.shiftKey) parts.push("Shift");
     parts.push(key);
-    return { text: parts.join("+"), valid: mod || event.altKey || /^F\d+$/.test(key) };
+    return { text: parts.join("+"), valid: mod || control || event.altKey || /^F\d+$/.test(key) };
   }
 
   function toast(text) {

@@ -24,6 +24,7 @@
 #include "space.h"
 #include "tab.h"
 #include "tab_id.h"
+#include "zoom_policy.h"
 
 // Headless BrowserWindow coverage for the Phase 3 window logic that needs no
 // live CefBrowser: tab/space command dispatch, the direct-index and space
@@ -770,5 +771,128 @@ TEST(BrowserWindowTest, GivenAHeadlessWindowWhenTheRuntimeStyleIsRequestedThenIt
     EXPECT_EQ(window->GetBrowserRuntimeStyle(), CEF_RUNTIME_STYLE_ALLOY);
 }
 
+// Accepts absolute https URLs without whitespace, standing in for
+// CefParseURL, which is unavailable headless.
+ValidatedAddress AcceptHttps(std::string_view text) {
+    if (text.substr(0, 8) != "https://" || text.find(' ') != std::string_view::npos) {
+        return {.url = {}, .error = AddressError::kNotAbsolute};
+    }
+    return {.url = std::string(text), .error = std::nullopt};
+}
+
+CefRefPtr<BrowserWindow> MakeWebWindow() {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAddressValidatorForTest(&AcceptHttps);
+    return window;
+}
+
+TEST(BrowserWindowTest, GivenAClosedWebTabWhenReopenedThenItReturnsWithItsURLInTheActiveSpace) {
+    CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->OpenNewTab("https://example.com/a"));
+    ASSERT_EQ(ActiveSpaceTabIds(*window).size(), 2U);
+    window->ExecuteCommand(BrowserCommand::kCloseTab);
+    ASSERT_EQ(ActiveSpaceTabIds(*window).size(), 1U);
+    EXPECT_EQ(window->closed_tab_count(), 1U);
+
+    window->ExecuteCommand(BrowserCommand::kReopenClosedTab);
+    EXPECT_EQ(ActiveSpaceTabIds(*window).size(), 2U);
+    EXPECT_EQ(ActiveSpace(*window).tabs().back().startup_url(), "https://example.com/a");
+    EXPECT_EQ(window->active_tab_id(), ActiveSpaceTabIds(*window).back());
+    EXPECT_EQ(window->closed_tab_count(), 0U);
+
+    // An empty stack changes nothing.
+    window->ExecuteCommand(BrowserCommand::kReopenClosedTab);
+    EXPECT_EQ(ActiveSpaceTabIds(*window).size(), 2U);
+}
+
+TEST(BrowserWindowTest, GivenMoreThanTwentyClosedTabsThenTheStackKeepsTheNewestTwenty) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    AppendTabs(*window, 25);
+    ASSERT_EQ(ActiveSpaceTabIds(*window).size(), 26U);
+    for (int closed = 0; closed < 25; ++closed) {
+        window->ExecuteCommand(BrowserCommand::kCloseTab);
+    }
+    EXPECT_EQ(ActiveSpaceTabIds(*window).size(), 1U);
+    EXPECT_EQ(window->closed_tab_count(), 20U);
+}
+
+TEST(BrowserWindowTest, GivenSeveralTabsWhenSelectLastTabRunsThenTheLastTabBecomesActive) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    AppendTabs(*window, 3);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    window->ExecuteCommand(BrowserCommand::kSelectLastTab);
+    EXPECT_EQ(window->active_tab_id(), ActiveSpaceTabIds(*window).back());
+    // Already on the last tab: still the last tab.
+    window->ExecuteCommand(BrowserCommand::kSelectLastTab);
+    EXPECT_EQ(window->active_tab_id(), ActiveSpaceTabIds(*window).back());
+}
+
+TEST(BrowserWindowTest, GivenTheAlternateTabKeysWhenRunThenTheySelectNextAndPreviousTabs) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    AppendTabs(*window, 2);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    window->RunKeyAction(KeyAction::kNextTabAlternate);
+    EXPECT_EQ(window->active_tab_id(), ActiveSpaceTabIds(*window)[1]);
+    window->RunKeyAction(KeyAction::kPreviousTabAlternate);
+    EXPECT_EQ(window->active_tab_id(), ActiveSpaceTabIds(*window)[0]);
+}
+
+TEST(BrowserWindowTest, GivenSpacesWhenNextAndPreviousSpaceRunThenTheyWrapAround) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->CreateSpace("Work"));
+    ASSERT_TRUE(window->CreateSpace("Notes"));
+    ASSERT_EQ(window->space_count(), 3U);
+    ASSERT_TRUE(window->SelectSpaceIndex(2));
+
+    window->ExecuteCommand(BrowserCommand::kNextSpace);
+    EXPECT_EQ(window->active_space_index(), 0U);
+    window->ExecuteCommand(BrowserCommand::kPreviousSpace);
+    EXPECT_EQ(window->active_space_index(), 2U);
+    window->ExecuteCommand(BrowserCommand::kPreviousSpace);
+    EXPECT_EQ(window->active_space_index(), 1U);
+}
+
+TEST(BrowserWindowTest, GivenASingleSpaceWhenNextSpaceRunsThenNothingChanges) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNextSpace);
+    window->ExecuteCommand(BrowserCommand::kPreviousSpace);
+    EXPECT_EQ(window->space_count(), 1U);
+    EXPECT_EQ(window->active_space_index(), 0U);
+}
+
+TEST(BrowserWindowTest, GivenAWebTabWhenCopyTabUrlRunsThenItsURLGoesToTheClipboardWriter) {
+    CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    std::vector<std::string> copied;
+    window->SetClipboardWriterForTest([&copied](std::string_view text) {
+        copied.emplace_back(text);
+        return true;
+    });
+
+    // The startup page has no web URL, so there is nothing to copy.
+    window->ExecuteCommand(BrowserCommand::kCopyTabUrl);
+    EXPECT_TRUE(copied.empty());
+
+    ASSERT_TRUE(window->OpenNewTab("https://example.com/copy"));
+    window->ExecuteCommand(BrowserCommand::kCopyTabUrl);
+    ASSERT_EQ(copied.size(), 1U);
+    EXPECT_EQ(copied[0], "https://example.com/copy");
+}
+
+TEST(BrowserWindowTest, GivenNoLoadingPageWhenStopLoadingIsAskedThenItIsUnavailable) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_FALSE(window->CanStopLoading());
+    EXPECT_FALSE(window->CanStopLoadingWithEscape());
+    // Stop with no browser is a tolerated no-op.
+    window->ExecuteCommand(BrowserCommand::kStopLoading);
+    EXPECT_FALSE(window->CanStopLoading());
+}
+
+TEST(BrowserWindowTest, GivenZoomStepsWhenSteppedThenTheyClampToTheUsableRange) {
+    EXPECT_DOUBLE_EQ(SteppedZoomLevel(0.0, 1), 0.5);
+    EXPECT_DOUBLE_EQ(SteppedZoomLevel(0.0, -1), -0.5);
+    EXPECT_DOUBLE_EQ(SteppedZoomLevel(kZoomLevelMax, 1), kZoomLevelMax);
+    EXPECT_DOUBLE_EQ(SteppedZoomLevel(kZoomLevelMin, -3), kZoomLevelMin);
+    EXPECT_DOUBLE_EQ(SteppedZoomLevel(8.0, 1), kZoomLevelMax);
+}
 }  // namespace
 }  // namespace island
