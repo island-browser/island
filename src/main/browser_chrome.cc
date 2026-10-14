@@ -434,7 +434,11 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_ = CefPanel::CreatePanel(root_delegate_);
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
 
-    const CefSize rail_size(tokens_.rail_width_dip, 0);
+    // A zero height reads as "no preference" to CEF, which then asks the layout manager: the
+    // rail's preferred width followed its tab list's (a scroll view grows its content to fill
+    // the viewport, the rail's preferred width followed, and the window-wide result stuck).
+    // One DIP of height makes the 286 DIP width authoritative.
+    const CefSize rail_size(tokens_.rail_width_dip, 1);
     CefRefPtr<SurfacePanelDelegate> rail_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail, rail_size, rail_size, rail_size);
     surface_delegates_.push_back(rail_delegate);
@@ -693,7 +697,21 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     }
     agent_panel_->SetVisible(false);
 
-    root_->AddChildView(sidebar_);
+    // CEF's default panel layout stretches every child to the panel's whole size. The
+    // root therefore laid the rail out window-wide on each pass before RootPanelDelegate
+    // narrowed it again, and a CefScrollView inside it grew (and kept) a window-wide content
+    // view: a permanent horizontal scrollbar and the vertical one that comes with it. The
+    // rail sits in a host with a horizontal box layout instead: the host may stretch, the
+    // rail keeps its fixed preferred width.
+    CefRefPtr<CefPanel> rail_host = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    {
+        CefBoxLayoutSettings host_settings;
+        host_settings.horizontal = static_cast<int>(true);
+        host_settings.between_child_spacing = 0;
+        rail_host->SetToBoxLayout(host_settings);
+    }
+    rail_host->AddChildView(sidebar_);
+    root_->AddChildView(rail_host);
     root_->AddChildView(browser_content_);
     root_->AddChildView(agent_panel_);
     // Last child so it paints above the rail and the content card.

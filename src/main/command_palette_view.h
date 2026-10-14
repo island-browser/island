@@ -8,6 +8,7 @@
 #include "command_palette.h"
 #include "design_tokens.h"
 #include "overlay_lifetime.h"
+#include "overlay_card.h"
 #include "search_palette_model.h"
 
 class CefLabelButton;
@@ -74,6 +75,7 @@ class CommandPaletteView final {
     void CreateOverlay();
     void RebuildResultRows(std::size_t row_count);
     [[nodiscard]] int PreferredContentHeightDip() const;
+    [[nodiscard]] std::size_t VisibleRowCount() const;
     bool HandleQueryKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void HandleQueryChanged(CefRefPtr<CefTextfield> textfield);
     void HandleRowPressed(std::size_t index);
@@ -92,6 +94,12 @@ class CommandPaletteView final {
     std::vector<CefRefPtr<CefLabelButton>> result_labels_;
     OverlaySlot overlay_;
     OverlayLifetime overlay_lifetime_;
+    // The right-aligned kind tag of each row ("TAB", "SPACE"), in mono label style.
+    std::vector<CefRefPtr<CefLabelButton>> result_kinds_;
+    // Hairline + shadow around panel_; overlay_root_ is what the overlay hosts.
+    OverlayCard card_;
+    CefRefPtr<CefPanel> overlay_root_;
+    CefRefPtr<CefPanel> divider_;
     CefRefPtr<PaletteSurfaceDelegate> panel_delegate_;
     std::vector<CefRefPtr<PaletteSurfaceDelegate>> surface_delegates_;
     std::vector<CefRefPtr<PaletteSurfaceDelegate>> row_delegates_;

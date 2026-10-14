@@ -24,16 +24,22 @@ constexpr int kEscapeKeyCode = 0x1B;
 constexpr int kArrowUpKeyCode = 0x26;
 constexpr int kArrowDownKeyCode = 0x28;
 
-int CommandRowHeight(const ChromeTokens& tokens) {
-    return tokens.spacing_6_dip + tokens.spacing_4_dip;
-}
+// Metrics in DIP: 36 DIP rows, a 40 DIP query field, and an 8 DIP card padding.
+constexpr int kRowHeightDip = 36;
+constexpr int kQueryHeightDip = 40;
+constexpr int kCardPaddingDip = 8;
+constexpr int kRowGapDip = 2;
+// Space the divider takes between the query and the rows: its hairline centered in 9 DIP.
+constexpr int kDividerHeightDip = 9;
 
-CefBoxLayoutSettings CommandPaletteLayout(const ChromeTokens& tokens) {
+int CommandRowHeight(const ChromeTokens&) { return kRowHeightDip; }
+
+CefBoxLayoutSettings CommandPaletteLayout(const ChromeTokens&) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(false);
-    settings.between_child_spacing = tokens.spacing_2_dip;
-    settings.inside_border_insets = CefInsets(tokens.spacing_3_dip, tokens.spacing_3_dip,
-                                              tokens.spacing_3_dip, tokens.spacing_3_dip);
+    settings.between_child_spacing = kRowGapDip;
+    settings.inside_border_insets =
+        CefInsets(kCardPaddingDip, kCardPaddingDip, kCardPaddingDip, kCardPaddingDip);
     return settings;
 }
 
@@ -41,9 +47,25 @@ CefBoxLayoutSettings CommandRowLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(true);
     settings.between_child_spacing = tokens.spacing_2_dip;
-    settings.inside_border_horizontal_spacing = tokens.spacing_2_dip;
-    settings.inside_border_vertical_spacing = tokens.spacing_1_dip;
+    settings.inside_border_horizontal_spacing = tokens.spacing_1_dip;
+    settings.inside_border_vertical_spacing = 0;
+    settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
     return settings;
+}
+
+// The mono label tag at the right of a row: what kind of thing the row opens.
+std::string PaletteKindLabel(const PaletteEntry& entry) {
+    switch (entry.kind) {
+        case PaletteEntryKind::kTab:
+            return "TAB";
+        case PaletteEntryKind::kSpace:
+            return "SPACE";
+        case PaletteEntryKind::kUrl:
+            return "GO TO";
+        case PaletteEntryKind::kBookmark:
+            return "BOOKMARK";
+    }
+    return "";
 }
 
 // The accessible name for one result row. Every row states the action it
@@ -141,8 +163,12 @@ class CommandPaletteView::RowButtonDelegate final : public CefButtonDelegate {
             return;
         }
         for (std::size_t index = 0; index < palette_->result_labels_.size(); ++index) {
-            if (palette_->result_labels_[index] != nullptr &&
-                palette_->result_labels_[index]->IsSame(button)) {
+            const bool name_pressed = palette_->result_labels_[index] != nullptr &&
+                                      palette_->result_labels_[index]->IsSame(button);
+            const bool kind_pressed = index < palette_->result_kinds_.size() &&
+                                      palette_->result_kinds_[index] != nullptr &&
+                                      palette_->result_kinds_[index]->IsSame(button);
+            if (name_pressed || kind_pressed) {
                 palette_->HandleRowPressed(index);
                 return;
             }
@@ -194,7 +220,8 @@ CommandPaletteView::CommandPaletteView(CommandPaletteHost& host, CefRefPtr<CefWi
 void CommandPaletteView::CreateOverlay() {
     // can_activate is true so the text field can take keyboard focus. The overlay only exists
     // while shown (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
-    overlay_.Adopt(window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
+    overlay_.Adopt(
+        window_->AddOverlayView(overlay_root_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
     if (overlay_.has_overlay()) {
         overlay_.get()->SetVisible(false);
     }
@@ -210,13 +237,33 @@ void CommandPaletteView::BuildViews() {
     panel_->SetToBoxLayout(CommandPaletteLayout(tokens_));
 
     textfield_delegate_ = new QueryTextfieldDelegate(
-        this, CefSize(SearchPaletteWidthDip(), CommandRowHeight(tokens_)));
+        this, CefSize(SearchPaletteWidthDip(), kQueryHeightDip));
     query_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
     query_field_->SetID(static_cast<int>(ChromeViewId::kCommandPaletteQuery));
     query_field_->SetAccessibleName("Command palette");
     query_field_->SetPlaceholderText("Switch to tab, space, or type a URL");
     query_field_->SetFocusable(true);
     panel_->AddChildView(query_field_);
+
+    // The hairline between the query and the rows, centered in a 9 DIP band.
+    {
+        CefRefPtr<PaletteSurfaceDelegate> band_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kRow, CefSize(SearchPaletteWidthDip(), kDividerHeightDip));
+        surface_delegates_.push_back(band_delegate);
+        divider_ = CefPanel::CreatePanel(band_delegate);
+        CefBoxLayoutSettings band_settings;
+        band_settings.horizontal = static_cast<int>(false);
+        band_settings.between_child_spacing = 0;
+        const int inset = (kDividerHeightDip - 1) / 2;
+        band_settings.inside_border_insets = CefInsets(inset, 0, inset, 0);
+        divider_->SetToBoxLayout(band_settings);
+        CefRefPtr<PaletteSurfaceDelegate> line_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kBorder, CefSize(SearchPaletteWidthDip(), 1));
+        surface_delegates_.push_back(line_delegate);
+        divider_->AddChildView(CefPanel::CreatePanel(line_delegate));
+        panel_->AddChildView(divider_);
+    }
+    overlay_root_ = card_.Wrap(panel_, tokens_);
 
     // Every result row is a CefLabelButton, and CEF refuses to create one
     // without a delegate (CreateLabelButton returns null), so this must exist
@@ -228,20 +275,24 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     for (const CefRefPtr<PaletteSurfaceDelegate>& delegate : row_delegates_) {
         delegate->Detach();
     }
-    surface_delegates_.erase(surface_delegates_.begin() + 1, surface_delegates_.end());
+    // Index 0 is the card, 1 and 2 are the divider band and its line: only row delegates go.
+    surface_delegates_.erase(surface_delegates_.begin() + 3, surface_delegates_.end());
     row_delegates_.clear();
     result_rows_.clear();
     result_labels_.clear();
+    result_kinds_.clear();
     panel_->RemoveAllChildViews();
     panel_->AddChildView(query_field_);
+    panel_->AddChildView(divider_);
 
     const int row_height = CommandRowHeight(tokens_);
     result_rows_.reserve(row_count);
     row_delegates_.reserve(row_count);
     result_labels_.reserve(row_count);
+    result_kinds_.reserve(row_count);
     for (std::size_t index = 0; index < row_count; ++index) {
-        CefRefPtr<PaletteSurfaceDelegate> row_delegate =
-            new PaletteSurfaceDelegate(this, PaletteSurfaceSlot::kRow, CefSize(0, row_height));
+        CefRefPtr<PaletteSurfaceDelegate> row_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kRow, CefSize(SearchPaletteWidthDip(), row_height));
         surface_delegates_.push_back(row_delegate);
         row_delegates_.push_back(row_delegate);
         CefRefPtr<CefPanel> row = CefPanel::CreatePanel(row_delegate);
@@ -251,22 +302,41 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         CefRefPtr<CefLabelButton> label = CefLabelButton::CreateLabelButton(button_delegate_, "");
         label->SetID(static_cast<int>(ChromeViewId::kCommandPaletteResultName));
         label->SetFocusable(false);
-        label->SetMinimumSize(CefSize(0, row_height));
+        label->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         row->AddChildView(label);
         row_layout->SetFlexForView(label, 1);
+
+        CefRefPtr<CefLabelButton> kind = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        kind->SetFocusable(false);
+        kind->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_RIGHT);
+        row->AddChildView(kind);
 
         panel_->AddChildView(row);
         result_rows_.push_back(row);
         result_labels_.push_back(label);
+        result_kinds_.push_back(kind);
     }
 }
 
+std::size_t CommandPaletteView::VisibleRowCount() const {
+    std::size_t visible = 0;
+    for (const CefRefPtr<CefPanel>& row : result_rows_) {
+        if (row->IsVisible()) {
+            ++visible;
+        }
+    }
+    return visible;
+}
+
+// The card: padding, the query field, then (when there are rows) the divider band and the
+// rows. Hidden pool rows take no space.
 int CommandPaletteView::PreferredContentHeightDip() const {
-    const int row_height = CommandRowHeight(tokens_);
-    const std::size_t row_count = result_rows_.size();
-    const auto rows = static_cast<int>(row_count);
-    const int spacing = rows > 0 ? tokens_.spacing_2_dip * (rows - 1) : 0;
-    return row_height * rows + spacing + tokens_.spacing_3_dip * 2;
+    const auto rows = static_cast<int>(VisibleRowCount());
+    int height = 2 * kCardPaddingDip + kQueryHeightDip;
+    if (rows > 0) {
+        height += kRowGapDip + kDividerHeightDip + rows * kRowHeightDip + rows * kRowGapDip;
+    }
+    return height;
 }
 
 void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
@@ -314,12 +384,15 @@ void CommandPaletteView::UpdateBounds() {
         return;
     }
     const CefSize window_size = window_->GetSize();
-    // The command palette shares the search palette's centered card geometry:
-    // same width and top offset, clamped to the window.
-    const DipRect bounds = SearchPaletteBounds(
+    // The command palette shares the search palette's centered card geometry: same width
+    // and top offset, clamped to the window. The overlay is the card plus its hairline and
+    // shadow extents.
+    const DipRect card = SearchPaletteBounds(
         {.x = 0, .y = 0, .width = window_size.width, .height = window_size.height},
         PreferredContentHeightDip());
-    overlay_.get()->SetBounds(CefRect(bounds.x, bounds.y, bounds.width, bounds.height));
+    card_.SetContentSize(card.width, card.height);
+    overlay_.get()->SetBounds(
+        OverlayCard::OverlayBoundsForContent(CefRect(card.x, card.y, card.width, card.height)));
 }
 
 void CommandPaletteView::ApplyTheme(ChromeTokens tokens) {
@@ -328,6 +401,7 @@ void CommandPaletteView::ApplyTheme(ChromeTokens tokens) {
         return;
     }
     tokens_ = tokens;
+    card_.Apply(tokens_);
     ApplySurfaceColors();
     ProjectResults();
 }
@@ -431,6 +505,8 @@ void CommandPaletteView::SubmitHighlighted() {
 }
 
 void CommandPaletteView::ProjectResults() {
+    // Rows are rebuilt on every Show(), so their text colors and fonts are applied here too.
+    ApplySurfaceColors();
     const std::vector<PaletteEntry> results = model_.Results();
     for (std::size_t index = 0; index < result_rows_.size(); ++index) {
         if (index >= results.size()) {
@@ -441,23 +517,41 @@ void CommandPaletteView::ProjectResults() {
         const bool highlighted = index == model_.highlighted_index();
         const PaletteSurfaceSlot slot =
             highlighted ? PaletteSurfaceSlot::kHighlightedRow : PaletteSurfaceSlot::kRow;
-        result_rows_[index]->SetBackgroundColor(ResolvePaletteColor(slot).argb);
+        const ArgbColor fill = ResolvePaletteColor(slot);
+        result_rows_[index]->SetBackgroundColor(fill.argb);
         // The row delegate remembers the slot so the theme-change re-assertion
         // restores the highlight rather than flattening every row.
         row_delegates_[index]->SetSlot(slot);
         result_labels_[index]->SetText(PaletteRowDisplayText(results[index]));
+        result_labels_[index]->SetBackgroundColor(fill.argb);
+        result_labels_[index]->SetFontList(highlighted ? "Geist, Medium 14px" : "Geist, 14px");
         result_labels_[index]->SetTooltipText(PaletteRowTooltipText(results[index]));
         result_labels_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
+        result_kinds_[index]->SetText(PaletteKindLabel(results[index]));
+        result_kinds_[index]->SetBackgroundColor(fill.argb);
+        result_kinds_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
     }
+    if (divider_ != nullptr) {
+        divider_->SetVisible(!results.empty());
+    }
+    // The card is exactly as tall as its visible rows.
+    UpdateBounds();
 }
 
 void CommandPaletteView::ApplySurfaceColors() {
     panel_->SetBackgroundColor(ResolvePaletteColor(PaletteSurfaceSlot::kPanel).argb);
+    divider_->SetBackgroundColor(ResolvePaletteColor(PaletteSurfaceSlot::kRow).argb);
+    divider_->GetChildViewAt(0)->SetBackgroundColor(
+        ResolvePaletteColor(PaletteSurfaceSlot::kBorder).argb);
     query_field_->SetBackgroundColor(ResolvePaletteColor(PaletteSurfaceSlot::kQueryWell).argb);
-    query_field_->SetFontList("Geist Mono, 14px");
+    query_field_->SetFontList("Geist, 15px");
     for (const CefRefPtr<CefLabelButton>& label : result_labels_) {
         label->SetEnabledTextColors(tokens_.text.argb);
         label->SetFontList("Geist, 14px");
+    }
+    for (const CefRefPtr<CefLabelButton>& kind : result_kinds_) {
+        kind->SetEnabledTextColors(tokens_.text_secondary.argb);
+        kind->SetFontList("Geist Mono, Medium 11px");
     }
 }
 

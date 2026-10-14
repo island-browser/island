@@ -40,6 +40,7 @@
 #include "runtime_style.h"
 #include "search_provider.h"
 #include "session_store.h"
+#include "startup_options.h"
 #include "window_agent_host.h"
 #include "zoom_policy.h"
 
@@ -2346,6 +2347,9 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->UpdateBounds();
     }
+    if (welcome_ != nullptr && welcome_->visible()) {
+        welcome_->UpdateBounds();
+    }
     ApplySidebarState();
     PublishChromeSnapshot();
 }
@@ -2841,6 +2845,18 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     window->SetThemeColor(CEF_ColorPrimaryForeground, tokens.text.argb);
     window->SetThemeColor(CEF_ColorSecondaryForeground, tokens.text_secondary.argb);
     window->SetThemeColor(CEF_ColorAccent, tokens.accent.argb);
+    // Textfields (the address field and both palette query fields) read their colors from the
+    // theme: the typed value in --text, the placeholder in --text-2, a selection in the accent
+    // with the page background as its text, and the field's own outline as the hairline.
+    window->SetThemeColor(CEF_ColorTextfieldBackground, tokens.surface.argb);
+    window->SetThemeColor(CEF_ColorTextfieldBackgroundDisabled, tokens.surface.argb);
+    window->SetThemeColor(CEF_ColorTextfieldForeground, tokens.text.argb);
+    window->SetThemeColor(CEF_ColorTextfieldForegroundDisabled, tokens.text.argb);
+    window->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder, tokens.text_secondary.argb);
+    window->SetThemeColor(CEF_ColorTextfieldSelectionBackground, tokens.accent.argb);
+    window->SetThemeColor(CEF_ColorTextfieldSelectionForeground, tokens.background.argb);
+    window->SetThemeColor(CEF_ColorTextfieldOutline, tokens.border.argb);
+    window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
     if (notify_views) {
         window->ThemeChanged();
     }
@@ -2855,6 +2871,9 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     }
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->ApplyTheme(tokens);
+    }
+    if (welcome_ != nullptr) {
+        welcome_->ApplyTheme(tokens);
     }
     chrome_snapshot_.theme = theme;
     ApplySidebarState();

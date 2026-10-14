@@ -1,6 +1,7 @@
 #include "welcome_flow.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -26,14 +27,18 @@ constexpr int kCardPaddingVerticalDip = 24;
 constexpr int kCardPaddingHorizontalDip = 30;
 constexpr int kSectionGapDip = 24;
 constexpr int kItemGapDip = 8;
+// Overlay width minus the card padding; the row stretches to the card, this only makes
+// the preferred size non-empty so CEF honors the fixed height.
+constexpr int kTextRowWidthDip = 480;
 constexpr int kTitleHeightDip = 36;
 constexpr int kLedeHeightDip = 24;
 constexpr int kLabelHeightDip = 16;
 constexpr int kControlHeightDip = 32;
 constexpr int kNoteLineHeightDip = 20;
 constexpr std::size_t kNoteLineChars = 64;
-// Paints a little slack so a font-metric rounding never clips the footer.
-constexpr int kHeightSlackDip = 8;
+// The dim layer behind the card (alpha black): lighter over the light canvas.
+constexpr std::uint32_t kScrimLightArgb = 0x47000000U;
+constexpr std::uint32_t kScrimDarkArgb = 0x99000000U;
 
 CefBoxLayoutSettings VerticalLayout(int spacing, const CefInsets& insets = CefInsets()) {
     CefBoxLayoutSettings settings;
@@ -117,7 +122,7 @@ int WelcomeFlow::ContentHeightDip(int readable_sources, int note_lines) {
     const int appearance = kLabelHeightDip + kItemGapDip + kControlHeightDip + 2 * kHairlineDip;
     const int actions = kControlHeightDip + 2 * kHairlineDip;
     return 2 * kHairlineDip + 2 * kCardPaddingVerticalDip + header + kSectionGapDip + appearance +
-           kSectionGapDip + import_height + kSectionGapDip + actions + kHeightSlackDip;
+           kSectionGapDip + import_height + kSectionGapDip + actions;
 }
 
 WelcomeFlow::ButtonColors WelcomeFlow::SegmentColors(const ChromeTokens& tokens, bool selected) {
@@ -201,13 +206,25 @@ WelcomeFlow::WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, Chr
     CEF_REQUIRE_UI_THREAD();
     source_checked_.assign(sources_.size(), true);
     BuildViews();
+    // The overlay covers the window: a translucent scrim that centers the shadowed card.
+    scrim_delegate_ = new OverlayFillDelegate(ArgbColor{.argb = kScrimDarkArgb});
+    scrim_panel_ = CefPanel::CreatePanel(scrim_delegate_);
+    {
+        CefBoxLayoutSettings settings;
+        settings.horizontal = static_cast<int>(true);
+        settings.main_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        scrim_panel_->SetToBoxLayout(settings);
+    }
+    scrim_panel_->AddChildView(shadow_.Wrap(panel_, ThemeOfTokens(tokens_)));
     ApplyColors();
 }
 
 void WelcomeFlow::CreateOverlay() {
     // can_activate is true so the text field can take keyboard focus. The overlay only exists
     // while shown (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
-    overlay_.Adopt(window_->AddOverlayView(panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
+    overlay_.Adopt(
+        window_->AddOverlayView(scrim_panel_, CEF_DOCKING_MODE_CUSTOM, /*can_activate=*/true));
     if (overlay_.has_overlay()) {
         overlay_.get()->SetVisible(false);
     }
@@ -223,7 +240,8 @@ CefRefPtr<CefPanel> WelcomeFlow::MakePanel(SurfaceSlot slot) {
     return panel;
 }
 
-CefRefPtr<CefLabelButton> WelcomeFlow::MakeText(const std::string& text, TextRole role) {
+CefRefPtr<CefPanel> WelcomeFlow::MakeText(const std::string& text, TextRole role,
+                                          CefRefPtr<CefLabelButton>* label_out) {
     CefRefPtr<CefLabelButton> label = CefLabelButton::CreateLabelButton(button_delegate_, text);
     label->SetID(kThemeSystemId - 1);
     label->SetAccessibleName(text);
@@ -244,9 +262,21 @@ CefRefPtr<CefLabelButton> WelcomeFlow::MakeText(const std::string& text, TextRol
             height = kNoteLineHeightDip;
             break;
     }
-    label->SetMinimumSize(CefSize(0, height));
+    // The row stretches the label to the row height, so the text is centered on a line
+    // of exactly |height| DIP whatever padding the label button adds.
+    CefRefPtr<WelcomeSurfaceDelegate> delegate =
+        new WelcomeSurfaceDelegate(this, SurfaceSlot::kCard, CefSize(kTextRowWidthDip, height));
+    surface_delegates_.push_back(delegate);
+    CefRefPtr<CefPanel> row = CefPanel::CreatePanel(delegate);
+    panels_.emplace_back(row, SurfaceSlot::kCard);
+    CefRefPtr<CefBoxLayout> layout = row->SetToBoxLayout(HorizontalLayout(0));
+    row->AddChildView(label);
+    layout->SetFlexForView(label, 1);
     texts_.push_back({label, role});
-    return label;
+    if (label_out != nullptr) {
+        *label_out = label;
+    }
+    return row;
 }
 
 void WelcomeFlow::BuildViews() {
@@ -343,14 +373,15 @@ void WelcomeFlow::BuildViews() {
         CefRefPtr<CefPanel> notes = MakePanel(SurfaceSlot::kCard);
         notes->SetToBoxLayout(VerticalLayout(0));
         for (std::size_t line = 0; line < note_lines.size(); ++line) {
-            CefRefPtr<CefLabelButton> note = MakeText(note_lines[line], TextRole::kNote);
+            CefRefPtr<CefLabelButton> note_label;
+            CefRefPtr<CefPanel> note = MakeText(note_lines[line], TextRole::kNote, &note_label);
             if (line == 0) {
                 // Screen readers get the whole note once, from its first line.
                 std::string full;
                 for (std::size_t i = 0; i < note_lines.size(); ++i) {
                     full += (i == 0 ? "" : " ") + note_lines[i];
                 }
-                note->SetAccessibleName(full);
+                note_label->SetAccessibleName(full);
             }
             notes->AddChildView(note);
         }
@@ -372,6 +403,7 @@ void WelcomeFlow::BuildViews() {
     import_button_->SetAccessibleName("Import and start browsing");
     import_button_->SetFocusable(true);
     import_button_->SetInkDropEnabled(true);
+    import_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
     import_button_->SetMinimumSize(CefSize(128, kControlHeightDip));
     import_outline_->AddChildView(import_button_);
     actions->AddChildView(import_outline_);
@@ -381,6 +413,7 @@ void WelcomeFlow::BuildViews() {
     start_button_->SetAccessibleName("Start browsing without importing");
     start_button_->SetFocusable(true);
     start_button_->SetInkDropEnabled(true);
+    start_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
     start_button_->SetMinimumSize(CefSize(128, kControlHeightDip + 2 * kHairlineDip));
     actions->AddChildView(start_button_);
     card_->AddChildView(actions);
@@ -500,10 +533,9 @@ void WelcomeFlow::UpdateBounds() {
         return;
     }
     const CefSize window_size = window_->GetSize();
-    const int height = ContentHeightDip(readable_count_, note_line_count_);
-    const int x = std::max(0, (static_cast<int>(window_size.width) - WidthDip()) / 2);
-    const int y = std::max(0, (static_cast<int>(window_size.height) - height) / 2);
-    overlay_.get()->SetBounds(CefRect(x, y, WidthDip(), height));
+    shadow_.SetCardSize(WidthDip(), ContentHeightDip(readable_count_, note_line_count_));
+    overlay_.get()->SetBounds(CefRect(0, 0, window_size.width, window_size.height));
+    scrim_panel_->Layout();
 }
 
 void WelcomeFlow::ApplyTheme(ChromeTokens tokens) {
@@ -531,6 +563,7 @@ void WelcomeFlow::Detach() {
     }
     static_cast<void>(overlay_lifetime_.Detach());
     overlay_.DestroyNow();
+    scrim_delegate_ = nullptr;
     window_ = nullptr;
 }
 
@@ -538,6 +571,14 @@ void WelcomeFlow::Detach() {
 // construction, on every theme/selection change, and after CEF's theme reset.
 void WelcomeFlow::ApplyColors() {
     CEF_REQUIRE_UI_THREAD();
+    const ChromeTheme theme = ThemeOfTokens(tokens_);
+    shadow_.Apply(theme);
+    if (scrim_delegate_ != nullptr && scrim_panel_ != nullptr) {
+        const ArgbColor scrim{.argb = theme == ChromeTheme::kDark ? kScrimDarkArgb
+                                                                  : kScrimLightArgb};
+        scrim_delegate_->SetColor(scrim);
+        scrim_panel_->SetBackgroundColor(scrim.argb);
+    }
     for (const std::pair<CefRefPtr<CefPanel>, SurfaceSlot>& entry : panels_) {
         entry.first->SetBackgroundColor(ResolveColor(entry.second).argb);
     }

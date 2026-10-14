@@ -11,6 +11,7 @@
 #include "browser_chrome.h"
 #include "design_tokens.h"
 #include "overlay_lifetime.h"
+#include "overlay_card.h"
 #include "prefs_store.h"
 
 class CefLabelButton;
@@ -56,6 +57,8 @@ class WelcomeFlow final {
     void Show();
     void Hide();
     void ApplyTheme(ChromeTokens tokens);
+    // Re-centers the card and re-fits the scrim to the window.
+    void UpdateBounds();
     // Drops the window/overlay references and detaches every delegate. Safe to
     // call more than once.
     void Detach();
@@ -111,7 +114,10 @@ class WelcomeFlow final {
     void BuildViews();
     void CreateOverlay();
     CefRefPtr<CefPanel> MakePanel(SurfaceSlot slot);
-    CefRefPtr<CefLabelButton> MakeText(const std::string& text, TextRole role);
+    // A text line is a label button inside a fixed-height row: CEF label buttons add their
+    // own vertical padding, so the row (not the button) sets the line pitch.
+    CefRefPtr<CefPanel> MakeText(const std::string& text, TextRole role,
+                                 CefRefPtr<CefLabelButton>* label_out = nullptr);
     void HandleButtonPressed(int view_id);
     // CEF wipes custom view colors when a theme change is delivered; the delegates
     // report it here and one coalesced pass repaints everything.
@@ -120,7 +126,6 @@ class WelcomeFlow final {
     void ApplyColors();
     void UpdateImportButtonState();
     [[nodiscard]] bool AnyCheckedAvailableSource() const;
-    void UpdateBounds();
     [[nodiscard]] ArgbColor ResolveColor(SurfaceSlot slot) const;
 
     WelcomeFlowHost* host_;
@@ -147,6 +152,12 @@ class WelcomeFlow final {
     CefRefPtr<CefLabelButton> start_button_;
     OverlaySlot overlay_;
     OverlayLifetime overlay_lifetime_;
+    // The overlay root: a translucent full-window scrim that centers the shadowed card. The
+    // scrim is part of the one overlay (a second, always-present overlay would swallow
+    // mouse input on macOS), so it exists exactly while the card does.
+    CefRefPtr<CefPanel> scrim_panel_;
+    CefRefPtr<OverlayFillDelegate> scrim_delegate_;
+    OverlayShadow shadow_;
     CefRefPtr<WelcomeSurfaceDelegate> panel_delegate_;
     std::vector<CefRefPtr<WelcomeSurfaceDelegate>> surface_delegates_;
     CefRefPtr<WelcomeButtonDelegate> button_delegate_;
