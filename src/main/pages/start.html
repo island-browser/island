@@ -102,7 +102,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
       button.setAttribute("aria-checked", on ? "true" : "false");
       button.tabIndex = on ? 0 : -1;
     });
-    input.placeholder = agent ? "Ask the agent to do something" : "Search " + state.engine + " or type an address";
+    input.placeholder = agent ? "Ask the agent to do something" : "Search " + state.engine;
     go.setAttribute("aria-label", agent ? "Ask agent" : "Search");
     go.disabled = !input.value.trim();
   }
