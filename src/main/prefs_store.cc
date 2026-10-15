@@ -73,9 +73,10 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         }
         state.agent_panel_open = open->bool_val;
     }
-    for (const auto& [key, field] :
-         {std::pair{"auto_check_updates", &state.auto_check_updates},
-          std::pair{"include_prereleases", &state.include_prereleases}}) {
+    for (const auto& [key, field] : {std::pair{"auto_check_updates", &state.auto_check_updates},
+                                     std::pair{"include_prereleases", &state.include_prereleases},
+                                     std::pair{"block_ads", &state.block_ads},
+                                     std::pair{"block_trackers", &state.block_trackers}}) {
         if (const json::Value* value = root.FindMember(key)) {
             if (!value->IsBool()) {
                 return Fail(PrefsError::kSchemaError);
@@ -97,6 +98,17 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             return Fail(PrefsError::kSchemaError);
         }
         state.last_update_check = last_check->int_val;
+    }
+    if (const json::Value* allowlist = root.FindMember("content_blocker_allowlist")) {
+        if (!allowlist->IsArray()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        for (const json::Value& site : allowlist->array_val) {
+            if (!site.IsString()) {
+                return Fail(PrefsError::kSchemaError);
+            }
+            state.content_blocker_allowlist.push_back(site.string_val);
+        }
     }
     return {PrefsError::kNone, state};
 }
@@ -137,6 +149,19 @@ std::string SerializeToJson(const PrefsState& state) {
     w.StringValue(state.search_engine);
     w.Key("start_mode");
     w.StringValue(state.start_mode);
+    w.Key("block_ads");
+    w.BoolValue(state.block_ads);
+    w.Key("block_trackers");
+    w.BoolValue(state.block_trackers);
+    if (!state.content_blocker_allowlist.empty()) {
+        w.Key("content_blocker_allowlist");
+        w.StartArray();
+        for (const std::string& site : state.content_blocker_allowlist) {
+            w.ArrayElement();
+            w.StringValue(site);
+        }
+        w.EndArray();
+    }
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);

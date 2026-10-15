@@ -1,6 +1,7 @@
 #ifndef ISLAND_TAB_H_
 #define ISLAND_TAB_H_
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -59,6 +60,10 @@ class Tab {
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const noexcept;
     [[nodiscard]] bool has_browser() const noexcept;
 
+    void IncrementBlockedRequests() noexcept { ++blocked_requests_; }
+    void ResetBlockedRequests() noexcept { blocked_requests_ = 0; }
+    [[nodiscard]] std::uint64_t blocked_requests() const noexcept { return blocked_requests_; }
+
   private:
     TabId id_;
     std::string startup_url_;
@@ -68,6 +73,7 @@ class Tab {
     CefRefPtr<CefBrowserView> browser_view_;
     CefRefPtr<CefBrowser> browser_;
     CefRefPtr<CefImage> favicon_;
+    std::uint64_t blocked_requests_ = 0;
 };
 
 }  // namespace island

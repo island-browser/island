@@ -206,6 +206,36 @@ TEST(PrefsStoreTest, GivenSearchSettingsWhenSavedThenTheyRoundTripAndStayOptiona
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
 }
 
+TEST(PrefsStoreTest, GivenContentBlockerPrefsWhenSavedThenTheyRoundTripAndStayOptional) {
+    const std::filesystem::path path = TempPath("content_blocker.json");
+    PrefsState state;
+    state.block_ads = false;
+    state.block_trackers = true;
+    state.content_blocker_allowlist = {"example.com", "news.example"};
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_FALSE(loaded.state.block_ads);
+    EXPECT_TRUE(loaded.state.block_trackers);
+    EXPECT_EQ(loaded.state.content_blocker_allowlist, state.content_blocker_allowlist);
+
+    WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"system"})");
+    const PrefsLoadResult legacy = PrefsStore::Load(path);
+    EXPECT_EQ(legacy.error, PrefsError::kNone);
+    EXPECT_TRUE(legacy.state.block_ads);
+    EXPECT_TRUE(legacy.state.block_trackers);
+    EXPECT_TRUE(legacy.state.content_blocker_allowlist.empty());
+
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":false,"theme":"system","block_ads":"yes"})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    WriteFile(
+        path,
+        R"({"version":1,"onboarding_completed":false,"theme":"system","content_blocker_allowlist":[1]})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    std::filesystem::remove(path);
+}
+
 TEST(PrefsStoreTest, GivenThemeTokensWhenConvertedThenTheyRoundTripStrictly) {
     ThemePreference parsed = ThemePreference::kSystem;
     EXPECT_TRUE(ThemePreferenceFromString("system", parsed));

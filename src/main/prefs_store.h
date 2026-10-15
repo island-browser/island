@@ -47,6 +47,11 @@ struct PrefsState {
     // values are resolved to the defaults where they are read.
     std::string search_engine = "google";
     std::string start_mode = "search";
+    // Native network filtering. Optional in schema v1 so existing profiles
+    // adopt the privacy-preserving defaults without migration.
+    bool block_ads = true;
+    bool block_trackers = true;
+    std::vector<std::string> content_blocker_allowlist;
 
     bool operator==(const PrefsState&) const = default;
 };

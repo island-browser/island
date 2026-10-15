@@ -16,6 +16,7 @@
 #include "cef_address_parser.h"
 #include "cef_update_fetcher.h"
 #include "clipboard.h"
+#include "content_blocker_policy.h"
 #include "design_tokens.h"
 #include "download_path.h"
 #include "include/base/cef_bind.h"
@@ -27,6 +28,7 @@
 #include "include/cef_frame.h"
 #include "include/cef_image.h"
 #include "include/cef_parser.h"
+#include "include/cef_request.h"
 #include "include/cef_task.h"
 #include "include/cef_values.h"
 #include "include/views/cef_browser_view.h"
@@ -174,6 +176,9 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
     }
     keymap_ = Keymap::WithOverrides(prefs_.keybindings);
+    content_blocker_ = new CefContentBlocker(PrefsStore::DefaultPrefsFilePath().parent_path(),
+                                             [this] { ScheduleLocalPagesRender(); });
+    ApplyContentBlockerPolicy();
     ConfigureUpdater(DefaultUpdaterConfig(), std::make_unique<CefUpdateFetcher>());
     chrome_snapshot_.rail_bounds = {.x = 0,
                                     .y = 0,
@@ -984,6 +989,7 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("shortcuts", std::move(shortcuts))
             .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
             .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
+            .Set("privacy", ContentBlockerStateJson())
             .Set("update", UpdateStateJson())
             .Set("message", Value::String(settings_message_))
             .Set("focus", Value::String(settings_focus_));
@@ -1040,6 +1046,11 @@ std::string BrowserWindow::TabOverviewStateJson() const {
                     .Set("active", Value::Bool(space.has_active_tab() &&
                                                space.active_tab_index() == tab_index))
                     .Set("pinned", Value::Bool(tab.pinned()))
+                    .Set(
+                        "blocked",
+                        Value::Int(static_cast<std::int64_t>(std::min<std::uint64_t>(
+                            tab.blocked_requests(),
+                            static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())))))
                     .Set("favicon", Value::String(FaviconDataUrl(tab.favicon()))));
         }
         spaces.Push(Value::MakeObject()
@@ -1098,6 +1109,41 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         }
     } else if (type == "open_agent") {
         SetAgentPanelOpen(true);
+    } else if (type == "set_content_blocker_pref") {
+        const json::Value* value = message.FindMember("value");
+        if (value == nullptr || !value->IsBool()) {
+            return;
+        }
+        const std::string_view key = message.StringOr("key", "");
+        if (key == "ads") {
+            prefs_.block_ads = value->bool_val;
+        } else if (key == "trackers") {
+            prefs_.block_trackers = value->bool_val;
+        } else {
+            return;
+        }
+        SavePrefs();
+        ApplyContentBlockerPolicy();
+    } else if (type == "add_content_blocker_site") {
+        const std::string site = NormalizeAllowlistSite(message.StringOr("site", ""));
+        if (!site.empty() && std::find(prefs_.content_blocker_allowlist.begin(),
+                                       prefs_.content_blocker_allowlist.end(),
+                                       site) == prefs_.content_blocker_allowlist.end()) {
+            prefs_.content_blocker_allowlist.push_back(site);
+            std::sort(prefs_.content_blocker_allowlist.begin(),
+                      prefs_.content_blocker_allowlist.end());
+            SavePrefs();
+            ApplyContentBlockerPolicy();
+        }
+    } else if (type == "remove_content_blocker_site") {
+        const std::string site = NormalizeAllowlistSite(message.StringOr("site", ""));
+        std::erase(prefs_.content_blocker_allowlist, site);
+        SavePrefs();
+        ApplyContentBlockerPolicy();
+    } else if (type == "update_content_blocker") {
+        if (content_blocker_ != nullptr) {
+            content_blocker_->UpdateNow();
+        }
     } else if (type == "set_binding" || type == "reset_binding") {
         const std::optional<KeyAction> action = KeyActionFromId(message.StringOr("action", ""));
         if (!action.has_value()) {
@@ -2028,6 +2074,46 @@ CefRefPtr<CefLifeSpanHandler> BrowserWindow::GetLifeSpanHandler() { return this;
 
 CefRefPtr<CefLoadHandler> BrowserWindow::GetLoadHandler() { return this; }
 
+CefRefPtr<CefRequestHandler> BrowserWindow::GetRequestHandler() { return this; }
+
+CefRefPtr<CefResourceRequestHandler> BrowserWindow::GetResourceRequestHandler(
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request, bool, bool,
+    const CefString&, bool&) {
+    if (browser == nullptr || request == nullptr || content_blocker_ == nullptr ||
+        ShouldBypassContentBlocker(request->GetURL().ToString(), request->GetResourceType())) {
+        return nullptr;
+    }
+    return this;
+}
+
+CefResourceRequestHandler::ReturnValue BrowserWindow::OnBeforeResourceLoad(
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
+    CefRefPtr<CefCallback>) {
+    if (browser == nullptr || request == nullptr || content_blocker_ == nullptr) {
+        return RV_CONTINUE;
+    }
+    const std::string url = request->GetURL().ToString();
+    const cef_resource_type_t resource_type = request->GetResourceType();
+    if (ShouldBypassContentBlocker(url, resource_type)) {
+        return RV_CONTINUE;
+    }
+    const CefRefPtr<CefFrame> main_frame = browser->GetMainFrame();
+    const std::string source_url = main_frame != nullptr ? main_frame->GetURL().ToString() : "";
+    if (source_url.empty()) {
+        return RV_CONTINUE;
+    }
+    const ContentBlockerResult result =
+        content_blocker_->Check(url, source_url, ContentBlockerRequestType(resource_type));
+    if (!result.blocked || result.exception) {
+        return RV_CONTINUE;
+    }
+    const int identifier = browser->GetIdentifier();
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(&BrowserWindow::RecordBlockedRequest,
+                                                    CefRefPtr<BrowserWindow>(this), identifier)));
+    return RV_CANCEL;
+}
+
 void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                     const CefString& url) {
     CEF_REQUIRE_UI_THREAD();
@@ -2198,6 +2284,8 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
         return;
     }
 
+    // The blocked-request badge counts the current page, not the tab's history.
+    owner->ResetBlockedRequests();
     owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
 }
 
@@ -2279,6 +2367,9 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     // AI-agent tools over MCP on 127.0.0.1. The smoke run stays offline and
     // deterministic, so only persisted windows serve them.
     if (persist_session_) {
+        if (content_blocker_ != nullptr) {
+            content_blocker_->Start();
+        }
         agent_host_ = std::make_unique<WindowAgentHost>(*this);
         static_cast<void>(agent_host_->StartEndpoint(agent::DefaultDiscoveryFilePath()));
         if (prefs_.agent_panel_open) {
@@ -2316,6 +2407,9 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     CloseAgentPanelAndSession();
     if (updater_ != nullptr) {
         updater_->Cancel();
+    }
+    if (content_blocker_ != nullptr) {
+        content_blocker_->Stop();
     }
     DetachChromeAndObservers();
     window_ = nullptr;
@@ -3074,6 +3168,60 @@ void BrowserWindow::SavePrefs() const {
         return;
     }
     static_cast<void>(PrefsStore::Save(PrefsStore::DefaultPrefsFilePath(), prefs_));
+}
+
+void BrowserWindow::ApplyContentBlockerPolicy() {
+    if (content_blocker_ != nullptr) {
+        std::vector<std::string> allowlist;
+        allowlist.reserve(prefs_.content_blocker_allowlist.size());
+        for (const std::string& entry : prefs_.content_blocker_allowlist) {
+            std::string normalized = NormalizeAllowlistSite(entry);
+            if (!normalized.empty()) {
+                allowlist.push_back(std::move(normalized));
+            }
+        }
+        std::sort(allowlist.begin(), allowlist.end());
+        allowlist.erase(std::unique(allowlist.begin(), allowlist.end()), allowlist.end());
+        content_blocker_->SetPolicy(prefs_.block_ads, prefs_.block_trackers, std::move(allowlist));
+    }
+}
+
+json::Value BrowserWindow::ContentBlockerStateJson() const {
+    using json::Value;
+    const ContentBlockerStatus status =
+        content_blocker_ != nullptr ? content_blocker_->status() : ContentBlockerStatus{};
+    Value allowlist = Value::MakeArray();
+    for (const std::string& site : prefs_.content_blocker_allowlist) {
+        allowlist.Push(Value::String(site));
+    }
+    return Value::MakeObject()
+        .Set("block_ads", Value::Bool(prefs_.block_ads))
+        .Set("block_trackers", Value::Bool(prefs_.block_trackers))
+        .Set("compiled_in", Value::Bool(status.compiled_in))
+        .Set("ready", Value::Bool(status.ready))
+        .Set("updating", Value::Bool(status.updating))
+        .Set("ads_rules", Value::Int(status.ads_rule_count))
+        .Set("tracker_rules", Value::Int(status.tracker_rule_count))
+        .Set("last_updated", Value::Int(status.last_updated))
+        .Set("error", Value::String(status.error))
+        .Set("allowlist", std::move(allowlist));
+}
+
+void BrowserWindow::RecordBlockedRequest(int browser_identifier) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    for (Space& space : spaces_) {
+        for (Tab& tab : space.tabs()) {
+            const CefRefPtr<CefBrowser> browser = tab.browser();
+            if (browser != nullptr && browser->GetIdentifier() == browser_identifier) {
+                tab.IncrementBlockedRequests();
+                ScheduleLocalPagesRender();
+                return;
+            }
+        }
+    }
 }
 
 bool BrowserWindow::SetThemePreference(ThemePreference preference) {

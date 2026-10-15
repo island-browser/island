@@ -20,11 +20,14 @@
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "browser_import.h"
+#include "cef_content_blocker.h"
 #include "chrome_snapshot.h"
 #include "clipboard.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
 #include "include/cef_client.h"
+#include "include/cef_request_handler.h"
+#include "include/cef_resource_request_handler.h"
 #include "include/internal/cef_types.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
@@ -70,6 +73,8 @@ class BrowserWindow : public CefClient,
                       public CefDownloadHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
+                      public CefRequestHandler,
+                      public CefResourceRequestHandler,
                       public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public BrowserChromeHost,
@@ -338,6 +343,15 @@ class BrowserWindow : public CefClient,
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
     CefRefPtr<CefLoadHandler> GetLoadHandler() override;
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override;
+
+    CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+        CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+        bool is_navigation, bool is_download, const CefString& request_initiator,
+        bool& disable_default_handling) override;
+    ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                     CefRefPtr<CefRequest> request,
+                                     CefRefPtr<CefCallback> callback) override;
 
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                          const CefString& url) override;
@@ -441,6 +455,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] ChromeTokens ResolvedTokens(ChromeTheme theme) const;
     // Persists prefs best-effort (logs via error code, never throws).
     void SavePrefs() const;
+    void ApplyContentBlockerPolicy();
+    [[nodiscard]] json::Value ContentBlockerStateJson() const;
+    void RecordBlockedRequest(int browser_identifier);
     // Navigates the active tab to a stored bookmark URL through the single
     // address-validation path; a URL the allow-list rejects is a no-op.
     void OpenBookmark(const PaletteBookmarkEntry& bookmark);
@@ -591,6 +608,7 @@ class BrowserWindow : public CefClient,
     // A one-shot Settings section to scroll to on the next render.
     std::string settings_focus_;
     std::unique_ptr<update::Updater> updater_;
+    CefRefPtr<CefContentBlocker> content_blocker_;
     // Most recent closed tabs, newest last (reopenable URLs), capped at
     // kClosedTabLimit.
     std::vector<std::string> closed_tab_urls_;
