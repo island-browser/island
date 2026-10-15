@@ -12,6 +12,7 @@ FetchContent_Declare(
     URL_HASH SHA256=7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926
 )
 FetchContent_MakeAvailable(googletest)
+include(GoogleTest)
 
 add_executable(island_tests
     address_bar_model_test.cpp
@@ -27,6 +28,8 @@ add_executable(island_tests
     chrome/browser_chrome_style_test.cpp
     chrome/welcome_flow_style_test.cpp
     command_palette_test.cpp
+    content_blocker_policy_test.cpp
+    content_blocker_test.cpp
     design_tokens_test.cpp
     download_path_test.cpp
     keymap_test.cpp
@@ -59,9 +62,12 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/cef_content_blocker.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_update_fetcher.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/content_blocker.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/content_blocker_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"
@@ -89,7 +95,19 @@ add_executable(island_tests
 target_compile_features(island_tests PRIVATE cxx_std_20)
 target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
-                      island_agent)
+                      island_agent island_content_blocker_ffi)
+
+# Compile the exact same wrapper without the Rust definition to prove the
+# no-toolchain build remains an allow-all stub even when the main build has
+# content blocking enabled.
+add_executable(island_content_blocker_stub_tests
+    content_blocker_stub_test.cpp
+    "${CMAKE_SOURCE_DIR}/src/main/content_blocker.cc"
+)
+target_compile_features(island_content_blocker_stub_tests PRIVATE cxx_std_20)
+target_include_directories(island_content_blocker_stub_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main")
+target_link_libraries(island_content_blocker_stub_tests PRIVATE GTest::gtest_main)
+gtest_discover_tests(island_content_blocker_stub_tests)
 # browser_window.cc references the platform sidebar-hover seam (never called by
 # the headless tests, but the symbols must link), so mirror src/main's split.
 if(APPLE)
@@ -110,7 +128,6 @@ if(WIN32)
     target_compile_definitions(island_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-include(GoogleTest)
 gtest_discover_tests(island_tests)
 
 add_executable(island_resource_tests
