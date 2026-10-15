@@ -445,6 +445,27 @@ TEST(BrowserWindowPagesTest, AddressBarSearchesInsteadOfRejectingNonUrls) {
     EXPECT_EQ(search->FindMember("engines")->array_val.size(), 3U);
 }
 
+TEST(BrowserWindowPagesTest, HistorySettingsToggleAndClearAreExposedToTheLocalPage) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* history = state->FindMember("settings")->FindMember("history");
+    ASSERT_NE(history, nullptr);
+    EXPECT_TRUE(history->BoolOr("remember", false));
+
+    SendSettings(*window, R"({"type":"set_remember_history","value":false})");
+    state = json::Parse(window->SettingsStateJson());
+    EXPECT_FALSE(state->FindMember("settings")->FindMember("history")->BoolOr("remember", true));
+
+    SendSettings(*window, R"({"type":"set_remember_history","value":"no"})");
+    state = json::Parse(window->SettingsStateJson());
+    EXPECT_FALSE(state->FindMember("settings")->FindMember("history")->BoolOr("remember", true));
+
+    SendSettings(*window, R"({"type":"clear_history"})");
+    state = json::Parse(window->SettingsStateJson());
+    EXPECT_EQ(state->FindMember("settings")->StringOr("message", ""), "Browsing history cleared.");
+}
+
 TEST(BrowserWindowPagesTest, TheStartPageRemembersItsModeAndStatesTheEngine) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     EXPECT_EQ(window->start_mode(), "search");

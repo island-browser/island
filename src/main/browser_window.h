@@ -24,6 +24,7 @@
 #include "clipboard.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
+#include "history_recorder.h"
 #include "include/cef_client.h"
 #include "include/internal/cef_types.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -328,6 +329,7 @@ class BrowserWindow : public CefClient,
     void OnCommandPaletteSubmitted(const PaletteSelection& selection,
                                    std::string_view url_query) override;
     void OnCommandPaletteDismissed() override;
+    void OnCommandPaletteQueryChanged(std::string_view query) override;
 
     void OnSpaceRenameCommitted(std::string name) override;
     void OnSpaceRenameCancelled() override;
@@ -445,6 +447,8 @@ class BrowserWindow : public CefClient,
     // Navigates the active tab to a stored bookmark URL through the single
     // address-validation path; a URL the allow-list rejects is a no-op.
     void OpenBookmark(const PaletteBookmarkEntry& bookmark);
+    void OpenHistory(const PaletteHistoryEntry& history);
+    void ApplyHistoryResults(std::string query, std::vector<HistoryResult> results);
     // Detaches the projection from the current active tab before a mutation
     // changes which tab/space is active; Attach re-subscribes to the (possibly
     // new) active tab, pushes its snapshot through the address model and
@@ -576,6 +580,7 @@ class BrowserWindow : public CefClient,
     PrefsState prefs_;
     Keymap keymap_ = Keymap::Defaults();
     BookmarkState bookmarks_;
+    std::unique_ptr<HistoryRecorder> history_;
     std::unique_ptr<WelcomeFlow> welcome_;
     // Agent integration: the MCP tools endpoint and its DevTools bridge.
     // Created in OnWindowCreated for persisted (non-smoke) windows only.

@@ -157,6 +157,13 @@ class SettingsPage(unittest.TestCase):
         self.assertIn('id="engine"', html)
         self.assertIn('type: "set_search_engine"', html)
 
+    def test_offers_local_history_controls(self) -> None:
+        html = page("settings.html")
+        self.assertIn('id="history-remember"', html)
+        self.assertIn('id="history-clear"', html)
+        self.assertIn('type: "set_remember_history"', html)
+        self.assertIn('type: "clear_history"', html)
+
 
 class AgentMarkdownStatic(unittest.TestCase):
     def test_renderer_escapes_before_emitting_and_allows_three_schemes(self) -> None:
