@@ -14,6 +14,7 @@ add_library(island_browser_core STATIC
     app_runtime.cc
     browser_chrome.cc
     browser_window.cc
+    browser_window_research.cc
     cef_address_parser.cc
     cef_content_blocker.cc
     cef_update_fetcher.cc
@@ -34,6 +35,8 @@ add_library(island_browser_core STATIC
     browser_window_find_reader.cc
     navigation_state.cc
     prefs_store.cc
+    report_store.cc
+    research_prompt.cc
     search_palette.cc
     search_palette_model.cc
     search_engine.cc

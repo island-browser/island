@@ -64,6 +64,11 @@ PaletteMatchRank RankBookmarkEntry(const PaletteBookmarkEntry& bookmark, std::st
                     ClassifyPaletteMatch(bookmark.url, query));
 }
 
+PaletteMatchRank RankReportEntry(const PaletteReportEntry& report, std::string_view query) {
+    return std::min(ClassifyPaletteMatch(report.title, query),
+                    ClassifyPaletteMatch(report.question, query));
+}
+
 }  // namespace
 
 PaletteMatchRank ClassifyPaletteMatch(std::string_view candidate, std::string_view query) {
@@ -113,7 +118,7 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
                                                 const std::vector<PaletteSpaceEntry>& spaces,
                                                 const std::vector<PaletteBookmarkEntry>& bookmarks,
                                                 const std::vector<PaletteHistoryEntry>& history) {
-    return ComposePaletteResults(query, tabs, spaces, bookmarks, history, {});
+    return ComposePaletteResults(query, tabs, spaces, bookmarks, history, {}, {});
 }
 
 std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
@@ -122,9 +127,19 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
                                                 const std::vector<PaletteBookmarkEntry>& bookmarks,
                                                 const std::vector<PaletteHistoryEntry>& history,
                                                 const std::vector<PaletteCommandEntry>& commands) {
+    return ComposePaletteResults(query, tabs, spaces, bookmarks, history, commands, {});
+}
+
+std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
+                                                const std::vector<PaletteTabEntry>& tabs,
+                                                const std::vector<PaletteSpaceEntry>& spaces,
+                                                const std::vector<PaletteBookmarkEntry>& bookmarks,
+                                                const std::vector<PaletteHistoryEntry>& history,
+                                                const std::vector<PaletteCommandEntry>& commands,
+                                                const std::vector<PaletteReportEntry>& reports) {
     std::vector<PaletteEntry> canonical;
     canonical.reserve(tabs.size() + spaces.size() + commands.size() + bookmarks.size() +
-                      history.size() + 1U);
+                      reports.size() + history.size() + 1U);
     for (const PaletteTabEntry& tab : tabs) {
         canonical.push_back({.kind = PaletteEntryKind::kTab, .tab = tab});
     }
@@ -136,6 +151,9 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
     }
     for (const PaletteBookmarkEntry& bookmark : bookmarks) {
         canonical.push_back({.kind = PaletteEntryKind::kBookmark, .bookmark = bookmark});
+    }
+    for (const PaletteReportEntry& report : reports) {
+        canonical.push_back({.kind = PaletteEntryKind::kReport, .report = report});
     }
 
     if (TrimAsciiWhitespace(query).empty()) {
@@ -167,6 +185,8 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
                 rank = ClassifyPaletteMatch(entry.space.name, query);
             } else if (kind == PaletteEntryKind::kCommand) {
                 rank = ClassifyPaletteMatch(entry.command.title, query);
+            } else if (kind == PaletteEntryKind::kReport) {
+                rank = RankReportEntry(entry.report, query);
             }
             if (rank != PaletteMatchRank::kNone) {
                 scored.push_back({.entry = entry, .input_index = index, .rank = rank});
@@ -187,6 +207,7 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
     append_section(PaletteEntryKind::kSpace);
     append_section(PaletteEntryKind::kCommand);
     append_section(PaletteEntryKind::kBookmark);
+    append_section(PaletteEntryKind::kReport);
     for (const PaletteHistoryEntry& item : history) {
         results.push_back({.kind = PaletteEntryKind::kHistory, .history = item});
     }
@@ -265,8 +286,13 @@ void CommandPaletteModel::SetCommands(std::vector<PaletteCommandEntry> commands)
     highlighted_index_ = 0;
 }
 
+void CommandPaletteModel::SetReports(std::vector<PaletteReportEntry> reports) {
+    reports_ = std::move(reports);
+    highlighted_index_ = 0;
+}
+
 std::vector<PaletteEntry> CommandPaletteModel::Results() const {
-    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, history_, commands_);
+    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, history_, commands_, reports_);
 }
 
 std::optional<PaletteSelection> CommandPaletteModel::Submit() {
@@ -304,6 +330,8 @@ std::optional<PaletteSelection> CommandPaletteModel::Submit() {
         selection.history = entry.history;
     } else if (entry.kind == PaletteEntryKind::kCommand) {
         selection.command = entry.command;
+    } else if (entry.kind == PaletteEntryKind::kReport) {
+        selection.report = entry.report;
     } else {
         selection.space = entry.space;
     }

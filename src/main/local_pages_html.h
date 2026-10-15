@@ -17,6 +17,7 @@ namespace island {
 // the window injects into the page being read.
 [[nodiscard]] std::string_view ReaderPageHtml() noexcept;
 [[nodiscard]] std::string_view ReaderExtractScript() noexcept;
+[[nodiscard]] std::string_view ReportPageHtml() noexcept;
 
 [[nodiscard]] inline std::string_view LocalPageHtml(LocalPageKind kind) noexcept {
     switch (kind) {
@@ -28,6 +29,8 @@ namespace island {
             return TabOverviewPageHtml();
         case LocalPageKind::kStart:
             return StartPageHtml();
+        case LocalPageKind::kReport:
+            return ReportPageHtml();
     }
     return AgentPageHtml();
 }

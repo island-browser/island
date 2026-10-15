@@ -43,6 +43,8 @@ add_executable(island_tests
     peek_state_test.cpp
     prefs_store_test.cpp
     reader_mode_test.cpp
+    report_store_test.cpp
+    research_prompt_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
@@ -68,6 +70,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/browser_window_research.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_content_blocker.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_update_fetcher.cc"
@@ -88,6 +91,8 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/report_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/research_prompt.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"

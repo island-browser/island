@@ -73,9 +73,19 @@ struct PaletteCommandEntry {
     bool operator==(const PaletteCommandEntry&) const = default;
 };
 
+// Read-only snapshot of one finished research report. Selecting one opens it
+// in a new Report tab, by id.
+struct PaletteReportEntry {
+    std::string id;
+    std::string title;
+    std::string question;
+
+    bool operator==(const PaletteReportEntry&) const = default;
+};
+
 // The result kinds the palette can list. Canonical section order is
-// tabs-before-spaces-before-commands-before-bookmarks-before-history, with the kUrl
-// affordance always last. New kinds append so existing enum values stay stable.
+// tabs-before-spaces-before-commands-before-bookmarks-before-reports-before-history, with the
+// kUrl affordance always last. New kinds append so existing enum values stay stable.
 enum class PaletteEntryKind : std::uint8_t {
     kTab,       // activate the tab (in whatever space holds it)
     kSpace,     // make the space the active space
@@ -83,6 +93,7 @@ enum class PaletteEntryKind : std::uint8_t {
     kBookmark,  // navigate the active tab to the bookmark's stored URL
     kHistory,   // navigate the active tab to a local history result
     kCommand,   // run a browser command (e.g. "Sleep inactive tabs now")
+    kReport,    // open the research report in a new Report tab
 };
 
 // One row of palette results. `tab`, `space`, `url_query`, and `bookmark` are
@@ -99,6 +110,7 @@ struct PaletteEntry {
     PaletteBookmarkEntry bookmark;
     PaletteHistoryEntry history;
     PaletteCommandEntry command;
+    PaletteReportEntry report;
 
     bool operator==(const PaletteEntry&) const = default;
 };
@@ -115,6 +127,7 @@ struct PaletteSelection {
     PaletteBookmarkEntry bookmark;
     PaletteHistoryEntry history;
     PaletteCommandEntry command;
+    PaletteReportEntry report;
 
     bool operator==(const PaletteSelection&) const = default;
 };
@@ -178,6 +191,14 @@ enum class PaletteMatchRank : std::uint8_t {
     const std::vector<PaletteBookmarkEntry>& bookmarks,
     const std::vector<PaletteHistoryEntry>& history,
     const std::vector<PaletteCommandEntry>& commands);
+// With research reports too: they rank after bookmarks by the better of title and question.
+[[nodiscard]] std::vector<PaletteEntry> ComposePaletteResults(
+    std::string_view query, const std::vector<PaletteTabEntry>& tabs,
+    const std::vector<PaletteSpaceEntry>& spaces,
+    const std::vector<PaletteBookmarkEntry>& bookmarks,
+    const std::vector<PaletteHistoryEntry>& history,
+    const std::vector<PaletteCommandEntry>& commands,
+    const std::vector<PaletteReportEntry>& reports);
 
 class CommandPaletteModel {
   public:
@@ -206,6 +227,7 @@ class CommandPaletteModel {
     void SetBookmarks(std::vector<PaletteBookmarkEntry> bookmarks);
     void SetHistory(std::vector<PaletteHistoryEntry> history);
     void SetCommands(std::vector<PaletteCommandEntry> commands);
+    void SetReports(std::vector<PaletteReportEntry> reports);
 
     // Replaces the draft query and resets the highlight to the first row, so
     // narrowing results can never leave the highlight past the last row. A new
@@ -254,6 +276,7 @@ class CommandPaletteModel {
     std::vector<PaletteBookmarkEntry> bookmarks_;
     std::vector<PaletteHistoryEntry> history_;
     std::vector<PaletteCommandEntry> commands_;
+    std::vector<PaletteReportEntry> reports_;
     PaletteUrlValidator validator_;
     std::string query_;
     std::size_t highlighted_index_ = 0;

@@ -68,6 +68,8 @@ std::string PaletteKindLabel(const PaletteEntry& entry) {
             return "HISTORY";
         case PaletteEntryKind::kCommand:
             return "COMMAND";
+        case PaletteEntryKind::kReport:
+            return "REPORT";
     }
     return "";
 }
@@ -94,6 +96,8 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
         }
         case PaletteEntryKind::kCommand:
             return "Run command: " + entry.command.title;
+        case PaletteEntryKind::kReport:
+            return "Open research report: " + entry.report.title;
     }
     return "Palette result";
 }
@@ -118,6 +122,8 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
                    (entry.history.host.empty() ? "" : "  —  " + entry.history.host);
         case PaletteEntryKind::kCommand:
             return entry.command.title;
+        case PaletteEntryKind::kReport:
+            return entry.report.title;
     }
     return "";
 }
@@ -136,6 +142,9 @@ std::string PaletteRowTooltipText(const PaletteEntry& entry) {
             return entry.history.url;
         case PaletteEntryKind::kCommand:
             return "Run this command";
+        case PaletteEntryKind::kReport:
+            return entry.report.question.empty() ? "Open the report in a new tab"
+                                                 : entry.report.question;
     }
     return "";
 }
@@ -362,8 +371,8 @@ int CommandPaletteView::PreferredContentHeightDip() const {
 void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
                               std::vector<PaletteSpaceEntry> spaces,
                               std::vector<PaletteBookmarkEntry> bookmarks,
-                              std::vector<PaletteCommandEntry> commands) {
-    CEF_REQUIRE_UI_THREAD();
+                              std::vector<PaletteCommandEntry> commands,
+                              std::vector<PaletteReportEntry> reports) {    CEF_REQUIRE_UI_THREAD();
     if (detached_ || window_ == nullptr) {
         return;
     }
@@ -375,11 +384,12 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     }
     constexpr std::size_t kHistoryRowLimit = 8;
     const std::size_t pool_size =
-        tabs.size() + spaces.size() + commands.size() + bookmarks.size() + kHistoryRowLimit + 1;
+        tabs.size() + spaces.size() + commands.size() + reports.size() + bookmarks.size() + kHistoryRowLimit + 1;
     model_.SetTabs(std::move(tabs));
     model_.SetSpaces(std::move(spaces));
     model_.SetBookmarks(std::move(bookmarks));
     model_.SetCommands(std::move(commands));
+    model_.SetReports(std::move(reports));
     // Worst case: every tab and every space matches plus the go-to-URL row
     // that a non-empty query appends.
     RebuildResultRows(pool_size);

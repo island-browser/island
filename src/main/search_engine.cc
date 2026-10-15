@@ -50,7 +50,9 @@ std::string BuildSearchUrl(const SearchEngine& engine, std::string_view query) {
 }
 
 std::string_view NormalizeStartMode(std::string_view mode) noexcept {
-    return mode == kStartModeAgent ? kStartModeAgent : kStartModeSearch;
+    if (mode == kStartModeAgent) return kStartModeAgent;
+    if (mode == kStartModeResearch) return kStartModeResearch;
+    return kStartModeSearch;
 }
 
 }  // namespace island

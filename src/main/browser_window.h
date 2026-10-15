@@ -43,6 +43,8 @@
 #include "peek_overlay.h"
 #include "prefs_store.h"
 #include "reader_mode.h"
+#include "report_store.h"
+#include "research_prompt.h"
 #include "search_engine.h"
 #include "search_palette.h"
 #include "sidebar_state.h"
@@ -176,6 +178,78 @@ class BrowserWindow : public CefClient,
     // Applies one start page message ({search}, {ask_agent}, {set_start_mode})
     // coming from the tab `source` (nullptr in tests: the active tab).
     void HandleStartPageMessage(const json::Value& message, CefRefPtr<CefBrowser> source = nullptr);
+
+    // --- Research mode (the start page's third mode) -------------------------
+    // The start page shows this and drives it: it is also what a second start
+    // page tab sees. `seq` changes with every transition so a page can tell a
+    // fresh result from one the user already dismissed.
+    struct ResearchStatus {
+        std::uint64_t seq = 0;
+        // idle | running | done | cancelled | failed | not_installed
+        std::string state = "idle";
+        std::string message;
+        std::string question;
+        std::string report_id;
+        std::string report_title;
+    };
+    enum class ResearchStart : std::uint8_t {
+        kStarted,
+        kBusy,          // another research task or agent turn is running
+        kNotInstalled,  // the selected agent is not on PATH (status carries the message)
+        kFailed,        // the agent refused or could not be launched
+    };
+    struct ResearchStartResult {
+        ResearchStart code = ResearchStart::kFailed;
+        std::string message;
+    };
+    // Sends the research prompt (research_prompt.h) to the configured agent
+    // through the panel's session and opens the panel. The agent creates the
+    // research space and its tabs with the island-browser tools; the final
+    // report is opened in a Report tab by FinishResearch.
+    ResearchStartResult StartResearch(std::string_view question);
+    // Stops the running task (the agent is asked to cancel; the outcome arrives
+    // as a normal turn end).
+    void CancelResearch();
+    // Reads how the research turn ended and publishes it: a report becomes a
+    // Reports entry plus a Report tab; a cancel or failure becomes the status.
+    // Runs from a posted task after the session goes quiet; tests call it directly.
+    void FinishResearch();
+    void CompleteResearch(const ResearchOutcome& outcome);
+    [[nodiscard]] bool research_running() const noexcept { return research_.has_value(); }
+    [[nodiscard]] const ResearchStatus& research_status() const noexcept {
+        return research_status_;
+    }
+
+    // --- Reports ----------------------------------------------------------------
+    [[nodiscard]] const ReportState& reports() const noexcept { return reports_; }
+    // Opens report `id` in a new tab, in the space named `space_name` when one
+    // exists (the research space), else the active space. False for an unknown id.
+    bool OpenReportTab(std::string_view id, std::string_view space_name = {});
+    bool DeleteReport(std::string_view id);
+    // The report page's fixed data: URL, and the URL of one report (the fixed
+    // URL plus "#<id>"). Computed on first use (it needs CEF's base64 encoder).
+    [[nodiscard]] const std::string& ReportPageUrl() const;
+    [[nodiscard]] std::string ReportPageUrlFor(std::string_view id) const;
+    // The report id a tab URL names, or std::nullopt for any other URL.
+    [[nodiscard]] std::optional<std::string> ReportIdForUrl(std::string_view url) const;
+    [[nodiscard]] std::string ReportPageStateJson(std::string_view id) const;
+    // Applies one report page message for report `id` (taken from the tab's
+    // URL, never from the message); `source` is the hosting tab (nullptr in tests).
+    void HandleReportPageMessage(const json::Value& message, std::string_view id,
+                                 CefRefPtr<CefBrowser> source = nullptr);
+    // Test seams: where reports persist, and the report page URL (headless tests
+    // cannot base64-encode).
+    void SetReportsFileForTest(std::filesystem::path path);
+    void SetReportPageUrlForTest(std::string url) { report_page_url_ = std::move(url); }
+    // Marks a research task as running without sending anything, as if the
+    // prompt had gone out after `turns_ended_before` turns.
+    void SetResearchTaskForTest(std::string question, std::uint64_t turns_ended_before = 0) {
+        research_ = ResearchTask{.question = question,
+                                 .space_name = ResearchSpaceName(question),
+                                 .turns_ended_before = turns_ended_before};
+        research_status_.question = std::move(question);
+        research_status_.state = "running";
+    }
 
     // The ACP agent panel (Cmd/Ctrl+J): opens/closes the right-hand column,
     // creating the panel and its session on first use. No-op without chrome.
@@ -584,8 +658,20 @@ class BrowserWindow : public CefClient,
     // The panel's "send" path, shared by the start page's Ask agent mode.
     // Returns false when the session refused the turn (it is busy with another one).
     bool SubmitAgentPrompt(std::string text, bool include_context);
-    // Pushes StartPageStateJson to every tab currently showing the start page.
+    // Pushes StartPageStateJson to every tab currently showing the start page
+    // (and each open report page its report and theme).
     void RenderStartPages();
+    void RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const;
+    void SetResearchStatus(std::string state, std::string message);
+    void OnAgentSessionChanged();
+    void SaveReports() const;
+    // The "Continue in agent panel" button: opens the panel and, when its
+    // conversation does not hold the report yet, hands the report to the agent.
+    void ContinueReportInAgent(const ResearchReport& report, CefRefPtr<CefBrowser> source);
+    void SaveReportToFile(const ResearchReport& report, CefRefPtr<CefBrowser> source);
+    void ReportPageResult(CefRefPtr<CefBrowser> source, std::string_view kind,
+                          std::string_view text) const;
+    [[nodiscard]] json::Value ReportsListJson() const;
     void HandleSettingsMessage(const json::Value& message);
     void HandleOverviewMessage(const json::Value& message);
     // Settings > Updates: the page's update messages, the state it renders,
@@ -667,6 +753,21 @@ class BrowserWindow : public CefClient,
 
     std::string initial_url_;
     mutable std::string start_page_url_;
+    mutable std::string report_page_url_;
+    // The research task in flight: what was asked, the space the agent was told
+    // to create, and how many turns had ended before the prompt went out.
+    struct ResearchTask {
+        std::string question;
+        std::string space_name;
+        std::uint64_t turns_ended_before = 0;
+    };
+    std::optional<ResearchTask> research_;
+    bool research_finish_posted_ = false;
+    ResearchStatus research_status_;
+    // The report whose text the agent session's conversation already holds.
+    std::string report_in_session_;
+    ReportState reports_;
+    std::filesystem::path reports_path_;
     AddressBarModel address_bar_model_;
     std::unique_ptr<BrowserChrome> chrome_;
     std::unique_ptr<SearchPalette> search_palette_;

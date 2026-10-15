@@ -49,6 +49,10 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     [[nodiscard]] std::string DevStateReport() const;
     // Opens the find bar on the active tab and searches for `query` (dev capture).
     void FindInPage(const std::string& query);
+    // `research:<question>` starts a Research task as the start page does;
+    // `open_report` opens the newest report in a new tab.
+    void StartResearch(const std::string& question);
+    void OpenNewestReport();
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

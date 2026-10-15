@@ -10,7 +10,9 @@
 //       Besides the menu-backed names, `navigate:<address>` loads an address in the active
 //       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state. `peek:<address>`
 //       opens the peek card, `sleep_tabs` puts eligible inactive tabs to sleep and
-//       `sleep_report` logs the sleeping-tab count, and `wait:<seconds>` pauses the sequence.
+//       `sleep_report` logs the sleeping-tab count, `wait:<seconds>` pauses the sequence,
+//       `research:<question>` starts a Research task and `open_report` opens the newest stored
+//       report in a new tab.
 //   --island-dev-capture=/tmp/shot.png
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4

@@ -49,8 +49,10 @@ TEST(SearchEngineTest, GivenEachEngineWhenBuiltThenItUsesItsOwnQueryParameter) {
               "https://yandex.com/search/?text=island%20browser");
 }
 
-TEST(SearchEngineTest, GivenStartModesWhenNormalizedThenOnlyAgentSticks) {
+TEST(SearchEngineTest, GivenStartModesWhenNormalizedThenOnlyAgentAndResearchStick) {
     EXPECT_EQ(NormalizeStartMode("agent"), kStartModeAgent);
+    EXPECT_EQ(NormalizeStartMode("research"), kStartModeResearch);
+    EXPECT_EQ(NormalizeStartMode("Research"), kStartModeSearch);
     EXPECT_EQ(NormalizeStartMode("search"), kStartModeSearch);
     EXPECT_EQ(NormalizeStartMode(""), kStartModeSearch);
     EXPECT_EQ(NormalizeStartMode("Agent"), kStartModeSearch);

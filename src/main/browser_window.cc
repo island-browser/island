@@ -251,6 +251,8 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         history_options.segment_path =
             PrefsStore::DefaultPrefsFilePath().parent_path() / "history" / "index.seg";
         history_ = std::make_unique<HistoryRecorder>(std::move(history_options));
+        reports_path_ = ReportStore::DefaultReportsFilePath();
+        reports_ = ReportStore::Load(reports_path_).state;
     }
     keymap_ = Keymap::WithOverrides(prefs_.keybindings);
     sleep_policy_.SetMinutes(prefs_.tab_sleep_minutes);
@@ -794,7 +796,7 @@ void BrowserWindow::EnsureAgentSession() {
             CefPostTask(TID_UI,
                         CefCreateClosureTask(base::BindOnce(&RunAgentTask, std::move(task))));
         },
-        [this] { ScheduleLocalPagesRender(); });
+        [this] { OnAgentSessionChanged(); });
     agent_session_->Configure(AgentConfig());
 }
 
@@ -929,6 +931,10 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
         case LocalPageKind::kTabOverview:
             HandleOverviewMessage(message);
             return;
+        case LocalPageKind::kReport:
+            // Report pages live in tabs and reach HandleReportPageMessage through
+            // the tab's console handler, which knows which report the URL names.
+            return;
     }
 }
 
@@ -953,6 +959,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
             return overview_page_.get();
         case LocalPageKind::kAgent:
         case LocalPageKind::kStart:
+        case LocalPageKind::kReport:
             return nullptr;
     }
     return nullptr;
@@ -965,7 +972,7 @@ void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettin
 void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent ||
-        kind == LocalPageKind::kStart) {
+        kind == LocalPageKind::kStart || kind == LocalPageKind::kReport) {
         return;
     }
     if (internal_page_ == kind) {
@@ -1066,6 +1073,7 @@ std::string BrowserWindow::SettingsStateJson() const {
     row("Version", ISLAND_VERSION_STRING);
     row("Preferences", PrefsStore::DefaultPrefsFilePath().string());
     row("Session", SessionStore::DefaultSessionFilePath().string());
+    row("Reports", ReportStore::DefaultReportsFilePath().string());
     row("Agent endpoint file", agent::DefaultDiscoveryFilePath().string());
 
     const std::string_view theme_pref = prefs_.theme == ThemePreference::kLight  ? "light"
@@ -1091,6 +1099,7 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("agent", std::move(agent))
             .Set("endpoint", std::move(endpoint))
             .Set("shortcuts", std::move(shortcuts))
+            .Set("reports", ReportsListJson())
             .Set("import", Value::MakeObject().Set("sources", std::move(sources)))
             .Set("about", Value::MakeObject().Set("rows", std::move(about_rows)))
             .Set("privacy", ContentBlockerStateJson())
@@ -1271,6 +1280,11 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         if (content_blocker_ != nullptr) {
             content_blocker_->UpdateNow();
         }
+    } else if (type == "open_report") {
+        static_cast<void>(OpenReportTab(message.StringOr("id", "")));
+        return;
+    } else if (type == "delete_report") {
+        static_cast<void>(DeleteReport(message.StringOr("id", "")));
     } else if (type == "set_binding" || type == "reset_binding") {
         const std::optional<KeyAction> action = KeyActionFromId(message.StringOr("action", ""));
         if (!action.has_value()) {
@@ -1775,7 +1789,17 @@ std::string BrowserWindow::StartPageStateJson() const {
             .Set("start",
                  Value::MakeObject()
                      .Set("mode", Value::String(std::string(start_mode())))
-                     .Set("engine", Value::String(std::string(search_engine().display_name)))));
+                     .Set("engine", Value::String(std::string(search_engine().display_name)))
+                     .Set("research",
+                          Value::MakeObject()
+                              .Set("seq", Value::Int(static_cast<std::int64_t>(
+                                              research_status_.seq)))
+                              .Set("state", Value::String(research_status_.state))
+                              .Set("message", Value::String(research_status_.message))
+                              .Set("question", Value::String(research_status_.question))
+                              .Set("report_id", Value::String(research_status_.report_id))
+                              .Set("report_title",
+                                   Value::String(research_status_.report_title)))));
 }
 
 void BrowserWindow::RenderStartPages() {
@@ -1789,6 +1813,11 @@ void BrowserWindow::RenderStartPages() {
             const CefRefPtr<CefFrame> frame =
                 browser != nullptr ? browser->GetMainFrame() : nullptr;
             if (frame == nullptr) {
+                continue;
+            }
+            if (const std::optional<std::string> report_id =
+                    ReportIdForUrl(frame->GetURL().ToString())) {
+                RenderReportFrame(frame, *report_id);
                 continue;
             }
             // The start page and the reader document both take the theme from this state.
@@ -1808,9 +1837,9 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
                                      const CefString& message, const CefString&, int) {
     CEF_REQUIRE_UI_THREAD();
     // Tabs show arbitrary web pages, so this bridge is closed to everything but
-    // Island's own start page: the message must carry the bridge prefix, come
-    // from a tab, and the tab's main frame must be exactly the start page
-    // document. Anything else logs as ordinary console output. (An ask_agent
+    // Island's own start and report pages: the message must carry the bridge
+    // prefix, come from a tab, and the tab's main frame must be exactly the
+    // start page document (or a report page document with a stored report id). Anything else logs as ordinary console output. (An ask_agent
     // message from a site would otherwise be a prompt-injection channel.)
     const std::string text = message.ToString();
     if (!closing_ && text.rfind(kSleepProbePrefix, 0) == 0) {
@@ -1834,7 +1863,10 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     const bool is_reader_page = reader != reader_sessions_.end() &&
                                 frame_url.size() == reader->second.url_size &&
                                 std::hash<std::string_view>{}(frame_url) == reader->second.url_hash;
-    if (!is_start_page && !is_reader_page) {
+    // A report page speaks for the one report its URL names.
+    const std::optional<std::string> report_id =
+        is_start_page || is_reader_page ? std::nullopt : ReportIdForUrl(frame_url);
+    if (!is_start_page && !is_reader_page && !report_id) {
         return false;
     }
     const std::optional<json::Value> decoded = LocalPage::DecodeMessage(text);
@@ -1843,6 +1875,8 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     }
     if (is_reader_page) {
         HandleReaderMessage(*owner, *decoded);
+    } else if (report_id) {
+        HandleReportPageMessage(*decoded, *report_id, browser);
     } else {
         HandleStartPageMessage(*decoded, browser);
     }
@@ -1899,6 +1933,30 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
                     (sent ? "true" : "false") + ")",
                 StartPageUrl(), 0);
         }
+    } else if (type == "research") {
+        const std::string_view question = message.StringOr("question", "");
+        if (!IsSubmittableQuery(question)) {
+            return;
+        }
+        remember_mode(kStartModeResearch);
+        const ResearchStartResult result = StartResearch(question);
+        // A refusal that leaves the running state alone (busy) is a one-line note;
+        // everything else is already in the research status the pages render.
+        const CefRefPtr<CefFrame> frame = source != nullptr ? source->GetMainFrame() : nullptr;
+        if (result.code == ResearchStart::kBusy && frame != nullptr) {
+            frame->ExecuteJavaScript("window.islandNote&&window.islandNote(" +
+                                         json::Serialize(json::Value::String(result.message)) +
+                                         ")",
+                                     StartPageUrl(), 0);
+        }
+    } else if (type == "cancel_research") {
+        CancelResearch();
+    } else if (type == "open_settings") {
+        ShowSettingsSection("agent");
+    } else if (type == "open_report") {
+        if (!research_status_.report_id.empty()) {
+            static_cast<void>(OpenReportTab(research_status_.report_id));
+        }
     }
 }
 
@@ -1910,6 +1968,7 @@ void BrowserWindow::CloseAgentPanelAndSession() {
             page->reset();
         }
     }
+    research_.reset();
     agent_session_.reset();
 }
 
@@ -2617,6 +2676,9 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     RestoreSavedScroll(*owner, frame);
     if (frame->GetURL().ToString() == StartPageUrl()) {
         frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
+    } else if (const std::optional<std::string> report_id =
+                   ReportIdForUrl(frame->GetURL().ToString())) {
+        RenderReportFrame(frame, *report_id);
     }
 }
 
@@ -3693,10 +3755,15 @@ void BrowserWindow::ShowCommandPalette() {
             bookmarks.push_back({.title = item.title, .url = item.url});
         }
     }
+    std::vector<PaletteReportEntry> reports;
+    reports.reserve(reports_.reports.size());
+    for (const ResearchReport& report : reports_.reports) {
+        reports.push_back({.id = report.id, .title = report.title, .question = report.question});
+    }
     std::vector<PaletteCommandEntry> commands;
     commands.push_back({.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"});
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
-                           std::move(commands));
+                           std::move(commands), std::move(reports));
 }
 
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
@@ -3759,6 +3826,9 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             if (selection.command.id == "sleep_inactive_tabs") {
                 static_cast<void>(SleepInactiveTabsNow());
             }
+            break;
+        case PaletteEntryKind::kReport:
+            static_cast<void>(OpenReportTab(selection.report.id));
             break;
     }
     FocusBrowserView();

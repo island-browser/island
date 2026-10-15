@@ -43,6 +43,12 @@
 - Native ad and tracker blocking is in scope as of 2026-10-15 at the project owner's request. It
   uses Brave's Rust `adblock` engine with runtime-cached EasyList and EasyPrivacy data; browser
   extensions remain out of scope.
+- Research mode (start page's third mode, 2026-10-15): `research_prompt.*` (prompt, space name,
+  report extraction, turn outcome), `report_store.*` (`reports.json`), `browser_window_research.cc`
+  (start/cancel/finish, Report tab, save/copy/continue), `pages/report.html`. The shared safe Markdown
+  renderer lives in `pages/markdown.js`; the root `CMakeLists.txt` inlines it where a page carries the
+  `// @@ISLAND_MARKDOWN@@` line. Report tabs are `data:` documents (`#<id>` fragment) and are not
+  restored after a restart (the report stays in the Reports list).
 - Versioning: `VERSION` is the only place the version is written. Bump it with
   `python3 scripts/version.py bump <part>` (never by hand-editing derived files), keep notes under
   `## [Unreleased]` in `CHANGELOG.md` as you land changes, and run

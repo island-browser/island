@@ -115,5 +115,27 @@ TEST(AgentTranscriptTest, JsonCarriesKindsAndIsBounded) {
               "n" + std::to_string(AgentTranscript::kMaxItems + 19));
 }
 
+TEST(AgentTranscriptTest, CountsEndedTurnsAndKeepsTheLastReasonAcrossClear) {
+    AgentTranscript transcript;
+    EXPECT_EQ(transcript.turns_ended(), 0U);
+    AcpEvent ended;
+    ended.type = AcpEvent::Type::kTurnEnded;
+    ended.text = "end_turn";
+    transcript.Apply(ended);
+    EXPECT_EQ(transcript.turns_ended(), 1U);
+    EXPECT_EQ(transcript.last_turn_end(), "end_turn");
+    ended.text = "cancelled";
+    transcript.Apply(ended);
+    EXPECT_EQ(transcript.last_turn_end(), "cancelled");
+    AcpEvent failed;
+    failed.type = AcpEvent::Type::kError;
+    failed.text = "boom";
+    transcript.Apply(failed);
+    EXPECT_EQ(transcript.turns_ended(), 3U);
+    EXPECT_EQ(transcript.last_turn_end(), "error");
+    transcript.Clear();
+    EXPECT_EQ(transcript.turns_ended(), 3U);
+}
+
 }  // namespace
 }  // namespace island::agent

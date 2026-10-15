@@ -411,6 +411,7 @@ bool CaptureOwnWindows(const std::string& path) {
 // `peek:<address>` opens the peek card, `sleep_tabs` probes and sleeps idle tabs, and
 // `sleep_report` logs how many tabs sleep, `find:<text>` opens the find bar on a query, and
 // `key:<id>` runs a keymap action.
+// `research:<question>` starts a Research task and `open_report` opens the newest report.
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -448,6 +449,15 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
             app->RunKeyAction(*key_action);
         }
         return key_action.has_value();
+    }
+    constexpr std::string_view kResearch = "research:";
+    if (action.compare(0, kResearch.size(), kResearch) == 0) {
+        app->StartResearch(action.substr(kResearch.size()));
+        return true;
+    }
+    if (action == "open_report") {
+        app->OpenNewestReport();
+        return true;
     }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
         app->SetSidebarExpanded(action == "sidebar:expanded");
