@@ -50,6 +50,9 @@ struct PrefsState {
     // values are resolved to the defaults where they are read.
     std::string search_engine = "google";
     std::string start_mode = "search";
+    // Browsing-history capture is opt-out. Existing history remains searchable
+    // while disabled and can be removed separately from Settings.
+    bool remember_history = true;
 
     bool operator==(const PrefsState&) const = default;
 };

@@ -212,6 +212,22 @@ TEST(PrefsStoreTest, GivenSearchSettingsWhenSavedThenTheyRoundTripAndStayOptiona
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
 }
 
+TEST(PrefsStoreTest, GivenHistorySettingsWhenSavedThenTheyRoundTripAndDefaultToRemembering) {
+    PrefsState state;
+    EXPECT_TRUE(state.remember_history);
+    state.remember_history = false;
+    const std::filesystem::path path = TempPath("history.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    EXPECT_FALSE(PrefsStore::Load(path).state.remember_history);
+
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
+    EXPECT_TRUE(PrefsStore::Load(path).state.remember_history);
+
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","remember_history":1})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
 TEST(PrefsStoreTest, GivenThemeTokensWhenConvertedThenTheyRoundTripStrictly) {
     ThemePreference parsed = ThemePreference::kSystem;
     EXPECT_TRUE(ThemePreferenceFromString("system", parsed));

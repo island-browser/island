@@ -75,7 +75,8 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
     }
     for (const auto& [key, field] : {std::pair{"auto_check_updates", &state.auto_check_updates},
                                      std::pair{"include_prereleases", &state.include_prereleases},
-                                     std::pair{"sidebar_collapsed", &state.sidebar_collapsed}}) {
+                                     std::pair{"sidebar_collapsed", &state.sidebar_collapsed},
+                                     std::pair{"remember_history", &state.remember_history}}) {
         if (const json::Value* value = root.FindMember(key)) {
             if (!value->IsBool()) {
                 return Fail(PrefsError::kSchemaError);
@@ -139,6 +140,8 @@ std::string SerializeToJson(const PrefsState& state) {
     w.StringValue(state.search_engine);
     w.Key("start_mode");
     w.StringValue(state.start_mode);
+    w.Key("remember_history");
+    w.BoolValue(state.remember_history);
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);
