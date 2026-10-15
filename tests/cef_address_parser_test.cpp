@@ -2,10 +2,15 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <filesystem>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "include/cef_app.h"
+#include "include/cef_command_line.h"
+#include "lifecycle_config.h"
 #if defined(OS_MAC)
 #include "include/wrapper/cef_library_loader.h"
 #endif
@@ -14,6 +19,24 @@
 #endif
 
 namespace island {
+namespace {
+
+class MockKeychainApp final : public CefApp {
+  public:
+    void OnBeforeCommandLineProcessing(const CefString& process_type,
+                                       CefRefPtr<CefCommandLine> command_line) override {
+        if (process_type.empty()) {
+            for (const std::string_view name : kBrowserProcessSwitches) {
+                command_line->AppendSwitch(std::string(name));
+            }
+        }
+    }
+
+  private:
+    IMPLEMENT_REFCOUNTING(MockKeychainApp);
+};
+
+}  // namespace
 
 int RunCefAddressParserTests(int argc, char* argv[]) {
     for (int argument_index = 0; argument_index < argc; ++argument_index) {
@@ -36,18 +59,30 @@ int RunCefAddressParserTests(int argc, char* argv[]) {
 #else
     CefMainArgs arguments(argc, argv);
 #endif
-    const int subprocess_exit_code = CefExecuteProcess(arguments, nullptr, nullptr);
+    // Same as the app: Chromium must never reach the login keychain (macOS would show a
+    // "Chromium Safe Storage" password prompt on every test run).
+    CefRefPtr<CefApp> app(new MockKeychainApp());
+    const int subprocess_exit_code = CefExecuteProcess(arguments, app, nullptr);
     if (subprocess_exit_code >= 0) {
         return subprocess_exit_code;
     }
 
     CefSettings settings;
     settings.no_sandbox = true;
-    if (!CefInitialize(arguments, settings, nullptr, nullptr)) {
+    // A private cache root, so the tests never collide with a running Island or with
+    // another test run over /tmp/island_cef_cache's singleton lock.
+    const std::filesystem::path cache =
+        std::filesystem::temp_directory_path() /
+        ("island_cef_tests_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    CefString(&settings.root_cache_path) = cache.string();
+    if (!CefInitialize(arguments, settings, app, nullptr)) {
         return 1;
     }
     const int result = RUN_ALL_TESTS();
     CefShutdown();
+    std::error_code ignored;
+    std::filesystem::remove_all(cache, ignored);
     return result;
 }
 
