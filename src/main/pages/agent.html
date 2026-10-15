@@ -931,6 +931,7 @@ textarea::placeholder { color: var(--text-2); }
       var value = theme[key.replace("-", "_")];
       if (value) root.style.setProperty("--" + key, value);
     });
+    if (theme.font) root.style.setProperty("--font", theme.font);
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
   }
 

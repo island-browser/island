@@ -39,6 +39,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // and load an address in the active tab through the address bar's own submit path.
     void SetSidebarExpanded(bool expanded);
     void NavigateActiveTab(const std::string& address);
+    void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

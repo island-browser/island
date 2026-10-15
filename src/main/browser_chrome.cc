@@ -272,14 +272,12 @@ void SetAllStateImages(const CefRefPtr<CefLabelButton>& button, const CefRefPtr<
 // dark favicons such as GitHub's stay visible on a dark sidebar.
 CefRefPtr<CefImage> BuildFaviconImage(const CefRefPtr<CefImage>& glyph, bool on_plate,
                                       ArgbColor plate) {
-    if (!on_plate) {
-        return glyph;
-    }
+    // The bare globe sits on the same canvas size as a plated favicon so every title lines up.
     return BuildRowImage({.width_dip = kFaviconPlateDip + 2,
                           .height_dip = kFaviconPlateDip + 2,
                           .radii = {},
                           .fill = std::nullopt,
-                          .plate = plate,
+                          .plate = on_plate ? std::optional<ArgbColor>(plate) : std::nullopt,
                           .glyph = glyph});
 }
 
@@ -688,6 +686,7 @@ class BrowserChrome::TextfieldDelegate final : public CefTextfieldDelegate {
         : chrome_(chrome), preferred_size_(preferred_size) {}
 
     void Detach() { chrome_ = nullptr; }
+    void SetPreferredSize(CefSize size) { preferred_size_ = size; }
 
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
 
@@ -740,6 +739,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CEF_REQUIRE_UI_THREAD();
 
     const int control_height = ControlHeight(tokens_);
+    applied_control_height_ = control_height;
     root_delegate_ = new RootPanelDelegate(tokens_);
     root_ = CefPanel::CreatePanel(root_delegate_);
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
@@ -760,6 +760,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<SurfacePanelDelegate> navigation_row_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail, CefSize(0, control_height));
     surface_delegates_.push_back(navigation_row_delegate);
+    navigation_row_delegate_ = navigation_row_delegate;
     CefRefPtr<CefPanel> navigation_row = CefPanel::CreatePanel(navigation_row_delegate);
     navigation_row->SetID(static_cast<int>(ChromeViewId::kNavigationRow));
     navigation_row_ = navigation_row;
@@ -786,6 +787,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<SurfacePanelDelegate> address_row_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kAddressOutline, CefSize(0, control_height));
     surface_delegates_.push_back(address_row_delegate);
+    address_row_delegate_ = address_row_delegate;
     CefRefPtr<CefPanel> address_row = CefPanel::CreatePanel(address_row_delegate);
     address_row->SetID(static_cast<int>(ChromeViewId::kAddressRow));
     address_row_ = address_row;
@@ -1313,7 +1315,7 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.title->SetFocusable(true);
         views.title->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, slot));
-        views.title->SetFontList(entry.active ? "Geist, Medium 13px" : "Geist, 13px");
+        views.title->SetFontList(FontList(13, entry.active));
         views.inner->AddChildView(views.title);
         row_layout->SetFlexForView(views.title, 1);
 
@@ -1516,7 +1518,7 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         views.name->SetTooltipText(entry.name);
         views.name->SetFocusable(true);
         views.name->SetInkDropEnabled(true);
-        views.name->SetFontList(entry.active ? "Geist, Medium 12px" : "Geist, 12px");
+        views.name->SetFontList(FontList(12, entry.active));
         views.name->SetMinimumSize(
             CefSize(pill_height - 2 * kHairlineDip - 2 * tokens_.spacing_2_dip,
                     pill_height - 2 * kHairlineDip));
@@ -1637,10 +1639,56 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
     }
     tokens_ = tokens;
     root_delegate_->SetTokens(tokens_);
+    ApplyDensity();
     ApplyLayoutTokens();
     ApplyControlTheme();
     rail_delegate_->SetFixedWidth(sidebar_expanded_ ? tokens_.rail_width_dip : 0);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
+}
+
+std::string BrowserChrome::FontList(int size_px, bool medium) const {
+    std::string family = tokens_.ui_font_family;
+    if (family == "system") {
+#if defined(__APPLE__)
+        family = ".AppleSystemUIFont, Helvetica Neue";
+#elif defined(_WIN32)
+        family = "Segoe UI";
+#else
+        family = "sans-serif";
+#endif
+    } else if (family != "Geist") {
+        family += ", Geist";
+    }
+    return family + ", " + (medium ? "Medium " : "") + std::to_string(size_px) + "px";
+}
+
+void BrowserChrome::ApplyDensity() {
+    const int h = tokens_.control_height_dip;
+    if (h == applied_control_height_) {
+        return;
+    }
+    applied_control_height_ = h;
+    navigation_row_delegate_->SetPreferredSize(CefSize(0, h));
+    address_row_delegate_->SetPreferredSize(CefSize(0, h));
+    textfield_delegate_->SetPreferredSize(CefSize(tokens_.spacing_6_dip * 4, h - kHairlineDip * 2));
+    for (const CefRefPtr<CefLabelButton>& button : {back_button_, forward_button_}) {
+        button->SetMinimumSize(CefSize(h, h));
+    }
+    for (const CefRefPtr<CefLabelButton>& button : {address_location_icon_, reload_button_}) {
+        button->SetMinimumSize(CefSize(h - kHairlineDip * 2, h - kHairlineDip * 2));
+    }
+    for (const CefRefPtr<CefLabelButton>& button : {new_tab_button_, agent_button_}) {
+        button->SetMinimumSize(CefSize(0, h));
+    }
+    for (const CefRefPtr<CefLabelButton>& button :
+         {tabs_button_, settings_button_, new_space_button_}) {
+        button->SetMinimumSize(CefSize(h, h));
+    }
+    // Rows and pills take their height at construction: rebuild them from the snapshots.
+    const std::vector<TabStripEntrySnapshot> tabs = tab_entries_;
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = space_entries_;
+    SetTabStripEntries(tabs);
+    SetSpaceSwitcherEntries(spaces);
 }
 
 void BrowserChrome::ApplyLayoutTokens() {
@@ -2059,8 +2107,8 @@ void BrowserChrome::ApplyControlTheme() {
     active_page_->SetBackgroundColor(active_page_fill.argb);
     active_page_indicator_->SetBackgroundColor(accent.argb);
     UpdateAddressFocusLeadingEdge();
-    address_field_->SetFontList("Geist, 13px");
-    active_tab_->SetFontList("Geist, 13px");
+    address_field_->SetFontList(FontList(13, false));
+    active_tab_->SetFontList(FontList(13, false));
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
@@ -2123,7 +2171,7 @@ void BrowserChrome::ApplyRailButtonTheme() {
     for (const CefRefPtr<CefLabelButton>& button :
          {new_tab_button_, agent_button_, new_space_button_, tabs_button_, settings_button_}) {
         button->SetInkDropEnabled(true);
-        button->SetFontList("Geist, 13px");
+        button->SetFontList(FontList(13, false));
         button->SetEnabledTextColors(tokens_.text_secondary.argb);
         button->SetBackgroundColor(rail.argb);
     }

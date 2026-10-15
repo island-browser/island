@@ -118,6 +118,11 @@ struct ChromeTokens {
 // WCAG 2.x contrast ratio between two opaque colors (1..21).
 [[nodiscard]] double ContrastRatio(ArgbColor a, ArgbColor b) noexcept;
 
+// The CSS font-family stack the internal pages use for the resolved interface font: the bundled
+// Geist stack, the platform system stack, or the installed custom family first (quoted) with the
+// Geist/system stack behind it.
+[[nodiscard]] std::string CssFontStack(const ChromeTokens& tokens);
+
 }  // namespace island
 
 #endif

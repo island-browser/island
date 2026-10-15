@@ -26,7 +26,9 @@ platform executable links.
 | `address_input.{h,cc}` | CEF-free address-bar heuristic: explicit scheme / host-like text becomes a URL (bare hosts get `https://`), everything else is a web search. Used only by `BrowserWindow::ResolveAddressInput` |
 | `search_engine.{h,cc}` | CEF-free table of web search engines (Google default, DuckDuckGo, Yandex), `BuildSearchUrl`, and the start page's remembered mode |
 | `cef_address_parser.{h,cc}` | CEF-dependent URL parsing behind the policy seam |
-| `design_tokens.{h,cc}` | `ArgbColor` and the token palette shared with `tests/design/` |
+| `design_tokens.{h,cc}` | `ArgbColor`, the token palette shared with `tests/design/`, the Arc `canvas/selected/hover/well/plate` surfaces, `AppearanceSettings` and `ChromeTokens::Customized` (tint, density, radius, inset, shadow, side, font) |
+| `page_card.h`, `macos/page_card_mac.mm` | Native macOS overlay that rounds and shadows the page card and repaints row/pill corners (`PageCardStyle`, `CornerPatch`); no-op elsewhere |
+| `row_raster.{h,cc}` | CEF-free rounded-rect raster used for favicon plates (and tested) |
 | `icon_catalog.{h,cc}` | Resolves icon names/sizes/scales against `resources/island/icons/manifest.json` |
 | `app_resources.{h,cc}` | Runtime resource-directory resolution (fonts, icons) |
 | `font_registry.h` | Font registration seam, implemented per platform |

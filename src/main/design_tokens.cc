@@ -210,4 +210,13 @@ ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
     return tokens;
 }
 
+std::string CssFontStack(const ChromeTokens& tokens) {
+    const std::string system_stack =
+        "ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
+    if (tokens.ui_font_family == "system") {
+        return system_stack;
+    }
+    return "\"" + tokens.ui_font_family + "\", Geist, " + system_stack;
+}
+
 }  // namespace island

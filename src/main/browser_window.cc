@@ -855,6 +855,8 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("text_2", json::Value::String(CssColor(tokens.text_secondary)))
         .Set("border", json::Value::String(CssColor(tokens.border)))
         .Set("accent", json::Value::String(CssColor(tokens.accent)))
+        .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
+        .Set("font", json::Value::String(CssFontStack(tokens)))
         .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
 }
 
@@ -988,9 +990,33 @@ std::string BrowserWindow::SettingsStateJson() const {
                          .Set("id", Value::String(std::string(engine.key)))
                          .Set("name", Value::String(std::string(engine.display_name))));
     }
+    const AppearanceSettings& look = prefs_.appearance;
+    Value appearance_spaces = Value::MakeArray();
+    for (std::size_t index = 0; index < spaces_.size(); ++index) {
+        appearance_spaces.Push(
+            Value::MakeObject()
+                .Set("index", Value::Int(static_cast<std::int64_t>(index)))
+                .Set("name", Value::String(spaces_[index].name()))
+                .Set("color", Value::String(CssColor(spaces_[index].color())))
+                .Set("active", Value::Bool(index == active_space_index_)));
+    }
+    Value appearance =
+        Value::MakeObject()
+            .Set("sidebar_tint", Value::Int(look.sidebar_tint_percent))
+            .Set("sidebar_side",
+                 Value::String(look.sidebar_side == SidebarSide::kRight ? "right" : "left"))
+            .Set("card_radius", Value::Int(look.card_radius_dip))
+            .Set("density", Value::String(look.density == Density::kCompact ? "compact"
+                                                                            : "comfortable"))
+            .Set("font", Value::String(look.font_family.empty() ? "geist" : look.font_family))
+            .Set("card_shadow", Value::Bool(look.card_shadow))
+            .Set("full_bleed", Value::Bool(look.full_bleed))
+            .Set("frameless", Value::Bool(FramelessWindowSupported()))
+            .Set("spaces", std::move(appearance_spaces));
     Value settings =
         Value::MakeObject()
             .Set("theme_pref", Value::String(std::string(theme_pref)))
+            .Set("appearance", std::move(appearance))
             .Set("search", Value::MakeObject()
                                .Set("engine", Value::String(std::string(search_engine().key)))
                                .Set("engines", std::move(engines)))
@@ -1071,6 +1097,117 @@ std::string BrowserWindow::TabOverviewStateJson() const {
             .Set("overview", Value::MakeObject().Set("spaces", std::move(spaces))));
 }
 
+bool BrowserWindow::SetSpaceColorFromHex(std::size_t space_index, std::string_view hex) {
+    if (space_index >= spaces_.size() || hex.size() != 7 || hex.front() != '#') {
+        return false;
+    }
+    std::uint32_t rgb = 0;
+    for (const char ch : hex.substr(1)) {
+        rgb <<= 4;
+        if (ch >= '0' && ch <= '9') {
+            rgb |= static_cast<std::uint32_t>(ch - '0');
+        } else if (ch >= 'a' && ch <= 'f') {
+            rgb |= static_cast<std::uint32_t>(ch - 'a' + 10);
+        } else if (ch >= 'A' && ch <= 'F') {
+            rgb |= static_cast<std::uint32_t>(ch - 'A' + 10);
+        } else {
+            return false;
+        }
+    }
+    spaces_[space_index].SetColor({.argb = 0xFF000000U | rgb});
+    return true;
+}
+
+void BrowserWindow::ApplyAppearance() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    ApplyTheme(window_, ResolvedChromeTheme(), true);
+    UpdateChromeCollections();
+    ApplySidebarState();
+    if (chrome_ != nullptr) {
+        // The new sidebar side / inset need one more pass over the live bounds.
+        chrome_->ApplyTheme(ResolvedTokens(chrome_snapshot_.theme));
+    }
+}
+
+void BrowserWindow::ApplyAppearanceForDev(std::string_view key, std::string_view value) {
+    using json::Value;
+    Value message = Value::MakeObject();
+    if (key == "space_color") {
+        const std::size_t equals = value.find('=');
+        if (equals == std::string_view::npos) {
+            return;
+        }
+        message.Set("type", Value::String("set_space_color"))
+            .Set("index",
+                 Value::Int(std::strtoll(std::string(value.substr(0, equals)).c_str(), nullptr, 10)))
+            .Set("color", Value::String(std::string(value.substr(equals + 1))));
+    } else if (key == "reset") {
+        message.Set("type", Value::String("reset_appearance"));
+    } else {
+        message.Set("type", Value::String("set_appearance")).Set("key", Value::String(std::string(key)));
+        if (value == "true" || value == "false") {
+            message.Set("value", Value::Bool(value == "true"));
+        } else if (!value.empty() && std::all_of(value.begin(), value.end(), [](char ch) {
+                       return ch >= '0' && ch <= '9';
+                   })) {
+            message.Set("value", Value::Int(std::strtoll(std::string(value).c_str(), nullptr, 10)));
+        } else {
+            message.Set("value", Value::String(std::string(value)));
+        }
+    }
+    HandleAppearanceMessage(message);
+}
+
+void BrowserWindow::HandleAppearanceMessage(const json::Value& message) {
+    const std::string_view type = message.StringOr("type", "");
+    if (type == "reset_appearance") {
+        prefs_.appearance = AppearanceSettings{};
+        SavePrefs();
+        ApplyAppearance();
+        return;
+    }
+    if (type == "set_space_color") {
+        const std::int64_t index = message.IntOr("index", -1);
+        if (index >= 0 && SetSpaceColorFromHex(static_cast<std::size_t>(index),
+                                               message.StringOr("color", ""))) {
+            SaveSession();
+            ApplyAppearance();
+        }
+        return;
+    }
+    const std::string_view key = message.StringOr("key", "");
+    AppearanceSettings next = prefs_.appearance;
+    if (key == "sidebar_tint") {
+        next.sidebar_tint_percent = static_cast<int>(message.IntOr("value", next.sidebar_tint_percent));
+    } else if (key == "sidebar_side") {
+        next.sidebar_side =
+            message.StringOr("value", "") == "right" ? SidebarSide::kRight : SidebarSide::kLeft;
+    } else if (key == "card_radius") {
+        next.card_radius_dip = static_cast<int>(message.IntOr("value", next.card_radius_dip));
+    } else if (key == "density") {
+        next.density =
+            message.StringOr("value", "") == "compact" ? Density::kCompact : Density::kComfortable;
+    } else if (key == "font") {
+        next.font_family = std::string(message.StringOr("value", ""));
+    } else if (key == "card_shadow") {
+        next.card_shadow = message.BoolOr("value", next.card_shadow);
+    } else if (key == "full_bleed") {
+        next.full_bleed = message.BoolOr("value", next.full_bleed);
+    } else {
+        return;
+    }
+    next = NormalizeAppearance(next);
+    if (next == prefs_.appearance) {
+        return;
+    }
+    prefs_.appearance = next;
+    SavePrefs();
+    ApplyAppearance();
+}
+
 void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
     const std::string_view type = message.StringOr("type", "");
     if (type == "ready") {
@@ -1090,6 +1227,9 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
             static_cast<void>(SetThemePreference(preference));
         }
+    } else if (type == "set_appearance" || type == "set_space_color" ||
+               type == "reset_appearance") {
+        HandleAppearanceMessage(message);
     } else if (type == "set_search_engine") {
         const std::string_view id = message.StringOr("id", "");
         if (IsSearchEngineKey(id)) {

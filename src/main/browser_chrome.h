@@ -616,6 +616,10 @@ class BrowserChrome final : public NavigationObserver {
     // Re-creates the box layouts whose insets depend on the tokens (sidebar side, titlebar band,
     // card inset, density) and the expand/agent state; a no-op while nothing relevant changed.
     void ApplyLayoutTokens();
+    // The row/control heights follow the density token; rebuilds the rows when it changes.
+    void ApplyDensity();
+    // A CEF font list ("Family, [Medium ]13px") for the resolved interface font.
+    [[nodiscard]] std::string FontList(int size_px, bool medium) const;
     [[nodiscard]] int RowHeight() const { return tokens_.control_height_dip; }
     void ApplyCollectionTheme();
     // Re-renders the soft rounded fill (selected / hovered / none) of one row's edge buttons.
@@ -744,6 +748,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> active_page_indicator_;
     CefRefPtr<SurfacePanelDelegate> rail_delegate_;
     CefRefPtr<RootPanelDelegate> root_delegate_;
+    CefRefPtr<SurfacePanelDelegate> navigation_row_delegate_;
+    CefRefPtr<SurfacePanelDelegate> address_row_delegate_;
+    int applied_control_height_ = 0;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;

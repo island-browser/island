@@ -8,7 +8,10 @@
 //   --island-dev-actions=welcome,theme:dark,command_palette
 //       Runs each action in order, a short pause apart, once the window is up.
 //       Besides the menu-backed names, `navigate:<address>` loads an address in the active
-//       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state.
+//       tab, `sidebar:expanded|collapsed` sets the persistent sidebar state,
+//       `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius, density, font,
+//       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the
+//       Settings > Appearance path.
 //   --island-dev-capture=/tmp/shot.png
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4

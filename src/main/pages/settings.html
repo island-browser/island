@@ -133,6 +133,20 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
 .dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
 #custom-command { margin-top: 10px; }
 #custom-command .label { display: block; margin-bottom: 6px; font-size: 13px; }
+#appearance .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#appearance .swatch { width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0; background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.18); transition: transform .16s; }
+#appearance .swatch:hover { transform: scale(1.12); }
+#appearance .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
+#appearance .space-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+#appearance .space-row:first-child { border-top: 0; }
+#appearance .space-row .name { width: 110px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#appearance .space-row .name small { color: var(--text-2); font-weight: 400; }
+#appearance input.hex { width: 92px; font: 12px var(--mono); }
+#appearance input[type="range"] { width: 180px; accent-color: var(--text); }
+#appearance .range-value { font: 12px var(--mono); color: var(--text-2); min-width: 38px; text-align: right; }
+#appearance input.family { width: 170px; font-family: var(--font); font-size: 12.5px; }
+#appearance input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
 #updates input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
 #updates .status { font: 12px/1.5 var(--mono); }
 #updates .status.error { color: var(--danger); }
@@ -153,12 +167,58 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
 
   <section id="appearance">
     <h2>Appearance</h2>
-    <p class="lead">Each space tints the sidebar with its own color.</p>
+    <p class="lead">Each space tints the sidebar with its own color. Changes apply right away.</p>
     <div class="row">
       <div class="label">Theme<small>Follow the system, or always light or dark.</small></div>
       <div class="segmented" role="group" aria-label="Theme" id="theme">
         <button data-value="system">System</button><button data-value="light">Light</button><button data-value="dark">Dark</button>
       </div>
+    </div>
+    <div class="row" style="display:block">
+      <div class="label" style="margin-bottom:4px">Space colors<small>Pick a preset or type a hex color such as <code>#7C5CFF</code>.</small></div>
+      <div id="space-colors"></div>
+    </div>
+    <div class="row">
+      <label class="label" for="tint">Sidebar tint<small>How strongly the space color washes the sidebar and the window margin.</small></label>
+      <input type="range" id="tint" min="0" max="100" step="1" aria-label="Sidebar tint intensity">
+      <span class="range-value" id="tint-value"></span>
+    </div>
+    <div class="row">
+      <div class="label">Sidebar position</div>
+      <div class="segmented" role="group" aria-label="Sidebar position" data-key="sidebar_side">
+        <button data-value="left">Left</button><button data-value="right">Right</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label">Page corner radius<small>The page card's rounded corners (macOS).</small></div>
+      <div class="segmented" role="group" aria-label="Page corner radius" data-key="card_radius" data-number="1">
+        <button data-value="0">0</button><button data-value="6">6</button><button data-value="10">10</button><button data-value="14">14</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label">Density<small>Row and control height in the sidebar.</small></div>
+      <div class="segmented" role="group" aria-label="Density" data-key="density">
+        <button data-value="comfortable">Comfortable</button><button data-value="compact">Compact</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="label">Interface font<small>Geist is bundled; System uses the platform font; or name any installed family.</small></div>
+      <div class="segmented" role="group" aria-label="Interface font" data-key="font">
+        <button data-value="geist">Geist</button><button data-value="system">System</button>
+      </div>
+      <input class="field family" id="font-family" spellcheck="false" placeholder="Custom family" aria-label="Custom font family">
+    </div>
+    <div class="row">
+      <label class="label" for="card-shadow">Page card shadow<small>One soft shadow under the page card.</small></label>
+      <input type="checkbox" id="card-shadow">
+    </div>
+    <div class="row">
+      <label class="label" for="full-bleed">Full bleed<small>No inset, no rounding, no shadow: the page fills its side edge to edge.</small></label>
+      <input type="checkbox" id="full-bleed">
+    </div>
+    <div class="row">
+      <div class="label">Reset appearance<small>Restores the default look (space colors stay).</small></div>
+      <button class="btn quiet" id="reset-appearance">Reset</button>
     </div>
   </section>
 
@@ -500,9 +560,76 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  var PRESETS = ["#0090FF", "#30A46C", "#FFB224", "#E5484D", "#8E4EC6", "#F76B15", "#12A594", "#D6409F", "#6E56CF", "#8D8D8D"];
+  var spaceSignature = "";
+  function setAppearance(key, value) { post({ type: "set_appearance", key: key, value: value }); }
+  function renderSpaceColors(spaces) {
+    var signature = JSON.stringify(spaces);
+    var box = $("space-colors");
+    // Do not rebuild under the user's cursor while a hex field is being edited.
+    if (signature === spaceSignature || box.contains(document.activeElement)) return;
+    spaceSignature = signature;
+    box.textContent = "";
+    spaces.forEach(function (space) {
+      var row = el("div", "space-row");
+      var name = el("div", "name", space.name);
+      if (space.active) name.appendChild(el("small", "", " \u00b7 active"));
+      row.appendChild(name);
+      var swatches = el("div", "swatches");
+      PRESETS.forEach(function (color) {
+        var button = el("button", "swatch");
+        button.style.setProperty("--c", color);
+        button.setAttribute("aria-label", space.name + " color " + color);
+        button.setAttribute("aria-pressed", color.toLowerCase() === space.color.toLowerCase() ? "true" : "false");
+        button.addEventListener("click", function () { post({ type: "set_space_color", index: space.index, color: color }); });
+        swatches.appendChild(button);
+      });
+      row.appendChild(swatches);
+      var hex = el("input", "field hex");
+      hex.value = space.color.toUpperCase();
+      hex.spellcheck = false;
+      hex.setAttribute("aria-label", space.name + " custom hex color");
+      function commit() {
+        var value = hex.value.trim();
+        if (value[0] !== "#") value = "#" + value;
+        if (/^#[0-9a-fA-F]{6}$/.test(value)) post({ type: "set_space_color", index: space.index, color: value });
+        else toast("Use a color like #7C5CFF");
+      }
+      hex.addEventListener("keydown", function (event) { if (event.key === "Enter") commit(); });
+      hex.addEventListener("change", commit);
+      row.appendChild(hex);
+      box.appendChild(row);
+    });
+  }
+  function renderAppearance(a) {
+    if (!a) return;
+    Array.prototype.forEach.call(document.querySelectorAll("#appearance .segmented[data-key]"), function (group) {
+      var key = group.getAttribute("data-key");
+      var current = String(a[key]);
+      var known = false;
+      Array.prototype.forEach.call(group.querySelectorAll("button"), function (button) {
+        var on = button.getAttribute("data-value") === current;
+        known = known || on;
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      if (key === "font") {
+        var field = $("font-family");
+        if (document.activeElement !== field) field.value = known ? "" : current;
+      }
+    });
+    var tint = $("tint");
+    if (document.activeElement !== tint) tint.value = a.sidebar_tint;
+    $("tint-value").textContent = a.sidebar_tint + "%";
+    $("card-shadow").checked = !!a.card_shadow;
+    $("full-bleed").checked = !!a.full_bleed;
+    $("card-shadow").disabled = !!a.full_bleed;
+    renderSpaceColors(a.spaces || []);
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
+    renderAppearance(s.appearance);
     Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-value") === s.theme_pref ? "true" : "false");
     });
@@ -538,6 +665,24 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {
     button.addEventListener("click", function () { post({ type: "set_theme", value: button.getAttribute("data-value") }); });
   });
+  Array.prototype.forEach.call(document.querySelectorAll("#appearance .segmented[data-key]"), function (group) {
+    Array.prototype.forEach.call(group.querySelectorAll("button"), function (button) {
+      button.addEventListener("click", function () {
+        var value = button.getAttribute("data-value");
+        setAppearance(group.getAttribute("data-key"), group.hasAttribute("data-number") ? Number(value) : value);
+      });
+    });
+  });
+  var tintTimer = 0;
+  $("tint").addEventListener("input", function () {
+    $("tint-value").textContent = $("tint").value + "%";
+    clearTimeout(tintTimer);
+    tintTimer = setTimeout(function () { setAppearance("sidebar_tint", Number($("tint").value)); }, 60);
+  });
+  $("font-family").addEventListener("change", function () { setAppearance("font", $("font-family").value.trim() || "geist"); });
+  $("card-shadow").addEventListener("change", function () { setAppearance("card_shadow", $("card-shadow").checked); });
+  $("full-bleed").addEventListener("change", function () { setAppearance("full_bleed", $("full-bleed").checked); });
+  $("reset-appearance").addEventListener("click", function () { post({ type: "reset_appearance" }); });
   $("agent-save").addEventListener("click", function () {
     post({ type: "set_agent_command", command: $("agent-command").value });
     toast("Saved");
@@ -596,6 +741,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       var value = theme[key.replace("-", "_")];
       if (value) root.style.setProperty("--" + key, value);
     });
+    if (theme.font) root.style.setProperty("--font", theme.font);
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
   }
 

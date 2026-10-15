@@ -162,6 +162,14 @@ void IslandApp::NavigateActiveTab(const std::string& address) {
     }
 }
 
+void IslandApp::ApplyAppearanceForDev(const std::string& key, const std::string& value) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->ApplyAppearanceForDev(key, value);
+    }
+}
+
 void IslandApp::ToggleAgentPanel() {
     CEF_REQUIRE_UI_THREAD();
 

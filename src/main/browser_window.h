@@ -304,6 +304,9 @@ class BrowserWindow : public CefClient,
     void ToggleSidebar();
     // Sets the persistent sidebar state (dev actions and the agent tool use this).
     void SetSidebarExpanded(bool expanded);
+    // Developer-capture entry point (--island-dev-actions=appearance:<key>=<value> and
+    // space_color:<index>=#RRGGBB): runs the same validated path as the Settings page.
+    void ApplyAppearanceForDev(std::string_view key, std::string_view value);
     [[nodiscard]] bool sidebar_expanded() const noexcept { return sidebar_state_.expanded(); }
     // Navigates the active tab to the provider URL for `query`. A blank query is
     // rejected and a null ActiveBrowser() is a defined no-op; neither navigates.
@@ -528,6 +531,11 @@ class BrowserWindow : public CefClient,
     void ApplySidebarState();
     // Frameless window: the sidebar's top band and the canvas margin above the cards drag it.
     void ApplyDragRegions();
+    // Settings > Appearance: `key`/`value` come from the page and are validated here. Persists
+    // the prefs and re-applies the tokens live.
+    void HandleAppearanceMessage(const json::Value& message);
+    void ApplyAppearance();
+    bool SetSpaceColorFromHex(std::size_t space_index, std::string_view hex);
     // Rounds/shadows the page card's native views (see page_card.h); coalesced and retried because
     // a freshly attached browser view gets its native view a moment later.
     void RefreshPageCards();
