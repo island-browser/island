@@ -201,9 +201,9 @@ ImagePixels PixelsAt(const CefRefPtr<CefImage>& image, int scale) {
     }
     int width = 0;
     int height = 0;
-    CefRefPtr<CefBinaryValue> binary = image->GetAsBitmap(
-        static_cast<float>(scale), CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, width,
-        height);
+    CefRefPtr<CefBinaryValue> binary =
+        image->GetAsBitmap(static_cast<float>(scale), CEF_COLOR_TYPE_BGRA_8888,
+                           CEF_ALPHA_TYPE_PREMULTIPLIED, width, height);
     if (binary == nullptr || width <= 0 || height <= 0 ||
         binary->GetSize() != static_cast<std::size_t>(width) * height * 4) {
         return pixels;
@@ -261,9 +261,8 @@ CefRefPtr<CefImage> BuildRowImage(const RowImageSpec& spec) {
 }
 
 void SetAllStateImages(const CefRefPtr<CefLabelButton>& button, const CefRefPtr<CefImage>& image) {
-    for (const cef_button_state_t state :
-         {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED,
-          CEF_BUTTON_STATE_DISABLED}) {
+    for (const cef_button_state_t state : {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED,
+                                           CEF_BUTTON_STATE_PRESSED, CEF_BUTTON_STATE_DISABLED}) {
         button->SetImage(state, image);
     }
 }
@@ -327,20 +326,16 @@ LayoutColumns ComputeColumns(DipRect root, const ChromeTokens& tokens, bool side
     if (tokens.sidebar_side == SidebarSide::kRight) {
         // The agent panel takes the opposite edge from the sidebar.
         columns.agent = {.x = root.x, .y = root.y, .width = panel_width, .height = root.height};
-        columns.content = {.x = root.x + panel_width,
-                           .y = root.y,
-                           .width = content_width,
-                           .height = root.height};
+        columns.content = {
+            .x = root.x + panel_width, .y = root.y, .width = content_width, .height = root.height};
         columns.rail = {.x = root.x + root.width - rail_width,
                         .y = root.y,
                         .width = rail_width,
                         .height = root.height};
     } else {
         columns.rail = {.x = root.x, .y = root.y, .width = rail_width, .height = root.height};
-        columns.content = {.x = root.x + rail_width,
-                           .y = root.y,
-                           .width = content_width,
-                           .height = root.height};
+        columns.content = {
+            .x = root.x + rail_width, .y = root.y, .width = content_width, .height = root.height};
         columns.agent = {.x = columns.content.x + content_width,
                          .y = root.y,
                          .width = panel_width,
@@ -413,7 +408,8 @@ BrowserChrome::CardInsets BrowserChrome::AgentPanelInsets(DipRect root_bounds,
                                                           bool sidebar_expanded) {
     const LayoutColumns columns = ComputeColumns(root_bounds, tokens, sidebar_expanded, true);
     const int inset = tokens.card_inset_dip;
-    // The panel keeps an inset on the window edge only; the page card's own inset separates the two.
+    // The panel keeps an inset on the window edge only; the page card's own inset separates the
+    // two.
     CardInsets insets{.left = 0,
                       .top = TopInsetFor(tokens, columns.agent.x - root_bounds.x, inset),
                       .right = 0,
@@ -427,8 +423,7 @@ BrowserChrome::CardInsets BrowserChrome::AgentPanelInsets(DipRect root_bounds,
 }
 
 std::vector<BrowserChrome::DragRegion> BrowserChrome::DragRegionsForBounds(
-    DipRect root_bounds, const ChromeTokens& tokens, bool sidebar_expanded,
-    bool agent_panel_open) {
+    DipRect root_bounds, const ChromeTokens& tokens, bool sidebar_expanded, bool agent_panel_open) {
     std::vector<DragRegion> regions;
     if (tokens.titlebar_band_dip <= 0) {
         return regions;
@@ -436,23 +431,19 @@ std::vector<BrowserChrome::DragRegion> BrowserChrome::DragRegionsForBounds(
     const LayoutColumns columns =
         ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
     const int band = tokens.titlebar_band_dip;
-    regions.push_back({{.x = columns.rail.x, .y = 0, .width = columns.rail.width, .height = band},
-                       true});
+    regions.push_back(
+        {{.x = columns.rail.x, .y = 0, .width = columns.rail.width, .height = band}, true});
     // The canvas margin above each card drags too.
-    const CardInsets content = ContentInsets(root_bounds, tokens, sidebar_expanded,
-                                             agent_panel_open);
-    regions.push_back({{.x = columns.content.x,
-                        .y = 0,
-                        .width = columns.content.width,
-                        .height = content.top},
-                       true});
+    const CardInsets content =
+        ContentInsets(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    regions.push_back(
+        {{.x = columns.content.x, .y = 0, .width = columns.content.width, .height = content.top},
+         true});
     if (columns.agent.width > 0) {
         const CardInsets agent = AgentPanelInsets(root_bounds, tokens, sidebar_expanded);
-        regions.push_back({{.x = columns.agent.x,
-                            .y = 0,
-                            .width = columns.agent.width,
-                            .height = agent.top},
-                           true});
+        regions.push_back(
+            {{.x = columns.agent.x, .y = 0, .width = columns.agent.width, .height = agent.top},
+             true});
     }
     if (sidebar_expanded) {
         // The navigation buttons stay clickable: carve them out of the band.
@@ -1069,9 +1060,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     agent_panel_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, 0)));
     agent_panel_->SetID(static_cast<int>(ChromeViewId::kAgentPanel));
     {
-        const CardInsets insets =
-            AgentPanelInsets({.x = 0, .y = 0, .width = 1200, .height = 800}, tokens_,
-                             sidebar_expanded_);
+        const CardInsets insets = AgentPanelInsets({.x = 0, .y = 0, .width = 1200, .height = 800},
+                                                   tokens_, sidebar_expanded_);
         CefBoxLayoutSettings settings;
         settings.horizontal = static_cast<int>(true);
         settings.inside_border_insets =
@@ -1700,14 +1690,14 @@ void BrowserChrome::ApplyLayoutTokens() {
     const DipRect root = {.x = 0, .y = 0, .width = bounds.width, .height = bounds.height};
     const CardInsets content = ContentInsets(root, tokens_, sidebar_expanded_, agent_panel_open_);
     const CardInsets agent = AgentPanelInsets(root, tokens_, sidebar_expanded_);
-    const std::string key =
-        std::to_string(tokens_.titlebar_band_dip) + "/" +
-        std::to_string(static_cast<int>(tokens_.sidebar_side)) + "/" +
-        std::to_string(tokens_.control_height_dip) + "/" + std::to_string(tokens_.row_gap_dip) +
-        "/" + std::to_string(content.left) + "," + std::to_string(content.top) + "," +
-        std::to_string(content.right) + "," + std::to_string(content.bottom) + "/" +
-        std::to_string(agent.left) + "," + std::to_string(agent.top) + "," +
-        std::to_string(agent.right) + "," + std::to_string(agent.bottom);
+    const std::string key = std::to_string(tokens_.titlebar_band_dip) + "/" +
+                            std::to_string(static_cast<int>(tokens_.sidebar_side)) + "/" +
+                            std::to_string(tokens_.control_height_dip) + "/" +
+                            std::to_string(tokens_.row_gap_dip) + "/" +
+                            std::to_string(content.left) + "," + std::to_string(content.top) + "," +
+                            std::to_string(content.right) + "," + std::to_string(content.bottom) +
+                            "/" + std::to_string(agent.left) + "," + std::to_string(agent.top) +
+                            "," + std::to_string(agent.right) + "," + std::to_string(agent.bottom);
     if (key == layout_key_) {
         return;
     }
@@ -2347,12 +2337,14 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
     return patches;
 }
 
-void BrowserChrome::SetCornerPatchSink(
-    std::function<void(const std::vector<CornerPatch>&)> sink) {
+void BrowserChrome::SetCornerPatchSink(std::function<void(const std::vector<CornerPatch>&)> sink) {
     corner_sink_ = std::move(sink);
     last_patches_.clear();
     PushCornerPatches();
+#if defined(__APPLE__)
+    // Only macOS has a native overlay to feed; the poll follows scrolling lists.
     SchedulePatchPoll();
+#endif
 }
 
 void BrowserChrome::PushCornerPatches() {
@@ -2372,18 +2364,17 @@ void BrowserChrome::SchedulePatchPoll() {
         return;
     }
     patch_poll_pending_ = true;
-    CefPostDelayedTask(
-        TID_UI,
-        CefCreateClosureTask(base::BindOnce(
-            [](std::shared_ptr<BrowserChrome*> alive) {
-                if (BrowserChrome* chrome = *alive) {
-                    chrome->patch_poll_pending_ = false;
-                    chrome->PushCornerPatches();
-                    chrome->SchedulePatchPoll();
-                }
-            },
-            alive_)),
-        kPatchPollMs);
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(
+                           [](std::shared_ptr<BrowserChrome*> alive) {
+                               if (BrowserChrome* chrome = *alive) {
+                                   chrome->patch_poll_pending_ = false;
+                                   chrome->PushCornerPatches();
+                                   chrome->SchedulePatchPoll();
+                               }
+                           },
+                           alive_)),
+                       kPatchPollMs);
 }
 
 void BrowserChrome::RefreshRowHover() {

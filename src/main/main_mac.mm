@@ -428,8 +428,8 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
     if (action.compare(0, kAppearance.size(), kAppearance) == 0) {
         const std::string rest = action.substr(kAppearance.size());
         const std::size_t equals = rest.find('=');
-        app->ApplyAppearanceForDev(
-            rest.substr(0, equals), equals == std::string::npos ? "" : rest.substr(equals + 1));
+        app->ApplyAppearanceForDev(rest.substr(0, equals),
+                                   equals == std::string::npos ? "" : rest.substr(equals + 1));
         return true;
     }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {

@@ -59,7 +59,8 @@ TEST(AppearancePrefsTest, GivenOutOfRangeValuesWhenLoadedThenTheyAreNormalized) 
 
 TEST(AppearancePrefsTest, GivenAMalformedAppearanceObjectWhenLoadedThenItIsASchemaError) {
     const std::filesystem::path path = TempPath("malformed.json");
-    std::ofstream(path, std::ios::trunc) << R"({"version":1,"onboarding_completed":false,"theme":"system","appearance":5})";
+    std::ofstream(path, std::ios::trunc)
+        << R"({"version":1,"onboarding_completed":false,"theme":"system","appearance":5})";
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
 }
 
@@ -95,8 +96,8 @@ TEST(AppearanceTokensTest, GivenTheStrongDefaultThenTheSidebarIsTintedMoreThanTh
 
 TEST(AppearanceTokensTest, GivenAnySpaceColorAndTintThenTextStaysReadableOnEverySurface) {
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
-        for (const std::uint32_t space : {0xFF0090FFU, 0xFFFFB224U, 0xFFFFFFFFU, 0xFF000000U,
-                                          0xFFE5484DU, 0xFF8E4EC6U}) {
+        for (const std::uint32_t space :
+             {0xFF0090FFU, 0xFFFFB224U, 0xFFFFFFFFU, 0xFF000000U, 0xFFE5484DU, 0xFF8E4EC6U}) {
             for (const int tint : {0, 25, 60, 100}) {
                 const ChromeTokens t = ChromeTokens::ForTheme(theme).Customized(
                     {space}, theme, {.sidebar_tint_percent = tint});
@@ -164,7 +165,8 @@ TEST(AppearanceLayoutTest, GivenSidebarOnTheRightThenRailAndCardMirror) {
     t.sidebar_side = SidebarSide::kRight;
     const ChromeGeometrySnapshot g = BrowserChrome::LayoutForBounds(kWindow, t);
     EXPECT_EQ(g.rail_bounds, (DipRect{.x = 1440 - 286, .y = 0, .width = 286, .height = 900}));
-    EXPECT_EQ(g.browser_content_bounds, (DipRect{.x = 0, .y = 0, .width = 1440 - 286, .height = 900}));
+    EXPECT_EQ(g.browser_content_bounds,
+              (DipRect{.x = 0, .y = 0, .width = 1440 - 286, .height = 900}));
     // Inset on the top, left and bottom; flush with the sidebar on the right.
     EXPECT_EQ(g.browser_view_bounds,
               (DipRect{.x = 8, .y = 8, .width = 1440 - 286 - 8, .height = 900 - 16}));

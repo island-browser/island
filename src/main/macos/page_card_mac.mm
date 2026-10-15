@@ -72,9 +72,9 @@ NSColor* ToNSColor(island::ArgbColor color) {
         [self.layer addSublayer:self.cardShadow];
     }
     const CGRect bounds = CGRectMake(0, 0, outer.size.width, outer.size.height);
-    const CGRect card = CGRectMake(target.frame.origin.x - outer.origin.x,
-                                   target.frame.origin.y - outer.origin.y,
-                                   target.frame.size.width, target.frame.size.height);
+    const CGRect card =
+        CGRectMake(target.frame.origin.x - outer.origin.x, target.frame.origin.y - outer.origin.y,
+                   target.frame.size.width, target.frame.size.height);
     const CGFloat radius = MIN(style.radius_dip, MIN(card.size.width, card.size.height) / 2);
 
     CGMutablePathRef ring_path = CGPathCreateMutable();
@@ -99,7 +99,8 @@ NSColor* ToNSColor(island::ArgbColor color) {
     self.cardShadow.shadowPath = hole;
     self.cardShadow.shadowRadius = MAX(2.0, inset);
     self.cardShadow.shadowOffset = CGSizeMake(0, -1);
-    self.cardShadow.shadowOpacity = (style.shadow && inset > 0) ? (style.dark ? 0.6f : 0.22f) : 0.0f;
+    self.cardShadow.shadowOpacity =
+        (style.shadow && inset > 0) ? (style.dark ? 0.6f : 0.22f) : 0.0f;
     self.cardShadow.hidden = !(style.shadow && inset > 0);
 
     CGPathRelease(hole);
@@ -172,7 +173,7 @@ void ApplyPageCardStyle(const std::vector<void*>& handles, const PageCardStyle& 
                             object:view
                              queue:nil
                         usingBlock:^(NSNotification*) {
-                            [weak_frame sync];
+                          [weak_frame sync];
                         }];
             frames[key] = frame;
         }
@@ -232,12 +233,12 @@ void ApplyCornerPatches(const std::vector<void*>& handles, const std::vector<Cor
         const CGFloat y = height - patch.y - patch.height;
         const CGFloat w = patch.width;
         const CGFloat h = patch.height;
-        AddWedge(path, CGPointMake(x, y + h), CGPointMake(x + r, y + h), CGPointMake(x + r, y + h - r),
-                 r, M_PI_2, M_PI, false);
+        AddWedge(path, CGPointMake(x, y + h), CGPointMake(x + r, y + h),
+                 CGPointMake(x + r, y + h - r), r, M_PI_2, M_PI, false);
         AddWedge(path, CGPointMake(x + w, y + h), CGPointMake(x + w - r, y + h),
                  CGPointMake(x + w - r, y + h - r), r, M_PI_2, 0, true);
-        AddWedge(path, CGPointMake(x + w, y), CGPointMake(x + w, y + r), CGPointMake(x + w - r, y + r),
-                 r, 0, -M_PI_2, true);
+        AddWedge(path, CGPointMake(x + w, y), CGPointMake(x + w, y + r),
+                 CGPointMake(x + w - r, y + r), r, 0, -M_PI_2, true);
         AddWedge(path, CGPointMake(x, y), CGPointMake(x, y + r), CGPointMake(x + r, y + r), r, M_PI,
                  M_PI + M_PI_2, false);
     }

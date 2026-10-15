@@ -17,7 +17,6 @@
 #include "cef_update_fetcher.h"
 #include "clipboard.h"
 #include "design_tokens.h"
-#include "page_card.h"
 #include "download_path.h"
 #include "favicon_policy.h"
 #include "include/base/cef_bind.h"
@@ -39,6 +38,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "page_card.h"
 #include "runtime_style.h"
 #include "search_provider.h"
 #include "session_store.h"
@@ -993,12 +993,11 @@ std::string BrowserWindow::SettingsStateJson() const {
     const AppearanceSettings& look = prefs_.appearance;
     Value appearance_spaces = Value::MakeArray();
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
-        appearance_spaces.Push(
-            Value::MakeObject()
-                .Set("index", Value::Int(static_cast<std::int64_t>(index)))
-                .Set("name", Value::String(spaces_[index].name()))
-                .Set("color", Value::String(CssColor(spaces_[index].color())))
-                .Set("active", Value::Bool(index == active_space_index_)));
+        appearance_spaces.Push(Value::MakeObject()
+                                   .Set("index", Value::Int(static_cast<std::int64_t>(index)))
+                                   .Set("name", Value::String(spaces_[index].name()))
+                                   .Set("color", Value::String(CssColor(spaces_[index].color())))
+                                   .Set("active", Value::Bool(index == active_space_index_)));
     }
     Value appearance =
         Value::MakeObject()
@@ -1006,8 +1005,8 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("sidebar_side",
                  Value::String(look.sidebar_side == SidebarSide::kRight ? "right" : "left"))
             .Set("card_radius", Value::Int(look.card_radius_dip))
-            .Set("density", Value::String(look.density == Density::kCompact ? "compact"
-                                                                            : "comfortable"))
+            .Set("density",
+                 Value::String(look.density == Density::kCompact ? "compact" : "comfortable"))
             .Set("font", Value::String(look.font_family.empty() ? "geist" : look.font_family))
             .Set("card_shadow", Value::Bool(look.card_shadow))
             .Set("full_bleed", Value::Bool(look.full_bleed))
@@ -1141,18 +1140,18 @@ void BrowserWindow::ApplyAppearanceForDev(std::string_view key, std::string_view
             return;
         }
         message.Set("type", Value::String("set_space_color"))
-            .Set("index",
-                 Value::Int(std::strtoll(std::string(value.substr(0, equals)).c_str(), nullptr, 10)))
+            .Set("index", Value::Int(std::strtoll(std::string(value.substr(0, equals)).c_str(),
+                                                  nullptr, 10)))
             .Set("color", Value::String(std::string(value.substr(equals + 1))));
     } else if (key == "reset") {
         message.Set("type", Value::String("reset_appearance"));
     } else {
-        message.Set("type", Value::String("set_appearance")).Set("key", Value::String(std::string(key)));
+        message.Set("type", Value::String("set_appearance"))
+            .Set("key", Value::String(std::string(key)));
         if (value == "true" || value == "false") {
             message.Set("value", Value::Bool(value == "true"));
-        } else if (!value.empty() && std::all_of(value.begin(), value.end(), [](char ch) {
-                       return ch >= '0' && ch <= '9';
-                   })) {
+        } else if (!value.empty() && std::all_of(value.begin(), value.end(),
+                                                 [](char ch) { return ch >= '0' && ch <= '9'; })) {
             message.Set("value", Value::Int(std::strtoll(std::string(value).c_str(), nullptr, 10)));
         } else {
             message.Set("value", Value::String(std::string(value)));
@@ -1171,8 +1170,8 @@ void BrowserWindow::HandleAppearanceMessage(const json::Value& message) {
     }
     if (type == "set_space_color") {
         const std::int64_t index = message.IntOr("index", -1);
-        if (index >= 0 && SetSpaceColorFromHex(static_cast<std::size_t>(index),
-                                               message.StringOr("color", ""))) {
+        if (index >= 0 &&
+            SetSpaceColorFromHex(static_cast<std::size_t>(index), message.StringOr("color", ""))) {
             SaveSession();
             ApplyAppearance();
         }
@@ -1181,7 +1180,8 @@ void BrowserWindow::HandleAppearanceMessage(const json::Value& message) {
     const std::string_view key = message.StringOr("key", "");
     AppearanceSettings next = prefs_.appearance;
     if (key == "sidebar_tint") {
-        next.sidebar_tint_percent = static_cast<int>(message.IntOr("value", next.sidebar_tint_percent));
+        next.sidebar_tint_percent =
+            static_cast<int>(message.IntOr("value", next.sidebar_tint_percent));
     } else if (key == "sidebar_side") {
         next.sidebar_side =
             message.StringOr("value", "") == "right" ? SidebarSide::kRight : SidebarSide::kLeft;
@@ -2449,8 +2449,8 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     chrome_->SetCornerPatchSink([this](const std::vector<CornerPatch>& patches) {
         corner_patches_ = patches;
         if (!closing_ && chrome_ != nullptr) {
-            ApplyCornerPatches(NativeContentHandles(),
-                               corner_patches_, ResolvedTokens(chrome_snapshot_.theme).canvas);
+            ApplyCornerPatches(NativeContentHandles(), corner_patches_,
+                               ResolvedTokens(chrome_snapshot_.theme).canvas);
         }
     });
     window_->SetTitle(CefString("Island"));
@@ -2559,9 +2559,7 @@ CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView>) {
     return CefSize(kMinimumWindowWidth, kMinimumWindowHeight);
 }
 
-bool BrowserWindow::IsFrameless(CefRefPtr<CefWindow>) {
-    return FramelessWindowSupported();
-}
+bool BrowserWindow::IsFrameless(CefRefPtr<CefWindow>) { return FramelessWindowSupported(); }
 
 bool BrowserWindow::WithStandardWindowButtons(CefRefPtr<CefWindow>) {
     return FramelessWindowSupported();
@@ -3590,8 +3588,8 @@ void BrowserWindow::ApplyDragRegions() {
             continue;
         }
         CefDraggableRegion draggable;
-        draggable.bounds = CefRect(region.bounds.x, region.bounds.y, region.bounds.width,
-                                   region.bounds.height);
+        draggable.bounds =
+            CefRect(region.bounds.x, region.bounds.y, region.bounds.width, region.bounds.height);
         draggable.draggable = region.draggable ? 1 : 0;
         regions.push_back(draggable);
     }

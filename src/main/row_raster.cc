@@ -78,7 +78,8 @@ void FillRoundedRect(RasterBitmap& bitmap, int x_dip, int y_dip, int w_dip, int 
             if (coverage <= 0.0) {
                 continue;
             }
-            std::uint8_t* dst = &bitmap.bgra[(static_cast<std::size_t>(py) * bitmap.width_px + px) * 4];
+            std::uint8_t* dst =
+                &bitmap.bgra[(static_cast<std::size_t>(py) * bitmap.width_px + px) * 4];
             const double inv = 1.0 - coverage;
             dst[0] = static_cast<std::uint8_t>(std::lround(255.0 * b * coverage + dst[0] * inv));
             dst[1] = static_cast<std::uint8_t>(std::lround(255.0 * g * coverage + dst[1] * inv));
@@ -101,10 +102,12 @@ void CompositePremultiplied(RasterBitmap& bitmap, const std::uint8_t* src, int s
                 continue;
             }
             const std::uint8_t* from = src + (static_cast<std::size_t>(sy) * src_w + sx) * 4;
-            std::uint8_t* dst = &bitmap.bgra[(static_cast<std::size_t>(py) * bitmap.width_px + px) * 4];
+            std::uint8_t* dst =
+                &bitmap.bgra[(static_cast<std::size_t>(py) * bitmap.width_px + px) * 4];
             const int inv = 255 - from[3];
             for (int c = 0; c < 4; ++c) {
-                dst[c] = static_cast<std::uint8_t>(std::min(255, from[c] + (dst[c] * inv + 127) / 255));
+                dst[c] =
+                    static_cast<std::uint8_t>(std::min(255, from[c] + (dst[c] * inv + 127) / 255));
             }
         }
     }
