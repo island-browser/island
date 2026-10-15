@@ -37,8 +37,12 @@ constexpr int kControlHeightDip = 32;
 constexpr int kNoteLineHeightDip = 20;
 constexpr std::size_t kNoteLineChars = 64;
 // The dim layer behind the card (alpha black): lighter over the light canvas.
-constexpr std::uint32_t kScrimLightArgb = 0x47000000U;
-constexpr std::uint32_t kScrimDarkArgb = 0x99000000U;
+// The overlay root stays transparent. A dimming scrim cannot reach the bottom of the window:
+// CEF positions overlays from the frame's top edge (title bar included) but clips them to
+// the client-area height, so the last title-bar-height of the window stays undimmed and
+// reads as a rendering bug. The card is separated by its hairline and shadow instead.
+constexpr std::uint32_t kScrimLightArgb = 0x00000000U;
+constexpr std::uint32_t kScrimDarkArgb = 0x00000000U;
 
 CefBoxLayoutSettings VerticalLayout(int spacing, const CefInsets& insets = CefInsets()) {
     CefBoxLayoutSettings settings;
