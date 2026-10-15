@@ -105,8 +105,16 @@ std::vector<PaletteEntry> ComposePaletteResults(
     std::string_view query, const std::vector<PaletteTabEntry>& tabs,
     const std::vector<PaletteSpaceEntry>& spaces,
     const std::vector<PaletteBookmarkEntry>& bookmarks) {
+    return ComposePaletteResults(query, tabs, spaces, bookmarks, {});
+}
+
+std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
+                                                const std::vector<PaletteTabEntry>& tabs,
+                                                const std::vector<PaletteSpaceEntry>& spaces,
+                                                const std::vector<PaletteBookmarkEntry>& bookmarks,
+                                                const std::vector<PaletteHistoryEntry>& history) {
     std::vector<PaletteEntry> canonical;
-    canonical.reserve(tabs.size() + spaces.size() + bookmarks.size() + 1U);
+    canonical.reserve(tabs.size() + spaces.size() + bookmarks.size() + history.size() + 1U);
     for (const PaletteTabEntry& tab : tabs) {
         canonical.push_back({.kind = PaletteEntryKind::kTab, .tab = tab});
     }
@@ -128,40 +136,43 @@ std::vector<PaletteEntry> ComposePaletteResults(
         std::size_t input_index;
         PaletteMatchRank rank;
     };
-    std::vector<ScoredEntry> scored;
-    scored.reserve(canonical.size());
-    for (std::size_t index = 0; index < canonical.size(); ++index) {
-        const PaletteEntry& entry = canonical[index];
-        PaletteMatchRank rank = PaletteMatchRank::kNone;
-        switch (entry.kind) {
-            case PaletteEntryKind::kTab:
-                rank = RankTabEntry(entry.tab, query);
-                break;
-            case PaletteEntryKind::kBookmark:
-                rank = RankBookmarkEntry(entry.bookmark, query);
-                break;
-            case PaletteEntryKind::kSpace:
-            case PaletteEntryKind::kUrl:
-                rank = ClassifyPaletteMatch(entry.space.name, query);
-                break;
-        }
-        if (rank != PaletteMatchRank::kNone) {
-            scored.push_back({.entry = entry, .input_index = index, .rank = rank});
-        }
-    }
-
-    std::stable_sort(scored.begin(), scored.end(),
-                     [](const ScoredEntry& lhs, const ScoredEntry& rhs) {
-                         if (lhs.rank != rhs.rank) {
-                             return lhs.rank < rhs.rank;
-                         }
-                         return lhs.input_index < rhs.input_index;
-                     });
-
     std::vector<PaletteEntry> results;
-    results.reserve(scored.size() + 1U);
-    for (ScoredEntry& scored_entry : scored) {
-        results.push_back(std::move(scored_entry.entry));
+    results.reserve(canonical.size() + history.size() + 1U);
+    const auto append_section = [&](PaletteEntryKind kind) {
+        std::vector<ScoredEntry> scored;
+        for (std::size_t index = 0; index < canonical.size(); ++index) {
+            const PaletteEntry& entry = canonical[index];
+            if (entry.kind != kind) {
+                continue;
+            }
+            PaletteMatchRank rank = PaletteMatchRank::kNone;
+            if (kind == PaletteEntryKind::kTab) {
+                rank = RankTabEntry(entry.tab, query);
+            } else if (kind == PaletteEntryKind::kBookmark) {
+                rank = RankBookmarkEntry(entry.bookmark, query);
+            } else if (kind == PaletteEntryKind::kSpace) {
+                rank = ClassifyPaletteMatch(entry.space.name, query);
+            }
+            if (rank != PaletteMatchRank::kNone) {
+                scored.push_back({.entry = entry, .input_index = index, .rank = rank});
+            }
+        }
+        std::stable_sort(scored.begin(), scored.end(),
+                         [](const ScoredEntry& lhs, const ScoredEntry& rhs) {
+                             if (lhs.rank != rhs.rank) {
+                                 return lhs.rank < rhs.rank;
+                             }
+                             return lhs.input_index < rhs.input_index;
+                         });
+        for (ScoredEntry& scored_entry : scored) {
+            results.push_back(std::move(scored_entry.entry));
+        }
+    };
+    append_section(PaletteEntryKind::kTab);
+    append_section(PaletteEntryKind::kSpace);
+    append_section(PaletteEntryKind::kBookmark);
+    for (const PaletteHistoryEntry& item : history) {
+        results.push_back({.kind = PaletteEntryKind::kHistory, .history = item});
     }
     // The URL affordance is offered for every non-empty query and always last;
     // validity is enforced by the validator at Submit, not by hiding the row.
@@ -228,8 +239,13 @@ void CommandPaletteModel::SetBookmarks(std::vector<PaletteBookmarkEntry> bookmar
     highlighted_index_ = 0;
 }
 
+void CommandPaletteModel::SetHistory(std::vector<PaletteHistoryEntry> history) {
+    history_ = std::move(history);
+    highlighted_index_ = 0;
+}
+
 std::vector<PaletteEntry> CommandPaletteModel::Results() const {
-    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_);
+    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, history_);
 }
 
 std::optional<PaletteSelection> CommandPaletteModel::Submit() {
@@ -263,6 +279,8 @@ std::optional<PaletteSelection> CommandPaletteModel::Submit() {
         selection.tab = entry.tab;
     } else if (entry.kind == PaletteEntryKind::kBookmark) {
         selection.bookmark = entry.bookmark;
+    } else if (entry.kind == PaletteEntryKind::kHistory) {
+        selection.history = entry.history;
     } else {
         selection.space = entry.space;
     }

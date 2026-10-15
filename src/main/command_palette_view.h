@@ -7,8 +7,8 @@
 #include "browser_chrome.h"
 #include "command_palette.h"
 #include "design_tokens.h"
-#include "overlay_lifetime.h"
 #include "overlay_card.h"
+#include "overlay_lifetime.h"
 #include "search_palette_model.h"
 
 class CefLabelButton;
@@ -31,6 +31,7 @@ class CommandPaletteHost {
     virtual void OnCommandPaletteSubmitted(const PaletteSelection& selection,
                                            std::string_view url_query) = 0;
     virtual void OnCommandPaletteDismissed() = 0;
+    virtual void OnCommandPaletteQueryChanged(std::string_view query) = 0;
 };
 
 // The Cmd/Ctrl+K command palette: the CEF projection of CommandPaletteModel,
@@ -38,9 +39,9 @@ class CommandPaletteHost {
 // created lazily on first invocation and then only shown and hidden, never
 // destroyed or re-parented, and never a second top-level window. It embeds no
 // web content. Unlike the search palette's fixed provider rows, the result list
-// is a bounded pool of row views sized to the worst case (one per tab, one per
-// space, plus the go-to-URL row); rows the current Results() does not fill stay
-// hidden.
+// is a bounded pool of row views sized to the worst case (tabs, spaces,
+// bookmarks, eight history results, and the go-to-URL row); rows the current
+// Results() does not fill stay hidden.
 class CommandPaletteView final {
   public:
     CommandPaletteView(CommandPaletteHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens,
@@ -51,10 +52,13 @@ class CommandPaletteView final {
     CommandPaletteView& operator=(const CommandPaletteView&) = delete;
 
     // Shows the palette with fresh read-only snapshots of the open tabs of the
-    // active space and the full space list, resets the draft query, and focuses
-    // the query field.
+    // active space, the full space list, and bookmarks; resets the draft query
+    // and focuses the query field. History arrives asynchronously per query.
     void Show(std::vector<PaletteTabEntry> tabs, std::vector<PaletteSpaceEntry> spaces,
               std::vector<PaletteBookmarkEntry> bookmarks);
+    // Applies a background history answer only when it still belongs to the
+    // visible draft that requested it.
+    void SetHistoryResults(std::string_view query, std::vector<PaletteHistoryEntry> history);
     // Hides the palette without acting on the highlighted row.
     void Hide();
     // Re-positions the overlay for the window's current bounds.
@@ -94,7 +98,7 @@ class CommandPaletteView final {
     std::vector<CefRefPtr<CefLabelButton>> result_labels_;
     OverlaySlot overlay_;
     OverlayLifetime overlay_lifetime_;
-    // The right-aligned kind tag of each row ("TAB", "SPACE"), in mono label style.
+    // The right-aligned kind tag (TAB / SPACE / BOOKMARK / HISTORY / GO TO).
     std::vector<CefRefPtr<CefLabelButton>> result_kinds_;
     // Hairline + shadow around panel_; overlay_root_ is what the overlay hosts.
     OverlayCard card_;

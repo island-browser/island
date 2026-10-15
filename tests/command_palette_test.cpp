@@ -23,6 +23,19 @@ PaletteSpaceEntry Space(std::uint64_t id, std::string name) {
     return {.id = SpaceId{id}, .name = std::move(name)};
 }
 
+PaletteBookmarkEntry Bookmark(std::string title, std::string url) {
+    return {.title = std::move(title), .url = std::move(url)};
+}
+
+PaletteHistoryEntry History(std::string title, std::string url, double score) {
+    return {.title = std::move(title),
+            .url = std::move(url),
+            .host = "history.test",
+            .visited_at_ms = 100,
+            .visit_count = 1,
+            .score = score};
+}
+
 // For ranking tests, where the palette must never touch URL validation: the
 // validator is only invoked from Submit() on a kUrl row.
 PaletteUrlValidator NeverCalledValidator() {
@@ -266,6 +279,36 @@ TEST(CommandPaletteTest, GivenATabAndASpaceOfEqualRankWhenRankedThenTheTabComesF
     EXPECT_EQ(results[1].kind, PaletteEntryKind::kSpace);
     EXPECT_EQ(results[1].space.id, SpaceId{5});
     EXPECT_EQ(results[2].kind, PaletteEntryKind::kUrl);
+}
+
+TEST(CommandPaletteTest, GivenFakeTabBookmarkAndHistoryResultsThenSectionsKeepTheirCanonicalOrder) {
+    const std::vector<PaletteEntry> results =
+        ComposePaletteResults("docs", {Tab(1, "Docs tab", "https://tab.test/")}, {},
+                              {Bookmark("Docs bookmark", "https://bookmark.test/")},
+                              {History("Docs recent", "https://history.test/recent", 9.0),
+                               History("Docs older", "https://history.test/older", 4.0)});
+
+    ASSERT_EQ(results.size(), 5U);
+    EXPECT_EQ(results[0].kind, PaletteEntryKind::kTab);
+    EXPECT_EQ(results[1].kind, PaletteEntryKind::kBookmark);
+    EXPECT_EQ(results[2].kind, PaletteEntryKind::kHistory);
+    EXPECT_EQ(results[2].history.title, "Docs recent");
+    EXPECT_EQ(results[3].kind, PaletteEntryKind::kHistory);
+    EXPECT_EQ(results[4].kind, PaletteEntryKind::kUrl);
+}
+
+TEST(CommandPaletteTest, GivenAHistoryRowWhenSubmittedThenItIsReturnedWithoutUrlValidation) {
+    CommandPaletteModel palette(NeverCalledValidator());
+    palette.Open();
+    palette.SetQuery("docs");
+    palette.SetHistory({History("Docs", "https://history.test/docs", 3.0)});
+
+    const std::optional<PaletteSelection> selection = palette.Submit();
+
+    ASSERT_TRUE(selection.has_value());
+    EXPECT_EQ(selection->kind, PaletteEntryKind::kHistory);
+    EXPECT_EQ(selection->history.url, "https://history.test/docs");
+    EXPECT_FALSE(palette.visible());
 }
 
 TEST(CommandPaletteTest, GivenSpacesWhenRankedThenTheyAreMatchedByNameByTheSameClasses) {
