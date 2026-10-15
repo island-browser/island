@@ -33,6 +33,8 @@ platform executable links.
 | `app_runtime.{h,cc}` | Runtime seam shared by the app and tests |
 | `startup_options.{h,cc}` | Command-line parsing, including `--island-smoke-test`; production leaves the initial URL empty so `BrowserWindow` opens the embedded start page |
 | `lifecycle_config.h` | Shutdown/lifecycle constants |
+| `sidebar_state.{h,cc}`, `collapsed_rail.h` | CEF-free expand/collapse state (persistent choice in prefs `sidebar_collapsed`, transient expansion while editing the address from the icon rail) and the icon rail's metrics plus the space-dot raster |
+| `favicon_policy.h` | CEF-free favicon rules: web pages only, 16 DIP downloads, stale-result and clear-on-navigation checks (bookkeeping lives on `Tab`) |
 | `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam |
 | `space.{h,cc}` | Named, colored space owning ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |

@@ -299,11 +299,12 @@ class BrowserWindow : public CefClient,
     // Moves the active space by |delta| positions (-1 left, +1 right); false
     // when the move would leave the space list.
     [[nodiscard]] bool MoveActiveSpace(int delta);
-    // Flips the explicit Cmd/Ctrl+B pin. Available on every platform; hover is a
-    // macOS-only enhancement layered on the same state.
+    // Cmd/Ctrl+B: flips the sidebar between the full 286 DIP rail and the 52 DIP icon rail,
+    // and saves the choice in the preferences.
     void ToggleSidebar();
-    // The macOS hover seam's entry point: a pointer position in window DIP.
-    void OnSidebarHoverPointer(int x_dip);
+    // Sets the persistent sidebar state (dev actions and the agent tool use this).
+    void SetSidebarExpanded(bool expanded);
+    [[nodiscard]] bool sidebar_expanded() const noexcept { return sidebar_state_.expanded(); }
     // Navigates the active tab to the provider URL for `query`. A blank query is
     // rejected and a null ActiveBrowser() is a defined no-op; neither navigates.
     void SubmitSearchQuery(std::string_view query, SearchProviderId provider);
@@ -348,7 +349,7 @@ class BrowserWindow : public CefClient,
     void OnFaviconURLChange(CefRefPtr<CefBrowser> browser,
                             const std::vector<CefString>& icon_urls) override;
     // Delivered by the favicon download started in OnFaviconURLChange.
-    void OnFaviconDownloaded(TabId tab, CefRefPtr<CefImage> image);
+    void OnFaviconDownloaded(TabId tab, const std::string& icon_url, CefRefPtr<CefImage> image);
 
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
                        const CefString& target_url, const CefString& target_frame_name,
@@ -521,7 +522,15 @@ class BrowserWindow : public CefClient,
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
     void ApplySidebarState();
-    void UninstallHoverSeam();
+    // Cmd/Ctrl+L while the icon rail is showing expands the sidebar for the length of the
+    // edit; the end of the edit (submit, Escape, blur) collapses it again and returns the
+    // keyboard to the page so focus never sits in a hidden field.
+    void BeginTransientSidebarExpand();
+    void EndTransientSidebarExpand();
+    // Escape and blur end the edit after a short grace period, so a click on a row of the
+    // temporarily expanded sidebar still lands before the layout moves under the pointer.
+    void ScheduleTransientSidebarCollapse();
+    void FinishTransientSidebarCollapse();
     void UpdateWindowTitle();
     void CloseNavigationAndQuitMessageLoop();
     // The URL a tab would reopen at: its committed page, else its startup URL.
@@ -540,7 +549,6 @@ class BrowserWindow : public CefClient,
     std::unique_ptr<CommandPaletteView> command_palette_;
     std::unique_ptr<SpaceRenameOverlay> space_rename_overlay_;
     SidebarState sidebar_state_;
-    void* hover_seam_ = nullptr;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
     ChromeSnapshot chrome_snapshot_;

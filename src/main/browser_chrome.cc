@@ -142,6 +142,38 @@ CefBoxLayoutSettings TabListLayout(const ChromeTokens& tokens) {
     return settings;
 }
 
+// The collapsed icon rail stacks centered square buttons; the rail owns the vertical
+// gutter, the buttons own the horizontal one.
+CefBoxLayoutSettings CollapsedColumnLayout(int spacing) {
+    CefBoxLayoutSettings settings;
+    settings.horizontal = static_cast<int>(false);
+    settings.between_child_spacing = spacing;
+    settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    return settings;
+}
+
+// A transparent-looking wrapper (rail colored by its delegate) that centers a child.
+CefBoxLayoutSettings CenteredLayout() {
+    CefBoxLayoutSettings settings;
+    settings.horizontal = static_cast<int>(false);
+    settings.main_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    return settings;
+}
+
+// The round dot a collapsed-rail space button shows: 16 DIP at 1x and 2x.
+CefRefPtr<CefImage> MakeSpaceDotImage(ArgbColor fill, ArgbColor ring, bool active) {
+    constexpr int kDotCanvasDip = 16;
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        const SpaceDotBitmap bitmap = RenderSpaceDot(fill, ring, active, kDotCanvasDip, scale);
+        image->AddBitmap(static_cast<float>(scale), bitmap.size_px, bitmap.size_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
+}
+
 std::string AddressErrorMessage(const std::optional<AddressError>& error) {
     if (!error.has_value()) {
         return "";
@@ -253,17 +285,17 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
   public:
     explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
 
-    void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> browser_content,
-                     CefRefPtr<CefPanel> agent_panel, CefRefPtr<CefPanel> hover_sliver) {
+    void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> collapsed_rail,
+                     CefRefPtr<CefPanel> browser_content, CefRefPtr<CefPanel> agent_panel) {
         rail_ = rail;
+        collapsed_rail_ = collapsed_rail;
         browser_content_ = browser_content;
         agent_panel_ = agent_panel;
-        hover_sliver_ = hover_sliver;
     }
 
     void SetTokens(ChromeTokens tokens) { tokens_ = tokens; }
 
-    void SetSidebarRevealed(bool revealed) { sidebar_revealed_ = revealed; }
+    void SetSidebarExpanded(bool expanded) { sidebar_expanded_ = expanded; }
     void SetAgentPanelOpen(bool open) { agent_panel_open_ = open; }
 
     void OnLayoutChanged(CefRefPtr<CefView>, const CefRect& new_bounds) override {
@@ -276,23 +308,17 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
                                             .y = new_bounds.y,
                                             .width = new_bounds.width,
                                             .height = new_bounds.height},
-                                           tokens_, sidebar_revealed_, agent_panel_open_);
-        ApplyBounds(rail_, geometry.rail_bounds);
+                                           tokens_, sidebar_expanded_, agent_panel_open_);
+        // Only the shown rail (the full sidebar or the icon rail) takes the rail column.
+        const CefRefPtr<CefPanel>& shown_rail =
+            sidebar_expanded_ || collapsed_rail_ == nullptr ? rail_ : collapsed_rail_;
+        ApplyBounds(shown_rail, geometry.rail_bounds);
         ApplyBounds(browser_content_, geometry.browser_content_bounds);
-        rail_->Layout();
+        shown_rail->Layout();
         browser_content_->Layout();
         if (agent_panel_ != nullptr) {
             ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
             agent_panel_->Layout();
-        }
-        if (hover_sliver_ != nullptr) {
-            // The edge marker sits on the window's left edge, inside the content gutter, and
-            // only exists visually while the rail is hidden.
-            ApplyBounds(hover_sliver_, {.x = new_bounds.x,
-                                        .y = new_bounds.y,
-                                        .width = kHoverSliverWidthDip,
-                                        .height = new_bounds.height});
-            hover_sliver_->SetVisible(!sidebar_revealed_);
         }
     }
 
@@ -305,12 +331,12 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     }
 
     ChromeTokens tokens_;
-    bool sidebar_revealed_ = kSidebarRevealedByDefault;
+    bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool agent_panel_open_ = false;
     CefRefPtr<CefPanel> rail_;
+    CefRefPtr<CefPanel> collapsed_rail_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefPanel> agent_panel_;
-    CefRefPtr<CefPanel> hover_sliver_;
 
     IMPLEMENT_REFCOUNTING(RootPanelDelegate);
 };
@@ -675,6 +701,73 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     active_page_->SetVisible(false);
     sidebar_->AddChildView(active_page_);
 
+    // The collapsed icon rail: same column as the sidebar, shown instead of it. Every part
+    // is a surface-slot panel so a theme reset repaints it like the rest of the rail.
+    const CefSize collapsed_size(kCollapsedRailWidthDip, 1);
+    collapsed_rail_delegate_ = new SurfacePanelDelegate(this, SurfaceSlot::kRail, collapsed_size,
+                                                        collapsed_size, collapsed_size);
+    surface_delegates_.push_back(collapsed_rail_delegate_);
+    collapsed_rail_ = CefPanel::CreatePanel(collapsed_rail_delegate_);
+    collapsed_rail_->SetID(static_cast<int>(ChromeViewId::kCollapsedRail));
+    CefBoxLayoutSettings collapsed_settings;
+    collapsed_settings.horizontal = static_cast<int>(false);
+    collapsed_settings.between_child_spacing = RailSectionSpacingDip();
+    collapsed_settings.inside_border_insets =
+        CefInsets(RailTopInsetDip(), 0, tokens_.spacing_3_dip, 0);
+    CefRefPtr<CefBoxLayout> collapsed_layout = collapsed_rail_->SetToBoxLayout(collapsed_settings);
+
+    const auto make_surface_panel = [this](SurfaceSlot slot, CefSize preferred, int id) {
+        CefRefPtr<SurfacePanelDelegate> delegate =
+            new SurfacePanelDelegate(this, slot, preferred, preferred, preferred);
+        surface_delegates_.push_back(delegate);
+        CefRefPtr<CefPanel> panel = CefPanel::CreatePanel(delegate);
+        panel->SetID(id);
+        return panel;
+    };
+
+    // The tab list scrolls like the expanded one: the scroll view is a layout wrapper and
+    // the list inside it keeps the buttons centered whatever width the viewport leaves.
+    collapsed_tab_list_delegate_ = new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(collapsed_tab_list_delegate_);
+    collapsed_tab_list_ = CefPanel::CreatePanel(collapsed_tab_list_delegate_);
+    collapsed_tab_list_->SetID(static_cast<int>(ChromeViewId::kCollapsedRailTabList));
+    collapsed_tab_list_->SetToBoxLayout(CollapsedColumnLayout(kCollapsedRailButtonSpacingDip));
+    CefRefPtr<SurfacePanelDelegate> collapsed_scroll_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail, CefSize(0, 0), CefSize(0, 0));
+    surface_delegates_.push_back(collapsed_scroll_delegate);
+    CefRefPtr<CefScrollView> collapsed_scroll =
+        CefScrollView::CreateScrollView(collapsed_scroll_delegate);
+    collapsed_scroll->SetContentView(collapsed_tab_list_);
+    collapsed_tab_scroll_ = collapsed_scroll;
+    collapsed_rail_->AddChildView(collapsed_scroll);
+    collapsed_layout->SetFlexForView(collapsed_scroll, 1);
+
+    // Bottom group: the "+" button, a hairline, then the space dots.
+    collapsed_bottom_group_ = make_surface_panel(SurfaceSlot::kRail, CefSize(), /*id=*/0);
+    collapsed_bottom_group_->SetToBoxLayout(CollapsedColumnLayout(kCollapsedRailButtonSpacingDip));
+    collapsed_new_tab_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    collapsed_new_tab_button_->SetID(static_cast<int>(ChromeViewId::kCollapsedRailNewTab));
+    collapsed_new_tab_button_->SetAccessibleName("New Tab");
+    collapsed_new_tab_button_->SetTooltipText("New Tab");
+    collapsed_new_tab_button_->SetFocusable(true);
+    collapsed_new_tab_button_->SetMinimumSize(
+        CefSize(kCollapsedRailButtonDip, kCollapsedRailButtonDip));
+    collapsed_bottom_group_->AddChildView(collapsed_new_tab_button_);
+    collapsed_divider_wrapper_ = make_surface_panel(
+        SurfaceSlot::kRail, CefSize(kCollapsedRailButtonDip, kCollapsedRailSeparatorHeightDip),
+        static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
+    collapsed_divider_wrapper_->SetToBoxLayout(CenteredLayout());
+    collapsed_divider_ = make_surface_panel(
+        SurfaceSlot::kHairline, CefSize(kCollapsedRailSeparatorWidthDip, DividerHeight(tokens_)),
+        static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
+    collapsed_divider_wrapper_->AddChildView(collapsed_divider_);
+    collapsed_bottom_group_->AddChildView(collapsed_divider_wrapper_);
+    collapsed_space_list_ = make_surface_panel(
+        SurfaceSlot::kRail, CefSize(), static_cast<int>(ChromeViewId::kCollapsedRailSpaceList));
+    collapsed_space_list_->SetToBoxLayout(CollapsedColumnLayout(0));
+    collapsed_bottom_group_->AddChildView(collapsed_space_list_);
+    collapsed_rail_->AddChildView(collapsed_bottom_group_);
+
     browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
         this, CefSize(control_height, control_height), CefSize(control_height, control_height)));
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
@@ -711,20 +804,15 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         rail_host->SetToBoxLayout(host_settings);
     }
     rail_host->AddChildView(sidebar_);
+    rail_host->AddChildView(collapsed_rail_);
     root_->AddChildView(rail_host);
     root_->AddChildView(browser_content_);
     root_->AddChildView(agent_panel_);
-    // Last child so it paints above the rail and the content card.
-    hover_sliver_ =
-        CefPanel::CreatePanel(new PanelDelegate(this, CefSize(kHoverSliverWidthDip, 0)));
-    hover_sliver_->SetID(static_cast<int>(ChromeViewId::kHoverSliver));
-    hover_sliver_->SetVisible(false);
-    root_->AddChildView(hover_sliver_);
-    root_delegate_->SetChildren(sidebar_, browser_content_, agent_panel_, hover_sliver_);
+    root_delegate_->SetChildren(sidebar_, collapsed_rail_, browser_content_, agent_panel_);
     ApplyControlTheme();
-    // Apply the hidden-by-default reveal state before the first layout so no
-    // frame ever shows a rail the sidebar state says is collapsed.
-    SetSidebarRevealed(sidebar_revealed_);
+    // Apply the expand state before the first layout so no frame ever shows a rail the
+    // sidebar state says is not on screen.
+    SetSidebarExpanded(sidebar_expanded_);
 }
 
 BrowserChrome::~BrowserChrome() { Detach(); }
@@ -757,7 +845,7 @@ ChromeGeometrySnapshot BrowserChrome::view_bounds_snapshot() const {
     CEF_REQUIRE_UI_THREAD();
     return {
         .root_bounds = ToDipRect(root_->GetBounds()),
-        .rail_bounds = ToDipRect(sidebar_->GetBounds()),
+        .rail_bounds = ToDipRect((sidebar_expanded_ ? sidebar_ : collapsed_rail_)->GetBounds()),
         .browser_content_bounds = ToDipRect(browser_content_->GetBounds()),
         .browser_view_bounds = ToDipRect(browser_view_->GetBounds()),
     };
@@ -803,6 +891,35 @@ std::string BrowserChrome::TabCloseAccessibleName(const TabStripEntrySnapshot& e
 
 std::string BrowserChrome::SpaceEntryAccessibleName(const SpaceSwitcherEntrySnapshot& entry) {
     return "Space: " + entry.name + (entry.active ? ", active" : ", inactive");
+}
+
+CollapsedRailTabLayout BrowserChrome::CollapsedRailLayout(
+    const std::vector<TabStripEntrySnapshot>& tabs) {
+    CollapsedRailTabLayout layout;
+    layout.order.reserve(tabs.size());
+    for (std::size_t index = 0; index < tabs.size(); ++index) {
+        if (tabs[index].pinned) {
+            layout.order.push_back(index);
+        }
+    }
+    const std::size_t pinned = layout.order.size();
+    for (std::size_t index = 0; index < tabs.size(); ++index) {
+        if (!tabs[index].pinned) {
+            layout.order.push_back(index);
+        }
+    }
+    if (pinned > 0 && pinned < tabs.size()) {
+        layout.separator_before = pinned;
+    }
+    return layout;
+}
+
+std::string BrowserChrome::CollapsedRailTabTooltip(const TabStripEntrySnapshot& entry) {
+    return entry.title;
+}
+
+std::string BrowserChrome::CollapsedRailSpaceTooltip(const SpaceSwitcherEntrySnapshot& entry) {
+    return entry.name;
 }
 
 std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry) {
@@ -931,7 +1048,125 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         tab_strip_->AddChildView(views.row);
     }
     UpdateTabStripPreferredSize();
+    RebuildCollapsedTabs();
     ApplyCollectionTheme();
+}
+
+void BrowserChrome::RebuildCollapsedTabs() {
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : collapsed_tab_delegates_) {
+        delegate->Detach();
+    }
+    collapsed_tab_delegates_.clear();
+    collapsed_tab_views_.clear();
+    collapsed_tab_list_->RemoveAllChildViews();
+    collapsed_pinned_separator_ = nullptr;
+    collapsed_pinned_separator_wrapper_ = nullptr;
+
+    const CollapsedRailTabLayout layout = CollapsedRailLayout(tab_entries_);
+    const std::optional<CefRefPtr<CefImage>> fallback_icon =
+        icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
+    const int button = kCollapsedRailButtonDip;
+    for (std::size_t position = 0; position < layout.order.size(); ++position) {
+        if (position == layout.separator_before) {
+            // Pinned tabs end here; the same hairline as the bottom group's.
+            CefRefPtr<SurfacePanelDelegate> wrapper_delegate = new SurfacePanelDelegate(
+                this, SurfaceSlot::kRail, CefSize(button, kCollapsedRailSeparatorHeightDip),
+                CefSize(button, kCollapsedRailSeparatorHeightDip),
+                CefSize(button, kCollapsedRailSeparatorHeightDip));
+            surface_delegates_.push_back(wrapper_delegate);
+            collapsed_pinned_separator_wrapper_ = CefPanel::CreatePanel(wrapper_delegate);
+            collapsed_pinned_separator_wrapper_->SetID(
+                static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
+            collapsed_pinned_separator_wrapper_->SetToBoxLayout(CenteredLayout());
+            const CefSize line(kCollapsedRailSeparatorWidthDip, DividerHeight(tokens_));
+            CefRefPtr<SurfacePanelDelegate> line_delegate =
+                new SurfacePanelDelegate(this, SurfaceSlot::kHairline, line, line, line);
+            surface_delegates_.push_back(line_delegate);
+            collapsed_pinned_separator_ = CefPanel::CreatePanel(line_delegate);
+            collapsed_pinned_separator_->SetID(
+                static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
+            collapsed_pinned_separator_wrapper_->AddChildView(collapsed_pinned_separator_);
+            collapsed_tab_list_->AddChildView(collapsed_pinned_separator_wrapper_);
+        }
+        const std::size_t source = layout.order[position];
+        const TabStripEntrySnapshot& entry = tab_entries_[source];
+        CollapsedTabViews views;
+        views.source_index = source;
+        // The row is the outline (hairline when active, rail otherwise); the inner panel is
+        // the fill: the same language as the expanded selected tab row.
+        views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(button, button)));
+        views.row->SetID(static_cast<int>(ChromeViewId::kCollapsedRailTab));
+        CefRefPtr<CefBoxLayout> outline_layout =
+            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+        CefBoxLayoutSettings inner_settings;
+        inner_settings.horizontal = static_cast<int>(true);
+        inner_settings.between_child_spacing = 0;
+        CefRefPtr<CefBoxLayout> inner_layout = views.inner->SetToBoxLayout(inner_settings);
+        views.row->AddChildView(views.inner);
+        outline_layout->SetFlexForView(views.inner, 1);
+
+        CefRefPtr<CollectionButtonDelegate> delegate =
+            new CollectionButtonDelegate(this, CollectionButtonAction::kActivateTab, source);
+        collapsed_tab_delegates_.push_back(delegate);
+        views.button = CefLabelButton::CreateLabelButton(delegate, "");
+        views.button->SetID(static_cast<int>(ChromeViewId::kCollapsedRailTab));
+        views.button->SetAccessibleName(TabEntryAccessibleName(entry));
+        views.button->SetTooltipText(CollapsedRailTabTooltip(entry));
+        views.button->SetFocusable(true);
+        views.button->SetInkDropEnabled(true);
+        views.button->SetMinimumSize(CefSize(button - 2 * kHairlineDip, button - 2 * kHairlineDip));
+        if (entry.favicon != nullptr) {
+            views.button->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
+        } else if (fallback_icon.has_value()) {
+            views.button->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
+        }
+        views.inner->AddChildView(views.button);
+        inner_layout->SetFlexForView(views.button, 1);
+
+        collapsed_tab_views_.push_back(views);
+        collapsed_tab_list_->AddChildView(views.row);
+    }
+    UpdateCollapsedTabListSize();
+}
+
+void BrowserChrome::UpdateCollapsedTabListSize() {
+    const bool separator = collapsed_pinned_separator_wrapper_ != nullptr;
+    const int height = CollapsedRailTabListHeightDip(tab_entries_.size(), separator);
+    if (collapsed_tab_list_delegate_ != nullptr) {
+        collapsed_tab_list_delegate_->SetPreferredSize(CefSize(kCollapsedRailButtonDip, height));
+    }
+    if (collapsed_tab_list_ != nullptr) {
+        collapsed_tab_list_->SetSize(CefSize(kCollapsedRailButtonDip, height));
+        collapsed_tab_list_->Layout();
+    }
+}
+
+void BrowserChrome::RebuildCollapsedSpaces() {
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : collapsed_space_delegates_) {
+        delegate->Detach();
+    }
+    collapsed_space_delegates_.clear();
+    collapsed_space_views_.clear();
+    collapsed_space_list_->RemoveAllChildViews();
+    for (std::size_t index = 0; index < space_entries_.size(); ++index) {
+        const SpaceSwitcherEntrySnapshot& entry = space_entries_[index];
+        CollapsedSpaceViews views;
+        views.source_index = index;
+        CefRefPtr<CollectionButtonDelegate> delegate =
+            new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
+        collapsed_space_delegates_.push_back(delegate);
+        views.button = CefLabelButton::CreateLabelButton(delegate, "");
+        views.button->SetID(static_cast<int>(ChromeViewId::kCollapsedRailSpace));
+        views.button->SetAccessibleName(SpaceEntryAccessibleName(entry));
+        views.button->SetTooltipText(CollapsedRailSpaceTooltip(entry));
+        views.button->SetFocusable(true);
+        views.button->SetInkDropEnabled(true);
+        views.button->SetMinimumSize(
+            CefSize(kCollapsedRailButtonDip, kCollapsedRailSpaceButtonHeightDip));
+        collapsed_space_views_.push_back(views);
+        collapsed_space_list_->AddChildView(views.button);
+    }
 }
 
 void BrowserChrome::SetSpaceSwitcherEntries(
@@ -989,8 +1224,10 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         space_entry_views_.push_back(views);
         space_switcher_->AddChildView(views.row);
     }
+    RebuildCollapsedSpaces();
     ApplyCollectionTheme();
     sidebar_->Layout();
+    collapsed_rail_->Layout();
 }
 
 void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
@@ -1100,21 +1337,23 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
     tokens_ = tokens;
     root_delegate_->SetTokens(tokens_);
     ApplyControlTheme();
-    rail_delegate_->SetFixedWidth(sidebar_revealed_ ? tokens_.rail_width_dip : 0);
+    rail_delegate_->SetFixedWidth(sidebar_expanded_ ? tokens_.rail_width_dip : 0);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
-void BrowserChrome::SetSidebarRevealed(bool revealed) {
+void BrowserChrome::SetSidebarExpanded(bool expanded) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {
         return;
     }
-    sidebar_revealed_ = revealed;
-    rail_delegate_->SetFixedWidth(revealed ? tokens_.rail_width_dip : 0);
-    // The rail keeps its place in the view tree; hiding it only removes it from
-    // layout, so ViewTreeContract() is unaffected.
-    sidebar_->SetVisible(revealed);
-    root_delegate_->SetSidebarRevealed(revealed);
+    sidebar_expanded_ = expanded;
+    // Exactly one of the two rails takes the rail column; the other leaves layout. Both stay
+    // in the view tree, so ViewTreeContract() is unaffected.
+    rail_delegate_->SetFixedWidth(expanded ? tokens_.rail_width_dip : 0);
+    collapsed_rail_delegate_->SetFixedWidth(expanded ? 0 : kCollapsedRailWidthDip);
+    sidebar_->SetVisible(expanded);
+    collapsed_rail_->SetVisible(!expanded);
+    root_delegate_->SetSidebarExpanded(expanded);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
@@ -1182,6 +1421,12 @@ void BrowserChrome::Detach() {
     for (const CefRefPtr<CollectionButtonDelegate>& delegate : space_button_delegates_) {
         delegate->Detach();
     }
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : collapsed_tab_delegates_) {
+        delegate->Detach();
+    }
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : collapsed_space_delegates_) {
+        delegate->Detach();
+    }
     for (const CefRefPtr<SurfacePanelDelegate>& surface_delegate : surface_delegates_) {
         surface_delegate->Detach();
     }
@@ -1222,6 +1467,11 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
             BeginAddressEditing();
             return;
+        case ChromeViewId::kCollapsedRailNewTab:
+            // The new tab opens on the start page, which focuses its own search field, so the
+            // collapsed rail stays collapsed instead of expanding for the address bar.
+            host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
+            return;
         case ChromeViewId::kRailAgentButton:
             host_->ToggleAgentPanel();
             return;
@@ -1239,8 +1489,43 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
     }
 }
 
+namespace {
+
+// Runs a collection action after the button's own press callback has returned: the actions
+// rebuild the very rows (and delegates) the pressed button lives in, and destroying a view
+// from inside its own event handler is a use-after-free in CEF's event dispatch.
+class CollectionActionTask final : public CefTask {
+  public:
+    CollectionActionTask(std::shared_ptr<BrowserChrome*> alive, CollectionButtonAction action,
+                         std::size_t index)
+        : alive_(std::move(alive)), action_(action), index_(index) {}
+
+    void Execute() override {
+        if (BrowserChrome* chrome = *alive_) {
+            chrome->DispatchCollectionAction(action_, index_);
+        }
+    }
+
+  private:
+    std::shared_ptr<BrowserChrome*> alive_;
+    CollectionButtonAction action_;
+    std::size_t index_;
+
+    IMPLEMENT_REFCOUNTING(CollectionActionTask);
+};
+
+}  // namespace
+
 void BrowserChrome::HandleCollectionButtonPressed(CollectionButtonAction action,
                                                   std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    CefPostTask(TID_UI, new CollectionActionTask(alive_, action, index));
+}
+
+void BrowserChrome::DispatchCollectionAction(CollectionButtonAction action, std::size_t index) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {
         return;
@@ -1384,7 +1669,6 @@ void BrowserChrome::ApplyControlTheme() {
     sidebar_->SetBackgroundColor(rail.argb);
     browser_content_->SetBackgroundColor(browser_content.argb);
     agent_panel_->SetBackgroundColor(browser_content.argb);
-    hover_sliver_->SetBackgroundColor(accent.argb);
     // Rail-descendant panels are created with no delegate and would otherwise inherit
     // the window's primary background; painting them the rail color keeps the whole
     // column one uniform tinted surface so the floating card separates cleanly.
@@ -1498,6 +1782,7 @@ void BrowserChrome::ApplyRailButtonTheme() {
 // which changes independently of the theme.
 void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
+    ApplyCollapsedRailTheme();
     for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
          ++index) {
         const TabStripEntrySnapshot& entry = tab_entries_[index];
@@ -1521,6 +1806,56 @@ void BrowserChrome::ApplyCollectionTheme() {
         views.name->SetBackgroundColor(colors.fill.argb);
         views.color_mark->SetBackgroundColor(entry.color.argb);
         views.name->SetEnabledTextColors(colors.title.argb);
+    }
+}
+
+// The icon rail re-asserts everything it owns: the surfaces, the hairlines, the "+" glyph,
+// the tab buttons (active = surface fill + hairline, like the expanded row) and the space
+// dots, whose ring color follows the theme.
+void BrowserChrome::ApplyCollapsedRailTheme() {
+    CEF_REQUIRE_UI_THREAD();
+    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
+    const ArgbColor hairline = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kHairline);
+    collapsed_rail_->SetBackgroundColor(rail.argb);
+    collapsed_tab_scroll_->SetBackgroundColor(rail.argb);
+    collapsed_tab_list_->SetBackgroundColor(rail.argb);
+    collapsed_bottom_group_->SetBackgroundColor(rail.argb);
+    collapsed_space_list_->SetBackgroundColor(rail.argb);
+    collapsed_divider_wrapper_->SetBackgroundColor(rail.argb);
+    collapsed_divider_->SetBackgroundColor(hairline.argb);
+    if (collapsed_pinned_separator_wrapper_ != nullptr) {
+        collapsed_pinned_separator_wrapper_->SetBackgroundColor(rail.argb);
+        collapsed_pinned_separator_->SetBackgroundColor(hairline.argb);
+    }
+    collapsed_new_tab_button_->SetBackgroundColor(rail.argb);
+    collapsed_new_tab_button_->SetInkDropEnabled(true);
+    collapsed_new_tab_button_->SetEnabledTextColors(tokens_.text_secondary.argb);
+    if (const std::optional<CefRefPtr<CefImage>> plus =
+            icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+        plus.has_value()) {
+        collapsed_new_tab_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
+    }
+    for (const CollapsedTabViews& views : collapsed_tab_views_) {
+        if (views.source_index >= tab_entries_.size()) {
+            continue;
+        }
+        const TabStripEntrySnapshot& entry = tab_entries_[views.source_index];
+        const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+        views.row->SetBackgroundColor(colors.outline.argb);
+        views.inner->SetBackgroundColor(colors.fill.argb);
+        views.button->SetBackgroundColor(colors.fill.argb);
+        views.button->SetEnabledTextColors(colors.title.argb);
+    }
+    for (const CollapsedSpaceViews& views : collapsed_space_views_) {
+        if (views.source_index >= space_entries_.size()) {
+            continue;
+        }
+        const SpaceSwitcherEntrySnapshot& entry = space_entries_[views.source_index];
+        views.button->SetBackgroundColor(rail.argb);
+        views.button->SetImage(
+            CEF_BUTTON_STATE_NORMAL,
+            MakeSpaceDotImage(entry.color, entry.active ? tokens_.text : tokens_.text_secondary,
+                              entry.active));
     }
 }
 

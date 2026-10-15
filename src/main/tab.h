@@ -49,6 +49,22 @@ class Tab {
     void SetFavicon(CefRefPtr<CefImage> favicon) { favicon_ = std::move(favicon); }
     [[nodiscard]] CefRefPtr<CefImage> favicon() const noexcept { return favicon_; }
 
+    // Favicon download bookkeeping (rules in favicon_policy.h). BeginFaviconRequest records
+    // the icon URL being fetched for the tab's current page; CompleteFaviconRequest accepts a
+    // finished download only while that URL is still the pending one, so a slow response for
+    // a page the tab has since left never replaces the newer icon. A successful completion
+    // stores `image`; a null or empty one is ignored (the previous icon stays). ClearFavicon
+    // drops both the icon and any pending request, restoring the globe.
+    void BeginFaviconRequest(std::string icon_url) { pending_favicon_url_ = std::move(icon_url); }
+    bool CompleteFaviconRequest(const std::string& icon_url, CefRefPtr<CefImage> image);
+    void ClearFavicon() {
+        favicon_ = nullptr;
+        pending_favicon_url_.clear();
+    }
+    [[nodiscard]] const std::string& pending_favicon_url() const noexcept {
+        return pending_favicon_url_;
+    }
+
     // U2: Caller-built CEF browser seam. The tab's CefBrowserView is created and owned
     // externally (by BrowserWindow); the tab holds raw CefRefPtr references to the view and
     // its underlying CefBrowser. Callers SetBrowserView after BrowserWindow creates the view;
@@ -68,6 +84,7 @@ class Tab {
     CefRefPtr<CefBrowserView> browser_view_;
     CefRefPtr<CefBrowser> browser_;
     CefRefPtr<CefImage> favicon_;
+    std::string pending_favicon_url_;
 };
 
 }  // namespace island

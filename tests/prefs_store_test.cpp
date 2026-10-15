@@ -47,6 +47,7 @@ TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional
     state.agent_provider = "custom";
     state.agent_command = "npx -y \"my agent\" --acp";
     state.agent_panel_open = true;
+    state.sidebar_collapsed = true;
     state.keybindings = {{"new_tab", "Mod+Shift+T"}, {"close_tab", ""}};
     const std::filesystem::path path = TempPath("agent.json");
     ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
@@ -60,9 +61,14 @@ TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional
     EXPECT_EQ(legacy.error, PrefsError::kNone);
     EXPECT_TRUE(legacy.state.agent_command.empty());
     EXPECT_FALSE(legacy.state.agent_panel_open);
+    // A missing sidebar key means expanded.
+    EXPECT_FALSE(legacy.state.sidebar_collapsed);
 
     WriteFile(path,
               R"({"version":1,"onboarding_completed":true,"theme":"dark","agent_command":7})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","sidebar_collapsed":1})");
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
     WriteFile(path,
               R"({"version":1,"onboarding_completed":true,"theme":"dark","keybindings":{"a":1}})");

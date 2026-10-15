@@ -15,6 +15,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
+  button per tab of the active space (pinned tabs first, the active tab highlighted like the
+  selected row, the page title as tooltip and accessible name), a "+" new-tab button and the
+  spaces as colored dots at the bottom, and a scrolling list when the tabs outgrow the window.
+  The choice is saved and restored on the next launch. Cmd/Ctrl+L from the icon rail expands the
+  sidebar for the length of the edit. The macOS hover reveal and the edge sliver are gone, since
+  the rail is always there. Favicons are fetched at 16 DIP only for web pages, ignored when
+  stale, and cleared when a tab leaves the site.
 - More keyboard shortcuts, all listed and rebindable in Settings: Ctrl+Tab and Ctrl+Shift+Tab
   switch tabs (Control is now its own modifier on macOS), Cmd+9 selects the last tab, Cmd+Shift+T
   reopens the last closed tab, Cmd+=, Cmd+-, and Cmd+0 zoom the page, Cmd+Shift+R reloads ignoring
@@ -36,6 +44,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- Clicking a tab or space button no longer destroys the pressed button from inside its own
+  callback (a use-after-free in CEF event dispatch that could crash the browser); the action now
+  runs right after the callback returns.
 - Island no longer crashes with "quit unexpectedly" when you switch to another app or window (and on
   quit). The window and every browser view now use CEF's Alloy runtime style; Island hosts several
   browser views in one window, which CEF supports only for Alloy style views.

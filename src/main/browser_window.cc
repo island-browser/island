@@ -18,6 +18,7 @@
 #include "clipboard.h"
 #include "design_tokens.h"
 #include "download_path.h"
+#include "favicon_policy.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
 #include "include/base/cef_callback.h"
@@ -174,6 +175,9 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
     }
     keymap_ = Keymap::WithOverrides(prefs_.keybindings);
+    // The sidebar starts the way the last session left it (the headless and smoke shapes
+    // keep the fresh-install default: expanded).
+    sidebar_state_.SetExpanded(!prefs_.sidebar_collapsed);
     ConfigureUpdater(DefaultUpdaterConfig(), std::make_unique<CefUpdateFetcher>());
     chrome_snapshot_.rail_bounds = {.x = 0,
                                     .y = 0,
@@ -1937,6 +1941,9 @@ void BrowserWindow::BeginAddressEditing() {
         return;
     }
 
+    // The address field only exists in the full sidebar; from the icon rail the sidebar
+    // opens for the length of the edit.
+    BeginTransientSidebarExpand();
     address_bar_model_.Focus();
     if (chrome_ != nullptr) {
         chrome_->OnAddressChanged(address_bar_model_.snapshot());
@@ -1955,6 +1962,7 @@ void BrowserWindow::CancelAddressEditing() {
     if (chrome_ != nullptr) {
         chrome_->OnAddressChanged(address_bar_model_.snapshot());
     }
+    ScheduleTransientSidebarCollapse();
 }
 
 void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
@@ -1970,6 +1978,7 @@ void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
     }
     Tab* tab = active_tab();
     if (!url.has_value() || tab == nullptr || tab->browser() == nullptr) {
+        // An invalid address keeps the field (and its message) on screen.
         return;
     }
 
@@ -1977,6 +1986,7 @@ void BrowserWindow::SubmitAddressDraft(std::string_view draft) {
     if (main_frame != nullptr) {
         main_frame->LoadURL(*url);
     }
+    EndTransientSidebarExpand();
 }
 
 void BrowserWindow::FocusBrowserView() {
@@ -2037,7 +2047,15 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
         return;
     }
 
-    owner->navigation_state().SetAddress(url.ToString());
+    // The icon belongs to the page that declared it: leaving the origin (or the web
+    // altogether) restores the globe until the new page declares its own.
+    const std::string new_url = url.ToString();
+    if (ShouldClearFaviconOnNavigation(owner->navigation_state().snapshot().url, new_url) &&
+        (owner->favicon() != nullptr || !owner->pending_favicon_url().empty())) {
+        owner->ClearFavicon();
+        UpdateChromeCollections();
+    }
+    owner->navigation_state().SetAddress(new_url);
 }
 
 void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {
@@ -2059,10 +2077,9 @@ class FaviconDownload final : public CefDownloadImageCallback {
     FaviconDownload(CefRefPtr<BrowserWindow> window, TabId tab)
         : window_(std::move(window)), tab_(tab) {}
 
-    void OnDownloadImageFinished(const CefString&, int, CefRefPtr<CefImage> image) override {
-        if (image != nullptr && !image->IsEmpty()) {
-            window_->OnFaviconDownloaded(tab_, image);
-        }
+    void OnDownloadImageFinished(const CefString& image_url, int,
+                                 CefRefPtr<CefImage> image) override {
+        window_->OnFaviconDownloaded(tab_, image_url.ToString(), image);
     }
 
   private:
@@ -2077,25 +2094,36 @@ class FaviconDownload final : public CefDownloadImageCallback {
 void BrowserWindow::OnFaviconURLChange(CefRefPtr<CefBrowser> browser,
                                        const std::vector<CefString>& icon_urls) {
     CEF_REQUIRE_UI_THREAD();
-    const Tab* owner = FindTabByBrowser(browser);
+    Tab* owner = FindTabByBrowser(browser);
     if (closing_ || owner == nullptr || icon_urls.empty()) {
         return;
     }
-    // 16 DIP at up to 2x; the page's first declared icon wins.
-    browser->GetHost()->DownloadImage(icon_urls.front(), /*is_favicon=*/true,
-                                      /*max_image_size=*/32, /*bypass_cache=*/false,
+    // Local pages (data:, file:, about:) never fetch; the page's first declared icon wins.
+    const std::string icon_url = icon_urls.front().ToString();
+    if (!ShouldFetchFavicon(owner->navigation_state().snapshot().url, icon_url)) {
+        return;
+    }
+    if (owner->pending_favicon_url() == icon_url) {
+        return;
+    }
+    owner->BeginFaviconRequest(icon_url);
+    // Never blocks: the callback runs later on the UI thread and failures are ignored.
+    browser->GetHost()->DownloadImage(icon_url, /*is_favicon=*/true,
+                                      /*max_image_size=*/kFaviconDownloadDip,
+                                      /*bypass_cache=*/false,
                                       new FaviconDownload(this, owner->id()));
 }
 
-void BrowserWindow::OnFaviconDownloaded(TabId tab_id, CefRefPtr<CefImage> image) {
+void BrowserWindow::OnFaviconDownloaded(TabId tab_id, const std::string& icon_url,
+                                        CefRefPtr<CefImage> image) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return;
     }
     for (Space& space : spaces_) {
         if (Tab* tab = space.FindTab(tab_id); tab != nullptr) {
-            tab->SetFavicon(image);
-            if (&space == &active_space()) {
+            if (tab->CompleteFaviconRequest(icon_url, std::move(image)) &&
+                &space == &active_space()) {
                 UpdateChromeCollections();
             }
             return;
@@ -2294,18 +2322,6 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
                 update::kStartupCheckDelayMs);
         }
     }
-    // The seam only observes; every chrome mutation it triggers is posted onto the
-    // CEF UI thread. It holds a raw BrowserWindow pointer, never a CefRefPtr, so it
-    // cannot create a refcount cycle, and OnWindowDestroyed uninstalls it.
-    // CefWindowHandle is a pointer on macOS and Windows but an unsigned long
-    // X11 XID on Linux, so a plain conversion to the seam's opaque void* is
-    // ill-formed there; reinterpret_cast is well-defined for both shapes.
-    hover_seam_ = InstallSidebarHoverSeam(
-        reinterpret_cast<void*>(window_->GetWindowHandle()),
-        [](void* context, int x_dip) {
-            static_cast<BrowserWindow*>(context)->OnSidebarHoverPointer(x_dip);
-        },
-        this);
 }
 
 void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
@@ -2336,7 +2352,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
-        // The hidden rail reports 0 width so observers never see a snapshot
+        // The collapsed icon rail reports its 52 DIP so observers never see a snapshot
         // claiming a 286 DIP rail while the sidebar is collapsed.
         .width = sidebar_state_.RailWidthDip(
             std::min(ChromeTokens::ForTheme(ChromeTheme::kLight).rail_width_dip, new_bounds.width)),
@@ -2901,7 +2917,6 @@ void BrowserWindow::PublishChromeSnapshot() {
 void BrowserWindow::DetachChromeAndObservers() {
     navigation_observer_ = nullptr;
     chrome_observer_ = nullptr;
-    UninstallHoverSeam();
     if (search_palette_ != nullptr) {
         search_palette_->Detach();
         search_palette_.reset();
@@ -3243,20 +3258,59 @@ void BrowserWindow::ToggleSidebar() {
     if (closing_) {
         return;
     }
-    sidebar_state_.Toggle();
-    ApplySidebarState();
+    SetSidebarExpanded(!sidebar_state_.expanded());
 }
 
-void BrowserWindow::OnSidebarHoverPointer(int x_dip) {
+void BrowserWindow::SetSidebarExpanded(bool expanded) {
     CEF_REQUIRE_UI_THREAD();
-    if (closing_ || chrome_ == nullptr) {
+    if (closing_) {
         return;
     }
-    const bool was_revealed = sidebar_state_.revealed();
-    sidebar_state_.OnPointerMoved(x_dip,
-                                  ChromeTokens::ForTheme(chrome_snapshot_.theme).rail_width_dip);
-    if (sidebar_state_.revealed() != was_revealed) {
+    const bool address_was_editing = address_bar_model_.snapshot().mode != AddressBarMode::kResting;
+    sidebar_state_.SetExpanded(expanded);
+    ApplySidebarState();
+    if (!expanded && address_was_editing) {
+        // The address field just left the layout; the keyboard returns to the page.
+        CancelAddressEditing();
+        FocusBrowserView();
+    }
+    // Only the persistent choice is saved (a transient expansion never is), so the next
+    // launch starts the way the user last left the sidebar.
+    if (prefs_.sidebar_collapsed != !expanded) {
+        prefs_.sidebar_collapsed = !expanded;
+        SavePrefs();
+    }
+}
+
+void BrowserWindow::BeginTransientSidebarExpand() {
+    if (!closing_ && sidebar_state_.BeginTransientExpand()) {
         ApplySidebarState();
+    }
+}
+
+void BrowserWindow::ScheduleTransientSidebarCollapse() {
+    constexpr int kTransientCollapseGraceMs = 200;
+    if (closing_ || !sidebar_state_.transient_expanded()) {
+        return;
+    }
+    CefPostDelayedTask(
+        TID_UI,
+        CefCreateClosureTask(base::BindOnce(&BrowserWindow::FinishTransientSidebarCollapse,
+                                            CefRefPtr<BrowserWindow>(this))),
+        kTransientCollapseGraceMs);
+}
+
+void BrowserWindow::FinishTransientSidebarCollapse() {
+    // A new edit started inside the grace period keeps the sidebar open.
+    if (address_bar_model_.snapshot().mode == AddressBarMode::kResting) {
+        EndTransientSidebarExpand();
+    }
+}
+
+void BrowserWindow::EndTransientSidebarExpand() {
+    if (!closing_ && sidebar_state_.EndTransientExpand()) {
+        ApplySidebarState();
+        FocusBrowserView();
     }
 }
 
@@ -3265,11 +3319,10 @@ void BrowserWindow::ApplySidebarState() {
     if (closing_) {
         return;
     }
-    const bool revealed = sidebar_state_.revealed();
     if (chrome_ != nullptr) {
-        chrome_->SetSidebarRevealed(revealed);
+        chrome_->SetSidebarExpanded(sidebar_state_.expanded());
     }
-    // Keep the published snapshot's rail/content split in step with the reveal
+    // Keep the published snapshot's rail/content split in step with the expand
     // state so observers never read a stale 286 DIP rail.
     const int window_width = window_width_dip_;
     const int rail_width = sidebar_state_.RailWidthDip(
@@ -3284,13 +3337,6 @@ void BrowserWindow::ApplySidebarState() {
     chrome_snapshot_.rail_bounds.width = rail_width;
     chrome_snapshot_.content_bounds.x = rail_width;
     chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
-}
-
-void BrowserWindow::UninstallHoverSeam() {
-    if (hover_seam_ != nullptr) {
-        RemoveSidebarHoverSeam(hover_seam_);
-        hover_seam_ = nullptr;
-    }
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {

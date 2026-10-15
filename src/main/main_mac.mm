@@ -406,13 +406,33 @@ bool CaptureOwnWindows(const std::string& path) {
     return written == YES;
 }
 
-void RunDevStep(IslandMenuActions* menu_actions, island::DevCaptureOptions options,
-                std::size_t next_action) {
+// Parameterized dev actions that have no menu item: `navigate:<address>` submits the address
+// the way the address bar does, `sidebar:expanded|collapsed` sets the persistent sidebar state.
+bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
+    constexpr std::string_view kNavigate = "navigate:";
+    if (app == nullptr) {
+        return false;
+    }
+    if (action.compare(0, kNavigate.size(), kNavigate) == 0) {
+        app->NavigateActiveTab(action.substr(kNavigate.size()));
+        return true;
+    }
+    if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
+        app->SetSidebarExpanded(action == "sidebar:expanded");
+        return true;
+    }
+    return false;
+}
+
+void RunDevStep(island::IslandApp* app, IslandMenuActions* menu_actions,
+                island::DevCaptureOptions options, std::size_t next_action) {
     constexpr double kActionPauseSeconds = 0.8;
     if (next_action < options.actions.size()) {
         const std::string& action = options.actions[next_action];
         const SEL selector = DevActionSelector(action);
-        if (selector != nullptr && [menu_actions respondsToSelector:selector]) {
+        if (RunParameterizedDevAction(app, action)) {
+            fprintf(stderr, "island-dev: action %s\n", action.c_str());
+        } else if (selector != nullptr && [menu_actions respondsToSelector:selector]) {
             [menu_actions performSelector:selector withObject:nil];
             fprintf(stderr, "island-dev: action %s\n", action.c_str());
         } else {
@@ -421,7 +441,7 @@ void RunDevStep(IslandMenuActions* menu_actions, island::DevCaptureOptions optio
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                      static_cast<int64_t>(kActionPauseSeconds * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-                         RunDevStep(menu_actions, options, next_action + 1);
+                         RunDevStep(app, menu_actions, options, next_action + 1);
                        });
         return;
     }
@@ -442,7 +462,8 @@ void RunDevStep(IslandMenuActions* menu_actions, island::DevCaptureOptions optio
 }
 
 // Starts once the window has had time to appear and lay out.
-void ScheduleDevCapture(IslandMenuActions* menu_actions, island::DevCaptureOptions options) {
+void ScheduleDevCapture(island::IslandApp* app, IslandMenuActions* menu_actions,
+                        island::DevCaptureOptions options) {
     constexpr double kStartupSeconds = 2.0;
     dispatch_after(
         dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(kStartupSeconds * NSEC_PER_SEC)),
@@ -450,7 +471,7 @@ void ScheduleDevCapture(IslandMenuActions* menu_actions, island::DevCaptureOptio
           // Overlays such as the palettes dismiss when the window loses focus,
           // and a process launched from a shell does not start frontmost.
           [NSApp activateIgnoringOtherApps:YES];
-          RunDevStep(menu_actions, options, 0);
+          RunDevStep(app, menu_actions, options, 0);
         });
 }
 
@@ -806,7 +827,7 @@ int main(int argc, char* argv[]) {
         const island::DevCaptureOptions dev_capture =
             island::DevCaptureOptions::Parse(std::span<const std::string_view>(arguments));
         if (dev_capture.enabled()) {
-            ScheduleDevCapture(menu_actions, dev_capture);
+            ScheduleDevCapture(app.get(), menu_actions, dev_capture);
         }
 
         const int exit_code =

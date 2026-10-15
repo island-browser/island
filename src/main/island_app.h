@@ -1,6 +1,8 @@
 #ifndef ISLAND_MAIN_ISLAND_APP_H_
 #define ISLAND_MAIN_ISLAND_APP_H_
 
+#include <string>
+
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "include/cef_app.h"
@@ -33,6 +35,10 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void ShowSearchPalette();
     void ShowCommandPalette();
     void ToggleSidebar();
+    // Developer-capture entry points (--island-dev-actions): set the persistent sidebar state
+    // and load an address in the active tab through the address bar's own submit path.
+    void SetSidebarExpanded(bool expanded);
+    void NavigateActiveTab(const std::string& address);
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

@@ -7,118 +7,80 @@ namespace {
 
 constexpr int kRailWidth = 286;
 
-TEST(SidebarStateTest, GivenANewSidebarWhenInspectedThenItMatchesTheDefaultAndIsRevealed) {
+TEST(SidebarStateTest, GivenANewSidebarWhenInspectedThenItIsExpandedAtFullWidth) {
     const SidebarState state;
 
-    EXPECT_EQ(state.pinned(), kSidebarRevealedByDefault);
-    EXPECT_TRUE(state.revealed());
-    EXPECT_FALSE(state.hover_revealed());
+    EXPECT_EQ(state.persistent_expanded(), kSidebarExpandedByDefault);
+    EXPECT_TRUE(state.expanded());
+    EXPECT_FALSE(state.transient_expanded());
     EXPECT_EQ(state.RailWidthDip(kRailWidth), kRailWidth);
-    EXPECT_FALSE(state.sliver_visible());
 }
 
-TEST(SidebarStateTest, GivenAHiddenSidebarWhenToggledThenItRevealsAtFullRailWidth) {
-    // The unpinned construction starts hidden, like a user-hidden rail.
-    SidebarState state(/*pinned=*/false);
-    ASSERT_FALSE(state.revealed());
+TEST(SidebarStateTest, GivenACollapsedSidebarWhenMeasuredThenItKeepsTheIconRailWidth) {
+    const SidebarState state(/*expanded=*/false);
 
-    state.Toggle();
-
-    EXPECT_TRUE(state.pinned());
-    EXPECT_TRUE(state.revealed());
-    EXPECT_EQ(state.RailWidthDip(kRailWidth), kRailWidth);
-    EXPECT_FALSE(state.sliver_visible());
-
-    state.Toggle();
-
-    EXPECT_FALSE(state.revealed());
-    EXPECT_EQ(state.RailWidthDip(kRailWidth), 0);
+    EXPECT_FALSE(state.expanded());
+    EXPECT_EQ(state.RailWidthDip(kRailWidth), kCollapsedRailWidthDip);
+    EXPECT_EQ(kCollapsedRailWidthDip, 52);
+    // A window narrower than the icon rail never reports more than it has.
+    EXPECT_EQ(state.RailWidthDip(30), 30);
 }
 
-TEST(SidebarStateTest, GivenTheEdgeBandWhenEnteredThenHoverReveals) {
-    SidebarState state(/*pinned=*/false);
-
-    state.OnPointerMoved(kHoverRevealBandDip, kRailWidth);
-    EXPECT_FALSE(state.revealed());
-
-    state.OnPointerMoved(kHoverRevealBandDip - 1, kRailWidth);
-    EXPECT_TRUE(state.revealed());
-    EXPECT_TRUE(state.hover_revealed());
-    EXPECT_FALSE(state.pinned());
-}
-
-TEST(SidebarStateTest, GivenAHoverRevealWhenThePointerLeavesTheGraceBandThenItHides) {
-    SidebarState state(/*pinned=*/false);
-    state.OnPointerMoved(0, kRailWidth);
-    ASSERT_TRUE(state.revealed());
-
-    state.OnPointerMoved(kRailWidth + kHoverGraceBandDip, kRailWidth);
-    EXPECT_TRUE(state.revealed());
-
-    state.OnPointerMoved(kRailWidth + kHoverGraceBandDip + 1, kRailWidth);
-    EXPECT_FALSE(state.revealed());
-}
-
-TEST(SidebarStateTest, GivenRepeatedHoverMovesWhenAppliedThenTheStateIsIdempotent) {
-    SidebarState state(/*pinned=*/false);
-
-    for (int repeat = 0; repeat < 5; ++repeat) {
-        state.OnPointerMoved(3, kRailWidth);
-        EXPECT_TRUE(state.revealed());
-    }
-    for (int repeat = 0; repeat < 5; ++repeat) {
-        state.OnPointerMoved(900, kRailWidth);
-        EXPECT_FALSE(state.revealed());
-    }
-}
-
-TEST(SidebarStateTest, GivenAPinnedSidebarWhenHoveredAnywhereThenTheToggleStateWins) {
+TEST(SidebarStateTest, GivenAToggleWhenAppliedThenItFlipsBetweenExpandedAndCollapsed) {
     SidebarState state;
-    ASSERT_TRUE(state.pinned());
 
-    state.OnPointerMoved(900, kRailWidth);
-
-    EXPECT_TRUE(state.revealed()) << "hover must never collapse a pinned sidebar";
-    EXPECT_FALSE(state.hover_revealed());
-}
-
-TEST(SidebarStateTest, GivenAHoverRevealWhenToggledOffThenTheHoverRevealIsClearedToo) {
-    SidebarState state(/*pinned=*/false);
-    state.OnPointerMoved(0, kRailWidth);
-    ASSERT_TRUE(state.hover_revealed());
-
-    // The first Cmd/Ctrl+B pins it, the second collapses it outright.
     state.Toggle();
-    EXPECT_TRUE(state.revealed());
+    EXPECT_FALSE(state.expanded());
+    EXPECT_FALSE(state.persistent_expanded());
+
+    state.Toggle();
+    EXPECT_TRUE(state.expanded());
+    EXPECT_TRUE(state.persistent_expanded());
+}
+
+TEST(SidebarStateTest, GivenACollapsedSidebarWhenTheAddressIsEditedThenItExpandsTransiently) {
+    SidebarState state(/*expanded=*/false);
+
+    EXPECT_TRUE(state.BeginTransientExpand());
+    EXPECT_TRUE(state.expanded());
+    EXPECT_TRUE(state.transient_expanded());
+    // The persistent choice (the one saved in the preferences) is untouched.
+    EXPECT_FALSE(state.persistent_expanded());
+    EXPECT_EQ(state.RailWidthDip(kRailWidth), kRailWidth);
+
+    EXPECT_TRUE(state.EndTransientExpand());
+    EXPECT_FALSE(state.expanded());
+    EXPECT_EQ(state.RailWidthDip(kRailWidth), kCollapsedRailWidthDip);
+}
+
+TEST(SidebarStateTest, GivenAnExpandedSidebarWhenTheAddressIsEditedThenNothingChanges) {
+    SidebarState state;
+
+    EXPECT_FALSE(state.BeginTransientExpand());
+    EXPECT_FALSE(state.transient_expanded());
+    EXPECT_FALSE(state.EndTransientExpand());
+    EXPECT_TRUE(state.expanded());
+}
+
+TEST(SidebarStateTest, GivenATransientExpansionWhenToggledThenItCollapsesAndStaysCollapsed) {
+    SidebarState state(/*expanded=*/false);
+    ASSERT_TRUE(state.BeginTransientExpand());
+
     state.Toggle();
 
-    EXPECT_FALSE(state.revealed());
-    EXPECT_FALSE(state.hover_revealed());
+    EXPECT_FALSE(state.expanded());
+    EXPECT_FALSE(state.transient_expanded());
+    EXPECT_FALSE(state.persistent_expanded());
 }
 
-TEST(SidebarStateTest, GivenAHoverRevealWhenThePointerLeavesTheWindowThenItHides) {
-    SidebarState state(/*pinned=*/false);
-    state.OnPointerMoved(0, kRailWidth);
-    ASSERT_TRUE(state.revealed());
+TEST(SidebarStateTest, GivenASetExpandedWhenAppliedThenAnyTransientExpansionEnds) {
+    SidebarState state(/*expanded=*/false);
+    ASSERT_TRUE(state.BeginTransientExpand());
 
-    state.OnPointerLeft();
+    state.SetExpanded(true);
 
-    EXPECT_FALSE(state.revealed());
-}
-
-TEST(SidebarStateTest, GivenAPinnedSidebarWhenThePointerLeavesThenItStaysRevealed) {
-    SidebarState state(/*pinned=*/true);
-
-    state.OnPointerLeft();
-
-    EXPECT_TRUE(state.revealed());
-}
-
-TEST(SidebarStateTest, GivenTheBandConstantsWhenInspectedThenTheyMatchTheSpec) {
-    EXPECT_EQ(kHoverRevealBandDip, 12);
-    EXPECT_EQ(kHoverGraceBandDip, 16);
-    EXPECT_GE(kHoverSliverWidthDip, 1);
-    EXPECT_LE(kHoverSliverWidthDip, 2);
+    EXPECT_TRUE(state.persistent_expanded());
+    EXPECT_FALSE(state.transient_expanded());
 }
 
 }  // namespace

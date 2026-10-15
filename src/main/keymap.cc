@@ -19,7 +19,7 @@ constexpr std::array<KeyActionInfo, kKeyActionCount> kActions = {{
     {KeyAction::kFocusAddress, "focus_address", "Focus address", "Mod+L"},
     {KeyAction::kCommandPalette, "command_palette", "Command palette", "Mod+K"},
     {KeyAction::kSearchPalette, "search_palette", "Search palette", "Mod+Shift+K"},
-    {KeyAction::kToggleSidebar, "toggle_sidebar", "Show or hide the sidebar", "Mod+B"},
+    {KeyAction::kToggleSidebar, "toggle_sidebar", "Expand or collapse the sidebar", "Mod+B"},
     {KeyAction::kNewTab, "new_tab", "New tab", "Mod+T"},
     {KeyAction::kCloseTab, "close_tab", "Close tab", "Mod+W"},
     {KeyAction::kNextTab, "next_tab", "Next tab", "Mod+Shift+]"},

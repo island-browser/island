@@ -398,8 +398,8 @@ BrowserToolbox::BrowserToolbox(AgentBrowserHost& host) : host_(host) {
     add("browser_toggle_split", "Toggle split view",
         "Show the active tab side by side with its neighbour, or leave split view.",
         Schema(Props()), false);
-    add("browser_toggle_sidebar", "Toggle sidebar", "Show or hide the sidebar.", Schema(Props()),
-        false);
+    add("browser_toggle_sidebar", "Toggle sidebar",
+        "Expand the sidebar or collapse it to the icon rail.", Schema(Props()), false);
 
     // Page inspection and interaction.
     add("page_read", "Read page",

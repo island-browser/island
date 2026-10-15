@@ -32,6 +32,9 @@ struct PrefsState {
     std::string agent_command;
     // Whether the agent panel was open at the last clean quit.
     bool agent_panel_open = false;
+    // Whether Cmd/Ctrl+B left the sidebar collapsed to the icon rail. Optional key (absent
+    // means expanded); a transient expansion for address editing is never saved.
+    bool sidebar_collapsed = false;
     // Keyboard shortcut overrides: {action id, binding} pairs that differ
     // from the built-in keymap (an empty binding unbinds). Optional key.
     std::vector<std::pair<std::string, std::string>> keybindings;

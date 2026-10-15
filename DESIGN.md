@@ -174,6 +174,16 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
   around surface-filled children); `--radius-sm` applies to web surfaces. CEF resets custom view
   colors on every theme change, so each chrome view reports the reset and the chrome repaints from
   the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`, `SpaceChipColors`).
+- **Collapsed icon rail (native):** Cmd/Ctrl+B swaps the 286 DIP sidebar for a 52 DIP rail on the
+  same `--surface-2` surface, never hiding the tabs. One 32 DIP square button per tab of the
+  active space (16 DIP favicon, globe fallback), pinned tabs first with a hairline between the
+  groups; the active tab is `--surface` with a 1px `--border` outline, the same language as the
+  selected row. A quiet "+" and the spaces (round dots; the active one wears a ring, so state is a
+  shape and never color alone) sit at the bottom. The tab title is the tooltip and the accessible
+  name, buttons are keyboard focusable, and the list scrolls vertically (buttons plus a classic
+  scrollbar always fit the 52 DIP). There is no edge sliver or hover reveal. Cmd/Ctrl+L expands
+  the sidebar for the length of the address edit. Every rail view re-asserts its colors through
+  the same theme-reset delegates (`BrowserChrome::ApplyCollapsedRailTheme`).
 - **Welcome card (native overlay):** a `--surface` card with a 1px `--border` outline and
   spacing_6 padding: Geist title and lede, mono uppercase section labels (APPEARANCE, IMPORT), a
   three-segment appearance control (selected = `--surface-2` fill, `--accent` text), one outlined

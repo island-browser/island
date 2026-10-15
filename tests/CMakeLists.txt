@@ -25,10 +25,12 @@ add_executable(island_tests
     browser_window_pages_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
+    chrome/collapsed_rail_test.cpp
     chrome/welcome_flow_style_test.cpp
     command_palette_test.cpp
     design_tokens_test.cpp
     download_path_test.cpp
+    favicon_policy_test.cpp
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
@@ -90,16 +92,14 @@ target_compile_features(island_tests PRIVATE cxx_std_20)
 target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
                       island_agent)
-# browser_window.cc references the platform sidebar-hover seam (never called by
-# the headless tests, but the symbols must link), so mirror src/main's split.
+# browser_window.cc references the platform bookmark-import and clipboard seams, so
+# mirror src/main's split.
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
-                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
-                    "${CMAKE_SOURCE_DIR}/src/main/macos/sidebar_hover_mac.mm")
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm")
 else()
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"
-                    "${CMAKE_SOURCE_DIR}/src/main/clipboard_stub.cc"
-                    "${CMAKE_SOURCE_DIR}/src/main/sidebar_hover_stub.cc")
+                    "${CMAKE_SOURCE_DIR}/src/main/clipboard_stub.cc")
 endif()
 if(NOT APPLE)
     target_link_libraries(island_tests PRIVATE libcef_lib)

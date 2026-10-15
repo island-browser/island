@@ -20,6 +20,7 @@
 #include "address_bar_model.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
+#include "collapsed_rail.h"
 #include "design_tokens.h"
 #include "icon_catalog.h"
 #include "include/cef_image.h"
@@ -66,9 +67,11 @@ enum class ChromeViewId : int {
     kSpaceSwitcherEntry = 1025,
     kSpaceSwitcherEntryColorMark = 1026,
     kSpaceSwitcherEntryName = 1027,
-    // Window-level regions. The palettes are reported through CefOverlayController
-    // and the hover sliver is a plain child of the root panel; all of them are
-    // deliberately absent from ViewTreeContract().
+    // Window-level regions. The palettes are reported through CefOverlayController;
+    // all of them are deliberately absent from ViewTreeContract().
+    // 1028 was the 2-DIP edge sliver shown while the sidebar was hidden. The sidebar
+    // now collapses to an icon rail instead of disappearing, so the sliver is gone;
+    // the value stays reserved and is never reused.
     kHoverSliver = 1028,
     kSearchPalette = 1029,
     kSearchPaletteQuery = 1030,
@@ -99,6 +102,16 @@ enum class ChromeViewId : int {
     kRailNewSpaceButton = 1045,
     kRailTabsButton = 1046,
     kRailSettingsButton = 1047,
+    // The collapsed icon rail (Cmd/Ctrl+B): a sibling of kRail inside the rail host, shown
+    // instead of it. Like the palettes it is absent from ViewTreeContract(); its entries
+    // are index-aligned with the tab and space projections.
+    kCollapsedRail = 1048,
+    kCollapsedRailTabList = 1049,
+    kCollapsedRailTab = 1050,
+    kCollapsedRailSeparator = 1051,
+    kCollapsedRailNewTab = 1052,
+    kCollapsedRailSpaceList = 1053,
+    kCollapsedRailSpace = 1054,
 };
 
 struct ChromeViewTreeNode {
@@ -162,6 +175,15 @@ enum class CollectionButtonAction : std::uint8_t {
     kCloseTab,
     kActivateSpace,
     kUnpinTab,
+};
+
+// What the collapsed rail draws for a tab projection: the tab order (source indices into
+// the projection, pinned tabs first and otherwise in list order) and the position in that
+// order where the unpinned group starts, or npos when only one group exists.
+struct CollapsedRailTabLayout {
+    static constexpr std::size_t npos = static_cast<std::size_t>(-1);
+    std::vector<std::size_t> order;
+    std::size_t separator_before = npos;
 };
 
 class BrowserChromeHost {
@@ -344,25 +366,25 @@ class BrowserChrome final : public NavigationObserver {
     }
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(
         DipRect root_bounds, const ChromeTokens& tokens) noexcept {
-        return LayoutForBounds(root_bounds, tokens, /*sidebar_revealed=*/true);
+        return LayoutForBounds(root_bounds, tokens, /*sidebar_expanded=*/true);
     }
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
-                                                                bool sidebar_revealed) noexcept {
-        return LayoutForBounds(root_bounds, tokens, sidebar_revealed,
+                                                                bool sidebar_expanded) noexcept {
+        return LayoutForBounds(root_bounds, tokens, sidebar_expanded,
                                /*agent_panel_open=*/false);
     }
-    // The hidden sidebar occupies 0 DIP of layout width; the rail stays in the
-    // view tree, so the contract shape is unchanged and only the content
-    // x-offset moves. This is the single layout path for both states.
+    // The collapsed sidebar occupies the icon rail's 52 DIP of layout width instead of the
+    // full 286; the rail stays in the view tree, so the contract shape is unchanged and
+    // only the content x-offset moves. This is the single layout path for both states.
     // The open agent panel takes its column from the right edge before the
     // content gutter applies; closed, it is a zero-width rect at that edge.
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
-                                                                bool sidebar_revealed,
+                                                                bool sidebar_expanded,
                                                                 bool agent_panel_open) noexcept {
-        const int rail_width =
-            sidebar_revealed ? std::min(tokens.rail_width_dip, root_bounds.width) : 0;
+        const int rail_width = std::min(
+            sidebar_expanded ? tokens.rail_width_dip : kCollapsedRailWidthDip, root_bounds.width);
         const int panel_width =
             agent_panel_open
                 ? std::clamp(root_bounds.width - rail_width - MinimumBrowserContentWidthDip(), 0,
@@ -517,6 +539,18 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr double SplitRatioStep() { return 0.05; }
     [[nodiscard]] static constexpr int SplitDividerWidthDip() { return 2; }
 
+    // The collapsed icon rail lists the tabs pinned-first (the projection is already in that
+    // order because Space keeps its pinned tabs on top; this re-asserts it without ever
+    // reordering within a group) and reports each tab by its source index, which is what
+    // the host's SelectTab needs. The separator sits where the unpinned group begins.
+    [[nodiscard]] static CollapsedRailTabLayout CollapsedRailLayout(
+        const std::vector<TabStripEntrySnapshot>& tabs);
+    // The tooltip of a rail icon is the full page title (or space name); the accessible
+    // names reuse TabEntryAccessibleName / SpaceEntryAccessibleName.
+    [[nodiscard]] static std::string CollapsedRailTabTooltip(const TabStripEntrySnapshot& entry);
+    [[nodiscard]] static std::string CollapsedRailSpaceTooltip(
+        const SpaceSwitcherEntrySnapshot& entry);
+
     // Rail metrics: every control row is one 32 DIP height (spacing_6 + spacing_2),
     // so tab rows, space chips, footer buttons, and the address pill align.
     [[nodiscard]] static constexpr int TabRowHeightDip() { return 32; }
@@ -529,10 +563,11 @@ class BrowserChrome final : public NavigationObserver {
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
     void ApplyTheme(ChromeTokens tokens);
-    // Applies the reveal state to the rail's layout width. Runtime geometry only:
+    // Applies the expand state to the rail's layout width. Runtime geometry only:
     // the rail is never removed from the tree.
-    void SetSidebarRevealed(bool revealed);
-    [[nodiscard]] bool sidebar_revealed() const noexcept { return sidebar_revealed_; }
+    // `expanded` selects the full 286 DIP sidebar; false shows the icon rail instead.
+    void SetSidebarExpanded(bool expanded);
+    [[nodiscard]] bool sidebar_expanded() const noexcept { return sidebar_expanded_; }
     // Hosts the agent panel's view in the kAgentPanel column (once) and opens
     // or closes the column.
     void SetAgentPanelView(CefRefPtr<CefView> view);
@@ -563,12 +598,21 @@ class BrowserChrome final : public NavigationObserver {
     class CollectionButtonDelegate;
     class TextfieldDelegate;
 
+  public:
+    // Runs a collection-button action; posted from HandleCollectionButtonPressed so the
+    // rebuild never happens inside the pressed button's own callback.
+    void DispatchCollectionAction(CollectionButtonAction action, std::size_t index);
+
+  private:
     // Called by every chrome delegate when CEF resets a view's colors on a theme
     // change; schedules one ReapplyThemeColors() pass.
     void HandleViewThemeReset();
     void HandleButtonPressed(ChromeViewId view_id);
     void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
     void UpdateTabStripPreferredSize();
+    void RebuildCollapsedTabs();
+    void RebuildCollapsedSpaces();
+    void UpdateCollapsedTabListSize();
     void ApplyRailButtonTheme();
     bool HandleAddressKeyEvent(CefRefPtr<CefTextfield> textfield, const CefKeyEvent& event);
     void HandleAddressUserAction(CefRefPtr<CefTextfield> textfield);
@@ -579,6 +623,7 @@ class BrowserChrome final : public NavigationObserver {
     void ScheduleAddressSelection();
     void ApplyControlTheme();
     void ApplyCollectionTheme();
+    void ApplyCollapsedRailTheme();
     void UpdateAddressFocusLeadingEdge();
 
     BrowserChromeHost* host_;
@@ -613,14 +658,24 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
+    // The collapsed icon rail. `collapsed_rail_` is the panel shown instead of `sidebar_`;
+    // the tab list scrolls inside `collapsed_tab_scroll_`, the "+" button and the space
+    // dots sit in the bottom group.
+    CefRefPtr<CefPanel> collapsed_rail_;
+    CefRefPtr<SurfacePanelDelegate> collapsed_rail_delegate_;
+    CefRefPtr<CefView> collapsed_tab_scroll_;
+    CefRefPtr<CefPanel> collapsed_tab_list_;
+    CefRefPtr<SurfacePanelDelegate> collapsed_tab_list_delegate_;
+    CefRefPtr<CefPanel> collapsed_bottom_group_;
+    CefRefPtr<CefPanel> collapsed_divider_wrapper_;
+    CefRefPtr<CefPanel> collapsed_divider_;
+    CefRefPtr<CefLabelButton> collapsed_new_tab_button_;
+    CefRefPtr<CefPanel> collapsed_space_list_;
     CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
     CefRefPtr<CefView> tab_list_scroll_;
     CefRefPtr<CefPanel> space_switcher_;
     CefRefPtr<CefLabelButton> new_tab_button_;
     CefRefPtr<CefPanel> rail_footer_;
-    // The 2-DIP edge marker shown while the rail is hidden. A plain child of the root, never
-    // a CefOverlayController: on macOS any live overlay widget swallows every mouse press.
-    CefRefPtr<CefPanel> hover_sliver_;
     CefRefPtr<CefLabelButton> agent_button_;
     CefRefPtr<CefLabelButton> new_space_button_;
     CefRefPtr<CefLabelButton> tabs_button_;
@@ -633,6 +688,18 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefLabelButton> title;
         CefRefPtr<CefLabelButton> close;
     };
+    // Collapsed-rail entries: `row` paints the hairline outline of the active tab and
+    // `inner` its fill; `button` carries the favicon (or the space dot) and the tooltip.
+    struct CollapsedTabViews {
+        CefRefPtr<CefPanel> row;
+        CefRefPtr<CefPanel> inner;
+        CefRefPtr<CefLabelButton> button;
+        std::size_t source_index = 0;
+    };
+    struct CollapsedSpaceViews {
+        CefRefPtr<CefLabelButton> button;
+        std::size_t source_index = 0;
+    };
     struct SpaceEntryViews {
         CefRefPtr<CefPanel> row;
         CefRefPtr<CefPanel> inner;
@@ -643,6 +710,12 @@ class BrowserChrome final : public NavigationObserver {
     std::vector<SpaceSwitcherEntrySnapshot> space_entries_;
     std::vector<TabEntryViews> tab_entry_views_;
     std::vector<SpaceEntryViews> space_entry_views_;
+    std::vector<CollapsedTabViews> collapsed_tab_views_;
+    std::vector<CollapsedSpaceViews> collapsed_space_views_;
+    CefRefPtr<CefPanel> collapsed_pinned_separator_wrapper_;
+    CefRefPtr<CefPanel> collapsed_pinned_separator_;
+    std::vector<CefRefPtr<CollectionButtonDelegate>> collapsed_tab_delegates_;
+    std::vector<CefRefPtr<CollectionButtonDelegate>> collapsed_space_delegates_;
     // Kept per region: rebuilding one collection must not detach the other's
     // still-live entry buttons.
     std::vector<CefRefPtr<CollectionButtonDelegate>> tab_button_delegates_;
@@ -656,7 +729,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;
-    bool sidebar_revealed_ = kSidebarRevealedByDefault;
+    bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool detached_ = false;
 };
 

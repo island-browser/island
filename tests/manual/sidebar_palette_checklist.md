@@ -1,3 +1,7 @@
+> Superseded in part: Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding
+> it, and the edge sliver and macOS hover reveal were removed. The hover and sliver rows below are
+> historical; verify the icon rail through `docs/phase3-visual-acceptance.md` captures instead.
+
 # Sidebar/palette manual acceptance checklist
 
 This is a template for the manual verification pass required by

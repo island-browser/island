@@ -249,25 +249,25 @@ TEST(BrowserChromeContractTest, GivenTheCollectionIdsWhenComparedThenTheyStartAf
               static_cast<int>(ChromeViewId::kActivePageIndicator));
 }
 
-TEST(BrowserChromeContractTest, GivenAHiddenSidebarWhenLaidOutThenTheRailTakesNoLayoutWidth) {
+TEST(BrowserChromeContractTest, GivenACollapsedSidebarWhenLaidOutThenTheRailKeepsTheIconRailWidth) {
     ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
     tokens.rail_width_dip = 286;
     const DipRect root = {.x = 0, .y = 0, .width = 1440, .height = 900};
 
-    const ChromeGeometrySnapshot hidden =
-        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_revealed=*/false);
-    const ChromeGeometrySnapshot revealed =
-        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_revealed=*/true);
+    const ChromeGeometrySnapshot collapsed =
+        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_expanded=*/false);
+    const ChromeGeometrySnapshot expanded =
+        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_expanded=*/true);
 
-    EXPECT_EQ(hidden.rail_bounds.width, 0);
-    EXPECT_EQ(hidden.browser_content_bounds.x, 0);
-    EXPECT_EQ(hidden.browser_content_bounds.width, 1440);
-    EXPECT_EQ(revealed.rail_bounds.width, 286);
-    EXPECT_EQ(revealed.browser_content_bounds.x, 286);
-    EXPECT_EQ(revealed.browser_content_bounds.width, 1440 - 286);
-    // The two-argument overload is the revealed layout, so every existing
+    EXPECT_EQ(collapsed.rail_bounds.width, kCollapsedRailWidthDip);
+    EXPECT_EQ(collapsed.browser_content_bounds.x, kCollapsedRailWidthDip);
+    EXPECT_EQ(collapsed.browser_content_bounds.width, 1440 - kCollapsedRailWidthDip);
+    EXPECT_EQ(expanded.rail_bounds.width, 286);
+    EXPECT_EQ(expanded.browser_content_bounds.x, 286);
+    EXPECT_EQ(expanded.browser_content_bounds.width, 1440 - 286);
+    // The two-argument overload is the expanded layout, so every existing
     // caller and contract assertion keeps its meaning.
-    EXPECT_EQ(BrowserChrome::LayoutForBounds(root, tokens), revealed);
+    EXPECT_EQ(BrowserChrome::LayoutForBounds(root, tokens), expanded);
 }
 
 TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenComparedThenTheyStartAfter1027) {
@@ -283,7 +283,7 @@ TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenComparedThenTheyStartAfter
 TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenTheTreeIsInspectedThenNoneOfThemAppear) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
 
-    // The hover sliver and the palette are window-level overlays reported
+    // The retired sliver id and the palette are window-level regions reported
     // through CefOverlayController, so the chrome view tree keeps its exact
     // Phase 2/3 shape and never gains an overlay node.
     EXPECT_EQ(FindChild(tree, ChromeViewId::kHoverSliver), nullptr);

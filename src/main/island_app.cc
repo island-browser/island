@@ -144,6 +144,24 @@ void IslandApp::ToggleSidebar() {
     }
 }
 
+void IslandApp::SetSidebarExpanded(bool expanded) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->SetSidebarExpanded(expanded);
+    }
+}
+
+void IslandApp::NavigateActiveTab(const std::string& address) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        // Submitting needs an edit in progress, exactly as when the user focuses the field.
+        browser_window_->BeginAddressEditing();
+        browser_window_->SubmitAddressDraft(address);
+    }
+}
+
 void IslandApp::ToggleAgentPanel() {
     CEF_REQUIRE_UI_THREAD();
 

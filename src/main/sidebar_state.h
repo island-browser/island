@@ -1,79 +1,60 @@
 #ifndef ISLAND_SIDEBAR_STATE_H_
 #define ISLAND_SIDEBAR_STATE_H_
 
-#include <cstdint>
+#include <algorithm>
 
 namespace island {
 
-// The sidebar is revealed by default: the rail is the product's primary
-// surface (tabs, address, spaces) and a first run with a 2-DIP sliver reads as
-// an empty window. Hiding stays one Cmd/Ctrl+B away everywhere, and
-// hover-reveal is the macOS-only enhancement layered on top.
-inline constexpr bool kSidebarRevealedByDefault = true;
+// The sidebar is expanded by default: the rail is the product's primary surface
+// (tabs, address, spaces). Cmd/Ctrl+B collapses it to a narrow icon rail instead of
+// hiding it, so the open tabs stay one click away.
+inline constexpr bool kSidebarExpandedByDefault = true;
 
-// Width of the always-visible edge marker while the rail is hidden. The spec
-// allows 1-2 DIP; 2 matches the ActivePageIndicator accent thickness so the two
-// chrome marks read as one system.
-inline constexpr int kHoverSliverWidthDip = 2;
+// Layout width of the collapsed icon rail: one 32 DIP icon button per tab with a
+// 10 DIP gutter on each side. The rail never goes away, so there is no edge
+// marker and no hover reveal (expanding under the pointer would swap the target
+// under the cursor and reflow the page).
+inline constexpr int kCollapsedRailWidthDip = 52;
 
-// Reveal when the cursor enters the leftmost 12-DIP band of the window.
-inline constexpr int kHoverRevealBandDip = 12;
-
-// Hide again once the cursor leaves the revealed rail by more than 16 DIP, so
-// small overshoots past the rail edge do not flicker the sidebar.
-inline constexpr int kHoverGraceBandDip = 16;
-
-// The CEF-free reveal/hide state machine. Two independent inputs fold into one
-// revealed flag with a fixed precedence: an explicit Cmd/Ctrl+B toggle pins the
-// sidebar and always wins, and hover only ever applies to the unpinned hidden
-// state.
+// The CEF-free expand/collapse state machine. Two inputs fold into one `expanded()`
+// flag: the persistent choice (Cmd/Ctrl+B, saved in the preferences) and a transient
+// expansion that only lasts while the address field is being edited in the collapsed
+// rail (Cmd/Ctrl+L), which is never persisted.
 class SidebarState {
   public:
     SidebarState() = default;
-    explicit SidebarState(bool pinned) : pinned_(pinned) {}
+    explicit SidebarState(bool expanded) : persistent_expanded_(expanded) {}
 
-    // Flips the explicit pin. Toggling off also clears any hover reveal, so one
-    // Cmd/Ctrl+B always collapses a visible sidebar whatever revealed it.
+    // Cmd/Ctrl+B flips what is on screen: an expanded sidebar (persistent or
+    // transient) collapses, a collapsed one expands. The result is the new persistent
+    // choice and always ends any transient expansion.
     void Toggle();
-    void SetPinned(bool pinned);
+    void SetExpanded(bool expanded);
 
-    // Feeds a pointer position, in window-relative DIP, to the hover rules.
-    // `revealed_rail_width` is the rail's revealed width so the grace band is
-    // measured from the rail's trailing edge. Idempotent: repeated moves inside
-    // the same band do not change state.
-    void OnPointerMoved(int x_dip, int revealed_rail_width);
+    // Expands a collapsed sidebar for the duration of an address edit. Returns true
+    // when it changed the layout (false when the sidebar was already expanded).
+    bool BeginTransientExpand();
+    // Returns true when a transient expansion ended (the layout changed).
+    bool EndTransientExpand();
 
-    // The pointer left the window (or the seam was uninstalled). Any hover
-    // reveal ends; a pinned reveal is untouched.
-    void OnPointerLeft();
-
-    [[nodiscard]] bool pinned() const noexcept { return pinned_; }
-    [[nodiscard]] bool hover_revealed() const noexcept { return hover_revealed_; }
-    [[nodiscard]] bool revealed() const noexcept { return pinned_ || hover_revealed_; }
-
-    // The rail's layout width: 0 while hidden, the full revealed width otherwise.
-    // The hidden rail stays in the view tree and occupies no layout width.
-    [[nodiscard]] int RailWidthDip(int revealed_rail_width) const noexcept {
-        return revealed() ? revealed_rail_width : 0;
+    // The persistent choice, as saved in the preferences.
+    [[nodiscard]] bool persistent_expanded() const noexcept { return persistent_expanded_; }
+    [[nodiscard]] bool transient_expanded() const noexcept { return transient_expanded_; }
+    // What is on screen: the full sidebar (true) or the icon rail (false).
+    [[nodiscard]] bool expanded() const noexcept {
+        return persistent_expanded_ || transient_expanded_;
     }
 
-    // The edge sliver is visible exactly when the rail is not.
-    [[nodiscard]] bool sliver_visible() const noexcept { return !revealed(); }
+    // The rail's layout width: the full width while expanded, the icon rail otherwise.
+    [[nodiscard]] int RailWidthDip(int expanded_rail_width) const noexcept {
+        return expanded() ? expanded_rail_width
+                          : std::min(kCollapsedRailWidthDip, expanded_rail_width);
+    }
 
   private:
-    bool pinned_ = kSidebarRevealedByDefault;
-    bool hover_revealed_ = false;
+    bool persistent_expanded_ = kSidebarExpandedByDefault;
+    bool transient_expanded_ = false;
 };
-
-// Installs the platform-native hover seam on `window_handle`, calling
-// `on_pointer_x` with the pointer's window-relative x in DIP. Returns an opaque
-// handle to pass to RemoveSidebarHoverSeam, or nullptr when the platform has no
-// seam. Only macOS implements this; Windows and Linux are deliberately
-// toggle-only, and their stub returns nullptr.
-using SidebarHoverCallback = void (*)(void* context, int x_dip);
-[[nodiscard]] void* InstallSidebarHoverSeam(void* window_handle, SidebarHoverCallback callback,
-                                            void* context);
-void RemoveSidebarHoverSeam(void* seam);
 
 }  // namespace island
 

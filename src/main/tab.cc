@@ -24,4 +24,15 @@ CefRefPtr<CefBrowser> Tab::browser() const noexcept { return browser_; }
 
 bool Tab::has_browser() const noexcept { return browser_ != nullptr; }
 
+bool Tab::CompleteFaviconRequest(const std::string& icon_url, CefRefPtr<CefImage> image) {
+    if (pending_favicon_url_.empty() || icon_url != pending_favicon_url_) {
+        return false;
+    }
+    pending_favicon_url_.clear();
+    if (image != nullptr && !image->IsEmpty()) {
+        favicon_ = std::move(image);
+    }
+    return true;
+}
+
 }  // namespace island

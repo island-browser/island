@@ -8,7 +8,7 @@
   strip, space switcher, rename via F2/menu, reorder via menu), split view (`Cmd/Ctrl+Shift+S`
   pairs the active tab with its adjacent tab; the divider is keyboard-adjustable), the command
   palette on `Cmd/Ctrl+K`, the search palette on `Cmd/Ctrl+Shift+K`, the hideable sidebar
-  (`Cmd/Ctrl+B` everywhere, macOS hover-reveal bands), popup rejection, and shutdown through the
+  (`Cmd/Ctrl+B` everywhere collapses it to a 52 DIP icon rail of tab favicons; no hover reveal), popup rejection, and shutdown through the
   CEF close lifecycle. Phase 3 units U4/U5, U6, U7, and U8 have landed; U9's locally completable
   part is done (workflows audited, docs updated — the green CI/package runs land with the next
   push), U11's clean-checkout regression is green locally (fresh configure/build, 242 default +
