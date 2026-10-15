@@ -26,6 +26,7 @@ add_executable(island_tests
     browser_window_pages_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
+    appearance_test.cpp
     chrome/collapsed_rail_test.cpp
     chrome/welcome_flow_style_test.cpp
     command_palette_test.cpp
@@ -79,6 +80,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker.cc"
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/row_raster.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
@@ -130,7 +132,11 @@ gtest_discover_tests(island_content_blocker_stub_tests)
 # mirror src/main's split.
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
-                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm")
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm")
+    target_link_libraries(island_tests PRIVATE "-framework QuartzCore")
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm"
+                                PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"
                     "${CMAKE_SOURCE_DIR}/src/main/clipboard_stub.cc")

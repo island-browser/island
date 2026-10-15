@@ -459,6 +459,21 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->OpenNewestReport();
         return true;
     }
+    // `appearance:<key>=<value>` (e.g. appearance:sidebar_side=right, appearance:reset) and
+    // `space_color:<index>=#RRGGBB` run the Settings > Appearance path.
+    constexpr std::string_view kAppearance = "appearance:";
+    constexpr std::string_view kSpaceColor = "space_color:";
+    if (action.compare(0, kSpaceColor.size(), kSpaceColor) == 0) {
+        app->ApplyAppearanceForDev("space_color", action.substr(kSpaceColor.size()));
+        return true;
+    }
+    if (action.compare(0, kAppearance.size(), kAppearance) == 0) {
+        const std::string rest = action.substr(kAppearance.size());
+        const std::size_t equals = rest.find('=');
+        app->ApplyAppearanceForDev(rest.substr(0, equals),
+                                   equals == std::string::npos ? "" : rest.substr(equals + 1));
+        return true;
+    }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
         app->SetSidebarExpanded(action == "sidebar:expanded");
         return true;

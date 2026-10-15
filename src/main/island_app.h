@@ -53,6 +53,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // `open_report` opens the newest report in a new tab.
     void StartResearch(const std::string& question);
     void OpenNewestReport();
+    void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

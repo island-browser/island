@@ -430,6 +430,9 @@ class BrowserWindow : public CefClient,
     void ToggleSidebar();
     // Sets the persistent sidebar state (dev actions and the agent tool use this).
     void SetSidebarExpanded(bool expanded);
+    // Developer-capture entry point (--island-dev-actions=appearance:<key>=<value> and
+    // space_color:<index>=#RRGGBB): runs the same validated path as the Settings page.
+    void ApplyAppearanceForDev(std::string_view key, std::string_view value);
     [[nodiscard]] bool sidebar_expanded() const noexcept { return sidebar_state_.expanded(); }
     // Navigates the active tab to the provider URL for `query`. A blank query is
     // rejected and a null ActiveBrowser() is a defined no-op; neither navigates.
@@ -541,6 +544,10 @@ class BrowserWindow : public CefClient,
     void OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool chrome_theme) override;
     CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
     bool CanClose(CefRefPtr<CefWindow> window) override;
+    // Arc-style: on macOS the window is frameless with the traffic lights over the sidebar.
+    bool IsFrameless(CefRefPtr<CefWindow> window) override;
+    bool WithStandardWindowButtons(CefRefPtr<CefWindow> window) override;
+    bool GetTitlebarHeight(CefRefPtr<CefWindow> window, float* titlebar_height) override;
     cef_runtime_style_t GetWindowRuntimeStyle() override;
     bool OnAccelerator(CefRefPtr<CefWindow> window, int command_id) override;
 
@@ -714,6 +721,20 @@ class BrowserWindow : public CefClient,
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
     void ApplySidebarState();
+    // Frameless window: the sidebar's top band and the canvas margin above the cards drag it.
+    void ApplyDragRegions();
+    // Settings > Appearance: `key`/`value` come from the page and are validated here. Persists
+    // the prefs and re-applies the tokens live.
+    void HandleAppearanceMessage(const json::Value& message);
+    void ApplyAppearance();
+    bool SetSpaceColorFromHex(std::size_t space_index, std::string_view hex);
+    // Rounds/shadows the page card's native views (see page_card.h); coalesced and retried because
+    // a freshly attached browser view gets its native view a moment later.
+    void RefreshPageCards();
+    void SchedulePageCardRefresh();
+    bool page_card_refresh_pending_ = false;
+    std::vector<CornerPatch> corner_patches_;
+    [[nodiscard]] std::vector<void*> NativeContentHandles() const;
     // Cmd/Ctrl+L while the icon rail is showing expands the sidebar for the length of the
     // edit; the end of the edit (submit, Escape, blur) collapses it again and returns the
     // keyboard to the page so focus never sits in a hidden field.
@@ -857,6 +878,7 @@ class BrowserWindow : public CefClient,
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).
     int window_width_dip_ = 1440;
+    int window_height_dip_ = 900;
     // The space color the chrome is currently tinted with; a space switch
     // re-tints when it changes.
     std::optional<std::uint32_t> tinted_space_color_;

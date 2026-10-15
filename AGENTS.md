@@ -17,6 +17,12 @@
   NSMenu owns the command keys), and the split divider is not drag-adjustable because the pinned
   CEF distribution exposes no mouse events on custom views — the divider moves through the menu
   items and `kMoveDividerLeft/Right` commands instead.
+- The Arc-style look (2026-10-15, project owner's request) is in: a frameless macOS window with
+  the traffic lights over the sidebar, a space-tinted `canvas` shared by the sidebar and window
+  margin, a rounded/shadowed page card, soft rounded row fills and favicon plates, plus Settings >
+  Appearance (per-space color, tint, sidebar side, radius, density, font, shadow, full bleed;
+  prefs `appearance`). CEF views cannot round or shadow, so `src/main/macos/page_card_mac.mm`
+  overlays native corner/shadow layers on macOS only; see DESIGN.md §5 and its Accepted Debt.
 - Read `docs/superpowers/specs/2026-08-09-island-browser-phase3-design.md` and
   `docs/superpowers/plans/2026-08-09-island-browser-phase3.md` (plus the 2026-08-12 sidebar/palette
   spec and plan) before implementing anything. The Phase 0/1/2 design and plan documents remain

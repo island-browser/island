@@ -44,6 +44,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "page_card.h"
 #include "runtime_style.h"
 #include "search_provider.h"
 #include "session_store.h"
@@ -60,6 +61,17 @@ constexpr int kChromeWindowWidth = 1440;
 constexpr int kChromeWindowHeight = 900;
 constexpr int kMinimumWindowWidth = 800;
 constexpr int kMinimumWindowHeight = 560;
+
+// The frameless Arc-style window (traffic lights over the sidebar, no title bar) is macOS-only
+// for now: the views toolkit's frameless + draggable-region mode is the supported combination
+// there, while Windows/Linux keep the platform frame.
+constexpr bool FramelessWindowSupported() {
+#if defined(__APPLE__)
+    return true;
+#else
+    return false;
+#endif
+}
 
 constexpr std::string_view kDefaultSpaceName = "Default";
 constexpr ArgbColor kDefaultSpaceColor{0xFF0090FF};
@@ -948,6 +960,8 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("text_2", json::Value::String(CssColor(tokens.text_secondary)))
         .Set("border", json::Value::String(CssColor(tokens.border)))
         .Set("accent", json::Value::String(CssColor(tokens.accent)))
+        .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
+        .Set("font", json::Value::String(CssFontStack(tokens)))
         .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
 }
 
@@ -1087,9 +1101,32 @@ std::string BrowserWindow::SettingsStateJson() const {
     }
     const ReaderSettings reader =
         ReaderSettings::Normalized(prefs_.reader_size, prefs_.reader_width, prefs_.reader_theme);
+    const AppearanceSettings& look = prefs_.appearance;
+    Value appearance_spaces = Value::MakeArray();
+    for (std::size_t index = 0; index < spaces_.size(); ++index) {
+        appearance_spaces.Push(Value::MakeObject()
+                                   .Set("index", Value::Int(static_cast<std::int64_t>(index)))
+                                   .Set("name", Value::String(spaces_[index].name()))
+                                   .Set("color", Value::String(CssColor(spaces_[index].color())))
+                                   .Set("active", Value::Bool(index == active_space_index_)));
+    }
+    Value appearance =
+        Value::MakeObject()
+            .Set("sidebar_tint", Value::Int(look.sidebar_tint_percent))
+            .Set("sidebar_side",
+                 Value::String(look.sidebar_side == SidebarSide::kRight ? "right" : "left"))
+            .Set("card_radius", Value::Int(look.card_radius_dip))
+            .Set("density",
+                 Value::String(look.density == Density::kCompact ? "compact" : "comfortable"))
+            .Set("font", Value::String(look.font_family.empty() ? "geist" : look.font_family))
+            .Set("card_shadow", Value::Bool(look.card_shadow))
+            .Set("full_bleed", Value::Bool(look.full_bleed))
+            .Set("frameless", Value::Bool(FramelessWindowSupported()))
+            .Set("spaces", std::move(appearance_spaces));
     Value settings =
         Value::MakeObject()
             .Set("theme_pref", Value::String(std::string(theme_pref)))
+            .Set("appearance", std::move(appearance))
             .Set("search", Value::MakeObject()
                                .Set("engine", Value::String(std::string(search_engine().key)))
                                .Set("engines", std::move(engines)))
@@ -1185,6 +1222,118 @@ std::string BrowserWindow::TabOverviewStateJson() const {
             .Set("overview", Value::MakeObject().Set("spaces", std::move(spaces))));
 }
 
+bool BrowserWindow::SetSpaceColorFromHex(std::size_t space_index, std::string_view hex) {
+    if (space_index >= spaces_.size() || hex.size() != 7 || hex.front() != '#') {
+        return false;
+    }
+    std::uint32_t rgb = 0;
+    for (const char ch : hex.substr(1)) {
+        rgb <<= 4;
+        if (ch >= '0' && ch <= '9') {
+            rgb |= static_cast<std::uint32_t>(ch - '0');
+        } else if (ch >= 'a' && ch <= 'f') {
+            rgb |= static_cast<std::uint32_t>(ch - 'a' + 10);
+        } else if (ch >= 'A' && ch <= 'F') {
+            rgb |= static_cast<std::uint32_t>(ch - 'A' + 10);
+        } else {
+            return false;
+        }
+    }
+    spaces_[space_index].SetColor({.argb = 0xFF000000U | rgb});
+    return true;
+}
+
+void BrowserWindow::ApplyAppearance() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    ApplyTheme(window_, ResolvedChromeTheme(), true);
+    UpdateChromeCollections();
+    ApplySidebarState();
+    if (chrome_ != nullptr) {
+        // The new sidebar side / inset need one more pass over the live bounds.
+        chrome_->ApplyTheme(ResolvedTokens(chrome_snapshot_.theme));
+    }
+}
+
+void BrowserWindow::ApplyAppearanceForDev(std::string_view key, std::string_view value) {
+    using json::Value;
+    Value message = Value::MakeObject();
+    if (key == "space_color") {
+        const std::size_t equals = value.find('=');
+        if (equals == std::string_view::npos) {
+            return;
+        }
+        message.Set("type", Value::String("set_space_color"))
+            .Set("index", Value::Int(std::strtoll(std::string(value.substr(0, equals)).c_str(),
+                                                  nullptr, 10)))
+            .Set("color", Value::String(std::string(value.substr(equals + 1))));
+    } else if (key == "reset") {
+        message.Set("type", Value::String("reset_appearance"));
+    } else {
+        message.Set("type", Value::String("set_appearance"))
+            .Set("key", Value::String(std::string(key)));
+        if (value == "true" || value == "false") {
+            message.Set("value", Value::Bool(value == "true"));
+        } else if (!value.empty() && std::all_of(value.begin(), value.end(),
+                                                 [](char ch) { return ch >= '0' && ch <= '9'; })) {
+            message.Set("value", Value::Int(std::strtoll(std::string(value).c_str(), nullptr, 10)));
+        } else {
+            message.Set("value", Value::String(std::string(value)));
+        }
+    }
+    HandleAppearanceMessage(message);
+}
+
+void BrowserWindow::HandleAppearanceMessage(const json::Value& message) {
+    const std::string_view type = message.StringOr("type", "");
+    if (type == "reset_appearance") {
+        prefs_.appearance = AppearanceSettings{};
+        SavePrefs();
+        ApplyAppearance();
+        return;
+    }
+    if (type == "set_space_color") {
+        const std::int64_t index = message.IntOr("index", -1);
+        if (index >= 0 &&
+            SetSpaceColorFromHex(static_cast<std::size_t>(index), message.StringOr("color", ""))) {
+            SaveSession();
+            ApplyAppearance();
+        }
+        return;
+    }
+    const std::string_view key = message.StringOr("key", "");
+    AppearanceSettings next = prefs_.appearance;
+    if (key == "sidebar_tint") {
+        next.sidebar_tint_percent =
+            static_cast<int>(message.IntOr("value", next.sidebar_tint_percent));
+    } else if (key == "sidebar_side") {
+        next.sidebar_side =
+            message.StringOr("value", "") == "right" ? SidebarSide::kRight : SidebarSide::kLeft;
+    } else if (key == "card_radius") {
+        next.card_radius_dip = static_cast<int>(message.IntOr("value", next.card_radius_dip));
+    } else if (key == "density") {
+        next.density =
+            message.StringOr("value", "") == "compact" ? Density::kCompact : Density::kComfortable;
+    } else if (key == "font") {
+        next.font_family = std::string(message.StringOr("value", ""));
+    } else if (key == "card_shadow") {
+        next.card_shadow = message.BoolOr("value", next.card_shadow);
+    } else if (key == "full_bleed") {
+        next.full_bleed = message.BoolOr("value", next.full_bleed);
+    } else {
+        return;
+    }
+    next = NormalizeAppearance(next);
+    if (next == prefs_.appearance) {
+        return;
+    }
+    prefs_.appearance = next;
+    SavePrefs();
+    ApplyAppearance();
+}
+
 void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
     const std::string_view type = message.StringOr("type", "");
     if (type == "ready") {
@@ -1204,6 +1353,9 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
             static_cast<void>(SetThemePreference(preference));
         }
+    } else if (type == "set_appearance" || type == "set_space_color" ||
+               type == "reset_appearance") {
+        HandleAppearanceMessage(message);
     } else if (type == "set_search_engine") {
         const std::string_view id = message.StringOr("id", "");
         if (IsSearchEngineKey(id)) {
@@ -1810,14 +1962,13 @@ std::string BrowserWindow::StartPageStateJson() const {
                      .Set("engine", Value::String(std::string(search_engine().display_name)))
                      .Set("research",
                           Value::MakeObject()
-                              .Set("seq", Value::Int(static_cast<std::int64_t>(
-                                              research_status_.seq)))
+                              .Set("seq",
+                                   Value::Int(static_cast<std::int64_t>(research_status_.seq)))
                               .Set("state", Value::String(research_status_.state))
                               .Set("message", Value::String(research_status_.message))
                               .Set("question", Value::String(research_status_.question))
                               .Set("report_id", Value::String(research_status_.report_id))
-                              .Set("report_title",
-                                   Value::String(research_status_.report_title)))));
+                              .Set("report_title", Value::String(research_status_.report_title)))));
 }
 
 void BrowserWindow::RenderStartPages() {
@@ -1857,8 +2008,9 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     // Tabs show arbitrary web pages, so this bridge is closed to everything but
     // Island's own start and report pages: the message must carry the bridge
     // prefix, come from a tab, and the tab's main frame must be exactly the
-    // start page document (or a report page document with a stored report id). Anything else logs as ordinary console output. (An ask_agent
-    // message from a site would otherwise be a prompt-injection channel.)
+    // start page document (or a report page document with a stored report id). Anything else logs
+    // as ordinary console output. (An ask_agent message from a site would otherwise be a
+    // prompt-injection channel.)
     const std::string text = message.ToString();
     if (!closing_ && text.rfind(kSleepProbePrefix, 0) == 0) {
         // The pre-sleep probe's reply: accepted only with the right token from the probed
@@ -1963,8 +2115,7 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
         const CefRefPtr<CefFrame> frame = source != nullptr ? source->GetMainFrame() : nullptr;
         if (result.code == ResearchStart::kBusy && frame != nullptr) {
             frame->ExecuteJavaScript("window.islandNote&&window.islandNote(" +
-                                         json::Serialize(json::Value::String(result.message)) +
-                                         ")",
+                                         json::Serialize(json::Value::String(result.message)) + ")",
                                      StartPageUrl(), 0);
         }
     } else if (type == "cancel_research") {
@@ -1995,7 +2146,12 @@ void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
 }
 
 ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
-    return ChromeTokens::ForTheme(theme).TintedForSpace(active_space().color(), theme);
+    ChromeTokens tokens =
+        ChromeTokens::ForTheme(theme).Customized(active_space().color(), theme, prefs_.appearance);
+    if (FramelessWindowSupported()) {
+        tokens.titlebar_band_dip = BrowserChrome::TrafficLightBandDip();
+    }
+    return tokens;
 }
 
 void BrowserWindow::ShutdownAgentHost() {
@@ -2576,6 +2732,7 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
         return;
     }
     browser_was_created_ = true;
+    SchedulePageCardRefresh();
     Tab* owner = FindTabByBrowser(browser);
     if (owner != nullptr) {
         owner->SetBrowser(browser);
@@ -2745,6 +2902,13 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
     UpdateChromeCollections();
     window_->AddChildView(chrome_->root());
+    chrome_->SetCornerPatchSink([this](const std::vector<CornerPatch>& patches) {
+        corner_patches_ = patches;
+        if (!closing_ && chrome_ != nullptr) {
+            ApplyCornerPatches(NativeContentHandles(), corner_patches_,
+                               ResolvedTokens(chrome_snapshot_.theme).canvas);
+        }
+    });
     window_->SetTitle(CefString("Island"));
     window_->CenterWindow(CefSize(kChromeWindowWidth, kChromeWindowHeight));
     ApplyTheme(window_, theme, true);
@@ -2815,6 +2979,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     }
 
     window_width_dip_ = new_bounds.width;
+    window_height_dip_ = new_bounds.height;
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
@@ -2861,6 +3026,21 @@ void BrowserWindow::OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool) {
 
 CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView>) {
     return CefSize(kMinimumWindowWidth, kMinimumWindowHeight);
+}
+
+bool BrowserWindow::IsFrameless(CefRefPtr<CefWindow>) { return FramelessWindowSupported(); }
+
+bool BrowserWindow::WithStandardWindowButtons(CefRefPtr<CefWindow>) {
+    return FramelessWindowSupported();
+}
+
+bool BrowserWindow::GetTitlebarHeight(CefRefPtr<CefWindow>, float* titlebar_height) {
+    if (!FramelessWindowSupported()) {
+        return false;
+    }
+    // The traffic lights sit halfway down this height: centered on the sidebar's top strip.
+    *titlebar_height = static_cast<float>(BrowserChrome::TrafficLightBandDip());
+    return true;
 }
 
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
@@ -3370,7 +3550,7 @@ Space BrowserWindow::RemoveSpaceAtIndex(std::size_t index) {
 void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views) {
     const ChromeTokens tokens = ResolvedTokens(theme);
     tinted_space_color_ = active_space().color().argb;
-    window->SetThemeColor(CEF_ColorPrimaryBackground, tokens.background.argb);
+    window->SetThemeColor(CEF_ColorPrimaryBackground, tokens.canvas.argb);
     window->SetThemeColor(CEF_ColorPrimaryForeground, tokens.text.argb);
     window->SetThemeColor(CEF_ColorSecondaryForeground, tokens.text_secondary.argb);
     window->SetThemeColor(CEF_ColorAccent, tokens.accent.argb);
@@ -4188,9 +4368,85 @@ void BrowserWindow::ApplySidebarState() {
                          0, BrowserChrome::AgentPanelWidthDip())
             : 0;
     chrome_snapshot_.rail_bounds.width = rail_width;
-    chrome_snapshot_.content_bounds.x = rail_width;
+    const bool sidebar_right = prefs_.appearance.sidebar_side == SidebarSide::kRight;
+    chrome_snapshot_.rail_bounds.x = sidebar_right ? std::max(0, window_width - rail_width) : 0;
+    chrome_snapshot_.content_bounds.x = sidebar_right ? panel_width : rail_width;
     chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
     ScheduleFindBarBounds();
+    ApplyDragRegions();
+    SchedulePageCardRefresh();
+}
+
+std::vector<void*> BrowserWindow::NativeContentHandles() const {
+    std::vector<void*> handles;
+    if (chrome_ == nullptr) {
+        return handles;
+    }
+    for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
+        CefRefPtr<CefBrowser> browser = view != nullptr ? view->GetBrowser() : nullptr;
+        if (browser != nullptr) {
+            handles.push_back(browser->GetHost()->GetWindowHandle());
+        }
+    }
+    return handles;
+}
+
+void BrowserWindow::RefreshPageCards() {
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
+    const std::vector<void*> handles = NativeContentHandles();
+    ApplyPageCardStyle(handles, {.radius_dip = tokens.card_radius_dip,
+                                 .shadow = tokens.card_shadow,
+                                 .canvas = tokens.canvas,
+                                 .inset_dip = tokens.card_inset_dip,
+                                 .dark = chrome_snapshot_.theme == ChromeTheme::kDark});
+    ApplyCornerPatches(handles, corner_patches_, tokens.canvas);
+}
+
+void BrowserWindow::SchedulePageCardRefresh() {
+    if (closing_ || window_ == nullptr || chrome_ == nullptr) {
+        return;
+    }
+    RefreshPageCards();
+    if (page_card_refresh_pending_) {
+        return;
+    }
+    page_card_refresh_pending_ = true;
+    for (const int64_t delay_ms : {60, 400}) {
+        CefPostDelayedTask(TID_UI,
+                           CefCreateClosureTask(base::BindOnce(
+                               [](CefRefPtr<BrowserWindow> self, bool last) {
+                                   if (last) {
+                                       self->page_card_refresh_pending_ = false;
+                                   }
+                                   self->RefreshPageCards();
+                               },
+                               CefRefPtr<BrowserWindow>(this), delay_ms == 400)),
+                           delay_ms);
+    }
+}
+
+void BrowserWindow::ApplyDragRegions() {
+    if (!FramelessWindowSupported() || window_ == nullptr || chrome_ == nullptr) {
+        return;
+    }
+    const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
+    std::vector<CefDraggableRegion> regions;
+    for (const BrowserChrome::DragRegion& region : BrowserChrome::DragRegionsForBounds(
+             {.x = 0, .y = 0, .width = window_width_dip_, .height = window_height_dip_}, tokens,
+             sidebar_state_.expanded(), agent_panel_open())) {
+        if (region.bounds.width <= 0 || region.bounds.height <= 0) {
+            continue;
+        }
+        CefDraggableRegion draggable;
+        draggable.bounds =
+            CefRect(region.bounds.x, region.bounds.y, region.bounds.width, region.bounds.height);
+        draggable.draggable = region.draggable ? 1 : 0;
+        regions.push_back(draggable);
+    }
+    window_->SetDraggableRegions(regions);
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {

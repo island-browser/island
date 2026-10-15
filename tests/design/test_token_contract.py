@@ -116,6 +116,45 @@ class TokenContractCompleteness(unittest.TestCase):
                         self.assertGreaterEqual(
                             contrast(palette[foreground], palette[background]), minimum)
 
+    def test_arc_contract_is_complete_and_consistent(self) -> None:
+        arc = self.contract["arc"]
+        self.assertEqual(sorted(arc["surfaces"]), ["dark", "light"])
+        for theme in ("light", "dark"):
+            self.assertEqual(
+                sorted(arc["surfaces"][theme]), ["canvas", "hover", "plate", "selected", "well"]
+            )
+            for value in arc["surfaces"][theme].values():
+                self.assertRegex(value, HEX_COLOR)
+        defaults = arc["defaults"]
+        self.assertIn(defaults["card_radius_dip"], defaults["card_radius_choices"])
+        self.assertEqual(defaults["card_radius_choices"], [0, 6, 10, 14])
+        self.assertEqual(defaults["card_inset_dip"], self.contract["spacing"]["space_2"])
+        self.assertEqual(defaults["control_height_dip"], 32)
+        self.assertLess(defaults["compact_control_height_dip"], defaults["control_height_dip"])
+        self.assertEqual(defaults["collapsed_rail_width_dip"], 52)
+        self.assertEqual(defaults["font"], "geist")
+
+    def test_arc_text_meets_contrast_on_every_arc_surface(self) -> None:
+        def luminance(hex_color: str) -> float:
+            channels = []
+            for index in (1, 3, 5):
+                value = int(hex_color[index : index + 2], 16) / 255
+                channels.append(value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4)
+            return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+        def ratio(a: str, b: str) -> float:
+            high, low = sorted((luminance(a), luminance(b)), reverse=True)
+            return (high + 0.05) / (low + 0.05)
+
+        for theme in ("light", "dark"):
+            colors = self.contract["colors"][theme]
+            for name, surface in self.contract["arc"]["surfaces"][theme].items():
+                if name == "plate":
+                    continue
+                for role in ("text", "text_secondary"):
+                    with self.subTest(theme=theme, surface=name, role=role):
+                        self.assertGreaterEqual(ratio(colors[role], surface), 4.5)
+
     def test_rail_width_is_286_dip(self) -> None:
         self.assertEqual(self.contract["rail_width_dip"], 286)
 
@@ -218,6 +257,28 @@ class NativeConsumerParity(unittest.TestCase):
             "spacing_3_dip": self.contract["spacing"]["space_3"],
             "spacing_4_dip": self.contract["spacing"]["space_4"],
             "spacing_6_dip": self.contract["spacing"]["space_6"],
+        }
+        for field, value in expected.items():
+            with self.subTest(field=field):
+                literals = self.assertions.get(field)
+                self.assertIsNotNone(literals, f"tests/design_tokens_test.cpp no longer asserts tokens.{field}")
+                self.assertEqual({int(literal) for literal in literals}, {value})
+
+    def test_arc_surfaces_match_the_contract(self) -> None:
+        for role in ("canvas", "selected", "hover", "well", "plate"):
+            with self.subTest(field=role):
+                literals = self.assertions.get(role)
+                self.assertIsNotNone(literals, f"tests/design_tokens_test.cpp no longer asserts tokens.{role}")
+                observed = sorted(f"#{NATIVE_HEX.fullmatch(literal).group(1)[2:]}" for literal in literals)
+                arc = self.contract["arc"]["surfaces"]
+                self.assertEqual(observed, sorted((arc["light"][role], arc["dark"][role])))
+
+    def test_arc_defaults_match_the_contract(self) -> None:
+        defaults = self.contract["arc"]["defaults"]
+        expected = {
+            "card_radius_dip": defaults["card_radius_dip"],
+            "card_inset_dip": defaults["card_inset_dip"],
+            "control_height_dip": defaults["control_height_dip"],
         }
         for field, value in expected.items():
             with self.subTest(field=field):

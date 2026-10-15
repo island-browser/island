@@ -56,6 +56,12 @@ TEST(ChromeTokens, ProvidesTheExactLightSemanticValues) {
     EXPECT_EQ(tokens.text_secondary.argb, 0xFF666666U);
     EXPECT_EQ(tokens.border.argb, 0xFFE5E5E5U);
     EXPECT_EQ(tokens.accent.argb, 0xFF0068D6U);
+    // Arc surfaces (neutral defaults; a space tints them at runtime).
+    EXPECT_EQ(tokens.canvas.argb, 0xFFF2F2F2U);
+    EXPECT_EQ(tokens.selected.argb, 0xFFFFFFFFU);
+    EXPECT_EQ(tokens.hover.argb, 0xFFEAEAEAU);
+    EXPECT_EQ(tokens.well.argb, 0xFFFAFAFAU);
+    EXPECT_EQ(tokens.plate.argb, 0xFFFFFFFFU);
 }
 
 TEST(ChromeTokens, ProvidesTheExactDarkSemanticValues) {
@@ -68,6 +74,29 @@ TEST(ChromeTokens, ProvidesTheExactDarkSemanticValues) {
     EXPECT_EQ(tokens.text_secondary.argb, 0xFFA1A1A1U);
     EXPECT_EQ(tokens.border.argb, 0xFF2A2A2AU);
     EXPECT_EQ(tokens.accent.argb, 0xFF3291FFU);
+    EXPECT_EQ(tokens.canvas.argb, 0xFF1A1A1AU);
+    EXPECT_EQ(tokens.selected.argb, 0xFF2A2A2AU);
+    EXPECT_EQ(tokens.hover.argb, 0xFF222222U);
+    EXPECT_EQ(tokens.well.argb, 0xFF242424U);
+    EXPECT_EQ(tokens.plate.argb, 0xFFEDEDEDU);
+}
+
+TEST(ChromeTokens, ProvidesTheArcCardAndDensityDefaultsInEveryTheme) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+
+        EXPECT_EQ(tokens.card_radius_dip, 10);
+        EXPECT_EQ(tokens.card_inset_dip, 8);
+        EXPECT_EQ(tokens.control_height_dip, 32);
+        EXPECT_EQ(tokens.titlebar_band_dip, 0);
+        EXPECT_TRUE(tokens.card_shadow);
+        EXPECT_EQ(tokens.sidebar_side, SidebarSide::kLeft);
+    }
+    const AppearanceSettings defaults;
+    EXPECT_EQ(defaults.sidebar_tint_percent, 60);
+    EXPECT_EQ(defaults.card_radius_dip, 10);
+    EXPECT_EQ(defaults.density, Density::kComfortable);
+    EXPECT_FALSE(defaults.full_bleed);
 }
 
 TEST(ChromeTokens, UsesTheSpecifiedLayoutAndFontTokensInEveryTheme) {

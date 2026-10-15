@@ -226,6 +226,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
       var value = theme[key.replace("-", "_")];
       if (value) root.style.setProperty("--" + key, value);
     });
+    if (theme.font) root.style.setProperty("--font", theme.font);
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
   }
 

@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "design_tokens.h"
+
 namespace island {
 
 // How the window resolves its chrome theme. kSystem keeps the Phase 3
@@ -66,6 +68,10 @@ struct PrefsState {
     int reader_size = 18;
     std::string reader_width = "medium";
     std::string reader_theme = "auto";
+
+    // Arc-style customization (Settings > Appearance); optional "appearance" object, each key
+    // optional. Values are normalized on load.
+    AppearanceSettings appearance;
 
     bool operator==(const PrefsState&) const = default;
 };
