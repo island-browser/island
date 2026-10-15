@@ -13,6 +13,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-15
+
 ### Added
 
 - Start page **Research** mode: Enter sends the question to the configured agent with a prompt to research it with Island's browser tools (a new space named after the question, several sources in tabs, compared) and to finish with a Markdown report that cites every claim. The final report opens in a new **Report** tab (local page, shared safe Markdown renderer, links open in new tabs) with Copy Markdown, Save as .md... and Continue in agent panel. Clear messages for a missing agent (with an Open Settings button), a busy agent, and Cancel.
@@ -240,7 +242,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/island-browser/island/releases/tag/v0.6.0
 [0.5.1]: https://github.com/island-browser/island/releases/tag/v0.5.1
 [0.5.0]: https://github.com/island-browser/island/releases/tag/v0.5.0
 [0.4.0]: https://github.com/island-browser/island/releases/tag/v0.4.0
