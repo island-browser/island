@@ -13,6 +13,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-15
+
+### Fixed
+
+- Compiled the Windows build as UTF-8, so window titles and the command palette no longer
+  show garbled dashes and non-ASCII download names keep their bytes in the tests.
+
 ## [0.6.1] - 2026-10-15
 
 ### Fixed
@@ -249,7 +256,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/island-browser/island/releases/tag/v0.6.2
 [0.6.1]: https://github.com/island-browser/island/releases/tag/v0.6.1
 [0.6.0]: https://github.com/island-browser/island/releases/tag/v0.6.0
 [0.5.1]: https://github.com/island-browser/island/releases/tag/v0.5.1
