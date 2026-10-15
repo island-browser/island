@@ -2,6 +2,7 @@
 #define ISLAND_DESIGN_TOKENS_H_
 
 #include <cstdint>
+#include <string>
 
 namespace island {
 
@@ -21,6 +22,40 @@ enum class ChromeFont : std::uint8_t {
     kGeistMono,
 };
 
+// Where the sidebar sits; the page card takes the other side.
+enum class SidebarSide : std::uint8_t { kLeft, kRight };
+
+// Control heights and spacing of the sidebar: comfortable is the Arc-like default (32 DIP rows),
+// compact tightens rows to 26 DIP.
+enum class Density : std::uint8_t { kComfortable, kCompact };
+
+// The user-customizable look layered on the theme tokens (Settings > Appearance, persisted in
+// prefs). CEF-free; every field is clamped/normalized by NormalizeAppearance before use.
+struct AppearanceSettings {
+    // How strongly the active space's color tints the sidebar and canvas, 0 (neutral graphite)
+    // to 100 (vivid).
+    int sidebar_tint_percent = 60;
+    SidebarSide sidebar_side = SidebarSide::kLeft;
+    // Page card corner radius in DIP: one of 0, 6, 10, 14.
+    int card_radius_dip = 10;
+    Density density = Density::kComfortable;
+    // Interface font: "" or "geist" = bundled Geist, "system" = the platform UI font, anything
+    // else is an installed family name.
+    std::string font_family;
+    // The page card's single soft shadow.
+    bool card_shadow = true;
+    // Full-bleed: no inset, no radius, no shadow; the page fills its side edge to edge.
+    bool full_bleed = false;
+
+    bool operator==(const AppearanceSettings&) const = default;
+};
+
+// Clamps tint to 0..100, snaps the radius to the nearest allowed value, and trims/limits the
+// font family (control characters and quotes dropped, 64 bytes at most).
+[[nodiscard]] AppearanceSettings NormalizeAppearance(AppearanceSettings settings);
+// The allowed card radii.
+[[nodiscard]] int SnapCardRadius(int radius_dip) noexcept;
+
 struct ChromeTokens {
     ArgbColor background;
     ArgbColor surface;
@@ -29,7 +64,28 @@ struct ChromeTokens {
     ArgbColor text_secondary;
     ArgbColor border;
     ArgbColor accent;
+    // Arc-style runtime tokens (derived by TintedForSpace; neutral defaults from ForTheme).
+    // `canvas` is the single surface of the sidebar and of the window margin around the page
+    // card; `selected`/`hover` are the soft fills of the selected and hovered rows; `well` is
+    // the address pill; `plate` is the light plate under favicons so dark icons stay visible.
+    ArgbColor canvas;
+    ArgbColor selected;
+    ArgbColor hover;
+    ArgbColor well;
+    ArgbColor plate;
     int rail_width_dip = 286;
+    int card_radius_dip = 10;
+    // Inset of the page card from the window edge on its three free sides.
+    int card_inset_dip = 8;
+    bool card_shadow = true;
+    SidebarSide sidebar_side = SidebarSide::kLeft;
+    int control_height_dip = 32;
+    int row_gap_dip = 2;
+    // Frameless macOS window: the height of the sidebar's top strip that hosts the traffic lights
+    // and drags the window (0 = the platform keeps its own title bar). Set by the window host.
+    int titlebar_band_dip = 0;
+    // Interface font family as handed to CEF font lists ("Geist" by default).
+    std::string ui_font_family = "Geist";
     int radius_small_dip = 6;
     int radius_medium_dip = 10;
     int spacing_1_dip = 4;
@@ -48,8 +104,11 @@ struct ChromeTokens {
     // lightened (dark) until it keeps 3:1 contrast against the surface. Text
     // tokens never change, and the wash is light enough to keep body text at
     // WCAG AA on the rail.
-    [[nodiscard]] ChromeTokens TintedForSpace(ArgbColor space_color,
-                                              ChromeTheme theme) const noexcept;
+    [[nodiscard]] ChromeTokens TintedForSpace(ArgbColor space_color, ChromeTheme theme) const;
+    // The full customized resolution: tint strength, density, radius, inset, shadow, side and
+    // font from `appearance`, on top of the space color and theme.
+    [[nodiscard]] ChromeTokens Customized(ArgbColor space_color, ChromeTheme theme,
+                                          const AppearanceSettings& appearance) const;
 
     bool operator==(const ChromeTokens&) const = default;
 };

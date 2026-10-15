@@ -65,6 +65,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/row_raster.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
@@ -96,7 +97,11 @@ target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIB
 # mirror src/main's split.
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
-                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm")
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm")
+    target_link_libraries(island_tests PRIVATE "-framework QuartzCore")
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm"
+                                PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"
                     "${CMAKE_SOURCE_DIR}/src/main/clipboard_stub.cc")

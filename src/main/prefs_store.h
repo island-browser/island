@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "design_tokens.h"
+
 namespace island {
 
 // How the window resolves its chrome theme. kSystem keeps the Phase 3
@@ -50,6 +52,10 @@ struct PrefsState {
     // values are resolved to the defaults where they are read.
     std::string search_engine = "google";
     std::string start_mode = "search";
+
+    // Arc-style customization (Settings > Appearance); optional "appearance" object, each key
+    // optional. Values are normalized on load.
+    AppearanceSettings appearance;
 
     bool operator==(const PrefsState&) const = default;
 };

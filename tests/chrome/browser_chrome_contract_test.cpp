@@ -170,9 +170,9 @@ TEST(BrowserChromeContractTest, GivenReferenceWindowBoundsWhenLaidOutThenRailSta
     EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 286, .height = 900}));
     EXPECT_EQ(geometry.browser_content_bounds,
               (DipRect{.x = 286, .y = 0, .width = 1154, .height = 900}));
-    EXPECT_EQ(
-        geometry.browser_view_bounds,
-        (DipRect{.x = 286 + pad, .y = pad, .width = 1154 - 2 * pad, .height = 900 - 2 * pad}));
+    // Flush with the sidebar on its left; inset on the top, right and bottom.
+    EXPECT_EQ(geometry.browser_view_bounds,
+              (DipRect{.x = 286, .y = pad, .width = 1154 - pad, .height = 900 - 2 * pad}));
 }
 
 TEST(BrowserChromeContractTest, GivenMinimumWindowBoundsWhenLaidOutThenBrowserViewStaysNonzero) {
@@ -186,7 +186,7 @@ TEST(BrowserChromeContractTest, GivenMinimumWindowBoundsWhenLaidOutThenBrowserVi
     EXPECT_EQ(geometry.browser_content_bounds,
               (DipRect{.x = 286, .y = 0, .width = 514, .height = 560}));
     EXPECT_EQ(geometry.browser_view_bounds,
-              (DipRect{.x = 286 + pad, .y = pad, .width = 514 - 2 * pad, .height = 560 - 2 * pad}));
+              (DipRect{.x = 286, .y = pad, .width = 514 - pad, .height = 560 - 2 * pad}));
     EXPECT_GT(geometry.browser_view_bounds.width, 0);
     EXPECT_GT(geometry.browser_view_bounds.height, 0);
 }

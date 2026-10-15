@@ -2,12 +2,14 @@
 
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/cef_task.h"
+#include "include/cef_values.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_button_delegate.h"
@@ -48,9 +50,7 @@ std::size_t AdvanceUtf8Character(const std::string& text, std::size_t byte_index
 
 // Every rail control (icon button, address pill, tab row, space chip, footer
 // button) shares this height so the column reads on one rhythm: 32 DIP.
-int ControlHeight(const ChromeTokens& tokens) {
-    return tokens.spacing_6_dip + tokens.spacing_2_dip;
-}
+int ControlHeight(const ChromeTokens& tokens) { return tokens.control_height_dip; }
 
 // Outline thickness of a hairline-defined surface (address pill, active tab,
 // active space chip). CEF views have no border or corner-radius API, so an
@@ -83,6 +83,16 @@ CefBoxLayoutSettings HorizontalLayout(const ChromeTokens& tokens) {
     return settings;
 }
 
+// The navigation row: back/forward start to the right of the traffic lights when the frameless
+// window puts them over the left sidebar.
+CefBoxLayoutSettings NavigationRowLayout(const ChromeTokens& tokens) {
+    CefBoxLayoutSettings settings = HorizontalLayout(tokens);
+    if (tokens.titlebar_band_dip > 0 && tokens.sidebar_side == SidebarSide::kLeft) {
+        settings.inside_border_insets = CefInsets(0, BrowserChrome::NavigationLeadDip(), 0, 0);
+    }
+    return settings;
+}
+
 // A hairline-outlined control: the panel paints the outline color and insets its
 // children by kHairlineDip, so a child painted with the surface color reads as a
 // bordered field.
@@ -94,17 +104,14 @@ CefBoxLayoutSettings OutlinedLayout(int outline_dip) {
     return settings;
 }
 
-// The browser_content panel holds the single CefBrowserView with a uniform
-// floating-canvas gutter on every side. CEF cannot round or clip the BrowserView,
-// so the floating read comes entirely from this rectangular inset: the tinted
-// background shows through the gap and the page reads as a raised card. No spacing
-// between the panel and the view beyond the gutter.
-CefBoxLayoutSettings FloatingCanvasLayout(const ChromeTokens& tokens) {
-    const int pad = BrowserChrome::BrowserContentPaddingDip();
+// The browser_content panel holds the single CefBrowserView with the card insets of
+// BrowserChrome::ContentInsets: the sidebar-colored canvas shows through the gap and the page
+// reads as a raised card. No spacing between the panel and the view beyond the insets.
+CefBoxLayoutSettings FloatingCanvasLayout(const BrowserChrome::CardInsets& insets) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(true);
-    settings.between_child_spacing = tokens.spacing_1_dip - tokens.spacing_1_dip;
-    settings.inside_border_insets = CefInsets(pad, pad, pad, pad);
+    settings.between_child_spacing = 0;
+    settings.inside_border_insets = CefInsets(insets.top, insets.left, insets.bottom, insets.right);
     return settings;
 }
 
@@ -116,9 +123,15 @@ CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     settings.horizontal = static_cast<int>(false);
     settings.between_child_spacing = BrowserChrome::RailSectionSpacingDip();
     settings.inside_border_insets =
-        CefInsets(BrowserChrome::RailTopInsetDip(), tokens.spacing_3_dip, tokens.spacing_3_dip,
-                  tokens.spacing_3_dip);
+        CefInsets(BrowserChrome::RailTopInsetDip(tokens), tokens.spacing_3_dip,
+                  tokens.spacing_3_dip, tokens.spacing_3_dip);
     return settings;
+}
+
+// The icon rail starts below the traffic lights when the window is frameless.
+int CollapsedRailTopInset(const ChromeTokens& tokens) {
+    return tokens.titlebar_band_dip > 0 ? tokens.titlebar_band_dip
+                                        : BrowserChrome::RailTopInsetDip();
 }
 
 // Collection regions (tab strip, space switcher) are empty until Phase 3 wires
@@ -138,7 +151,7 @@ CefBoxLayoutSettings CollectionLayout(const ChromeTokens& tokens) {
 // row in a calm column (Arc's rhythm).
 CefBoxLayoutSettings TabListLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings = CollectionLayout(tokens);
-    settings.between_child_spacing = tokens.spacing_1_dip / 2;
+    settings.between_child_spacing = tokens.row_gap_dip;
     return settings;
 }
 
@@ -174,6 +187,102 @@ CefRefPtr<CefImage> MakeSpaceDotImage(ArgbColor fill, ArgbColor ring, bool activ
     return image;
 }
 
+// Pixels of a CefImage at `scale`, premultiplied BGRA.
+struct ImagePixels {
+    int width = 0;
+    int height = 0;
+    std::vector<std::uint8_t> data;
+};
+
+ImagePixels PixelsAt(const CefRefPtr<CefImage>& image, int scale) {
+    ImagePixels pixels;
+    if (image == nullptr) {
+        return pixels;
+    }
+    int width = 0;
+    int height = 0;
+    CefRefPtr<CefBinaryValue> binary = image->GetAsBitmap(
+        static_cast<float>(scale), CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, width,
+        height);
+    if (binary == nullptr || width <= 0 || height <= 0 ||
+        binary->GetSize() != static_cast<std::size_t>(width) * height * 4) {
+        return pixels;
+    }
+    pixels.width = width;
+    pixels.height = height;
+    pixels.data.resize(binary->GetSize());
+    binary->GetData(pixels.data.data(), pixels.data.size(), 0);
+    return pixels;
+}
+
+// One edge button's image: an optional rounded fill (the row's selected/hover state), an
+// optional light plate under a page favicon (so dark favicons stay visible on a dark sidebar),
+// and the glyph, all rendered into a w x h DIP bitmap at 1x and 2x.
+struct RowImageSpec {
+    int width_dip = 32;
+    int height_dip = 32;
+    CornerRadii radii;
+    std::optional<ArgbColor> fill;
+    std::optional<ArgbColor> plate;
+    CefRefPtr<CefImage> glyph;
+};
+
+constexpr int kFaviconPlateDip = 22;
+constexpr int kFaviconPlateRadiusDip = 6;
+constexpr int kRowFillRadiusDip = 8;
+constexpr int kPatchPollMs = 150;
+
+CefRefPtr<CefImage> BuildRowImage(const RowImageSpec& spec) {
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        RasterBitmap bitmap = NewRasterBitmap(spec.width_dip, spec.height_dip, scale);
+        if (spec.fill.has_value()) {
+            FillRoundedRect(bitmap, 0, 0, spec.width_dip, spec.height_dip, spec.radii, *spec.fill);
+        }
+        if (spec.plate.has_value()) {
+            const int size = kFaviconPlateDip;
+            FillRoundedRect(bitmap, (spec.width_dip - size) / 2, (spec.height_dip - size) / 2, size,
+                            size,
+                            {kFaviconPlateRadiusDip, kFaviconPlateRadiusDip, kFaviconPlateRadiusDip,
+                             kFaviconPlateRadiusDip},
+                            *spec.plate);
+        }
+        const ImagePixels glyph = PixelsAt(spec.glyph, scale);
+        if (glyph.width > 0) {
+            CompositePremultiplied(bitmap, glyph.data.data(), glyph.width, glyph.height,
+                                   (bitmap.width_px - glyph.width) / 2,
+                                   (bitmap.height_px - glyph.height) / 2);
+        }
+        image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
+}
+
+void SetAllStateImages(const CefRefPtr<CefLabelButton>& button, const CefRefPtr<CefImage>& image) {
+    for (const cef_button_state_t state :
+         {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED,
+          CEF_BUTTON_STATE_DISABLED}) {
+        button->SetImage(state, image);
+    }
+}
+
+// The favicon on its small rounded plate (page favicons only; the globe fallback stays bare), so
+// dark favicons such as GitHub's stay visible on a dark sidebar.
+CefRefPtr<CefImage> BuildFaviconImage(const CefRefPtr<CefImage>& glyph, bool on_plate,
+                                      ArgbColor plate) {
+    if (!on_plate) {
+        return glyph;
+    }
+    return BuildRowImage({.width_dip = kFaviconPlateDip + 2,
+                          .height_dip = kFaviconPlateDip + 2,
+                          .radii = {},
+                          .fill = std::nullopt,
+                          .plate = plate,
+                          .glyph = glyph});
+}
+
 std::string AddressErrorMessage(const std::optional<AddressError>& error) {
     if (!error.has_value()) {
         return "";
@@ -197,6 +306,169 @@ std::string AddressErrorMessage(const std::optional<AddressError>& error) {
 }
 
 }  // namespace
+
+namespace {
+
+struct LayoutColumns {
+    DipRect rail;
+    DipRect content;
+    DipRect agent;
+};
+
+LayoutColumns ComputeColumns(DipRect root, const ChromeTokens& tokens, bool sidebar_expanded,
+                             bool agent_panel_open) {
+    const int rail_width =
+        std::min(sidebar_expanded ? tokens.rail_width_dip : kCollapsedRailWidthDip, root.width);
+    const int panel_width =
+        agent_panel_open
+            ? std::clamp(root.width - rail_width - BrowserChrome::MinimumBrowserContentWidthDip(),
+                         0, BrowserChrome::AgentPanelWidthDip())
+            : 0;
+    const int content_width = std::max(0, root.width - rail_width - panel_width);
+    LayoutColumns columns;
+    if (tokens.sidebar_side == SidebarSide::kRight) {
+        // The agent panel takes the opposite edge from the sidebar.
+        columns.agent = {.x = root.x, .y = root.y, .width = panel_width, .height = root.height};
+        columns.content = {.x = root.x + panel_width,
+                           .y = root.y,
+                           .width = content_width,
+                           .height = root.height};
+        columns.rail = {.x = root.x + root.width - rail_width,
+                        .y = root.y,
+                        .width = rail_width,
+                        .height = root.height};
+    } else {
+        columns.rail = {.x = root.x, .y = root.y, .width = rail_width, .height = root.height};
+        columns.content = {.x = root.x + rail_width,
+                           .y = root.y,
+                           .width = content_width,
+                           .height = root.height};
+        columns.agent = {.x = columns.content.x + content_width,
+                         .y = root.y,
+                         .width = panel_width,
+                         .height = root.height};
+    }
+    return columns;
+}
+
+// A card whose left edge sits under the frameless window's traffic lights must start below them.
+int TopInsetFor(const ChromeTokens& tokens, int card_x, int base_inset) {
+    if (tokens.titlebar_band_dip > 0 && card_x < BrowserChrome::TrafficLightClearDip()) {
+        return std::max(base_inset, tokens.titlebar_band_dip);
+    }
+    return base_inset;
+}
+
+}  // namespace
+
+ChromeGeometrySnapshot BrowserChrome::LayoutForBounds(DipRect root_bounds,
+                                                      const ChromeTokens& tokens,
+                                                      bool sidebar_expanded,
+                                                      bool agent_panel_open) {
+    const LayoutColumns columns =
+        ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    const CardInsets insets =
+        ContentInsets(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    // The insets shrink the content region and are clamped so the card never inverts on very
+    // narrow windows.
+    const int left = std::min(insets.left, columns.content.width / 2);
+    const int right = std::min(insets.right, columns.content.width / 2);
+    const int top = std::min(insets.top, columns.content.height / 2);
+    const int bottom = std::min(insets.bottom, columns.content.height / 2);
+    const DipRect browser_view_bounds = {
+        .x = columns.content.x + left,
+        .y = columns.content.y + top,
+        .width = std::max(0, columns.content.width - left - right),
+        .height = std::max(0, columns.content.height - top - bottom),
+    };
+    return {
+        .root_bounds = root_bounds,
+        .rail_bounds = columns.rail,
+        .browser_content_bounds = columns.content,
+        .browser_view_bounds = browser_view_bounds,
+        .agent_panel_bounds = columns.agent,
+    };
+}
+
+BrowserChrome::CardInsets BrowserChrome::ContentInsets(DipRect root_bounds,
+                                                       const ChromeTokens& tokens,
+                                                       bool sidebar_expanded,
+                                                       bool agent_panel_open) {
+    const LayoutColumns columns =
+        ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    const int inset = tokens.card_inset_dip;
+    CardInsets insets{.left = inset,
+                      .top = TopInsetFor(tokens, columns.content.x - root_bounds.x, inset),
+                      .right = inset,
+                      .bottom = inset};
+    // Flush with the sidebar: the sidebar is the card's neighbor on that side.
+    if (tokens.sidebar_side == SidebarSide::kRight) {
+        insets.right = 0;
+    } else {
+        insets.left = 0;
+    }
+    return insets;
+}
+
+BrowserChrome::CardInsets BrowserChrome::AgentPanelInsets(DipRect root_bounds,
+                                                          const ChromeTokens& tokens,
+                                                          bool sidebar_expanded) {
+    const LayoutColumns columns = ComputeColumns(root_bounds, tokens, sidebar_expanded, true);
+    const int inset = tokens.card_inset_dip;
+    // The panel keeps an inset on the window edge only; the page card's own inset separates the two.
+    CardInsets insets{.left = 0,
+                      .top = TopInsetFor(tokens, columns.agent.x - root_bounds.x, inset),
+                      .right = 0,
+                      .bottom = inset};
+    if (tokens.sidebar_side == SidebarSide::kRight) {
+        insets.left = inset;
+    } else {
+        insets.right = inset;
+    }
+    return insets;
+}
+
+std::vector<BrowserChrome::DragRegion> BrowserChrome::DragRegionsForBounds(
+    DipRect root_bounds, const ChromeTokens& tokens, bool sidebar_expanded,
+    bool agent_panel_open) {
+    std::vector<DragRegion> regions;
+    if (tokens.titlebar_band_dip <= 0) {
+        return regions;
+    }
+    const LayoutColumns columns =
+        ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    const int band = tokens.titlebar_band_dip;
+    regions.push_back({{.x = columns.rail.x, .y = 0, .width = columns.rail.width, .height = band},
+                       true});
+    // The canvas margin above each card drags too.
+    const CardInsets content = ContentInsets(root_bounds, tokens, sidebar_expanded,
+                                             agent_panel_open);
+    regions.push_back({{.x = columns.content.x,
+                        .y = 0,
+                        .width = columns.content.width,
+                        .height = content.top},
+                       true});
+    if (columns.agent.width > 0) {
+        const CardInsets agent = AgentPanelInsets(root_bounds, tokens, sidebar_expanded);
+        regions.push_back({{.x = columns.agent.x,
+                            .y = 0,
+                            .width = columns.agent.width,
+                            .height = agent.top},
+                           true});
+    }
+    if (sidebar_expanded) {
+        // The navigation buttons stay clickable: carve them out of the band.
+        const int lead =
+            tokens.sidebar_side == SidebarSide::kLeft ? BrowserChrome::NavigationLeadDip() : 0;
+        const int top = RailTopInsetDip(tokens);
+        regions.push_back({{.x = columns.rail.x + tokens.spacing_3_dip + lead,
+                            .y = top,
+                            .width = 2 * tokens.control_height_dip + 2,
+                            .height = tokens.control_height_dip},
+                           false});
+    }
+    return regions;
+}
 
 // CEF resets every view's custom background (and the text colors derived from the
 // theme) whenever CefViewDelegate::OnThemeChanged fires, and CefWindow::ThemeChanged()
@@ -354,6 +626,12 @@ class BrowserChrome::ButtonDelegate final : public CefButtonDelegate {
         }
     }
 
+    void OnButtonStateChanged(CefRefPtr<CefButton>) override {
+        if (chrome_ != nullptr) {
+            chrome_->RefreshRowHover();
+        }
+    }
+
     void OnThemeChanged(CefRefPtr<CefView>) override {
         if (chrome_ != nullptr) {
             chrome_->HandleViewThemeReset();
@@ -381,6 +659,12 @@ class BrowserChrome::CollectionButtonDelegate final : public CefButtonDelegate {
         CEF_REQUIRE_UI_THREAD();
         if (chrome_ != nullptr) {
             chrome_->HandleCollectionButtonPressed(action_, index_);
+        }
+    }
+
+    void OnButtonStateChanged(CefRefPtr<CefButton>) override {
+        if (chrome_ != nullptr) {
+            chrome_->RefreshRowHover();
         }
     }
 
@@ -471,7 +755,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     rail_delegate_ = rail_delegate;
     sidebar_ = CefPanel::CreatePanel(rail_delegate);
     sidebar_->SetID(static_cast<int>(ChromeViewId::kRail));
-    CefRefPtr<CefBoxLayout> rail_layout = sidebar_->SetToBoxLayout(RailLayout(tokens_));
+    rail_layout_ = sidebar_->SetToBoxLayout(RailLayout(tokens_));
 
     CefRefPtr<SurfacePanelDelegate> navigation_row_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail, CefSize(0, control_height));
@@ -479,7 +763,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<CefPanel> navigation_row = CefPanel::CreatePanel(navigation_row_delegate);
     navigation_row->SetID(static_cast<int>(ChromeViewId::kNavigationRow));
     navigation_row_ = navigation_row;
-    navigation_row->SetToBoxLayout(HorizontalLayout(tokens_));
+    navigation_row_layout_ = navigation_row->SetToBoxLayout(NavigationRowLayout(tokens_));
 
     button_delegate_ = new ButtonDelegate(this);
     back_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
@@ -567,7 +851,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     new_tab_button_->SetTooltipText("New Tab");
     new_tab_button_->SetFocusable(true);
     new_tab_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-    new_tab_button_->SetMinimumSize(CefSize(0, TabRowHeightDip()));
+    new_tab_button_->SetMinimumSize(CefSize(0, RowHeight()));
     sidebar_->AddChildView(new_tab_button_);
 
     // The tab list scrolls inside the rail so a long list never pushes the
@@ -586,7 +870,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     tab_list_scroll->SetContentView(tab_strip_);
     tab_list_scroll_ = tab_list_scroll;
     sidebar_->AddChildView(tab_list_scroll);
-    rail_layout->SetFlexForView(tab_list_scroll, 1);
+    rail_layout_->SetFlexForView(tab_list_scroll, 1);
     UpdateTabStripPreferredSize();
 
     // The spacer keeps its contract slot but is inert: the scrolling tab list
@@ -636,7 +920,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     agent_button_->SetTooltipText("Ask the agent (Ctrl/Cmd+J)");
     agent_button_->SetFocusable(true);
     agent_button_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-    agent_button_->SetMinimumSize(CefSize(0, TabRowHeightDip()));
+    agent_button_->SetMinimumSize(CefSize(0, RowHeight()));
     rail_footer_->AddChildView(agent_button_);
     footer_layout->SetFlexForView(agent_button_, 1);
     tabs_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
@@ -644,21 +928,21 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     tabs_button_->SetAccessibleName("All tabs");
     tabs_button_->SetTooltipText("All tabs");
     tabs_button_->SetFocusable(true);
-    tabs_button_->SetMinimumSize(CefSize(TabRowHeightDip(), TabRowHeightDip()));
+    tabs_button_->SetMinimumSize(CefSize(RowHeight(), RowHeight()));
     rail_footer_->AddChildView(tabs_button_);
     settings_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     settings_button_->SetID(static_cast<int>(ChromeViewId::kRailSettingsButton));
     settings_button_->SetAccessibleName("Settings");
     settings_button_->SetTooltipText("Settings");
     settings_button_->SetFocusable(true);
-    settings_button_->SetMinimumSize(CefSize(TabRowHeightDip(), TabRowHeightDip()));
+    settings_button_->SetMinimumSize(CefSize(RowHeight(), RowHeight()));
     rail_footer_->AddChildView(settings_button_);
     new_space_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     new_space_button_->SetID(static_cast<int>(ChromeViewId::kRailNewSpaceButton));
     new_space_button_->SetAccessibleName("New Space");
     new_space_button_->SetTooltipText("New Space");
     new_space_button_->SetFocusable(true);
-    new_space_button_->SetMinimumSize(CefSize(TabRowHeightDip(), TabRowHeightDip()));
+    new_space_button_->SetMinimumSize(CefSize(RowHeight(), RowHeight()));
     rail_footer_->AddChildView(new_space_button_);
     sidebar_->AddChildView(rail_footer_);
 
@@ -713,8 +997,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     collapsed_settings.horizontal = static_cast<int>(false);
     collapsed_settings.between_child_spacing = RailSectionSpacingDip();
     collapsed_settings.inside_border_insets =
-        CefInsets(RailTopInsetDip(), 0, tokens_.spacing_3_dip, 0);
-    CefRefPtr<CefBoxLayout> collapsed_layout = collapsed_rail_->SetToBoxLayout(collapsed_settings);
+        CefInsets(CollapsedRailTopInset(tokens_), 0, tokens_.spacing_3_dip, 0);
+    collapsed_layout_ = collapsed_rail_->SetToBoxLayout(collapsed_settings);
 
     const auto make_surface_panel = [this](SurfaceSlot slot, CefSize preferred, int id) {
         CefRefPtr<SurfacePanelDelegate> delegate =
@@ -740,7 +1024,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     collapsed_scroll->SetContentView(collapsed_tab_list_);
     collapsed_tab_scroll_ = collapsed_scroll;
     collapsed_rail_->AddChildView(collapsed_scroll);
-    collapsed_layout->SetFlexForView(collapsed_scroll, 1);
+    collapsed_layout_->SetFlexForView(collapsed_scroll, 1);
 
     // Bottom group: the "+" button, a hairline, then the space dots.
     collapsed_bottom_group_ = make_surface_panel(SurfaceSlot::kRail, CefSize(), /*id=*/0);
@@ -771,7 +1055,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
         this, CefSize(control_height, control_height), CefSize(control_height, control_height)));
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
-    browser_content_layout_ = browser_content_->SetToBoxLayout(FloatingCanvasLayout(tokens_));
+    browser_content_layout_ = browser_content_->SetToBoxLayout(FloatingCanvasLayout(ContentInsets(
+        {.x = 0, .y = 0, .width = 1200, .height = 800}, tokens_, sidebar_expanded_, false)));
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
     browser_content_->AddChildView(browser_view_);
     browser_content_layout_->SetFlexForView(browser_view_, 1);
@@ -782,11 +1067,14 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     agent_panel_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, 0)));
     agent_panel_->SetID(static_cast<int>(ChromeViewId::kAgentPanel));
     {
-        const int pad = BrowserContentPaddingDip();
+        const CardInsets insets =
+            AgentPanelInsets({.x = 0, .y = 0, .width = 1200, .height = 800}, tokens_,
+                             sidebar_expanded_);
         CefBoxLayoutSettings settings;
         settings.horizontal = static_cast<int>(true);
-        settings.inside_border_insets = CefInsets(pad, 0, pad, pad);
-        agent_panel_->SetToBoxLayout(settings);
+        settings.inside_border_insets =
+            CefInsets(insets.top, insets.left, insets.bottom, insets.right);
+        agent_panel_layout_ = agent_panel_->SetToBoxLayout(settings);
     }
     agent_panel_->SetVisible(false);
 
@@ -825,6 +1113,17 @@ CefRefPtr<CefPanel> BrowserChrome::root() const {
 CefRefPtr<CefPanel> BrowserChrome::sidebar() const {
     CEF_REQUIRE_UI_THREAD();
     return sidebar_;
+}
+
+std::vector<CefRefPtr<CefBrowserView>> BrowserChrome::visible_browser_views() const {
+    std::vector<CefRefPtr<CefBrowserView>> views;
+    if (browser_view_ != nullptr) {
+        views.push_back(browser_view_);
+    }
+    if (split_view_ != nullptr) {
+        views.push_back(split_view_);
+    }
+    return views;
 }
 
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
@@ -940,7 +1239,7 @@ std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entr
 void BrowserChrome::UpdateTabStripPreferredSize() {
     const int count = static_cast<int>(tab_entries_.size());
     const int spacing = TabListLayout(tokens_).between_child_spacing;
-    const int height = count == 0 ? 0 : count * TabRowHeightDip() + (count - 1) * spacing;
+    const int height = count == 0 ? 0 : count * RowHeight() + (count - 1) * spacing;
     const int width =
         std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
     if (tab_strip_delegate_ != nullptr) {
@@ -965,7 +1264,7 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     tab_entries_ = entries;
     tab_strip_->RemoveAllChildViews();
 
-    const int row_height = TabRowHeightDip();
+    const int row_height = RowHeight();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
         icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> close_icon =
@@ -979,8 +1278,7 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         // panel is the fill that carries the favicon, title, and trailing control.
         views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, row_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kTabStripEntry));
-        CefRefPtr<CefBoxLayout> outline_layout =
-            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        CefRefPtr<CefBoxLayout> outline_layout = views.row->SetToBoxLayout(OutlinedLayout(0));
         views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
         CefBoxLayoutSettings row_settings;
         row_settings.horizontal = static_cast<int>(true);
@@ -988,7 +1286,7 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         CefRefPtr<CefBoxLayout> row_layout = views.inner->SetToBoxLayout(row_settings);
         views.row->AddChildView(views.inner);
         outline_layout->SetFlexForView(views.inner, 1);
-        const int slot = row_height - 2 * kHairlineDip;
+        const int slot = row_height;
 
         views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
@@ -996,10 +1294,11 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
                                                                   : "Tab favicon placeholder");
         views.favicon->SetFocusable(false);
         views.favicon->SetMinimumSize(CefSize(slot, slot));
+        views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
-            views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
+            views.favicon_source = entry.favicon;
         } else if (fallback_icon.has_value()) {
-            views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
+            views.favicon_source = *fallback_icon;
         }
         views.inner->AddChildView(views.favicon);
 
@@ -1034,14 +1333,16 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.close->SetMinimumSize(CefSize(slot, slot));
         const std::optional<CefRefPtr<CefImage>>& trailing = entry.pinned ? pin_icon : close_icon;
         if (trailing.has_value()) {
-            views.close->SetImage(CEF_BUTTON_STATE_NORMAL, *trailing);
+            views.trailing_source = *trailing;
         } else {
             views.close->SetText(entry.pinned ? "-" : "\xC3\x97");
         }
         views.inner->AddChildView(views.close);
 
         for (const CefRefPtr<CefLabelButton>& button : {views.favicon, views.title, views.close}) {
-            button->SetInkDropEnabled(true);
+            // Hover is drawn into the edge images (RefreshRowHover); the square ink drop would
+            // show through the rounded fill.
+            button->SetInkDropEnabled(false);
         }
 
         tab_entry_views_.push_back(views);
@@ -1096,8 +1397,7 @@ void BrowserChrome::RebuildCollapsedTabs() {
         // the fill: the same language as the expanded selected tab row.
         views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(button, button)));
         views.row->SetID(static_cast<int>(ChromeViewId::kCollapsedRailTab));
-        CefRefPtr<CefBoxLayout> outline_layout =
-            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        CefRefPtr<CefBoxLayout> outline_layout = views.row->SetToBoxLayout(OutlinedLayout(0));
         views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
         CefBoxLayoutSettings inner_settings;
         inner_settings.horizontal = static_cast<int>(true);
@@ -1114,12 +1414,13 @@ void BrowserChrome::RebuildCollapsedTabs() {
         views.button->SetAccessibleName(TabEntryAccessibleName(entry));
         views.button->SetTooltipText(CollapsedRailTabTooltip(entry));
         views.button->SetFocusable(true);
-        views.button->SetInkDropEnabled(true);
-        views.button->SetMinimumSize(CefSize(button - 2 * kHairlineDip, button - 2 * kHairlineDip));
+        views.button->SetInkDropEnabled(false);
+        views.button->SetMinimumSize(CefSize(button, button));
+        views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
-            views.button->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
+            views.favicon_source = entry.favicon;
         } else if (fallback_icon.has_value()) {
-            views.button->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
+            views.favicon_source = *fallback_icon;
         }
         views.inner->AddChildView(views.button);
         inner_layout->SetFlexForView(views.button, 1);
@@ -1183,7 +1484,7 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     space_entries_ = entries;
     space_switcher_->RemoveAllChildViews();
 
-    const int pill_height = SpacePillHeightDip();
+    const int pill_height = RowHeight();
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         SpaceEntryViews views;
@@ -1336,9 +1637,66 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
     }
     tokens_ = tokens;
     root_delegate_->SetTokens(tokens_);
+    ApplyLayoutTokens();
     ApplyControlTheme();
     rail_delegate_->SetFixedWidth(sidebar_expanded_ ? tokens_.rail_width_dip : 0);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
+}
+
+void BrowserChrome::ApplyLayoutTokens() {
+    CEF_REQUIRE_UI_THREAD();
+    CefRect bounds = root_->GetBounds();
+    if (bounds.width <= 0 || bounds.height <= 0) {
+        bounds = CefRect(0, 0, 1200, 800);
+    }
+    const DipRect root = {.x = 0, .y = 0, .width = bounds.width, .height = bounds.height};
+    const CardInsets content = ContentInsets(root, tokens_, sidebar_expanded_, agent_panel_open_);
+    const CardInsets agent = AgentPanelInsets(root, tokens_, sidebar_expanded_);
+    const std::string key =
+        std::to_string(tokens_.titlebar_band_dip) + "/" +
+        std::to_string(static_cast<int>(tokens_.sidebar_side)) + "/" +
+        std::to_string(tokens_.control_height_dip) + "/" + std::to_string(tokens_.row_gap_dip) +
+        "/" + std::to_string(content.left) + "," + std::to_string(content.top) + "," +
+        std::to_string(content.right) + "," + std::to_string(content.bottom) + "/" +
+        std::to_string(agent.left) + "," + std::to_string(agent.top) + "," +
+        std::to_string(agent.right) + "," + std::to_string(agent.bottom);
+    if (key == layout_key_) {
+        return;
+    }
+    layout_key_ = key;
+
+    rail_layout_ = sidebar_->SetToBoxLayout(RailLayout(tokens_));
+    rail_layout_->SetFlexForView(tab_list_scroll_, 1);
+    navigation_row_layout_ = navigation_row_->SetToBoxLayout(NavigationRowLayout(tokens_));
+    tab_strip_->SetToBoxLayout(TabListLayout(tokens_));
+
+    CefBoxLayoutSettings collapsed_settings;
+    collapsed_settings.horizontal = static_cast<int>(false);
+    collapsed_settings.between_child_spacing = RailSectionSpacingDip();
+    collapsed_settings.inside_border_insets =
+        CefInsets(CollapsedRailTopInset(tokens_), 0, tokens_.spacing_3_dip, 0);
+    collapsed_layout_ = collapsed_rail_->SetToBoxLayout(collapsed_settings);
+    collapsed_layout_->SetFlexForView(collapsed_tab_scroll_, 1);
+
+    browser_content_layout_ = browser_content_->SetToBoxLayout(FloatingCanvasLayout(content));
+    if (split_view_ != nullptr) {
+        const int first_flex = SplitFlexForRatio(split_ratio_);
+        browser_content_layout_->SetFlexForView(browser_view_, first_flex);
+        browser_content_layout_->SetFlexForView(split_divider_, 0);
+        browser_content_layout_->SetFlexForView(split_view_, 100 - first_flex);
+    } else if (browser_view_ != nullptr) {
+        browser_content_layout_->SetFlexForView(browser_view_, 1);
+    }
+
+    CefBoxLayoutSettings agent_settings;
+    agent_settings.horizontal = static_cast<int>(true);
+    agent_settings.inside_border_insets =
+        CefInsets(agent.top, agent.left, agent.bottom, agent.right);
+    agent_panel_layout_ = agent_panel_->SetToBoxLayout(agent_settings);
+    if (agent_panel_view_ != nullptr) {
+        agent_panel_layout_->SetFlexForView(agent_panel_view_, 1);
+    }
+    UpdateTabStripPreferredSize();
 }
 
 void BrowserChrome::SetSidebarExpanded(bool expanded) {
@@ -1354,6 +1712,7 @@ void BrowserChrome::SetSidebarExpanded(bool expanded) {
     sidebar_->SetVisible(expanded);
     collapsed_rail_->SetVisible(!expanded);
     root_delegate_->SetSidebarExpanded(expanded);
+    ApplyLayoutTokens();
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
@@ -1379,6 +1738,7 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     agent_panel_->SetVisible(open);
     ApplyRailButtonTheme();
     root_delegate_->SetAgentPanelOpen(open);
+    ApplyLayoutTokens();
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
@@ -1668,6 +2028,11 @@ void BrowserChrome::ApplyControlTheme() {
     root_->SetBackgroundColor(background.argb);
     sidebar_->SetBackgroundColor(rail.argb);
     browser_content_->SetBackgroundColor(browser_content.argb);
+    // The page card's rounded corners (macOS) show whatever the browser view paints behind them:
+    // the canvas, not the toolkit's default.
+    for (const CefRefPtr<CefBrowserView>& view : visible_browser_views()) {
+        view->SetBackgroundColor(browser_content.argb);
+    }
     agent_panel_->SetBackgroundColor(browser_content.argb);
     // Rail-descendant panels are created with no delegate and would otherwise inherit
     // the window's primary background; painting them the rail color keeps the whole
@@ -1787,14 +2152,9 @@ void BrowserChrome::ApplyCollectionTheme() {
          ++index) {
         const TabStripEntrySnapshot& entry = tab_entries_[index];
         const TabEntryViews& views = tab_entry_views_[index];
-        const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
-        views.row->SetBackgroundColor(colors.outline.argb);
-        views.inner->SetBackgroundColor(colors.fill.argb);
-        views.favicon->SetBackgroundColor(colors.fill.argb);
-        views.title->SetBackgroundColor(colors.fill.argb);
-        views.close->SetBackgroundColor(colors.fill.argb);
-        views.title->SetEnabledTextColors(colors.title.argb);
-        views.close->SetEnabledTextColors(colors.trailing.argb);
+        static_cast<void>(entry);
+        static_cast<void>(views);
+        ApplyTabRowVisual(index);
     }
     for (std::size_t index = 0; index < space_entry_views_.size() && index < space_entries_.size();
          ++index) {
@@ -1807,6 +2167,203 @@ void BrowserChrome::ApplyCollectionTheme() {
         views.color_mark->SetBackgroundColor(entry.color.argb);
         views.name->SetEnabledTextColors(colors.title.argb);
     }
+}
+
+// The row's fill: `selected` for the active tab, `hover` under the pointer, none otherwise.
+namespace {
+std::optional<ArgbColor> RowFill(const ChromeTokens& tokens, bool active, bool pinned,
+                                 bool hovered) {
+    if (active) {
+        return tokens.selected;
+    }
+    if (hovered) {
+        return tokens.hover;
+    }
+    if (pinned) {
+        return MixColor(tokens.canvas, tokens.selected, 0.5);
+    }
+    return std::nullopt;
+}
+}  // namespace
+
+void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
+    if (index >= tab_entry_views_.size() || index >= tab_entries_.size()) {
+        return;
+    }
+    const TabStripEntrySnapshot& entry = tab_entries_[index];
+    const TabEntryViews& views = tab_entry_views_[index];
+    const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+    const ArgbColor bg =
+        RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+    views.row->SetBackgroundColor(bg.argb);
+    views.inner->SetBackgroundColor(bg.argb);
+    views.favicon->SetBackgroundColor(bg.argb);
+    views.title->SetBackgroundColor(bg.argb);
+    views.close->SetBackgroundColor(bg.argb);
+    views.title->SetEnabledTextColors(colors.title.argb);
+    views.close->SetEnabledTextColors(colors.trailing.argb);
+    if (views.favicon_source != nullptr) {
+        SetAllStateImages(views.favicon, BuildFaviconImage(views.favicon_source,
+                                                           views.favicon_is_page, tokens_.plate));
+    }
+    if (views.trailing_source != nullptr) {
+        SetAllStateImages(views.close, views.trailing_source);
+    }
+}
+
+void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
+    if (position >= collapsed_tab_views_.size()) {
+        return;
+    }
+    const CollapsedTabViews& views = collapsed_tab_views_[position];
+    if (views.source_index >= tab_entries_.size()) {
+        return;
+    }
+    const TabStripEntrySnapshot& entry = tab_entries_[views.source_index];
+    const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+    const ArgbColor bg =
+        RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+    views.row->SetBackgroundColor(bg.argb);
+    views.inner->SetBackgroundColor(bg.argb);
+    views.button->SetBackgroundColor(bg.argb);
+    views.button->SetEnabledTextColors(colors.title.argb);
+    if (views.favicon_source != nullptr) {
+        SetAllStateImages(views.button, BuildFaviconImage(views.favicon_source,
+                                                          views.favicon_is_page, tokens_.plate));
+    }
+}
+
+namespace {
+
+struct WindowRect {
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+};
+
+WindowRect InWindow(const CefRefPtr<CefView>& view) {
+    CefPoint origin(0, 0);
+    view->ConvertPointToWindow(origin);
+    const CefSize size = view->GetSize();
+    return {origin.x, origin.y, size.width, size.height};
+}
+
+bool Contains(const WindowRect& outer, const WindowRect& inner) {
+    return inner.x >= outer.x && inner.y >= outer.y &&
+           inner.x + inner.width <= outer.x + outer.width &&
+           inner.y + inner.height <= outer.y + outer.height;
+}
+
+}  // namespace
+
+std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
+    std::vector<CornerPatch> patches;
+    if (detached_ || root_ == nullptr) {
+        return patches;
+    }
+    const auto add = [&patches](const WindowRect& rect) {
+        if (rect.width > 0 && rect.height > 0) {
+            patches.push_back({rect.x, rect.y, rect.width, rect.height, kRowFillRadiusDip});
+        }
+    };
+    const auto filled = [this](const TabStripEntrySnapshot& entry, bool hovered) {
+        return RowFill(tokens_, entry.active, entry.pinned, hovered).has_value();
+    };
+    if (sidebar_expanded_) {
+        add(InWindow(address_row_));
+        const WindowRect viewport = InWindow(tab_list_scroll_);
+        for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
+             ++index) {
+            if (!filled(tab_entries_[index], tab_entry_views_[index].hovered)) {
+                continue;
+            }
+            const WindowRect rect = InWindow(tab_entry_views_[index].row);
+            if (Contains(viewport, rect)) {
+                add(rect);
+            }
+        }
+    } else {
+        const WindowRect viewport = InWindow(collapsed_tab_scroll_);
+        for (const CollapsedTabViews& views : collapsed_tab_views_) {
+            if (views.source_index >= tab_entries_.size() ||
+                !filled(tab_entries_[views.source_index], views.hovered)) {
+                continue;
+            }
+            const WindowRect rect = InWindow(views.row);
+            if (Contains(viewport, rect)) {
+                add(rect);
+            }
+        }
+    }
+    return patches;
+}
+
+void BrowserChrome::SetCornerPatchSink(
+    std::function<void(const std::vector<CornerPatch>&)> sink) {
+    corner_sink_ = std::move(sink);
+    last_patches_.clear();
+    PushCornerPatches();
+    SchedulePatchPoll();
+}
+
+void BrowserChrome::PushCornerPatches() {
+    if (!corner_sink_ || detached_) {
+        return;
+    }
+    std::vector<CornerPatch> patches = ComputeCornerPatches();
+    if (patches == last_patches_) {
+        return;
+    }
+    last_patches_ = patches;
+    corner_sink_(patches);
+}
+
+void BrowserChrome::SchedulePatchPoll() {
+    if (patch_poll_pending_ || detached_ || !corner_sink_) {
+        return;
+    }
+    patch_poll_pending_ = true;
+    CefPostDelayedTask(
+        TID_UI,
+        CefCreateClosureTask(base::BindOnce(
+            [](std::shared_ptr<BrowserChrome*> alive) {
+                if (BrowserChrome* chrome = *alive) {
+                    chrome->patch_poll_pending_ = false;
+                    chrome->PushCornerPatches();
+                    chrome->SchedulePatchPoll();
+                }
+            },
+            alive_)),
+        kPatchPollMs);
+}
+
+void BrowserChrome::RefreshRowHover() {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_) {
+        return;
+    }
+    const auto over = [](const CefRefPtr<CefLabelButton>& button) {
+        const cef_button_state_t state = button->GetState();
+        return state == CEF_BUTTON_STATE_HOVERED || state == CEF_BUTTON_STATE_PRESSED;
+    };
+    for (std::size_t index = 0; index < tab_entry_views_.size(); ++index) {
+        TabEntryViews& views = tab_entry_views_[index];
+        const bool hovered = over(views.favicon) || over(views.title) || over(views.close);
+        if (hovered != views.hovered) {
+            views.hovered = hovered;
+            ApplyTabRowVisual(index);
+        }
+    }
+    for (std::size_t position = 0; position < collapsed_tab_views_.size(); ++position) {
+        CollapsedTabViews& views = collapsed_tab_views_[position];
+        const bool hovered = over(views.button);
+        if (hovered != views.hovered) {
+            views.hovered = hovered;
+            ApplyCollapsedTabVisual(position);
+        }
+    }
+    PushCornerPatches();
 }
 
 // The icon rail re-asserts everything it owns: the surfaces, the hairlines, the "+" glyph,
@@ -1839,12 +2396,7 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
         if (views.source_index >= tab_entries_.size()) {
             continue;
         }
-        const TabStripEntrySnapshot& entry = tab_entries_[views.source_index];
-        const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
-        views.row->SetBackgroundColor(colors.outline.argb);
-        views.inner->SetBackgroundColor(colors.fill.argb);
-        views.button->SetBackgroundColor(colors.fill.argb);
-        views.button->SetEnabledTextColors(colors.title.argb);
+        ApplyCollapsedTabVisual(static_cast<std::size_t>(&views - collapsed_tab_views_.data()));
     }
     for (const CollapsedSpaceViews& views : collapsed_space_views_) {
         if (views.source_index >= space_entries_.size()) {

@@ -17,6 +17,7 @@
 #include "cef_update_fetcher.h"
 #include "clipboard.h"
 #include "design_tokens.h"
+#include "page_card.h"
 #include "download_path.h"
 #include "favicon_policy.h"
 #include "include/base/cef_bind.h"
@@ -54,6 +55,17 @@ constexpr int kChromeWindowWidth = 1440;
 constexpr int kChromeWindowHeight = 900;
 constexpr int kMinimumWindowWidth = 800;
 constexpr int kMinimumWindowHeight = 560;
+
+// The frameless Arc-style window (traffic lights over the sidebar, no title bar) is macOS-only
+// for now: the views toolkit's frameless + draggable-region mode is the supported combination
+// there, while Windows/Linux keep the platform frame.
+constexpr bool FramelessWindowSupported() {
+#if defined(__APPLE__)
+    return true;
+#else
+    return false;
+#endif
+}
 
 constexpr std::string_view kDefaultSpaceName = "Default";
 constexpr ArgbColor kDefaultSpaceColor{0xFF0090FF};
@@ -1717,7 +1729,12 @@ void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
 }
 
 ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
-    return ChromeTokens::ForTheme(theme).TintedForSpace(active_space().color(), theme);
+    ChromeTokens tokens =
+        ChromeTokens::ForTheme(theme).Customized(active_space().color(), theme, prefs_.appearance);
+    if (FramelessWindowSupported()) {
+        tokens.titlebar_band_dip = BrowserChrome::TrafficLightBandDip();
+    }
+    return tokens;
 }
 
 void BrowserWindow::ShutdownAgentHost() {
@@ -2145,6 +2162,7 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
         return;
     }
     browser_was_created_ = true;
+    SchedulePageCardRefresh();
     Tab* owner = FindTabByBrowser(browser);
     if (owner != nullptr) {
         owner->SetBrowser(browser);
@@ -2288,6 +2306,13 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
     UpdateChromeCollections();
     window_->AddChildView(chrome_->root());
+    chrome_->SetCornerPatchSink([this](const std::vector<CornerPatch>& patches) {
+        corner_patches_ = patches;
+        if (!closing_ && chrome_ != nullptr) {
+            ApplyCornerPatches(NativeContentHandles(),
+                               corner_patches_, ResolvedTokens(chrome_snapshot_.theme).canvas);
+        }
+    });
     window_->SetTitle(CefString("Island"));
     window_->CenterWindow(CefSize(kChromeWindowWidth, kChromeWindowHeight));
     ApplyTheme(window_, theme, true);
@@ -2349,6 +2374,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     }
 
     window_width_dip_ = new_bounds.width;
+    window_height_dip_ = new_bounds.height;
     chrome_snapshot_.rail_bounds = {
         .x = 0,
         .y = 0,
@@ -2391,6 +2417,23 @@ void BrowserWindow::OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool) {
 
 CefSize BrowserWindow::GetMinimumSize(CefRefPtr<CefView>) {
     return CefSize(kMinimumWindowWidth, kMinimumWindowHeight);
+}
+
+bool BrowserWindow::IsFrameless(CefRefPtr<CefWindow>) {
+    return FramelessWindowSupported();
+}
+
+bool BrowserWindow::WithStandardWindowButtons(CefRefPtr<CefWindow>) {
+    return FramelessWindowSupported();
+}
+
+bool BrowserWindow::GetTitlebarHeight(CefRefPtr<CefWindow>, float* titlebar_height) {
+    if (!FramelessWindowSupported()) {
+        return false;
+    }
+    // The traffic lights sit halfway down this height: centered on the sidebar's top strip.
+    *titlebar_height = static_cast<float>(BrowserChrome::TrafficLightBandDip());
+    return true;
 }
 
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
@@ -2867,7 +2910,7 @@ Space BrowserWindow::RemoveSpaceAtIndex(std::size_t index) {
 void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views) {
     const ChromeTokens tokens = ResolvedTokens(theme);
     tinted_space_color_ = active_space().color().argb;
-    window->SetThemeColor(CEF_ColorPrimaryBackground, tokens.background.argb);
+    window->SetThemeColor(CEF_ColorPrimaryBackground, tokens.canvas.argb);
     window->SetThemeColor(CEF_ColorPrimaryForeground, tokens.text.argb);
     window->SetThemeColor(CEF_ColorSecondaryForeground, tokens.text_secondary.argb);
     window->SetThemeColor(CEF_ColorAccent, tokens.accent.argb);
@@ -3335,8 +3378,84 @@ void BrowserWindow::ApplySidebarState() {
                          0, BrowserChrome::AgentPanelWidthDip())
             : 0;
     chrome_snapshot_.rail_bounds.width = rail_width;
-    chrome_snapshot_.content_bounds.x = rail_width;
+    const bool sidebar_right = prefs_.appearance.sidebar_side == SidebarSide::kRight;
+    chrome_snapshot_.rail_bounds.x = sidebar_right ? std::max(0, window_width - rail_width) : 0;
+    chrome_snapshot_.content_bounds.x = sidebar_right ? panel_width : rail_width;
     chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
+    ApplyDragRegions();
+    SchedulePageCardRefresh();
+}
+
+std::vector<void*> BrowserWindow::NativeContentHandles() const {
+    std::vector<void*> handles;
+    if (chrome_ == nullptr) {
+        return handles;
+    }
+    for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
+        CefRefPtr<CefBrowser> browser = view != nullptr ? view->GetBrowser() : nullptr;
+        if (browser != nullptr) {
+            handles.push_back(browser->GetHost()->GetWindowHandle());
+        }
+    }
+    return handles;
+}
+
+void BrowserWindow::RefreshPageCards() {
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
+    const std::vector<void*> handles = NativeContentHandles();
+    ApplyPageCardStyle(handles, {.radius_dip = tokens.card_radius_dip,
+                                 .shadow = tokens.card_shadow,
+                                 .canvas = tokens.canvas,
+                                 .inset_dip = tokens.card_inset_dip,
+                                 .dark = chrome_snapshot_.theme == ChromeTheme::kDark});
+    ApplyCornerPatches(handles, corner_patches_, tokens.canvas);
+}
+
+void BrowserWindow::SchedulePageCardRefresh() {
+    if (closing_ || window_ == nullptr || chrome_ == nullptr) {
+        return;
+    }
+    RefreshPageCards();
+    if (page_card_refresh_pending_) {
+        return;
+    }
+    page_card_refresh_pending_ = true;
+    for (const int64_t delay_ms : {60, 400}) {
+        CefPostDelayedTask(TID_UI,
+                           CefCreateClosureTask(base::BindOnce(
+                               [](CefRefPtr<BrowserWindow> self, bool last) {
+                                   if (last) {
+                                       self->page_card_refresh_pending_ = false;
+                                   }
+                                   self->RefreshPageCards();
+                               },
+                               CefRefPtr<BrowserWindow>(this), delay_ms == 400)),
+                           delay_ms);
+    }
+}
+
+void BrowserWindow::ApplyDragRegions() {
+    if (!FramelessWindowSupported() || window_ == nullptr || chrome_ == nullptr) {
+        return;
+    }
+    const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
+    std::vector<CefDraggableRegion> regions;
+    for (const BrowserChrome::DragRegion& region : BrowserChrome::DragRegionsForBounds(
+             {.x = 0, .y = 0, .width = window_width_dip_, .height = window_height_dip_}, tokens,
+             sidebar_state_.expanded(), agent_panel_open())) {
+        if (region.bounds.width <= 0 || region.bounds.height <= 0) {
+            continue;
+        }
+        CefDraggableRegion draggable;
+        draggable.bounds = CefRect(region.bounds.x, region.bounds.y, region.bounds.width,
+                                   region.bounds.height);
+        draggable.draggable = region.draggable ? 1 : 0;
+        regions.push_back(draggable);
+    }
+    window_->SetDraggableRegions(regions);
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {

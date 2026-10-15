@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -25,6 +26,8 @@
 #include "icon_catalog.h"
 #include "include/cef_image.h"
 #include "navigation_state.h"
+#include "page_card.h"
+#include "row_raster.h"
 #include "sidebar_state.h"
 
 class CefBoxLayout;
@@ -218,6 +221,8 @@ class BrowserChrome final : public NavigationObserver {
 
     [[nodiscard]] CefRefPtr<CefPanel> root() const;
     [[nodiscard]] CefRefPtr<CefPanel> sidebar() const;
+    // The browser views currently in the page card slot (one, or two in split view).
+    [[nodiscard]] std::vector<CefRefPtr<CefBrowserView>> visible_browser_views() const;
     [[nodiscard]] ChromeViewTreeNode view_tree_snapshot() const;
     [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
     [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
@@ -229,22 +234,32 @@ class BrowserChrome final : public NavigationObserver {
         return AddressFocusLeadingEdgeDip();
     }
 
-    // Top inset above the navigation row. The window keeps the platform's standard
-    // title bar, which already clears the window controls, so the rail starts on
-    // the same spacing_3 (12) gutter as its sides.
+    // Top inset above the navigation row on platforms that keep their own title bar, which
+    // already clears the window controls: the rail starts on the same spacing_3 (12) gutter as
+    // its sides. With a frameless window (ChromeTokens::titlebar_band_dip > 0) the navigation row
+    // is vertically centered in that band instead, next to the traffic lights.
     [[nodiscard]] static constexpr int RailTopInsetDip() { return 12; }
+    [[nodiscard]] static int RailTopInsetDip(const ChromeTokens& tokens) {
+        return tokens.titlebar_band_dip > 0
+                   ? std::max(0, (tokens.titlebar_band_dip - tokens.control_height_dip) / 2)
+                   : RailTopInsetDip();
+    }
+    // Height of the frameless titlebar band (macOS traffic lights centered in it) and the width
+    // the three buttons occupy from the window's left edge, plus a gap.
+    [[nodiscard]] static constexpr int TrafficLightBandDip() { return 40; }
+    [[nodiscard]] static constexpr int TrafficLightClearDip() { return 92; }
+    // Extra leading space of the navigation row (past the rail's own gutter) that clears them.
+    [[nodiscard]] static constexpr int NavigationLeadDip() { return TrafficLightClearDip() - 12; }
 
     // Vertical cadence between rail sections: one spacing_2 (8) step, so the
     // controls read as one dense, even column (Graphite, "Linear-calm").
     [[nodiscard]] static constexpr int RailSectionSpacingDip() { return 8; }
 
-    // Uniform gutter padding the browser_content panel on every side so the single
-    // CefBrowserView reads as a floating card over the tinted canvas. spacing_3 (12)
-    // is the calm edge: wide enough to separate the card from the rail and window
-    // edge, tight enough to keep the canvas dominant at the 800x560 minimum.
-    // CEF cannot round or clip the CefBrowserView, so the floating read comes from
-    // this rectangular inset, not from a corner radius.
-    [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 12; }
+    // Default gutter around the page card (ChromeTokens::card_inset_dip is the live value): the
+    // card floats on the sidebar-colored canvas, inset on its top, outer side and bottom and flush
+    // with the sidebar on the fourth side. CEF cannot round or clip the CefBrowserView, so the
+    // macOS helper (macos/page_card_mac.mm) rounds it natively; elsewhere the corners stay square.
+    [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 8; }
 
     // The agent panel column: a fixed 380 DIP that yields to the page, so the
     // browser content never drops below MinimumBrowserContentWidthDip.
@@ -269,27 +284,20 @@ class BrowserChrome final : public NavigationObserver {
         switch (slot) {
             case SurfaceSlot::kRoot:
             case SurfaceSlot::kBrowserContent:
-                return tokens.background;
             case SurfaceSlot::kRail:
-                // The calm tinted rail sits one step off the canvas so the floating
-                // browser card separates from it.
-                return tokens.surface_secondary;
+                // One surface: the sidebar and the window margin around the page card share
+                // the canvas, so the card floats on it (Arc).
+                return tokens.canvas;
             case SurfaceSlot::kHairline:
             case SurfaceSlot::kAddressOutline:
                 return tokens.border;
             case SurfaceSlot::kAddressWell:
-                // The address pill lifts to the primary surface so it reads as a raised
-                // rounded field against the tinted rail, matching the canonical
-                // .rail-address anatomy (surface fill, hairline edge).
-                return tokens.surface;
+                // The address pill is a soft well on the canvas.
+                return tokens.well;
             case SurfaceSlot::kNavControl:
-                // Nav icon-button hover/pressed fill stays on the quiet surface step so
-                // the tinted rail keeps the controls calm until targeted.
-                return tokens.surface;
+                return tokens.hover;
             case SurfaceSlot::kActivePage:
-                // The active-page pill lifts to the primary surface against the tinted
-                // rail so the current page reads as the one raised card.
-                return tokens.surface;
+                return tokens.selected;
             case SurfaceSlot::kAccent:
                 return tokens.accent;
         }
@@ -299,18 +307,17 @@ class BrowserChrome final : public NavigationObserver {
         switch (slot) {
             case SurfaceSlot::kRoot:
             case SurfaceSlot::kBrowserContent:
-                return tokens_.background;
             case SurfaceSlot::kRail:
-                return tokens_.surface_secondary;
+                return tokens_.canvas;
             case SurfaceSlot::kHairline:
             case SurfaceSlot::kAddressOutline:
                 return tokens_.border;
             case SurfaceSlot::kAddressWell:
-                return tokens_.surface;
+                return tokens_.well;
             case SurfaceSlot::kNavControl:
-                return tokens_.surface;
+                return tokens_.hover;
             case SurfaceSlot::kActivePage:
-                return tokens_.surface;
+                return tokens_.selected;
             case SurfaceSlot::kAccent:
                 return tokens_.accent;
         }
@@ -327,14 +334,16 @@ class BrowserChrome final : public NavigationObserver {
         ArgbColor title;
         ArgbColor trailing;
     };
-    // The selected row is surface-filled and hairline-outlined (DESIGN.md §5);
-    // pinned rows sit half a step toward the surface; every other row is the rail.
+    // The selected row is a soft `selected` fill with no outline (Arc); pinned rows sit half a
+    // step toward it; every other row is the canvas.
     [[nodiscard]] static EntryColors TabRowColors(const ChromeTokens& tokens, bool active,
                                                   bool pinned) {
-        const ArgbColor rail = tokens.surface_secondary;
+        const ArgbColor rail = tokens.canvas;
+        const ArgbColor fill =
+            active ? tokens.selected : (pinned ? MixColor(rail, tokens.selected, 0.5) : rail);
         return {
-            .outline = active ? tokens.border : rail,
-            .fill = active ? tokens.surface : (pinned ? MixColor(rail, tokens.surface, 0.5) : rail),
+            .outline = fill,
+            .fill = fill,
             .title = active ? tokens.text : tokens.text_secondary,
             .trailing = tokens.text_secondary,
         };
@@ -342,7 +351,7 @@ class BrowserChrome final : public NavigationObserver {
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
     // active chip, carry the state); the active chip's label takes --text.
     [[nodiscard]] static EntryColors SpaceChipColors(const ChromeTokens& tokens, bool active) {
-        const ArgbColor rail = tokens.surface_secondary;
+        const ArgbColor rail = tokens.canvas;
         return {
             .outline = rail,
             .fill = rail,
@@ -364,72 +373,50 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr ChromeIconTone FallbackFaviconIconTone() {
         return ChromeIconTone::kSecondary;
     }
-    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(
-        DipRect root_bounds, const ChromeTokens& tokens) noexcept {
+    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
+                                                                const ChromeTokens& tokens) {
         return LayoutForBounds(root_bounds, tokens, /*sidebar_expanded=*/true);
     }
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
-                                                                bool sidebar_expanded) noexcept {
+                                                                bool sidebar_expanded) {
         return LayoutForBounds(root_bounds, tokens, sidebar_expanded,
                                /*agent_panel_open=*/false);
     }
     // The collapsed sidebar occupies the icon rail's 52 DIP of layout width instead of the
     // full 286; the rail stays in the view tree, so the contract shape is unchanged and
     // only the content x-offset moves. This is the single layout path for both states.
-    // The open agent panel takes its column from the right edge before the
-    // content gutter applies; closed, it is a zero-width rect at that edge.
+    // The open agent panel takes its column from the window edge opposite the sidebar before
+    // the card inset applies; closed, it is a zero-width rect at that edge.
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
-                                                                bool agent_panel_open) noexcept {
-        const int rail_width = std::min(
-            sidebar_expanded ? tokens.rail_width_dip : kCollapsedRailWidthDip, root_bounds.width);
-        const int panel_width =
-            agent_panel_open
-                ? std::clamp(root_bounds.width - rail_width - MinimumBrowserContentWidthDip(), 0,
-                             AgentPanelWidthDip())
-                : 0;
-        const DipRect rail_bounds = {
-            .x = root_bounds.x,
-            .y = root_bounds.y,
-            .width = rail_width,
-            .height = root_bounds.height,
-        };
-        // The floating-canvas gutter insets the browser card on every side; it shrinks
-        // the content region symmetrically and is clamped so the card never inverts on
-        // very narrow windows.
-        const int pad = BrowserContentPaddingDip();
-        const int content_x = root_bounds.x + rail_width;
-        const int content_width = std::max(0, root_bounds.width - rail_width - panel_width);
-        const DipRect browser_content_bounds = {
-            .x = content_x,
-            .y = root_bounds.y,
-            .width = content_width,
-            .height = root_bounds.height,
-        };
-        const int inset_width = std::max(0, content_width - 2 * pad);
-        const int inset_height = std::max(0, root_bounds.height - 2 * pad);
-        const DipRect browser_view_bounds = {
-            .x = content_x + std::min(pad, content_width / 2),
-            .y = root_bounds.y + std::min(pad, root_bounds.height / 2),
-            .width = inset_width,
-            .height = inset_height,
-        };
-        const DipRect agent_panel_bounds = {
-            .x = content_x + content_width,
-            .y = root_bounds.y,
-            .width = panel_width,
-            .height = root_bounds.height,
-        };
-        return {
-            .root_bounds = root_bounds,
-            .rail_bounds = rail_bounds,
-            .browser_content_bounds = browser_content_bounds,
-            .browser_view_bounds = browser_view_bounds,
-            .agent_panel_bounds = agent_panel_bounds,
-        };
-    }
+                                                                bool agent_panel_open);
+
+    // Insets of the page card (browser_view_bounds inside browser_content_bounds) and of the
+    // agent panel's own card, resolved for the same inputs as LayoutForBounds.
+    struct CardInsets {
+        int left = 0;
+        int top = 0;
+        int right = 0;
+        int bottom = 0;
+    };
+    [[nodiscard]] static CardInsets ContentInsets(DipRect root_bounds, const ChromeTokens& tokens,
+                                                  bool sidebar_expanded, bool agent_panel_open);
+    [[nodiscard]] static CardInsets AgentPanelInsets(DipRect root_bounds,
+                                                     const ChromeTokens& tokens,
+                                                     bool sidebar_expanded);
+
+    // The window regions that drag the window in a frameless window: the sidebar's top band
+    // (minus the navigation buttons) and the canvas margin above the page card.
+    struct DragRegion {
+        DipRect bounds;
+        bool draggable = true;
+    };
+    [[nodiscard]] static std::vector<DragRegion> DragRegionsForBounds(DipRect root_bounds,
+                                                                      const ChromeTokens& tokens,
+                                                                      bool sidebar_expanded,
+                                                                      bool agent_panel_open);
     // The fixed rail regions keep their Phase 2 shape; the collection regions
     // (kTabStrip, kSpaceSwitcher) are present but empty because Phase 3 U3
     // wires no real tab/space data yet. Per-entry structure is asserted
@@ -580,6 +567,10 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] const std::string& update_notice() const noexcept { return update_notice_; }
     void BeginAddressEditing();
     void Detach();
+    // The window host applies the corner patches (page_card.h) the chrome computes for its soft
+    // rounded fills; the chrome re-pushes them when rows change, hover, scroll or relayout.
+    void SetCornerPatchSink(std::function<void(const std::vector<CornerPatch>&)> sink);
+    [[nodiscard]] std::vector<CornerPatch> ComputeCornerPatches() const;
     // Repaints every chrome view from the resolved tokens and each entry's current
     // state. Runs after CEF's asynchronous theme reset has wiped the custom colors.
     void ReapplyThemeColors();
@@ -622,7 +613,19 @@ class BrowserChrome final : public NavigationObserver {
     void ProjectAddress(const AddressBarSnapshot& snapshot);
     void ScheduleAddressSelection();
     void ApplyControlTheme();
+    // Re-creates the box layouts whose insets depend on the tokens (sidebar side, titlebar band,
+    // card inset, density) and the expand/agent state; a no-op while nothing relevant changed.
+    void ApplyLayoutTokens();
+    [[nodiscard]] int RowHeight() const { return tokens_.control_height_dip; }
     void ApplyCollectionTheme();
+    // Re-renders the soft rounded fill (selected / hovered / none) of one row's edge buttons.
+    void ApplyTabRowVisual(std::size_t index);
+    void ApplyCollapsedTabVisual(std::size_t position);
+    void ApplyAddressPillImages();
+    // Called by the row buttons' delegates on every pointer-state change.
+    void RefreshRowHover();
+    void PushCornerPatches();
+    void SchedulePatchPoll();
     void ApplyCollapsedRailTheme();
     void UpdateAddressFocusLeadingEdge();
 
@@ -636,6 +639,10 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefBoxLayout> browser_content_layout_;
+    CefRefPtr<CefBoxLayout> agent_panel_layout_;
+    CefRefPtr<CefBoxLayout> navigation_row_layout_;
+    CefRefPtr<CefBoxLayout> rail_layout_;
+    CefRefPtr<CefBoxLayout> collapsed_layout_;
     CefRefPtr<CefPanel> agent_panel_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
@@ -655,6 +662,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;
     CefRefPtr<CefLabelButton> address_location_icon_;
+    CefRefPtr<CefImage> location_icon_source_;
+    CefRefPtr<CefImage> reload_icon_source_;
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
@@ -687,6 +696,12 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefLabelButton> favicon;
         CefRefPtr<CefLabelButton> title;
         CefRefPtr<CefLabelButton> close;
+        // The glyph sources the row's edge-button images are re-rendered from (favicon or the
+        // globe fallback, close or pin icon) and the live pointer state.
+        CefRefPtr<CefImage> favicon_source;
+        bool favicon_is_page = false;
+        CefRefPtr<CefImage> trailing_source;
+        bool hovered = false;
     };
     // Collapsed-rail entries: `row` paints the hairline outline of the active tab and
     // `inner` its fill; `button` carries the favicon (or the space dot) and the tooltip.
@@ -695,6 +710,9 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefPanel> inner;
         CefRefPtr<CefLabelButton> button;
         std::size_t source_index = 0;
+        CefRefPtr<CefImage> favicon_source;
+        bool favicon_is_page = false;
+        bool hovered = false;
     };
     struct CollapsedSpaceViews {
         CefRefPtr<CefLabelButton> button;
@@ -731,6 +749,11 @@ class BrowserChrome final : public NavigationObserver {
     std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;
     bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool detached_ = false;
+    // The inputs ApplyLayoutTokens() last laid out for.
+    std::string layout_key_;
+    std::function<void(const std::vector<CornerPatch>&)> corner_sink_;
+    std::vector<CornerPatch> last_patches_;
+    bool patch_poll_pending_ = false;
 };
 
 }  // namespace island

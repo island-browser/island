@@ -19,6 +19,7 @@ add_library(island_browser_core STATIC
     command_palette.cc
     command_palette_view.cc
     design_tokens.cc
+    row_raster.cc
     devtools_bridge.cc
     download_path.cc
     icon_catalog.cc
@@ -50,8 +51,10 @@ SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)
 
-    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm macos/clipboard_mac.mm macos/font_registry_mac.mm)
-    target_link_libraries(island_browser_core PRIVATE "-framework CoreFoundation" "-framework CoreText")
+    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm macos/clipboard_mac.mm macos/font_registry_mac.mm macos/page_card_mac.mm)
+    set_source_files_properties(macos/page_card_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    target_link_libraries(island_browser_core PRIVATE "-framework CoreFoundation" "-framework CoreText"
+                          "-framework Cocoa" "-framework QuartzCore")
 
     set(CEF_TARGET island_browser)
     set(CEF_HELPER_TARGET island_browser_Helper)
