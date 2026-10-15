@@ -34,7 +34,7 @@ TEST(BrowserChromeContractTest, GivenTheChromeTreeWhenInspectedThenItHasOneRailA
 }
 
 TEST(BrowserChromeContractTest,
-     GivenTheAddressControlWhenInspectedThenItContainsLocationAndTrailingReload) {
+     GivenTheAddressControlWhenInspectedThenItContainsLocationReloadAndReader) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
     const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
     ASSERT_NE(rail, nullptr);
@@ -46,10 +46,11 @@ TEST(BrowserChromeContractTest,
     EXPECT_EQ(navigation_row->children[0].id, ChromeViewId::kBack);
     EXPECT_EQ(navigation_row->children[1].id, ChromeViewId::kForward);
     ASSERT_NE(address_row, nullptr);
-    ASSERT_EQ(address_row->children.size(), 3U);
+    ASSERT_EQ(address_row->children.size(), 4U);
     EXPECT_EQ(address_row->children[0].id, ChromeViewId::kAddressLocationIcon);
     EXPECT_EQ(address_row->children[1].id, ChromeViewId::kAddress);
     EXPECT_EQ(address_row->children[2].id, ChromeViewId::kReload);
+    EXPECT_EQ(address_row->children[3].id, ChromeViewId::kReaderButton);
 }
 
 TEST(BrowserChromeContractTest, GivenTheCurrentPageWhenInspectedThenItHasFallbackAndIndicator) {
@@ -226,6 +227,8 @@ TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStabl
     EXPECT_EQ(static_cast<int>(ChromeViewId::kActivePage), 1016);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kActivePageFallbackFavicon), 1017);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kActivePageIndicator), 1018);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kFindBar), 1060);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kReaderButton), 1067);
 }
 
 TEST(BrowserChromeContractTest, GivenTheCollectionIdsWhenComparedThenTheyStartAfter1018) {

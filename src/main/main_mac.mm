@@ -409,7 +409,8 @@ bool CaptureOwnWindows(const std::string& path) {
 // Parameterized dev actions that have no menu item: `navigate:<address>` submits the address
 // the way the address bar does, `sidebar:expanded|collapsed` sets the persistent sidebar state,
 // `peek:<address>` opens the peek card, `sleep_tabs` probes and sleeps idle tabs, and
-// `sleep_report` logs how many tabs sleep.
+// `sleep_report` logs how many tabs sleep, `find:<text>` opens the find bar on a query, and
+// `key:<id>` runs a keymap action.
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -432,6 +433,21 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
     if (action == "sleep_report") {
         fprintf(stderr, "island-dev: sleeping tabs: %zu\n", app->SleepingTabCount());
         return true;
+    }
+    constexpr std::string_view kFind = "find:";
+    constexpr std::string_view kKey = "key:";
+    if (action.compare(0, kFind.size(), kFind) == 0) {
+        app->FindInPage(action.substr(kFind.size()));
+        return true;
+    }
+    // `key:<action id>` runs a keymap action the way its shortcut does (e.g. key:reader_mode).
+    if (action.compare(0, kKey.size(), kKey) == 0) {
+        const std::optional<island::KeyAction> key_action =
+            island::KeyActionFromId(std::string_view(action).substr(kKey.size()));
+        if (key_action.has_value()) {
+            app->RunKeyAction(*key_action);
+        }
+        return key_action.has_value();
     }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
         app->SetSidebarExpanded(action == "sidebar:expanded");
@@ -672,6 +688,16 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     // Phase 4 shortcuts: closed-tab reopen, reload and stop, zoom, spaces, and
     // the alternate tab keys. Each follows the keymap via ApplyKeyBinding.
     NSMutableArray<NSMenuItem*>* keymap_items = [NSMutableArray array];
+    // Find in page and Reader view: the bindings follow the keymap like every item below.
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Find in Page…",
+                                                 island::KeyAction::kFindInPage, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Find Next",
+                                                 island::KeyAction::kFindNext, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Find Previous",
+                                                 island::KeyAction::kFindPrevious, keymap)];
+    [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Reader View",
+                                                 island::KeyAction::kReaderMode, keymap)];
+    [browser_menu addItem:[NSMenuItem separatorItem]];
     [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Reopen Closed Tab",
                                                  island::KeyAction::kReopenClosedTab, keymap)];
     [keymap_items addObject:AddKeyActionMenuItem(browser_menu, menu_actions, @"Copy Tab URL",

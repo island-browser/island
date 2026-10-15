@@ -156,6 +156,20 @@ TEST(KeymapTest, PhaseFourDefaultsAreBound) {
               ParseKeyBinding("Control+Shift+Tab"));
 }
 
+TEST(KeymapTest, FindAndReaderActionsAreBoundWithoutConflicts) {
+    const Keymap defaults = Keymap::Defaults();
+    EXPECT_EQ(defaults.Binding(KeyAction::kFindInPage), ParseKeyBinding("Mod+F"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kFindNext), ParseKeyBinding("Mod+G"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kFindPrevious), ParseKeyBinding("Mod+Shift+G"));
+    EXPECT_EQ(defaults.Binding(KeyAction::kReaderMode), ParseKeyBinding("Mod+Alt+R"));
+    EXPECT_TRUE(defaults.Conflicts().empty());
+    EXPECT_EQ(KeyActionFromId("find_in_page"), KeyAction::kFindInPage);
+    EXPECT_EQ(KeyActionFromId("reader_mode"), KeyAction::kReaderMode);
+    // Reload ignoring cache keeps Mod+Shift+R; Reader mode must not shadow it.
+    EXPECT_EQ(defaults.ActionFor(*ParseKeyBinding("Mod+Shift+R")), KeyAction::kReloadIgnoringCache);
+    EXPECT_EQ(defaults.ActionFor(*ParseKeyBinding("Mod+Alt+R")), KeyAction::kReaderMode);
+}
+
 TEST(KeymapTest, EveryDefaultBindingIsUniqueIncludingFixedAccelerators) {
     std::set<std::string> seen;
     for (const KeyActionInfo& info : KeyActions()) {

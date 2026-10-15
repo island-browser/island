@@ -13,6 +13,10 @@ namespace island {
 [[nodiscard]] std::string_view SettingsPageHtml() noexcept;
 [[nodiscard]] std::string_view TabOverviewPageHtml() noexcept;
 [[nodiscard]] std::string_view StartPageHtml() noexcept;
+// Reader view assets under src/main/reader/: the document template and the extraction script
+// the window injects into the page being read.
+[[nodiscard]] std::string_view ReaderPageHtml() noexcept;
+[[nodiscard]] std::string_view ReaderExtractScript() noexcept;
 
 [[nodiscard]] inline std::string_view LocalPageHtml(LocalPageKind kind) noexcept {
     switch (kind) {

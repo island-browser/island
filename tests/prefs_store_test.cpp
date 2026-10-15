@@ -66,6 +66,20 @@ TEST(PrefsStoreTest, GivenTabSleepMinutesThenTheyRoundTripAndUnknownValuesFallBa
     EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
 }
 
+TEST(PrefsStoreTest, GivenReaderAppearanceWhenSavedThenItRoundTrips) {
+    PrefsState state;
+    state.reader_size = 22;
+    state.reader_width = "wide";
+    state.reader_theme = "sepia";
+    const std::filesystem::path path = TempPath("reader.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.reader_size, 22);
+    EXPECT_EQ(loaded.state.reader_width, "wide");
+    EXPECT_EQ(loaded.state.reader_theme, "sepia");
+}
+
 TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional) {
     PrefsState state;
     state.agent_provider = "custom";

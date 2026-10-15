@@ -61,6 +61,11 @@ struct PrefsState {
     // Minutes of inactivity before a background tab releases its browser (0 = never; see
     // tab_sleep_policy.h). Optional key; a value that is not one of 0/15/30/60 means the default.
     int tab_sleep_minutes = 30;
+    // Reader view appearance (reader_mode.h): font size in px, "narrow"/"medium"/"wide", and
+    // "auto"/"light"/"sepia"/"dark". Optional keys; unknown values are normalized where read.
+    int reader_size = 18;
+    std::string reader_width = "medium";
+    std::string reader_theme = "auto";
 
     bool operator==(const PrefsState&) const = default;
 };

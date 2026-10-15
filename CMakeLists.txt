@@ -205,15 +205,18 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 
-# Embed the built-in pages (src/main/pages/*.html) as byte arrays (string
+# Embed the built-in pages (src/main/pages/*.html) and the reader assets (src/main/reader/) as byte arrays (string
 # literals hit MSVC's length limit). Reconfigures when a page changes.
 set(ISLAND_LOCAL_PAGE_SOURCES)
-foreach(_island_page IN ITEMS "agent.html:AgentPageHtml" "settings.html:SettingsPageHtml"
-                              "tab_overview.html:TabOverviewPageHtml" "start.html:StartPageHtml")
+foreach(_island_page IN ITEMS "pages/agent.html:AgentPageHtml" "pages/settings.html:SettingsPageHtml"
+                              "pages/tab_overview.html:TabOverviewPageHtml"
+                              "pages/start.html:StartPageHtml"
+                              "reader/reader_page.html:ReaderPageHtml"
+                              "reader/reader_extract.js:ReaderExtractScript")
     string(REPLACE ":" ";" _island_page "${_island_page}")
     list(GET _island_page 0 ISLAND_PAGE_FILE)
     list(GET _island_page 1 ISLAND_PAGE_FUNCTION)
-    set(_island_page_html "${CMAKE_SOURCE_DIR}/src/main/pages/${ISLAND_PAGE_FILE}")
+    set(_island_page_html "${CMAKE_SOURCE_DIR}/src/main/${ISLAND_PAGE_FILE}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_island_page_html}")
     file(READ "${_island_page_html}" _island_page_hex HEX)
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ISLAND_PAGE_BYTES "${_island_page_hex}")

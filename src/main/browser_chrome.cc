@@ -597,6 +597,18 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     reload_button_->SetMinimumSize(
         CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
     address_row->AddChildView(reload_button_);
+
+    // Reader view toggle: a quiet "Aa" cell at the end of the pill (no icon asset is needed, and
+    // the glyph is what every reader mode uses). It is disabled on pages that are not web pages.
+    reader_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Aa");
+    reader_button_->SetID(static_cast<int>(ChromeViewId::kReaderButton));
+    reader_button_->SetAccessibleName("Reader view");
+    reader_button_->SetTooltipText("Reader view");
+    reader_button_->SetFocusable(true);
+    reader_button_->SetEnabled(false);
+    reader_button_->SetMinimumSize(
+        CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
+    address_row->AddChildView(reader_button_);
     sidebar_->AddChildView(address_row);
 
     validation_message_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
@@ -895,6 +907,20 @@ ChromeGeometrySnapshot BrowserChrome::view_bounds_snapshot() const {
         .browser_content_bounds = ToDipRect(browser_content_->GetBounds()),
         .browser_view_bounds = ToDipRect(browser_view_->GetBounds()),
     };
+}
+
+void BrowserChrome::SetReaderState(bool available, bool active) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || (available == reader_available_ && active == reader_active_)) {
+        return;
+    }
+    reader_available_ = available;
+    reader_active_ = active;
+    reader_button_->SetEnabled(available);
+    reader_button_->SetEnabledTextColors(
+        (active ? tokens_.accent : tokens_.text_secondary).argb);
+    reader_button_->SetTooltipText(active ? "Exit reader view" : "Reader view");
+    reader_button_->SetAccessibleName(active ? "Exit reader view" : "Reader view");
 }
 
 AddressSelectionSnapshot BrowserChrome::address_selection_snapshot() const {
@@ -1514,6 +1540,9 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kReload);
             host_->FocusBrowserView();
             return;
+        case ChromeViewId::kReaderButton:
+            host_->ExecuteBrowserCommand(BrowserCommand::kToggleReaderMode);
+            return;
         case ChromeViewId::kActiveTab:
             host_->FocusBrowserView();
             return;
@@ -1741,6 +1770,7 @@ void BrowserChrome::ApplyControlTheme() {
     address_field_->SetBackgroundColor(address_well.argb);
     address_field_holder_->SetBackgroundColor(address_well.argb);
     reload_button_->SetBackgroundColor(address_well.argb);
+    reader_button_->SetBackgroundColor(address_well.argb);
     // Back and Forward are ghost icon buttons: no fill of their own, so only the
     // native hover/pressed ink shows when targeted.
     back_button_->SetBackgroundColor(rail.argb);
@@ -1754,6 +1784,11 @@ void BrowserChrome::ApplyControlTheme() {
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
+    reader_button_->SetFontList("Geist, Medium 12px");
+    reader_button_->SetEnabledTextColors(
+        (reader_active_ ? tokens_.accent : tokens_.text_secondary).argb);
+    reader_button_->SetTextColor(CEF_BUTTON_STATE_DISABLED,
+                                 MixColor(tokens_.surface, tokens_.text_secondary, 0.45).argb);
     address_location_icon_->SetEnabledTextColors(tokens_.text_secondary.argb);
     active_page_fallback_favicon_->SetEnabledTextColors(tokens_.text_secondary.argb);
     active_tab_->SetEnabledTextColors(tokens_.text.argb);
@@ -1781,7 +1816,7 @@ void BrowserChrome::ApplyControlTheme() {
         active_page_fallback_favicon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
     }
     for (const CefRefPtr<CefLabelButton>& button :
-         {back_button_, forward_button_, reload_button_}) {
+         {back_button_, forward_button_, reload_button_, reader_button_}) {
         button->SetInkDropEnabled(true);
     }
     ApplyRailButtonTheme();

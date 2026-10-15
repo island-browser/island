@@ -35,12 +35,14 @@ add_executable(island_tests
     download_path_test.cpp
     favicon_policy_test.cpp
     history_recorder_test.cpp
+    find_bar_model_test.cpp
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
     overlay_lifetime_test.cpp
     peek_state_test.cpp
     prefs_store_test.cpp
+    reader_mode_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
@@ -79,6 +81,10 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
     "${CMAKE_SOURCE_DIR}/src/main/history_recorder.cc"
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/find_bar_model.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/find_bar_overlay.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/reader_mode.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/browser_window_find_reader.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"

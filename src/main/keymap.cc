@@ -47,6 +47,11 @@ constexpr std::array<KeyActionInfo, kKeyActionCount> kActions = {{
     {KeyAction::kNextTabAlternate, "next_tab_alt", "Next tab (alternate)", "Control+Tab"},
     {KeyAction::kPreviousTabAlternate, "previous_tab_alt", "Previous tab (alternate)",
      "Control+Shift+Tab"},
+    {KeyAction::kFindInPage, "find_in_page", "Find in page", "Mod+F"},
+    {KeyAction::kFindNext, "find_next", "Find next match", "Mod+G"},
+    {KeyAction::kFindPrevious, "find_previous", "Find previous match", "Mod+Shift+G"},
+    // Mod+Shift+R is Reload ignoring cache, so Reader mode takes Mod+Alt+R.
+    {KeyAction::kReaderMode, "reader_mode", "Reader mode", "Mod+Alt+R"},
 }};
 
 struct NamedKey {

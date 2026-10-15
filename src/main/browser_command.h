@@ -42,6 +42,12 @@ enum class BrowserCommand : std::uint8_t {
     kNextSpace,
     kPreviousSpace,
     kCopyTabUrl,
+    // Find in page: opens (or refocuses) the find bar; next/previous step through matches.
+    kFindInPage,
+    kFindNext,
+    kFindPrevious,
+    // Toggles Reader view of the active tab.
+    kToggleReaderMode,
 };
 
 }  // namespace island

@@ -1,5 +1,6 @@
 #include "prefs_store.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -88,7 +89,9 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         }
     }
     for (const auto& [key, field] : {std::pair{"search_engine", &state.search_engine},
-                                     std::pair{"start_mode", &state.start_mode}}) {
+                                     std::pair{"start_mode", &state.start_mode},
+                                     std::pair{"reader_width", &state.reader_width},
+                                     std::pair{"reader_theme", &state.reader_theme}}) {
         if (const json::Value* value = root.FindMember(key)) {
             if (!value->IsString()) {
                 return Fail(PrefsError::kSchemaError);
@@ -102,6 +105,13 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         }
         state.tab_sleep_minutes =
             NormalizeTabSleepMinutes(static_cast<int>(sleep_minutes->int_val));
+    }
+    if (const json::Value* reader_size = root.FindMember("reader_size")) {
+        if (!reader_size->IsInt()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        state.reader_size = static_cast<int>(
+            std::clamp<std::int64_t>(reader_size->int_val, 1, 1000));
     }
     if (const json::Value* last_check = root.FindMember("last_update_check")) {
         if (!last_check->IsInt()) {
@@ -178,6 +188,12 @@ std::string SerializeToJson(const PrefsState& state) {
         }
         w.EndArray();
     }
+    w.Key("reader_size");
+    w.IntValue(state.reader_size);
+    w.Key("reader_width");
+    w.StringValue(state.reader_width);
+    w.Key("reader_theme");
+    w.StringValue(state.reader_theme);
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);

@@ -47,6 +47,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     [[nodiscard]] std::size_t SleepingTabCount() const;
     // One-line state for the dev log: tab, sleeping-tab and peek state.
     [[nodiscard]] std::string DevStateReport() const;
+    // Opens the find bar on the active tab and searches for `query` (dev capture).
+    void FindInPage(const std::string& query);
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

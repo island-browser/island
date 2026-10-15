@@ -1,4 +1,4 @@
-// Generated from src/main/pages/@ISLAND_PAGE_FILE@ by the root CMakeLists.txt.
+// Generated from src/main/@ISLAND_PAGE_FILE@ by the root CMakeLists.txt.
 // Do not edit; edit the HTML and reconfigure.
 #include "local_pages_html.h"
 

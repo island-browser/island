@@ -119,6 +119,16 @@ enum class ChromeViewId : int {
     kPeekAddress = 1057,
     kPeekOpenAsTab = 1058,
     kPeekClose = 1059,
+    // Find-in-page bar overlay (like the palettes it lives on the CefWindow, not in the
+    // contract tree) and the Reader button in the address pill (a contract node).
+    kFindBar = 1060,
+    kFindBarField = 1061,
+    kFindBarCount = 1062,
+    kFindBarPrevious = 1063,
+    kFindBarNext = 1064,
+    kFindBarMatchCase = 1065,
+    kFindBarClose = 1066,
+    kReaderButton = 1067,
 };
 
 struct ChromeViewTreeNode {
@@ -231,6 +241,12 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] ChromeViewTreeNode view_tree_snapshot() const;
     [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
     [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
+
+    // The Reader button in the address pill: `available` for an article-capable (http/https)
+    // page, `active` while the tab shows Island's reader view of it.
+    void SetReaderState(bool available, bool active);
+    [[nodiscard]] bool reader_available() const noexcept { return reader_available_; }
+    [[nodiscard]] bool reader_active() const noexcept { return reader_active_; }
 
     // Focus-ring thickness of the address pill and ActivePageIndicator thickness in
     // DIP; both are 2 so the accent marks read as one weight.
@@ -452,7 +468,8 @@ class BrowserChrome final : public NavigationObserver {
                    {ChromeViewId::kAddressRow,
                     {{ChromeViewId::kAddressLocationIcon, {}},
                      {ChromeViewId::kAddress, {}},
-                     {ChromeViewId::kReload, {}}}},
+                     {ChromeViewId::kReload, {}},
+                     {ChromeViewId::kReaderButton, {}}}},
                    {ChromeViewId::kValidationMessage, {}},
                    {ChromeViewId::kRailNewTab, {}},
                    {ChromeViewId::kTabStrip, {}},
@@ -664,6 +681,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;
+    CefRefPtr<CefLabelButton> reader_button_;
+    bool reader_available_ = false;
+    bool reader_active_ = false;
     CefRefPtr<CefLabelButton> address_location_icon_;
     CefRefPtr<CefTextfield> address_field_;
     CefRefPtr<CefLabelButton> validation_message_;

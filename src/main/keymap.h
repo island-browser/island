@@ -50,9 +50,13 @@ enum class KeyAction : std::uint8_t {
     kCopyTabUrl,
     kNextTabAlternate,
     kPreviousTabAlternate,
+    kFindInPage,
+    kFindNext,
+    kFindPrevious,
+    kReaderMode,
 };
 
-inline constexpr std::size_t kKeyActionCount = 32;
+inline constexpr std::size_t kKeyActionCount = 36;
 
 struct KeyBinding {
     // Windows virtual-key code (CEF's key_code convention).
