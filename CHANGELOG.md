@@ -14,16 +14,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 ## [Unreleased]
 
 ### Added
+
 - Start page **Research** mode: Enter sends the question to the configured agent with a prompt to research it with Island's browser tools (a new space named after the question, several sources in tabs, compared) and to finish with a Markdown report that cites every claim. The final report opens in a new **Report** tab (local page, shared safe Markdown renderer, links open in new tabs) with Copy Markdown, Save as .md... and Continue in agent panel. Clear messages for a missing agent (with an Open Settings button), a busy agent, and Cancel.
-- Reports list: persisted in `reports.json` under the support directory, listed in Settings > Reports and in Cmd/Ctrl+K as REPORT rows.
-- Dev capture actions `research:<question>` and `open_report`.
-
-- On-device browsing history now records http/https page addresses and titles (never local,
-  credentialed, data, or future private-mode pages), keeps the newest 50,000 visits, and searches
-  them from Cmd/Ctrl+K alongside open tabs and bookmarks. The last typed word matches as a prefix. Results are URL-deduplicated, combine
-  BM25/recency with repeat-visit frequency, and stay entirely on the device. Settings can stop
-  remembering new visits or clear the persisted history.
-
+  Reports list: persisted in `reports.json` under the support directory, listed in Settings > Reports and in Cmd/Ctrl+K as REPORT rows.
+  Dev capture actions `research:<question>` and `open_report`.
+- Native ad and tracker blocking powered by Brave's `adblock` Rust engine. Island refreshes
+  EasyList and EasyPrivacy in the background at most every four days, keeps working from its
+  cached lists when an update fails, supports independent controls and a per-site allowlist in
+  Settings > Privacy, and reports per-tab blocked-request counts in All tabs.
 - Tab sleep: a tab you have not used for 15, 30 (default) or 60 minutes (Settings → Tabs, or
   Never) releases its browser to free memory. It keeps its URL, title, favicon and scroll
   position, shows dimmed in the sidebar and the icon rail, and reloads where you left off when you
@@ -43,7 +41,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Graphite tokens; size, width and Auto/Light/Sepia/Dark controls, remembered in prefs). Toggling
   again returns to the original page. Nothing external is fetched; all four find/reader actions
   appear in Settings and the macOS Browser menu.
-
+- On-device browsing history now records http/https page addresses and titles (never local,
+  credentialed, data, or future private-mode pages), keeps the newest 50,000 visits, and searches
+  them from Cmd/Ctrl+K alongside open tabs and bookmarks. The last typed word matches as a prefix. Results are URL-deduplicated, combine
+  BM25/recency with repeat-visit frequency, and stay entirely on the device. Settings can stop
+  remembering new visits or clear the persisted history.
 - Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
   button per tab of the active space (pinned tabs first, the active tab highlighted like the
   selected row, the page title as tooltip and accessible name), a "+" new-tab button and the
@@ -52,10 +54,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   sidebar for the length of the edit. The macOS hover reveal and the edge sliver are gone, since
   the rail is always there. Favicons are fetched at 16 DIP only for web pages, ignored when
   stale, and cleared when a tab leaves the site.
-- Native ad and tracker blocking powered by Brave's `adblock` Rust engine. Island refreshes
-  EasyList and EasyPrivacy in the background at most every four days, keeps working from its
-  cached lists when an update fails, supports independent controls and a per-site allowlist in
-  Settings > Privacy, and reports per-tab blocked-request counts in All tabs.
 - More keyboard shortcuts, all listed and rebindable in Settings: Ctrl+Tab and Ctrl+Shift+Tab
   switch tabs (Control is now its own modifier on macOS), Cmd+9 selects the last tab, Cmd+Shift+T
   reopens the last closed tab, Cmd+=, Cmd+-, and Cmd+0 zoom the page, Cmd+Shift+R reloads ignoring
