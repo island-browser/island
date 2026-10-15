@@ -162,6 +162,14 @@ void IslandApp::NavigateActiveTab(const std::string& address) {
     }
 }
 
+void IslandApp::FindInPage(const std::string& query) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->FindInPage(query);
+    }
+}
+
 void IslandApp::ToggleAgentPanel() {
     CEF_REQUIRE_UI_THREAD();
 

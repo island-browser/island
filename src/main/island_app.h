@@ -39,6 +39,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // and load an address in the active tab through the address bar's own submit path.
     void SetSidebarExpanded(bool expanded);
     void NavigateActiveTab(const std::string& address);
+    // Opens the find bar on the active tab and searches for `query` (dev capture).
+    void FindInPage(const std::string& query);
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

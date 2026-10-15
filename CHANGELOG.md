@@ -15,6 +15,16 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Find in page (Cmd/Ctrl+F, next/previous with Enter / Shift+Enter or Cmd/Ctrl+G / +Shift+G, Escape
+  closes): a small bar at the top-right of the page card with the "n of m" count and a match-case
+  toggle, built on `CefBrowserHost::Find` and `CefFindHandler::OnFindResult`. The bar is an overlay
+  that exists only while open, and it closes when the tab changes.
+- Reader view (Cmd/Ctrl+Alt+R, or the "Aa" button in the address pill): a compact Readability-style
+  script reads the article out of the page, and Island shows it in its own reader document (Geist,
+  Graphite tokens; size, width and Auto/Light/Sepia/Dark controls, remembered in prefs). Toggling
+  again returns to the original page. Nothing external is fetched; all four find/reader actions
+  appear in Settings and the macOS Browser menu.
+
 - Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
   button per tab of the active space (pinned tabs first, the active tab highlighted like the
   selected row, the page title as tooltip and accessible name), a "+" new-tab button and the

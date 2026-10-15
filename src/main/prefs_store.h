@@ -50,6 +50,11 @@ struct PrefsState {
     // values are resolved to the defaults where they are read.
     std::string search_engine = "google";
     std::string start_mode = "search";
+    // Reader view appearance (reader_mode.h): font size in px, "narrow"/"medium"/"wide", and
+    // "auto"/"light"/"sepia"/"dark". Optional keys; unknown values are normalized where read.
+    int reader_size = 18;
+    std::string reader_width = "medium";
+    std::string reader_theme = "auto";
 
     bool operator==(const PrefsState&) const = default;
 };

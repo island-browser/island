@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Reader</title>
+<style>
+:root {
+  --bg: #FAFAFA; --surface: #FFFFFF; --surface-2: #F2F2F2; --text: #0A0A0A; --text-2: #666666;
+  --border: #E5E5E5; --accent: #0068D6; --code-bg: #F2F2F2;
+  --radius: 10px; --radius-sm: 6px;
+  --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --size: 18px; --measure: 700px;
+  color-scheme: light;
+}
+:root[data-theme="dark"] { --bg: #0A0A0A; --surface: #111111; --surface-2: #1A1A1A; --text: #EDEDED;
+  --text-2: #A1A1A1; --border: #2A2A2A; --accent: #3291FF; --code-bg: #1A1A1A; color-scheme: dark; }
+:root[data-theme="sepia"] { --bg: #F1E7D0; --surface: #F4ECD8; --surface-2: #EADFC4; --text: #3B2F20;
+  --text-2: #75654F; --border: #DCCDAA; --accent: #7A4B12; --code-bg: #EADFC4; color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--surface); color: var(--text); font: 15px/1.5 var(--font);
+  -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
+  padding: 10px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.spacer { flex: 1; }
+.btn { height: 30px; padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface); font-size: 13px; line-height: 1; transition: background .14s, border-color .14s; }
+.btn:hover { background: var(--surface-2); }
+.btn.icon { width: 30px; padding: 0; font-weight: 600; }
+.group { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
+.group .btn { height: 24px; border: 0; background: transparent; padding: 0 10px; font-size: 12px; }
+.group .btn[aria-pressed="true"] { background: var(--surface); box-shadow: 0 0 0 1px var(--border); }
+.group .btn.icon { width: 28px; padding: 0; }
+.label { color: var(--text-2); font: 500 11px/1.4 var(--mono); letter-spacing: .06em;
+  text-transform: uppercase; }
+main { max-width: calc(var(--measure) + 48px); margin: 0 auto; padding: 56px 24px 120px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 14px; }
+h1.title { margin: 0 0 28px; font-size: 2.1em; line-height: 1.15; letter-spacing: -0.02em; font-weight: 650;
+  font-size: calc(var(--size) * 1.75); }
+article { font-size: var(--size); line-height: 1.68; overflow-wrap: break-word; }
+article > :first-child { margin-top: 0; }
+article p, article ul, article ol, article blockquote, article pre, article figure, article table,
+article dl { margin: 0 0 1.05em; }
+article h2, article h3, article h4, article h5, article h6 { margin: 1.7em 0 .55em; line-height: 1.25;
+  letter-spacing: -0.012em; font-weight: 640; }
+article h2 { font-size: 1.45em; } article h3 { font-size: 1.2em; }
+article h4, article h5, article h6 { font-size: 1em; }
+article a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px;
+  text-underline-offset: 3px; }
+article ul, article ol { padding-left: 1.5em; }
+article li { margin: .25em 0; }
+article blockquote { padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--border); color: var(--text-2); }
+article code { font: .88em/1.5 var(--mono); background: var(--code-bg); border-radius: 4px; padding: .1em .35em; }
+article pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 14px 16px; overflow-x: auto; font: .85em/1.55 var(--mono); white-space: pre; }
+article pre code { background: none; padding: 0; font-size: inherit; }
+article img { display: block; max-width: 100%; height: auto; margin: 0 auto; border-radius: var(--radius-sm); }
+article figure { text-align: center; }
+article figcaption { margin-top: .5em; color: var(--text-2); font-size: .82em; line-height: 1.45; }
+article hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+article table { border-collapse: collapse; display: block; overflow-x: auto; font-size: .9em; }
+article th, article td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+article th { background: var(--surface-2); font-weight: 600; }
+.note { margin: 36px 0 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text-2); font-size: 14px; }
+@media (max-width: 700px) { main { padding: 32px 18px 80px; } .bar { padding: 8px 12px; flex-wrap: wrap; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="bar" role="toolbar" aria-label="Reader controls">
+  <button class="btn" id="exit" type="button" title="Back to the original page">&larr; Original page</button>
+  <span class="spacer"></span>
+  <div class="group" role="group" aria-label="Text size">
+    <button class="btn icon" id="smaller" type="button" aria-label="Smaller text" title="Smaller text">A&minus;</button>
+    <button class="btn icon" id="larger" type="button" aria-label="Larger text" title="Larger text">A+</button>
+  </div>
+  <div class="group" role="group" aria-label="Page width" id="widths"></div>
+  <div class="group" role="group" aria-label="Theme" id="themes"></div>
+</div>
+<main>
+  <p class="meta label" id="meta" hidden></p>
+  <h1 class="title" id="title" hidden></h1>
+  <article id="article"></article>
+  <p class="note" id="note" hidden></p>
+</main>
+<script type="application/json" id="island-reader-data">__ISLAND_READER_DATA__</script>
+<script>
+(function () {
+  "use strict";
+  var MESSAGE_PREFIX = "\u0001island:";
+  var TAGS = { p: 1, h2: 1, h3: 1, h4: 1, h5: 1, h6: 1, ul: 1, ol: 1, li: 1, blockquote: 1, pre: 1,
+    code: 1, a: 1, em: 1, strong: 1, br: 1, hr: 1, img: 1, figure: 1, figcaption: 1, table: 1,
+    thead: 1, tbody: 1, tfoot: 1, tr: 1, th: 1, td: 1, sub: 1, sup: 1, dl: 1, dt: 1, dd: 1 };
+  var VOID = { br: 1, hr: 1, img: 1 };
+  var SIZES = { min: 14, max: 28, fallback: 18 };
+  var WIDTHS = [["narrow", "Narrow", 560], ["medium", "Medium", 700], ["wide", "Wide", 880]];
+  var THEMES = [["auto", "Auto"], ["light", "Light"], ["sepia", "Sepia"], ["dark", "Dark"]];
+
+  var data = { token: "", article: null, error: "", settings: {}, app_theme: "light" };
+  try {
+    data = JSON.parse(document.getElementById("island-reader-data").textContent) || data;
+  } catch (error) { data.error = "Reader view could not read this page."; }
+  var settings = {
+    size: clampSize(Number(data.settings && data.settings.size)),
+    width: lookup(WIDTHS, data.settings && data.settings.width) ? data.settings.width : "medium",
+    theme: lookup(THEMES, data.settings && data.settings.theme) ? data.settings.theme : "auto"
+  };
+  var appTheme = data.app_theme === "dark" ? "dark" : "light";
+  var root = document.documentElement;
+
+  function lookup(list, key) {
+    for (var i = 0; i < list.length; i++) if (list[i][0] === key) return list[i];
+    return null;
+  }
+  function clampSize(value) {
+    if (!isFinite(value) || value <= 0) return SIZES.fallback;
+    return Math.max(SIZES.min, Math.min(SIZES.max, Math.round(value)));
+  }
+  function post(message) {
+    message.token = data.token;
+    console.log(MESSAGE_PREFIX + JSON.stringify(message));
+  }
+  function safeUrl(value) {
+    return typeof value === "string" && /^https?:\/\//i.test(value) ? value : "";
+  }
+
+  // --- Article tree -> DOM (whitelist; createElement and textContent only) ---------------------
+  function build(node) {
+    if (typeof node === "string") return document.createTextNode(node);
+    if (!Array.isArray(node) || typeof node[0] !== "string" || !TAGS[node[0]]) return null;
+    var tag = node[0], attrs = node[1] && typeof node[1] === "object" ? node[1] : {};
+    var element = document.createElement(tag);
+    if (tag === "a") {
+      var href = safeUrl(attrs.href);
+      if (!href) return buildChildren(document.createDocumentFragment(), node);
+      element.setAttribute("href", href);
+      element.setAttribute("rel", "noopener noreferrer");
+    } else if (tag === "img") {
+      var src = safeUrl(attrs.src);
+      if (!src) return null;
+      element.setAttribute("src", src);
+      element.setAttribute("alt", typeof attrs.alt === "string" ? attrs.alt : "");
+      element.setAttribute("loading", "lazy");
+      element.setAttribute("decoding", "async");
+      element.setAttribute("referrerpolicy", "no-referrer");
+      element.addEventListener("error", function () { element.hidden = true; });
+    }
+    if (!VOID[tag]) buildChildren(element, node);
+    return element;
+  }
+  function buildChildren(parent, node) {
+    for (var i = 2; i < node.length; i++) {
+      var child = build(node[i]);
+      if (child) parent.appendChild(child);
+    }
+    return parent;
+  }
+
+  function readingMinutes(words) { return Math.max(1, Math.round(words / 220)); }
+  function hostOf(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ""); } catch (error) { return ""; }
+  }
+  function renderArticle() {
+    var article = data.article;
+    var note = document.getElementById("note");
+    if (!article || !article.ok || !Array.isArray(article.content)) {
+      var title = document.getElementById("title");
+      title.textContent = "Reader view isn\u2019t available";
+      title.hidden = false;
+      note.textContent = data.error ||
+        "Island couldn\u2019t find an article on this page. Use \u201COriginal page\u201D to go back.";
+      note.hidden = false;
+      return;
+    }
+    document.title = article.title ? article.title + " \u2014 Reader" : "Reader";
+    if (article.lang) root.setAttribute("lang", String(article.lang).slice(0, 12));
+    var meta = [];
+    var site = article.site || hostOf(article.url);
+    if (site) meta.push(site);
+    if (article.byline) meta.push(article.byline);
+    if (article.published) meta.push(article.published);
+    if (article.words) meta.push(readingMinutes(article.words) + " min read");
+    var metaNode = document.getElementById("meta");
+    if (meta.length) {
+      metaNode.textContent = "";
+      meta.forEach(function (part) {
+        var span = document.createElement("span");
+        span.textContent = part;
+        metaNode.appendChild(span);
+      });
+      metaNode.hidden = false;
+    }
+    if (article.title) {
+      var heading = document.getElementById("title");
+      heading.textContent = article.title;
+      heading.hidden = false;
+    }
+    var container = document.getElementById("article");
+    article.content.forEach(function (node) {
+      var element = build(node);
+      if (element) container.appendChild(element);
+    });
+    if (article.truncated) {
+      note.textContent = "This article is long, so Reader view stops here. Use \u201COriginal page\u201D for the rest.";
+      note.hidden = false;
+    }
+  }
+
+  // --- Controls --------------------------------------------------------------------------------
+  function applySettings() {
+    var theme = settings.theme === "auto" ? appTheme : settings.theme;
+    root.setAttribute("data-theme", theme);
+    root.style.setProperty("--size", settings.size + "px");
+    root.style.setProperty("--measure", lookup(WIDTHS, settings.width)[2] + "px");
+    var pressed = { widths: settings.width, themes: settings.theme };
+    ["widths", "themes"].forEach(function (id) {
+      var buttons = document.getElementById(id).children;
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute("aria-pressed", buttons[i].getAttribute("data-key") === pressed[id] ? "true" : "false");
+      }
+    });
+    document.getElementById("smaller").disabled = settings.size <= SIZES.min;
+    document.getElementById("larger").disabled = settings.size >= SIZES.max;
+  }
+  function changed() {
+    applySettings();
+    post({ type: "reader_settings", size: settings.size, width: settings.width, theme: settings.theme });
+  }
+  function fillGroup(id, list, key) {
+    var group = document.getElementById(id);
+    list.forEach(function (entry) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn";
+      button.setAttribute("data-key", entry[0]);
+      button.textContent = entry[1];
+      button.addEventListener("click", function () { settings[key] = entry[0]; changed(); });
+      group.appendChild(button);
+    });
+  }
+  fillGroup("widths", WIDTHS, "width");
+  fillGroup("themes", THEMES, "theme");
+  document.getElementById("smaller").addEventListener("click", function () {
+    settings.size = clampSize(settings.size - 1); changed();
+  });
+  document.getElementById("larger").addEventListener("click", function () {
+    settings.size = clampSize(settings.size + 1); changed();
+  });
+  document.getElementById("exit").addEventListener("click", function () { post({ type: "reader_exit" }); });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) post({ type: "reader_exit" });
+  });
+
+  // The app pushes its theme here, so "Auto" follows it.
+  window.islandRender = function (state) {
+    if (state && state.theme) {
+      appTheme = state.theme.dark ? "dark" : "light";
+      applySettings();
+    }
+  };
+  window.islandFocus = function () { window.focus(); };
+
+  renderArticle();
+  applySettings();
+})();
+</script>
+</body>
+</html>

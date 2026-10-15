@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -24,6 +25,8 @@
 #include "clipboard.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
+#include "find_bar_model.h"
+#include "find_bar_overlay.h"
 #include "include/cef_client.h"
 #include "include/internal/cef_types.h"
 #include "include/views/cef_browser_view_delegate.h"
@@ -32,6 +35,7 @@
 #include "local_page.h"
 #include "navigation_state.h"
 #include "prefs_store.h"
+#include "reader_mode.h"
 #include "search_engine.h"
 #include "search_palette.h"
 #include "sidebar_state.h"
@@ -68,6 +72,7 @@ class WindowAgentHost;
 class BrowserWindow : public CefClient,
                       public CefDisplayHandler,
                       public CefDownloadHandler,
+                      public CefFindHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
                       public CefWindowDelegate,
@@ -77,6 +82,7 @@ class BrowserWindow : public CefClient,
                       public SearchPaletteHost,
                       public CommandPaletteHost,
                       public SpaceRenameOverlayHost,
+                      public FindBarOverlayHost,
                       public WelcomeFlowHost,
                       public LocalPageDelegate,
                       public NavigationObserver {
@@ -296,6 +302,21 @@ class BrowserWindow : public CefClient,
     // Opens the rename overlay for the active space. Menu-driven on macOS (no
     // key equivalent); F2 is the cross-platform accelerator.
     void BeginSpaceRenaming();
+    // Find in page: opens the find bar on the active tab (or reselects its field when it is open),
+    // optionally running `query` at once. Headless windows keep only the model, so tests and
+    // dev actions can drive it.
+    void FindInPage(std::string_view query = {});
+    [[nodiscard]] const FindBarModel& find_bar_model() const noexcept { return find_model_; }
+    // Reader view: toggles the active tab between the page and Island's reader document built
+    // from it. Extraction needs the DevTools bridge (persisted windows); otherwise a no-op.
+    void ToggleReaderMode();
+    // Builds the reader document for `tab` from the extractor's JSON (or an error page when it
+    // found no article) and loads it. Returns the data: URL, empty when the tab is gone or
+    // closing. Public so tests can drive the page contract without DevTools.
+    std::string ShowReaderDocument(TabId tab, std::string_view origin_url,
+                                   std::optional<std::string> extraction_json,
+                                   std::string_view error);
+    [[nodiscard]] bool ReaderActive(TabId tab) const;
     // Moves the active space by |delta| positions (-1 left, +1 right); false
     // when the move would leave the space list.
     [[nodiscard]] bool MoveActiveSpace(int delta);
@@ -332,11 +353,21 @@ class BrowserWindow : public CefClient,
     void OnSpaceRenameCommitted(std::string name) override;
     void OnSpaceRenameCancelled() override;
 
+    void OnFindQueryChanged(std::string text) override;
+    void OnFindStep(bool forward) override;
+    void OnFindMatchCaseChanged(bool match_case) override;
+    void OnFindCloseRequested() override;
+
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
+    CefRefPtr<CefFindHandler> GetFindHandler() override;
+    // Counts for the find bar's "n of m" (only the find tab's results are used).
+    void OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count,
+                      const CefRect& selection_rect, int active_match_ordinal,
+                      bool final_update) override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
     CefRefPtr<CefLoadHandler> GetLoadHandler() override;
 
@@ -459,6 +490,23 @@ class BrowserWindow : public CefClient,
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     void AppendTabToActiveSpace(std::string startup_url);
     void ShutdownAgentHost();
+    // --- Find in page and Reader view (browser_window_find_reader.cc) ---
+    [[nodiscard]] Tab* FindTabById(TabId id) noexcept;
+    void ApplyFindRequest(const FindRequest& request, CefRefPtr<CefBrowser> browser);
+    void ShowFindOverlay();
+    void CloseFindBar(bool refocus_page);
+    void RefreshFindCount(bool final_update);
+    [[nodiscard]] CefRect FindAnchorBounds() const;
+    void UpdateFindBarBounds();
+    void ScheduleFindBarBounds();
+    void StepFind(bool forward);
+    [[nodiscard]] bool ReaderActiveFor(const Tab& tab) const;
+    // The page address a tab should show and persist: the original page while its reader view
+    // is up, else the committed URL.
+    [[nodiscard]] std::string EffectiveUrl(const Tab& tab) const;
+    void UpdateReaderButton();
+    void ExitReaderMode(Tab& tab);
+    void HandleReaderMessage(Tab& tab, const json::Value& message);
     void ApplyKeymap();
     void EnsureAgentSession();
     [[nodiscard]] agent::AgentSessionConfig AgentConfig() const;
@@ -535,7 +583,7 @@ class BrowserWindow : public CefClient,
     void CloseNavigationAndQuitMessageLoop();
     // The URL a tab would reopen at: its committed page, else its startup URL.
     // Web URLs only; anything else reopens at the startup page.
-    [[nodiscard]] static std::string WebUrlOf(const Tab& tab);
+    [[nodiscard]] std::string WebUrlOf(const Tab& tab) const;
     void RememberClosedTab(const Tab& tab);
     // True while a welcome flow, palette, rename overlay, Settings or All-tabs
     // page, or address editing owns the keyboard.
@@ -548,6 +596,22 @@ class BrowserWindow : public CefClient,
     std::unique_ptr<SearchPalette> search_palette_;
     std::unique_ptr<CommandPaletteView> command_palette_;
     std::unique_ptr<SpaceRenameOverlay> space_rename_overlay_;
+    // Find in page (browser_window_find_reader.cc). The bar belongs to one tab: switching tabs
+    // closes it.
+    FindBarModel find_model_;
+    std::unique_ptr<FindBarOverlay> find_overlay_;
+    std::optional<TabId> find_tab_;
+    std::filesystem::path icon_resource_root_;
+    // Reader view, per tab. The session records where the reader document came from and which
+    // data: URL it is, so the window can tell when the tab is showing it (also after Back and
+    // Forward) without storing the document twice.
+    struct ReaderSession {
+        std::string origin_url;
+        std::string token;
+        std::size_t url_hash = 0;
+        std::size_t url_size = 0;
+    };
+    std::map<TabId, ReaderSession> reader_sessions_;
     SidebarState sidebar_state_;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;

@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
@@ -275,8 +276,8 @@ void BrowserWindow::SaveSession() const {
         space_state.name = space.name();
         space_state.color_argb = space.color().argb;
         for (const Tab& tab : space.tabs()) {
-            space_state.tabs.push_back(
-                TabState{tab.id(), tab.navigation_state().snapshot().url, tab.pinned()});
+            // A reader view is saved as the page it was made from, never as its data: URL.
+            space_state.tabs.push_back(TabState{tab.id(), EffectiveUrl(tab), tab.pinned()});
         }
         space_state.active_tab_id =
             space.has_active_tab() ? std::optional<TabId>(space.active_tab_id()) : std::nullopt;
@@ -454,6 +455,18 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             static_cast<void>(SelectSpaceIndex(next));
             return;
         }
+        case BrowserCommand::kFindInPage:
+            FindInPage();
+            return;
+        case BrowserCommand::kFindNext:
+            StepFind(/*forward=*/true);
+            return;
+        case BrowserCommand::kFindPrevious:
+            StepFind(/*forward=*/false);
+            return;
+        case BrowserCommand::kToggleReaderMode:
+            ToggleReaderMode();
+            return;
         case BrowserCommand::kCopyTabUrl: {
             const Tab* tab = active_tab();
             const std::string url = tab != nullptr ? WebUrlOf(*tab) : std::string();
@@ -881,6 +894,8 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     if (kind == LocalPageKind::kSettings) {
         provider_statuses_.reset();  // re-detect agents installed meanwhile
     }
+    // Settings and All tabs replace the page the find bar was searching.
+    CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
     chrome_->AttachBrowserView(page->view());
     FlushLocalPagesRender();
@@ -1505,8 +1520,9 @@ bool BrowserWindow::OverlayShown() const noexcept {
            address_bar_model_.snapshot().mode == AddressBarMode::kEditing;
 }
 
-std::string BrowserWindow::WebUrlOf(const Tab& tab) {
-    const std::string& committed = tab.navigation_state().snapshot().url;
+std::string BrowserWindow::WebUrlOf(const Tab& tab) const {
+    // While a tab shows its reader view the page it came from is the one to copy or reopen.
+    const std::string committed = EffectiveUrl(tab);
     const std::string& url = committed.empty() ? tab.startup_url() : committed;
     return IsWebUrl(url) ? url : std::string();
 }
@@ -1612,13 +1628,18 @@ void BrowserWindow::RenderStartPages() {
             const CefRefPtr<CefBrowser> browser = tab.browser();
             const CefRefPtr<CefFrame> frame =
                 browser != nullptr ? browser->GetMainFrame() : nullptr;
-            if (frame == nullptr || frame->GetURL().ToString() != StartPageUrl()) {
+            if (frame == nullptr) {
+                continue;
+            }
+            // The start page and the reader document both take the theme from this state.
+            const bool shows_start = frame->GetURL().ToString() == StartPageUrl();
+            if (!shows_start && !ReaderActiveFor(tab)) {
                 continue;
             }
             if (script.empty()) {
                 script = LocalPage::RenderScript(StartPageStateJson());
             }
-            frame->ExecuteJavaScript(script, StartPageUrl(), 0);
+            frame->ExecuteJavaScript(script, shows_start ? StartPageUrl() : std::string(), 0);
         }
     }
 }
@@ -1632,19 +1653,34 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     // document. Anything else logs as ordinary console output. (An ask_agent
     // message from a site would otherwise be a prompt-injection channel.)
     const std::string text = message.ToString();
-    if (closing_ || text.rfind(LocalPage::kMessagePrefix, 0) != 0 ||
-        FindTabByBrowser(browser) == nullptr) {
+    Tab* owner = FindTabByBrowser(browser);
+    if (closing_ || text.rfind(LocalPage::kMessagePrefix, 0) != 0 || owner == nullptr) {
         return false;
     }
     const CefRefPtr<CefFrame> frame = browser->GetMainFrame();
-    if (frame == nullptr || frame->GetURL().ToString() != StartPageUrl()) {
+    if (frame == nullptr) {
+        return false;
+    }
+    const std::string frame_url = frame->GetURL().ToString();
+    const bool is_start_page = frame_url == StartPageUrl();
+    // The reader document is the other page this bridge serves: the tab must be showing exactly
+    // the data: URL Island built for it (and the message must carry that document's token).
+    const auto reader = reader_sessions_.find(owner->id());
+    const bool is_reader_page = reader != reader_sessions_.end() &&
+                                frame_url.size() == reader->second.url_size &&
+                                std::hash<std::string_view>{}(frame_url) == reader->second.url_hash;
+    if (!is_start_page && !is_reader_page) {
         return false;
     }
     const std::optional<json::Value> decoded = LocalPage::DecodeMessage(text);
     if (!decoded) {
         return false;
     }
-    HandleStartPageMessage(*decoded, browser);
+    if (is_reader_page) {
+        HandleReaderMessage(*owner, *decoded);
+    } else {
+        HandleStartPageMessage(*decoded, browser);
+    }
     return true;
 }
 
@@ -2009,7 +2045,11 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
         return;
     }
 
-    address_bar_model_.UpdateCommittedUrl(snapshot.url);
+    const Tab* shown_tab = active_tab();
+    address_bar_model_.UpdateCommittedUrl(shown_tab != nullptr && ReaderActiveFor(*shown_tab)
+                                              ? EffectiveUrl(*shown_tab)
+                                              : snapshot.url);
+    UpdateReaderButton();
     if (chrome_ != nullptr) {
         chrome_->OnNavigationChanged(snapshot);
         chrome_->OnAddressChanged(address_bar_model_.snapshot());
@@ -2227,6 +2267,11 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
     }
 
     owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
+    if (find_tab_.has_value() && *find_tab_ == owner->id()) {
+        // The old counts describe a document that is gone.
+        find_model_.ClearResults();
+        RefreshFindCount(false);
+    }
 }
 
 void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -2271,6 +2316,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
         return;
     }
 
+    icon_resource_root_ = icon_resource_root;
     const ChromeTheme theme = ResolvedChromeTheme();
     const Tab* startup_tab = active_tab();
     CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
@@ -2373,6 +2419,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->UpdateBounds();
     }
+    ScheduleFindBarBounds();
     if (welcome_ != nullptr && welcome_->visible()) {
         welcome_->UpdateBounds();
     }
@@ -2602,6 +2649,18 @@ void BrowserWindow::RunKeyAction(KeyAction action) {
         case KeyAction::kCopyTabUrl:
             ExecuteCommand(BrowserCommand::kCopyTabUrl);
             return;
+        case KeyAction::kFindInPage:
+            ExecuteCommand(BrowserCommand::kFindInPage);
+            return;
+        case KeyAction::kFindNext:
+            ExecuteCommand(BrowserCommand::kFindNext);
+            return;
+        case KeyAction::kFindPrevious:
+            ExecuteCommand(BrowserCommand::kFindPrevious);
+            return;
+        case KeyAction::kReaderMode:
+            ExecuteCommand(BrowserCommand::kToggleReaderMode);
+            return;
         case KeyAction::kNextTabAlternate:
             ExecuteCommand(BrowserCommand::kNextTab);
             return;
@@ -2736,6 +2795,10 @@ void BrowserWindow::AttachActiveTabObservers() {
         return;
     }
     Tab* tab = active_tab();
+    if (find_tab_.has_value() && (tab == nullptr || tab->id() != *find_tab_)) {
+        // The find bar belongs to the tab it searched; a different (or no) active tab ends it.
+        CloseFindBar(/*refocus_page=*/false);
+    }
     if (tab == nullptr) {
         UpdateChromeCollections();
         return;
@@ -2898,6 +2961,9 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->ApplyTheme(tokens);
     }
+    if (find_overlay_ != nullptr) {
+        find_overlay_->ApplyTheme(tokens);
+    }
     if (welcome_ != nullptr) {
         welcome_->ApplyTheme(tokens);
     }
@@ -2928,6 +2994,10 @@ void BrowserWindow::DetachChromeAndObservers() {
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->Detach();
         space_rename_overlay_.reset();
+    }
+    if (find_overlay_ != nullptr) {
+        find_overlay_->Detach();
+        find_overlay_.reset();
     }
     Tab* tab = active_tab();
     if (tab != nullptr) {
@@ -3337,6 +3407,7 @@ void BrowserWindow::ApplySidebarState() {
     chrome_snapshot_.rail_bounds.width = rail_width;
     chrome_snapshot_.content_bounds.x = rail_width;
     chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
+    ScheduleFindBarBounds();
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {

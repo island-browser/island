@@ -24,6 +24,10 @@ add_library(island_browser_core STATIC
     icon_catalog.cc
     island_app.cc
     keymap.cc
+    find_bar_model.cc
+    find_bar_overlay.cc
+    reader_mode.cc
+    browser_window_find_reader.cc
     navigation_state.cc
     prefs_store.cc
     search_palette.cc
