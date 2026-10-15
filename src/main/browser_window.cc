@@ -1085,6 +1085,8 @@ std::string BrowserWindow::SettingsStateJson() const {
                          .Set("id", Value::String(std::string(engine.key)))
                          .Set("name", Value::String(std::string(engine.display_name))));
     }
+    const ReaderSettings reader =
+        ReaderSettings::Normalized(prefs_.reader_size, prefs_.reader_width, prefs_.reader_theme);
     Value settings =
         Value::MakeObject()
             .Set("theme_pref", Value::String(std::string(theme_pref)))
@@ -1095,6 +1097,10 @@ std::string BrowserWindow::SettingsStateJson() const {
                  Value::MakeObject().Set("remember", Value::Bool(prefs_.remember_history)))
             .Set("tabs",
                  Value::MakeObject().Set("sleep_minutes", Value::Int(prefs_.tab_sleep_minutes)))
+            .Set("reader", Value::MakeObject()
+                               .Set("size", Value::Int(reader.size))
+                               .Set("width", Value::String(reader.width))
+                               .Set("theme", Value::String(reader.theme)))
             .Set("platform", Value::String(platform))
             .Set("agent", std::move(agent))
             .Set("endpoint", std::move(endpoint))
@@ -1228,6 +1234,18 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         }
     } else if (type == "set_tab_sleep") {
         static_cast<void>(SetTabSleepMinutes(static_cast<int>(message.IntOr("minutes", -1))));
+    } else if (type == "set_reader_settings") {
+        const ReaderSettings settings =
+            ReaderSettings::Normalized(static_cast<int>(message.IntOr("size", prefs_.reader_size)),
+                                       message.StringOr("width", prefs_.reader_width),
+                                       message.StringOr("theme", prefs_.reader_theme));
+        if (settings.size != prefs_.reader_size || settings.width != prefs_.reader_width ||
+            settings.theme != prefs_.reader_theme) {
+            prefs_.reader_size = settings.size;
+            prefs_.reader_width = settings.width;
+            prefs_.reader_theme = settings.theme;
+            SavePrefs();
+        }
     } else if (type == "set_agent_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "set_agent_command") {

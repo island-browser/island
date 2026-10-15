@@ -40,7 +40,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   script reads the article out of the page, and Island shows it in its own reader document (Geist,
   Graphite tokens; size, width and Auto/Light/Sepia/Dark controls, remembered in prefs). Toggling
   again returns to the original page. Nothing external is fetched; all four find/reader actions
-  appear in Settings and the macOS Browser menu.
+  appear in Settings and the macOS Browser menu, and Settings > Reader configures the default
+  text size, page width and color theme.
 - On-device browsing history now records http/https page addresses and titles (never local,
   credentialed, data, or future private-mode pages), keeps the newest 50,000 visits, and searches
   them from Cmd/Ctrl+K alongside open tabs and bookmarks. The last typed word matches as a prefix. Results are URL-deduplicated, combine
@@ -73,19 +74,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   code blocks, lists, links, blockquotes and tables. The renderer escapes everything the model
   sends, only links to http, https and mailto, and falls back to plain text.
 
-### Fixed
-
-- Clicking a tab or space button no longer destroys the pressed button from inside its own
-  callback (a use-after-free in CEF event dispatch that could crash the browser); the action now
-  runs right after the callback returns.
-- Island no longer crashes with "quit unexpectedly" when you switch to another app or window (and on
-  quit). The window and every browser view now use CEF's Alloy runtime style; Island hosts several
-  browser views in one window, which CEF supports only for Alloy style views.
-- The sidebar no longer shows every control as its own light box: CEF wipes custom view colors
-  when a theme change lands, and only some chrome views repainted afterwards. Every chrome view now
-  reports the reset and the chrome repaints from the design tokens, which also removes the white
-  panel behind the tab list.
-
 ### Changed
 
 - Downloads are saved straight into your Downloads folder under the suggested name, without a
@@ -102,6 +90,19 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Import / Start browsing buttons.
 - The start page is styled with the design tokens and the Geist stack (still a local `data:`
   document with no external requests).
+
+### Fixed
+
+- Clicking a tab or space button no longer destroys the pressed button from inside its own
+  callback (a use-after-free in CEF event dispatch that could crash the browser); the action now
+  runs right after the callback returns.
+- Island no longer crashes with "quit unexpectedly" when you switch to another app or window (and on
+  quit). The window and every browser view now use CEF's Alloy runtime style; Island hosts several
+  browser views in one window, which CEF supports only for Alloy style views.
+- The sidebar no longer shows every control as its own light box: CEF wipes custom view colors
+  when a theme change lands, and only some chrome views repainted afterwards. Every chrome view now
+  reports the reset and the chrome repaints from the design tokens, which also removes the white
+  panel behind the tab list.
 
 ## [0.5.1] - 2026-10-06
 

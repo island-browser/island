@@ -273,6 +273,14 @@ class SettingsPage(unittest.TestCase):
         self.assertIn('type: "set_remember_history"', html)
         self.assertIn('type: "clear_history"', html)
 
+    def test_offers_reader_appearance_controls(self) -> None:
+        html = page("settings.html")
+        self.assertIn('<section id="reader">', html)
+        self.assertIn('id="reader-size"', html)
+        self.assertIn('id="reader-width"', html)
+        self.assertIn('id="reader-theme"', html)
+        self.assertIn('type: "set_reader_settings"', html)
+
     def test_lists_reports_with_open_and_delete(self) -> None:
         html = page("settings.html")
         self.assertIn('id="reports-list"', html)

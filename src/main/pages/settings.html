@@ -150,7 +150,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     </button>
   </div>
   <nav aria-label="Sections">
-    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#history">History</a><a href="#tabs">Tabs</a><a href="#agent">Agent &amp; tools</a><a href="#privacy">Privacy</a><a href="#reports">Reports</a>
+    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#history">History</a><a href="#tabs">Tabs</a><a href="#reader">Reader</a><a href="#agent">Agent &amp; tools</a><a href="#privacy">Privacy</a><a href="#reports">Reports</a>
     <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
@@ -193,6 +193,23 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     <div class="row">
       <div class="label">Sleep inactive tabs<small>Also in the command palette: &ldquo;Sleep inactive tabs now&rdquo;.</small></div>
       <div class="segmented" role="group" aria-label="Sleep inactive tabs after" id="tab-sleep"></div>
+    </div>
+  </section>
+
+  <section id="reader">
+    <h2>Reader</h2>
+    <p class="lead">Choose the default appearance for Reader view. You can change the same controls while reading an article.</p>
+    <div class="row">
+      <div class="label">Text size<small>Adjust article text from 14 to 28 pixels.</small></div>
+      <div class="segmented" role="group" aria-label="Reader text size" id="reader-size"></div>
+    </div>
+    <div class="row">
+      <div class="label">Page width<small>Choose how wide article text appears.</small></div>
+      <div class="segmented" role="group" aria-label="Reader page width" id="reader-width"></div>
+    </div>
+    <div class="row">
+      <div class="label">Color theme<small>Auto follows Island's current light or dark theme.</small></div>
+      <div class="segmented" role="group" aria-label="Reader color theme" id="reader-theme"></div>
     </div>
   </section>
 
@@ -628,6 +645,35 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  function renderReader(reader) {
+    function renderChoice(id, key, choices) {
+      var box = $(id);
+      if (!box.childNodes.length) {
+        choices.forEach(function (choice) {
+          var button = el("button", "", choice[1]);
+          button.setAttribute("data-value", String(choice[0]));
+          button.addEventListener("click", function () {
+            var current = (state.settings && state.settings.reader) || {};
+            var next = {
+              size: Number(current.size) || 18,
+              width: current.width || "medium",
+              theme: current.theme || "auto"
+            };
+            next[key] = choice[0];
+            post({ type: "set_reader_settings", size: next.size, width: next.width, theme: next.theme });
+          });
+          box.appendChild(button);
+        });
+      }
+      Array.prototype.forEach.call(box.querySelectorAll("button"), function (button) {
+        button.setAttribute("aria-pressed", button.getAttribute("data-value") === String(reader[key]) ? "true" : "false");
+      });
+    }
+    renderChoice("reader-size", "size", [[14, "Small"], [18, "Medium"], [22, "Large"], [28, "Largest"]]);
+    renderChoice("reader-width", "width", [["narrow", "Narrow"], ["medium", "Medium"], ["wide", "Wide"]]);
+    renderChoice("reader-theme", "theme", [["auto", "Auto"], ["light", "Light"], ["sepia", "Sepia"], ["dark", "Dark"]]);
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
@@ -637,6 +683,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     renderSearch(s.search || {});
     renderHistory(s.history || {});
     renderTabSleep(s.tabs || {});
+    renderReader(s.reader || {});
     renderAgent(s.agent || {});
     var endpoint = s.endpoint || {};
     $("endpoint-dot").className = "dot" + (endpoint.running ? " on" : "");

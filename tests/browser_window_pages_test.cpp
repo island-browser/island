@@ -511,6 +511,33 @@ TEST(BrowserWindowPagesTest, SettingsChoosesTheTabSleepTimeoutAmongTheOfferedVal
     EXPECT_EQ(tabs->IntOr("sleep_minutes", -1), 0);
 }
 
+TEST(BrowserWindowPagesTest, SettingsChoosesPersistedReaderAppearance) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* reader = state->FindMember("settings")->FindMember("reader");
+    ASSERT_NE(reader, nullptr);
+    EXPECT_EQ(reader->IntOr("size", -1), 18);
+    EXPECT_EQ(reader->StringOr("width", ""), "medium");
+    EXPECT_EQ(reader->StringOr("theme", ""), "auto");
+
+    SendSettings(*window,
+                 R"({"type":"set_reader_settings","size":22,"width":"wide","theme":"sepia"})");
+    state = json::Parse(window->SettingsStateJson());
+    reader = state->FindMember("settings")->FindMember("reader");
+    EXPECT_EQ(reader->IntOr("size", -1), 22);
+    EXPECT_EQ(reader->StringOr("width", ""), "wide");
+    EXPECT_EQ(reader->StringOr("theme", ""), "sepia");
+
+    SendSettings(*window,
+                 R"({"type":"set_reader_settings","size":999,"width":"huge","theme":"neon"})");
+    state = json::Parse(window->SettingsStateJson());
+    reader = state->FindMember("settings")->FindMember("reader");
+    EXPECT_EQ(reader->IntOr("size", -1), ReaderSettings::kMaxSize);
+    EXPECT_EQ(reader->StringOr("width", ""), "medium");
+    EXPECT_EQ(reader->StringOr("theme", ""), "auto");
+}
+
 TEST(BrowserWindowPagesTest, ASleepingTabKeepsItsPageAndTheActiveTabNeverSleeps) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     ASSERT_TRUE(window->OpenNewTab("https://example.com/a"));
