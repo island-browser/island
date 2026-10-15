@@ -1,9 +1,11 @@
 #include "browser_chrome.h"
 
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
@@ -159,6 +161,50 @@ CefBoxLayoutSettings CenteredLayout() {
     settings.main_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
     settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
     return settings;
+}
+
+// Multiplies a premultiplied BGRA bitmap by |alpha| (0..1): the dimmed look of a sleeping tab.
+void DimPremultipliedBgra(std::vector<std::uint8_t>& pixels, double alpha) {
+    for (std::uint8_t& channel : pixels) {
+        channel = static_cast<std::uint8_t>(static_cast<double>(channel) * alpha + 0.5);
+    }
+}
+
+// A reduced-alpha copy of |source| (the icon of a sleeping tab); the original when the image
+// has no bitmap representation to copy.
+CefRefPtr<CefImage> DimmedImage(const CefRefPtr<CefImage>& source, double alpha) {
+    if (source == nullptr) {
+        return source;
+    }
+    CefRefPtr<CefImage> dimmed = CefImage::CreateImage();
+    bool copied = false;
+    for (const float scale : {1.0F, 2.0F}) {
+        if (!source->HasRepresentation(scale)) {
+            continue;
+        }
+        int width = 0;
+        int height = 0;
+        const CefRefPtr<CefBinaryValue> data = source->GetAsBitmap(
+            scale, CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, width, height);
+        if (data == nullptr || data->GetSize() == 0) {
+            continue;
+        }
+        std::vector<std::uint8_t> pixels(data->GetSize());
+        data->GetData(pixels.data(), pixels.size(), 0);
+        DimPremultipliedBgra(pixels, alpha);
+        copied = dimmed->AddBitmap(scale, width, height, CEF_COLOR_TYPE_BGRA_8888,
+                                   CEF_ALPHA_TYPE_PREMULTIPLIED, pixels.data(), pixels.size()) ||
+                 copied;
+    }
+    return copied ? dimmed : source;
+}
+
+constexpr double kSleepingIconAlpha = 0.42;
+constexpr double kSleepingTitleMix = 0.55;
+
+// The title color of a sleeping row: faded toward the row fill.
+ArgbColor SleepingTitleColor(ArgbColor title, ArgbColor fill) {
+    return MixColor(title, fill, kSleepingTitleMix);
 }
 
 // The round dot a collapsed-rail space button shows: 16 DIP at 1x and 2x.
@@ -882,7 +928,8 @@ std::string BrowserChrome::TruncateCollectionTitle(std::string title) {
 }
 
 std::string BrowserChrome::TabEntryAccessibleName(const TabStripEntrySnapshot& entry) {
-    return "Tab: " + entry.title + (entry.active ? ", active" : ", inactive");
+    return "Tab: " + entry.title + (entry.active ? ", active" : ", inactive") +
+           (entry.sleeping ? ", sleeping" : "");
 }
 
 std::string BrowserChrome::TabCloseAccessibleName(const TabStripEntrySnapshot& entry) {
@@ -915,7 +962,7 @@ CollapsedRailTabLayout BrowserChrome::CollapsedRailLayout(
 }
 
 std::string BrowserChrome::CollapsedRailTabTooltip(const TabStripEntrySnapshot& entry) {
-    return entry.title;
+    return entry.sleeping ? entry.title + " (sleeping)" : entry.title;
 }
 
 std::string BrowserChrome::CollapsedRailSpaceTooltip(const SpaceSwitcherEntrySnapshot& entry) {
@@ -997,9 +1044,13 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.favicon->SetFocusable(false);
         views.favicon->SetMinimumSize(CefSize(slot, slot));
         if (entry.favicon != nullptr) {
-            views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
+            views.favicon->SetImage(
+                CEF_BUTTON_STATE_NORMAL,
+                entry.sleeping ? DimmedImage(entry.favicon, kSleepingIconAlpha) : entry.favicon);
         } else if (fallback_icon.has_value()) {
-            views.favicon->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
+            views.favicon->SetImage(
+                CEF_BUTTON_STATE_NORMAL,
+                entry.sleeping ? DimmedImage(*fallback_icon, kSleepingIconAlpha) : *fallback_icon);
         }
         views.inner->AddChildView(views.favicon);
 
@@ -1117,9 +1168,13 @@ void BrowserChrome::RebuildCollapsedTabs() {
         views.button->SetInkDropEnabled(true);
         views.button->SetMinimumSize(CefSize(button - 2 * kHairlineDip, button - 2 * kHairlineDip));
         if (entry.favicon != nullptr) {
-            views.button->SetImage(CEF_BUTTON_STATE_NORMAL, entry.favicon);
+            views.button->SetImage(
+                CEF_BUTTON_STATE_NORMAL,
+                entry.sleeping ? DimmedImage(entry.favicon, kSleepingIconAlpha) : entry.favicon);
         } else if (fallback_icon.has_value()) {
-            views.button->SetImage(CEF_BUTTON_STATE_NORMAL, *fallback_icon);
+            views.button->SetImage(
+                CEF_BUTTON_STATE_NORMAL,
+                entry.sleeping ? DimmedImage(*fallback_icon, kSleepingIconAlpha) : *fallback_icon);
         }
         views.inner->AddChildView(views.button);
         inner_layout->SetFlexForView(views.button, 1);
@@ -1793,7 +1848,8 @@ void BrowserChrome::ApplyCollectionTheme() {
         views.favicon->SetBackgroundColor(colors.fill.argb);
         views.title->SetBackgroundColor(colors.fill.argb);
         views.close->SetBackgroundColor(colors.fill.argb);
-        views.title->SetEnabledTextColors(colors.title.argb);
+        views.title->SetEnabledTextColors(
+            (entry.sleeping ? SleepingTitleColor(colors.title, colors.fill) : colors.title).argb);
         views.close->SetEnabledTextColors(colors.trailing.argb);
     }
     for (std::size_t index = 0; index < space_entry_views_.size() && index < space_entries_.size();

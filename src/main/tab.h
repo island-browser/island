@@ -79,9 +79,27 @@ class Tab {
     void IncrementBlockedRequests() noexcept { ++blocked_requests_; }
     void ResetBlockedRequests() noexcept { blocked_requests_ = 0; }
     [[nodiscard]] std::uint64_t blocked_requests() const noexcept { return blocked_requests_; }
+    // Tab sleep: a sleeping tab has released its CefBrowser (and view) but keeps its model state
+    // (URL via startup_url/navigation snapshot, title, favicon). The scroll offset read from the
+    // page just before it closed is replayed once the woken page finishes loading.
+    void SetSleeping(bool sleeping) noexcept { sleeping_ = sleeping; }
+    [[nodiscard]] bool sleeping() const noexcept { return sleeping_; }
+    void SetSavedScroll(double x, double y) noexcept {
+        saved_scroll_x_ = x;
+        saved_scroll_y_ = y;
+        has_saved_scroll_ = x != 0.0 || y != 0.0;
+    }
+    void ClearSavedScroll() noexcept { SetSavedScroll(0.0, 0.0); }
+    [[nodiscard]] bool has_saved_scroll() const noexcept { return has_saved_scroll_; }
+    [[nodiscard]] double saved_scroll_x() const noexcept { return saved_scroll_x_; }
+    [[nodiscard]] double saved_scroll_y() const noexcept { return saved_scroll_y_; }
 
   private:
     TabId id_;
+    bool sleeping_ = false;
+    bool has_saved_scroll_ = false;
+    double saved_scroll_x_ = 0.0;
+    double saved_scroll_y_ = 0.0;
     std::string startup_url_;
     bool pinned_ = false;
     NavigationState navigation_state_;

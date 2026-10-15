@@ -42,6 +42,30 @@ TEST(PrefsStoreTest, GivenARoundTripWhenSavedAndLoadedThenTheStateSurvives) {
     }
 }
 
+TEST(PrefsStoreTest, GivenTabSleepMinutesThenTheyRoundTripAndUnknownValuesFallBackToThirty) {
+    const std::filesystem::path path = TempPath("tab_sleep.json");
+    EXPECT_EQ(PrefsState().tab_sleep_minutes, 30);
+
+    for (const int minutes : {0, 15, 30, 60}) {
+        PrefsState state;
+        state.tab_sleep_minutes = minutes;
+        ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+        const PrefsLoadResult loaded = PrefsStore::Load(path);
+        EXPECT_EQ(loaded.error, PrefsError::kNone);
+        EXPECT_EQ(loaded.state.tab_sleep_minutes, minutes);
+    }
+
+    // A file without the key, or with a value Settings never offers, means the default.
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
+    EXPECT_EQ(PrefsStore::Load(path).state.tab_sleep_minutes, 30);
+    WriteFile(path,
+              R"({"version":1,"onboarding_completed":true,"theme":"dark","tab_sleep_minutes":7})");
+    EXPECT_EQ(PrefsStore::Load(path).state.tab_sleep_minutes, 30);
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark",
+                        "tab_sleep_minutes":"15"})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+}
+
 TEST(PrefsStoreTest, GivenAgentSettingsWhenSavedThenTheyRoundTripAndStayOptional) {
     PrefsState state;
     state.agent_provider = "custom";

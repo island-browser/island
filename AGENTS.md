@@ -29,6 +29,9 @@
   on 2026-10-06 at the project owner's request; both are local HTML pages shown in the content
   slot (`src/main/pages/`). Shortcut overrides persist in prefs; on macOS they reach the NSMenu
   on the next launch.
+- Tab sleep (inactive background tabs release their `CefBrowser`; Settings → Tabs, palette command) and
+  Peek (a floating single-window card with its own browser, opened from Cmd/middle-click, the
+  context menu or new-tab opens) were added on 2026-10-15; see `src/main/AGENTS.md`.
 - Agentic integration is in scope as of 2026-10-06 at the project owner's request: the CEF-free
   `src/agent/` kernel provides an MCP tools endpoint (`http://127.0.0.1:<port>/mcp`, bearer token,
   discovery file) and an ACP client that runs an agent in the sidebar. GitHub Actions triggers

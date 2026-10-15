@@ -112,6 +112,13 @@ enum class ChromeViewId : int {
     kCollapsedRailNewTab = 1052,
     kCollapsedRailSpaceList = 1053,
     kCollapsedRailSpace = 1054,
+    // The peek card (a floating page over the current one). Overlay-only, like the palettes,
+    // so absent from ViewTreeContract().
+    kPeekCard = 1055,
+    kPeekTitleBar = 1056,
+    kPeekAddress = 1057,
+    kPeekOpenAsTab = 1058,
+    kPeekClose = 1059,
 };
 
 struct ChromeViewTreeNode {
@@ -133,6 +140,9 @@ struct TabStripEntrySnapshot {
     bool pinned = false;
     // The page's favicon once downloaded; null shows the globe fallback.
     CefRefPtr<CefImage> favicon;
+    // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
+    // title and a reduced-alpha favicon, in the rows and in the icon rail.
+    bool sleeping = false;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };

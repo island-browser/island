@@ -38,6 +38,7 @@ add_library(island_browser_core STATIC
     sha256.cc
     sidebar_state.cc
     space.cc
+    peek_overlay.cc
     space_rename_overlay.cc
     startup_options.cc
     dev_capture.cc

@@ -21,6 +21,16 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   BM25/recency with repeat-visit frequency, and stay entirely on the device. Settings can stop
   remembering new visits or clear the persisted history.
 
+- Tab sleep: a tab you have not used for 15, 30 (default) or 60 minutes (Settings → Tabs, or
+  Never) releases its browser to free memory. It keeps its URL, title, favicon and scroll
+  position, shows dimmed in the sidebar and the icon rail, and reloads where you left off when you
+  select it. Pinned tabs, the tab on screen, split-view partners, tabs playing audio and tabs with
+  unsaved form input never sleep (a page script checks the last three just before closing). The
+  command palette gains "Sleep inactive tabs now".
+- Peek: Cmd/Ctrl+click or middle-click on a link, the "Open in peek" context-menu item, and
+  links the page opens in a new tab show the page in a floating card over the current one, with
+  the address, "Open as tab" (reopens it as a real tab of the active space) and "Close"; Escape
+  closes it. The card is an overlay that exists only while it is open and covers only the card.
 - Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
   button per tab of the active space (pinned tabs first, the active tab highlighted like the
   selected row, the page title as tooltip and accessible name), a "+" new-tab button and the

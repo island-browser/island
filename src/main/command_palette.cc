@@ -113,13 +113,26 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
                                                 const std::vector<PaletteSpaceEntry>& spaces,
                                                 const std::vector<PaletteBookmarkEntry>& bookmarks,
                                                 const std::vector<PaletteHistoryEntry>& history) {
+    return ComposePaletteResults(query, tabs, spaces, bookmarks, history, {});
+}
+
+std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
+                                                const std::vector<PaletteTabEntry>& tabs,
+                                                const std::vector<PaletteSpaceEntry>& spaces,
+                                                const std::vector<PaletteBookmarkEntry>& bookmarks,
+                                                const std::vector<PaletteHistoryEntry>& history,
+                                                const std::vector<PaletteCommandEntry>& commands) {
     std::vector<PaletteEntry> canonical;
-    canonical.reserve(tabs.size() + spaces.size() + bookmarks.size() + history.size() + 1U);
+    canonical.reserve(tabs.size() + spaces.size() + commands.size() + bookmarks.size() +
+                      history.size() + 1U);
     for (const PaletteTabEntry& tab : tabs) {
         canonical.push_back({.kind = PaletteEntryKind::kTab, .tab = tab});
     }
     for (const PaletteSpaceEntry& space : spaces) {
         canonical.push_back({.kind = PaletteEntryKind::kSpace, .space = space});
+    }
+    for (const PaletteCommandEntry& command : commands) {
+        canonical.push_back({.kind = PaletteEntryKind::kCommand, .command = command});
     }
     for (const PaletteBookmarkEntry& bookmark : bookmarks) {
         canonical.push_back({.kind = PaletteEntryKind::kBookmark, .bookmark = bookmark});
@@ -152,6 +165,8 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
                 rank = RankBookmarkEntry(entry.bookmark, query);
             } else if (kind == PaletteEntryKind::kSpace) {
                 rank = ClassifyPaletteMatch(entry.space.name, query);
+            } else if (kind == PaletteEntryKind::kCommand) {
+                rank = ClassifyPaletteMatch(entry.command.title, query);
             }
             if (rank != PaletteMatchRank::kNone) {
                 scored.push_back({.entry = entry, .input_index = index, .rank = rank});
@@ -170,6 +185,7 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
     };
     append_section(PaletteEntryKind::kTab);
     append_section(PaletteEntryKind::kSpace);
+    append_section(PaletteEntryKind::kCommand);
     append_section(PaletteEntryKind::kBookmark);
     for (const PaletteHistoryEntry& item : history) {
         results.push_back({.kind = PaletteEntryKind::kHistory, .history = item});
@@ -244,8 +260,13 @@ void CommandPaletteModel::SetHistory(std::vector<PaletteHistoryEntry> history) {
     highlighted_index_ = 0;
 }
 
+void CommandPaletteModel::SetCommands(std::vector<PaletteCommandEntry> commands) {
+    commands_ = std::move(commands);
+    highlighted_index_ = 0;
+}
+
 std::vector<PaletteEntry> CommandPaletteModel::Results() const {
-    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, history_);
+    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, history_, commands_);
 }
 
 std::optional<PaletteSelection> CommandPaletteModel::Submit() {
@@ -281,6 +302,8 @@ std::optional<PaletteSelection> CommandPaletteModel::Submit() {
         selection.bookmark = entry.bookmark;
     } else if (entry.kind == PaletteEntryKind::kHistory) {
         selection.history = entry.history;
+    } else if (entry.kind == PaletteEntryKind::kCommand) {
+        selection.command = entry.command;
     } else {
         selection.space = entry.space;
     }

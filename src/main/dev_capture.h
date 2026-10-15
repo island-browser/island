@@ -8,7 +8,9 @@
 //   --island-dev-actions=welcome,theme:dark,command_palette
 //       Runs each action in order, a short pause apart, once the window is up.
 //       Besides the menu-backed names, `navigate:<address>` loads an address in the active
-//       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state.
+//       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state. `peek:<address>`
+//       opens the peek card, `sleep_tabs` puts eligible inactive tabs to sleep and
+//       `sleep_report` logs the sleeping-tab count, and `wait:<seconds>` pauses the sequence.
 //   --island-dev-capture=/tmp/shot.png
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4

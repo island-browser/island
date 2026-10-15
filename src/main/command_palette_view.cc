@@ -66,6 +66,8 @@ std::string PaletteKindLabel(const PaletteEntry& entry) {
             return "BOOKMARK";
         case PaletteEntryKind::kHistory:
             return "HISTORY";
+        case PaletteEntryKind::kCommand:
+            return "COMMAND";
     }
     return "";
 }
@@ -90,6 +92,8 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
                 entry.history.title.empty() ? entry.history.url : entry.history.title;
             return "Open history: " + title + ", URL " + entry.history.url;
         }
+        case PaletteEntryKind::kCommand:
+            return "Run command: " + entry.command.title;
     }
     return "Palette result";
 }
@@ -112,6 +116,8 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
         case PaletteEntryKind::kHistory:
             return (entry.history.title.empty() ? entry.history.url : entry.history.title) +
                    (entry.history.host.empty() ? "" : "  —  " + entry.history.host);
+        case PaletteEntryKind::kCommand:
+            return entry.command.title;
     }
     return "";
 }
@@ -128,6 +134,8 @@ std::string PaletteRowTooltipText(const PaletteEntry& entry) {
             return entry.bookmark.url;
         case PaletteEntryKind::kHistory:
             return entry.history.url;
+        case PaletteEntryKind::kCommand:
+            return "Run this command";
     }
     return "";
 }
@@ -353,7 +361,8 @@ int CommandPaletteView::PreferredContentHeightDip() const {
 
 void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
                               std::vector<PaletteSpaceEntry> spaces,
-                              std::vector<PaletteBookmarkEntry> bookmarks) {
+                              std::vector<PaletteBookmarkEntry> bookmarks,
+                              std::vector<PaletteCommandEntry> commands) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || window_ == nullptr) {
         return;
@@ -366,10 +375,11 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     }
     constexpr std::size_t kHistoryRowLimit = 8;
     const std::size_t pool_size =
-        tabs.size() + spaces.size() + bookmarks.size() + kHistoryRowLimit + 1;
+        tabs.size() + spaces.size() + commands.size() + bookmarks.size() + kHistoryRowLimit + 1;
     model_.SetTabs(std::move(tabs));
     model_.SetSpaces(std::move(spaces));
     model_.SetBookmarks(std::move(bookmarks));
+    model_.SetCommands(std::move(commands));
     // Worst case: every tab and every space matches plus the go-to-URL row
     // that a non-empty query appends.
     RebuildResultRows(pool_size);

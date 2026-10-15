@@ -162,6 +162,36 @@ void IslandApp::NavigateActiveTab(const std::string& address) {
     }
 }
 
+std::size_t IslandApp::SleepInactiveTabsNow() {
+    CEF_REQUIRE_UI_THREAD();
+
+    return browser_window_ != nullptr ? browser_window_->SleepInactiveTabsNow() : 0;
+}
+
+bool IslandApp::OpenPeek(const std::string& address) {
+    CEF_REQUIRE_UI_THREAD();
+
+    return browser_window_ != nullptr && browser_window_->OpenPeek(address);
+}
+
+std::size_t IslandApp::SleepingTabCount() const {
+    return browser_window_ != nullptr ? browser_window_->sleeping_tab_count() : 0;
+}
+
+std::string IslandApp::DevStateReport() const {
+    if (browser_window_ == nullptr) {
+        return "no window";
+    }
+    std::size_t tabs = 0;
+    for (const Space& space : browser_window_->spaces()) {
+        tabs += space.tab_count();
+    }
+    return "spaces=" + std::to_string(browser_window_->space_count()) +
+           " tabs=" + std::to_string(tabs) +
+           " sleeping=" + std::to_string(browser_window_->sleeping_tab_count()) +
+           " peek=" + (browser_window_->peek_open() ? "open" : "closed");
+}
+
 void IslandApp::ToggleAgentPanel() {
     CEF_REQUIRE_UI_THREAD();
 

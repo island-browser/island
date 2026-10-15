@@ -39,6 +39,14 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // and load an address in the active tab through the address bar's own submit path.
     void SetSidebarExpanded(bool expanded);
     void NavigateActiveTab(const std::string& address);
+    // Developer-capture entry points for tab sleep and peek: probe-and-sleep every eligible
+    // inactive tab (returns the number of probes started), open an address in the peek card,
+    // and report counts for the dev log.
+    std::size_t SleepInactiveTabsNow();
+    bool OpenPeek(const std::string& address);
+    [[nodiscard]] std::size_t SleepingTabCount() const;
+    // One-line state for the dev log: tab, sleeping-tab and peek state.
+    [[nodiscard]] std::string DevStateReport() const;
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

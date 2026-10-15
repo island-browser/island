@@ -407,7 +407,9 @@ bool CaptureOwnWindows(const std::string& path) {
 }
 
 // Parameterized dev actions that have no menu item: `navigate:<address>` submits the address
-// the way the address bar does, `sidebar:expanded|collapsed` sets the persistent sidebar state.
+// the way the address bar does, `sidebar:expanded|collapsed` sets the persistent sidebar state,
+// `peek:<address>` opens the peek card, `sleep_tabs` probes and sleeps idle tabs, and
+// `sleep_report` logs how many tabs sleep.
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -415,6 +417,20 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
     }
     if (action.compare(0, kNavigate.size(), kNavigate) == 0) {
         app->NavigateActiveTab(action.substr(kNavigate.size()));
+        return true;
+    }
+    constexpr std::string_view kPeek = "peek:";
+    if (action.compare(0, kPeek.size(), kPeek) == 0) {
+        static_cast<void>(app->OpenPeek(action.substr(kPeek.size())));
+        return true;
+    }
+    if (action == "sleep_tabs") {
+        const std::size_t probes = app->SleepInactiveTabsNow();
+        fprintf(stderr, "island-dev: sleep probes started: %zu\n", probes);
+        return true;
+    }
+    if (action == "sleep_report") {
+        fprintf(stderr, "island-dev: sleeping tabs: %zu\n", app->SleepingTabCount());
         return true;
     }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
@@ -429,6 +445,18 @@ void RunDevStep(island::IslandApp* app, IslandMenuActions* menu_actions,
     constexpr double kActionPauseSeconds = 0.8;
     if (next_action < options.actions.size()) {
         const std::string& action = options.actions[next_action];
+        constexpr std::string_view kWait = "wait:";
+        if (action.compare(0, kWait.size(), kWait) == 0) {
+            // `wait:<seconds>` pauses the sequence (pages need time to load or sleep).
+            const double seconds = std::atof(action.c_str() + kWait.size());
+            fprintf(stderr, "island-dev: waiting %.0fs\n", seconds);
+            dispatch_after(
+                dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(seconds * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+                  RunDevStep(app, menu_actions, options, next_action + 1);
+                });
+            return;
+        }
         const SEL selector = DevActionSelector(action);
         if (RunParameterizedDevAction(app, action)) {
             fprintf(stderr, "island-dev: action %s\n", action.c_str());
@@ -473,6 +501,31 @@ void ScheduleDevCapture(island::IslandApp* app, IslandMenuActions* menu_actions,
           [NSApp activateIgnoringOtherApps:YES];
           RunDevStep(app, menu_actions, options, 0);
         });
+    if (options.keep_open) {
+        // Interactive dev runs: SIGUSR1 saves another capture (path with a counter), SIGUSR2
+        // logs the tab/sleep/peek state, so real input can be checked without a screen recorder.
+        static int capture_count = 0;
+        signal(SIGUSR1, SIG_IGN);
+        signal(SIGUSR2, SIG_IGN);
+        dispatch_source_t capture_signal = dispatch_source_create(
+            DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR1, 0, dispatch_get_main_queue());
+        dispatch_source_set_event_handler(capture_signal, ^{
+          std::string path =
+              options.capture_path.empty() ? "/tmp/island-dev.png" : options.capture_path;
+          const std::size_t dot = path.rfind('.');
+          path.insert(dot == std::string::npos ? path.size() : dot,
+                      "-" + std::to_string(++capture_count));
+          fprintf(stderr, "island-dev: %s %s\n",
+                  CaptureOwnWindows(path) ? "captured" : "capture FAILED", path.c_str());
+        });
+        dispatch_resume(capture_signal);
+        dispatch_source_t report_signal = dispatch_source_create(
+            DISPATCH_SOURCE_TYPE_SIGNAL, SIGUSR2, 0, dispatch_get_main_queue());
+        dispatch_source_set_event_handler(report_signal, ^{
+          fprintf(stderr, "island-dev: state %s\n", app->DevStateReport().c_str());
+        });
+        dispatch_resume(report_signal);
+    }
 }
 
 island::StartupOptions ParseStartupOptions(int argc, char* argv[]) {

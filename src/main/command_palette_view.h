@@ -55,7 +55,8 @@ class CommandPaletteView final {
     // active space, the full space list, and bookmarks; resets the draft query
     // and focuses the query field. History arrives asynchronously per query.
     void Show(std::vector<PaletteTabEntry> tabs, std::vector<PaletteSpaceEntry> spaces,
-              std::vector<PaletteBookmarkEntry> bookmarks);
+              std::vector<PaletteBookmarkEntry> bookmarks,
+              std::vector<PaletteCommandEntry> commands = {});
     // Applies a background history answer only when it still belongs to the
     // visible draft that requested it.
     void SetHistoryResults(std::string_view query, std::vector<PaletteHistoryEntry> history);
