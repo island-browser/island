@@ -55,6 +55,9 @@ add_library(island_browser_core STATIC
     updater.cc
 )
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
+# MSVC reads sources in the ANSI code page unless told otherwise, which turns the
+# UTF-8 literals (em dashes in titles, Cyrillic test names) into mojibake.
+target_compile_options(island_browser_core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
 target_link_libraries(island_browser_core PUBLIC island_agent island_search island_content_blocker_ffi)
