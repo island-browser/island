@@ -567,3 +567,42 @@ TEST(CommandPaletteTest, GivenCandidateAndQueryPairsWhenClassifiedThenTheRankOrd
 
 }  // namespace
 }  // namespace island
+
+namespace island {
+namespace {
+
+TEST(CommandPaletteCommandsTest, GivenCommandsThenTheyFollowSpacesAndMatchByTitle) {
+    const std::vector<PaletteTabEntry> tabs{
+        {.id = TabId{1}, .title = "Sleepy docs", .url = "https://a.example/"}};
+    const std::vector<PaletteSpaceEntry> spaces{{.id = SpaceId{1}, .name = "Work"}};
+    const std::vector<PaletteCommandEntry> commands{
+        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"}};
+
+    const std::vector<PaletteEntry> all = ComposePaletteResults("", tabs, spaces, {}, commands);
+    ASSERT_EQ(all.size(), 3U);
+    EXPECT_EQ(all[0].kind, PaletteEntryKind::kTab);
+    EXPECT_EQ(all[1].kind, PaletteEntryKind::kSpace);
+    EXPECT_EQ(all[2].kind, PaletteEntryKind::kCommand);
+
+    const std::vector<PaletteEntry> found =
+        ComposePaletteResults("inactive", tabs, spaces, {}, commands);
+    ASSERT_EQ(found.size(), 2U);  // the command, then the go-to row
+    EXPECT_EQ(found[0].kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(found[0].command.id, "sleep_inactive_tabs");
+}
+
+TEST(CommandPaletteCommandsTest, GivenAHighlightedCommandWhenSubmittedThenItsIdIsReturnedOnce) {
+    CommandPaletteModel model([](std::string_view) { return ValidatedAddress{}; });
+    model.SetCommands({{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"}});
+    model.Open();
+
+    const std::optional<PaletteSelection> selection = model.Submit();
+
+    ASSERT_TRUE(selection.has_value());
+    EXPECT_EQ(selection->kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(selection->command.id, "sleep_inactive_tabs");
+    EXPECT_FALSE(model.Submit().has_value());
+}
+
+}  // namespace
+}  // namespace island

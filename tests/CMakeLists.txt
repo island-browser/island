@@ -35,6 +35,7 @@ add_executable(island_tests
     lifecycle_config_test.cpp
     navigation_state_test.cpp
     overlay_lifetime_test.cpp
+    peek_state_test.cpp
     prefs_store_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
@@ -44,6 +45,7 @@ add_executable(island_tests
     space_test.cpp
     startup_options_test.cpp
     dev_capture_test.cpp
+    tab_sleep_policy_test.cpp
     tab_test.cpp
     updater_test.cpp
     window_agent_host_test.cpp
@@ -70,6 +72,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <limits>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -25,8 +26,10 @@
 #include "include/cef_app.h"
 #include "include/cef_browser.h"
 #include "include/cef_color_ids.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_frame.h"
 #include "include/cef_image.h"
+#include "include/cef_menu_model.h"
 #include "include/cef_parser.h"
 #include "include/cef_task.h"
 #include "include/cef_values.h"
@@ -99,6 +102,58 @@ std::string TrimmedCopy(std::string_view text) {
 
 bool IsWebUrl(std::string_view url) {
     return url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0;
+}
+
+// Tab sleep: how often the idle sweep runs, how long a page has to answer the pre-sleep probe,
+// and the prefix of the probe's reply (a console message carrying a per-probe random token).
+constexpr int kSleepTickMs = 30 * 1000;
+constexpr int kSleepProbeTimeoutMs = 500;
+constexpr std::string_view kSleepProbePrefix = "\x01island-sleep:";
+
+std::string RandomHexToken() {
+    std::random_device device;
+    std::mt19937_64 engine((static_cast<std::uint64_t>(device()) << 32U) ^ device());
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string token;
+    for (int index = 0; index < 24; ++index) {
+        token += kHex[engine() & 0xFU];
+    }
+    return token;
+}
+
+// One script answers all three questions the sleep decision needs: where the page is scrolled,
+// whether an input holds text the user typed (or a contenteditable has focus with content), and
+// whether any media element is audibly playing. The reply is a console message tagged with the
+// probe's token: "<prefix><token>:<scrollX>,<scrollY>,<dirty 0|1>,<playing 0|1>".
+std::string SleepProbeScript(const std::string& token) {
+    return R"JS((function () {
+  var dirty = 0, playing = 0;
+  try {
+    var fields = document.querySelectorAll('input,textarea');
+    for (var i = 0; i < fields.length && !dirty; i++) {
+      var f = fields[i], t = (f.type || '').toLowerCase();
+      if (t === 'hidden' || t === 'submit' || t === 'button' || t === 'reset' || t === 'image') continue;
+      if (t === 'checkbox' || t === 'radio') { if (f.checked !== f.defaultChecked) dirty = 1; }
+      else if (f.value !== f.defaultValue) dirty = 1;
+    }
+    var a = document.activeElement;
+    if (!dirty && a && a.isContentEditable && a.textContent && a.textContent.length > 0) dirty = 1;
+    var media = document.querySelectorAll('audio,video');
+    for (var j = 0; j < media.length && !playing; j++) {
+      var m = media[j];
+      if (!m.paused && !m.ended && !m.muted && m.volume > 0) playing = 1;
+    }
+  } catch (e) {}
+  console.log('\u0001island-sleep:)JS" +
+           token + R"JS(:' + [window.scrollX, window.scrollY, dirty, playing].join(','));
+})();)JS";
+}
+
+// Replays a woken page's scroll offset; pages often grow after load, so retry briefly.
+std::string ScrollRestoreScript(double x, double y) {
+    return "(function(x,y){var n=0;function "
+           "t(){window.scrollTo(x,y);if(++n<4)setTimeout(t,250);}t();})(" +
+           std::to_string(x) + "," + std::to_string(y) + ");";
 }
 
 // Closed tabs kept for Reopen Closed Tab; the oldest drops first.
@@ -175,6 +230,7 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
         bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
     }
     keymap_ = Keymap::WithOverrides(prefs_.keybindings);
+    sleep_policy_.SetMinutes(prefs_.tab_sleep_minutes);
     // The sidebar starts the way the last session left it (the headless and smoke shapes
     // keep the fresh-install default: expanded).
     sidebar_state_.SetExpanded(!prefs_.sidebar_collapsed);
@@ -436,6 +492,10 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             return;
         }
         case BrowserCommand::kStopLoading: {
+            if (peek_open() && !OverlayShown()) {
+                ClosePeek();
+                return;
+            }
             Tab* tab = active_tab();
             if (tab != nullptr && tab->browser() != nullptr) {
                 tab->browser()->StopLoad();
@@ -553,6 +613,7 @@ bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_vi
         tab.browser()->GetMainFrame()->LoadURL(*url);
     } else {
         tab.SetStartupUrl(*url);
+        tab.ClearSavedScroll();
     }
     return true;
 }
@@ -982,6 +1043,8 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("search", Value::MakeObject()
                                .Set("engine", Value::String(std::string(search_engine().key)))
                                .Set("engines", std::move(engines)))
+            .Set("tabs",
+                 Value::MakeObject().Set("sleep_minutes", Value::Int(prefs_.tab_sleep_minutes)))
             .Set("platform", Value::String(platform))
             .Set("agent", std::move(agent))
             .Set("endpoint", std::move(endpoint))
@@ -1085,6 +1148,8 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
             SavePrefs();
             RenderStartPages();
         }
+    } else if (type == "set_tab_sleep") {
+        static_cast<void>(SetTabSleepMinutes(static_cast<int>(message.IntOr("minutes", -1))));
     } else if (type == "set_agent_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "set_agent_command") {
@@ -1494,7 +1559,13 @@ bool BrowserWindow::CanStopLoading() const {
     return !closing_ && tab != nullptr && tab->browser() != nullptr && tab->browser()->IsLoading();
 }
 
-bool BrowserWindow::CanStopLoadingWithEscape() const { return CanStopLoading() && !OverlayShown(); }
+bool BrowserWindow::CanStopLoadingWithEscape() const {
+    // An open peek owns Escape (it closes the card) unless a palette or dialog sits above it.
+    if (peek_open() && !OverlayShown()) {
+        return true;
+    }
+    return CanStopLoading() && !OverlayShown();
+}
 
 bool BrowserWindow::OverlayShown() const noexcept {
     return (welcome_ != nullptr && welcome_->visible()) ||
@@ -1632,6 +1703,11 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     // document. Anything else logs as ordinary console output. (An ask_agent
     // message from a site would otherwise be a prompt-injection channel.)
     const std::string text = message.ToString();
+    if (!closing_ && text.rfind(kSleepProbePrefix, 0) == 0) {
+        // The pre-sleep probe's reply: accepted only with the right token from the probed
+        // browser, and never routed to the start-page bridge below.
+        return HandleSleepProbeMessage(browser, text);
+    }
     if (closing_ || text.rfind(LocalPage::kMessagePrefix, 0) != 0 ||
         FindTabByBrowser(browser) == nullptr) {
         return false;
@@ -2131,12 +2207,118 @@ void BrowserWindow::OnFaviconDownloaded(TabId tab_id, const std::string& icon_ur
     }
 }
 
-bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int, const CefString&,
-                                  const CefString&, WindowOpenDisposition, bool,
+bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int,
+                                  const CefString& target_url, const CefString&,
+                                  WindowOpenDisposition target_disposition, bool user_gesture,
                                   const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
                                   CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) {
     CEF_REQUIRE_UI_THREAD();
+    // Popups and new windows stay rejected (Island is single-window). A user-initiated new-tab
+    // open (Cmd/Ctrl+click, middle-click, target=_blank) becomes a peek instead.
+    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
+         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
+        user_gesture && IsPeekLinkSource(browser)) {
+        DeferPeek(target_url.ToString());
+    }
     return true;
+}
+
+CefRefPtr<CefRequestHandler> BrowserWindow::GetRequestHandler() { return this; }
+
+CefRefPtr<CefContextMenuHandler> BrowserWindow::GetContextMenuHandler() { return this; }
+
+bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
+                                     const CefString& target_url,
+                                     WindowOpenDisposition target_disposition, bool) {
+    CEF_REQUIRE_UI_THREAD();
+    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
+         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
+        IsPeekLinkSource(browser)) {
+        DeferPeek(target_url.ToString());
+        return true;
+    }
+    return false;
+}
+
+void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                        CefRefPtr<CefContextMenuParams> params,
+                                        CefRefPtr<CefMenuModel> model) {
+    CEF_REQUIRE_UI_THREAD();
+    if (params != nullptr && model != nullptr && IsWebUrl(params->GetLinkUrl().ToString())) {
+        model->AddItem(MENU_ID_USER_FIRST, "Open in peek");
+    }
+}
+
+bool BrowserWindow::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
+                                         CefRefPtr<CefContextMenuParams> params, int command_id,
+                                         EventFlags) {
+    CEF_REQUIRE_UI_THREAD();
+    if (command_id != MENU_ID_USER_FIRST || params == nullptr || !IsPeekLinkSource(browser)) {
+        return false;
+    }
+    DeferPeek(params->GetLinkUrl().ToString());
+    return true;
+}
+
+bool BrowserWindow::IsPeekLinkSource(CefRefPtr<CefBrowser> browser) const {
+    return !closing_ && window_ != nullptr && browser != nullptr &&
+           FindTabByBrowser(browser) != nullptr;
+}
+
+void BrowserWindow::DeferPeek(const std::string& url) {
+    // The popup and menu callbacks run inside CEF's own dispatch: open the card on the next
+    // UI task instead of building views there.
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window, std::string target) {
+                                static_cast<void>(window->OpenPeek(target));
+                            },
+                            CefRefPtr<BrowserWindow>(this), url)));
+}
+
+PeekOverlay& BrowserWindow::EnsurePeek() {
+    if (peek_ == nullptr) {
+        peek_ =
+            std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()));
+    }
+    return *peek_;
+}
+
+bool BrowserWindow::OpenPeek(std::string_view url) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr || chrome_ == nullptr) {
+        return false;
+    }
+    const ValidatedAddress address = address_validator_(url);
+    if (!address.is_valid() || !IsWebUrl(address.url)) {
+        return false;
+    }
+    PeekOverlay& peek = EnsurePeek();
+    peek.Open(address.url, active_space().request_context(), chrome_snapshot_.content_bounds);
+    return peek.open();
+}
+
+void BrowserWindow::ClosePeek() {
+    CEF_REQUIRE_UI_THREAD();
+    if (peek_ != nullptr) {
+        peek_->Close();
+    }
+}
+
+void BrowserWindow::OnPeekOpenAsTab(std::string url) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    // The card's page is reopened as a real tab of the active space; the card's browser (and its
+    // history and scroll state) is not transferred.
+    AppendTabToActiveSpace(std::move(url));
+}
+
+void BrowserWindow::OnPeekClosed() {
+    CEF_REQUIRE_UI_THREAD();
+    if (!closing_) {
+        FocusBrowserView();
+    }
 }
 
 void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
@@ -2189,6 +2371,12 @@ void BrowserWindow::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
         agent_host_->OnBrowserClosed(browser);
     }
 
+    if (browser != nullptr && sleep_closing_browser_ids_.erase(browser->GetIdentifier()) > 0) {
+        // A tab put to sleep: its model entry already dropped the browser and the window stays
+        // up, even if this close lands after shutdown began.
+        return;
+    }
+
     Tab* owner = FindTabByBrowser(browser);
     if (owner != nullptr) {
         owner->SetBrowser(nullptr);
@@ -2239,6 +2427,7 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     }
 
     owner->navigation_state().OnLoadEnd(http_status_code);
+    RestoreSavedScroll(*owner, frame);
     if (frame->GetURL().ToString() == StartPageUrl()) {
         frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
     }
@@ -2298,6 +2487,9 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     ApplyKeymap();
 
     ApplySidebarState();
+    if (persist_session_) {
+        ScheduleSleepTick();
+    }
     // Fresh install: offer the import/appearance welcome once, without
     // blocking browsing (Escape dismisses). The smoke run skips it so the
     // smoke page stays the only surface.
@@ -2377,6 +2569,9 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         welcome_->UpdateBounds();
     }
     ApplySidebarState();
+    if (peek_open()) {
+        peek_->UpdateBounds(chrome_snapshot_.content_bounds);
+    }
     PublishChromeSnapshot();
 }
 
@@ -2724,6 +2919,8 @@ const Tab* BrowserWindow::active_tab() const noexcept {
 
 void BrowserWindow::DetachActiveTabObservers() {
     CEF_REQUIRE_UI_THREAD();
+    // Leaving a tab starts its idle clock.
+    TouchActiveTabs();
     Tab* tab = active_tab();
     if (tab != nullptr) {
         tab->navigation_state().SetObserver(nullptr);
@@ -2735,6 +2932,9 @@ void BrowserWindow::AttachActiveTabObservers() {
     if (closing_) {
         return;
     }
+    // A peek floats over one page; changing the selection dismisses it.
+    ClosePeek();
+    TouchActiveTabs();
     Tab* tab = active_tab();
     if (tab == nullptr) {
         UpdateChromeCollections();
@@ -2791,12 +2991,20 @@ bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
     if (chrome_ == nullptr) {
         return false;
     }
+    // Waking a sleeping tab: its startup URL is the page it slept on, and the saved scroll is
+    // replayed from OnLoadEnd.
+    const bool waking = tab.sleeping();
+    tab.SetSleeping(false);
     // Only valid for tabs of the active space: the view carries the space's
     // request context and the tab's validated startup URL, matching kNewTab.
     CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
         this, CefString(StartupUrlForTab(tab)), CefBrowserSettings(), nullptr,
         active_space().request_context(), this);
     tab.SetBrowserView(browser_view);
+    if (waking) {
+        sleep_policy_.Touch(tab.id(), TabSleepPolicy::Clock::now());
+        UpdateChromeCollections();
+    }
     return true;
 }
 
@@ -2813,7 +3021,8 @@ void BrowserWindow::UpdateChromeCollections() {
         tabs.push_back({.title = page_title.empty() ? "Island" : page_title,
                         .active = active != nullptr && tab.id() == active->id(),
                         .pinned = tab.pinned(),
-                        .favicon = tab.favicon()});
+                        .favicon = tab.favicon(),
+                        .sleeping = tab.sleeping()});
     }
     std::vector<SpaceSwitcherEntrySnapshot> spaces;
     spaces.reserve(spaces_.size());
@@ -2901,6 +3110,9 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     if (welcome_ != nullptr) {
         welcome_->ApplyTheme(tokens);
     }
+    if (peek_ != nullptr) {
+        peek_->ApplyTheme(tokens);
+    }
     chrome_snapshot_.theme = theme;
     ApplySidebarState();
     PublishChromeSnapshot();
@@ -2929,6 +3141,10 @@ void BrowserWindow::DetachChromeAndObservers() {
         space_rename_overlay_->Detach();
         space_rename_overlay_.reset();
     }
+    if (peek_ != nullptr) {
+        peek_->Detach();
+        peek_.reset();
+    }
     Tab* tab = active_tab();
     if (tab != nullptr) {
         tab->navigation_state().SetObserver(nullptr);
@@ -2954,6 +3170,227 @@ CefRefPtr<CefBrowser> BrowserWindow::ActiveBrowser() {
     CEF_REQUIRE_UI_THREAD();
     const Tab* tab = active_tab();
     return closing_ || tab == nullptr ? nullptr : tab->browser();
+}
+
+Tab* BrowserWindow::FindTabById(TabId id) noexcept {
+    for (Space& space : spaces_) {
+        if (Tab* tab = space.FindTab(id)) {
+            return tab;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<TabSleepInput> BrowserWindow::CollectSleepInputs() const {
+    std::vector<TabSleepInput> inputs;
+    for (std::size_t space_index = 0; space_index < spaces_.size(); ++space_index) {
+        const Space& space = spaces_[space_index];
+        const bool space_shown = space_index == active_space_index_;
+        for (const Tab& tab : space.tabs()) {
+            TabSleepInput input;
+            input.id = tab.id();
+            input.active =
+                space_shown && space.has_active_tab() && space.active_tab_id() == tab.id();
+            input.pinned = tab.pinned();
+            input.split_partner = space.split().has_value() && (space.split()->first == tab.id() ||
+                                                                space.split()->second == tab.id());
+            input.sleeping = tab.sleeping();
+            input.has_browser = tab.browser() != nullptr;
+            input.web_page = !WebUrlOf(tab).empty();
+            inputs.push_back(input);
+        }
+    }
+    return inputs;
+}
+
+void BrowserWindow::TouchActiveTabs() {
+    if (spaces_.empty() || active_space_index_ >= spaces_.size()) {
+        return;
+    }
+    const TabSleepPolicy::Clock::time_point now = TabSleepPolicy::Clock::now();
+    const Space& space = active_space();
+    if (space.has_active_tab()) {
+        sleep_policy_.Touch(space.active_tab_id(), now);
+    }
+    if (space.split().has_value()) {
+        sleep_policy_.Touch(space.split()->first, now);
+        sleep_policy_.Touch(space.split()->second, now);
+    }
+}
+
+bool BrowserWindow::SetTabSleepMinutes(int minutes) {
+    if (!IsValidTabSleepMinutes(minutes)) {
+        return false;
+    }
+    prefs_.tab_sleep_minutes = minutes;
+    sleep_policy_.SetMinutes(minutes);
+    SavePrefs();
+    return true;
+}
+
+std::size_t BrowserWindow::sleeping_tab_count() const {
+    std::size_t count = 0;
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            count += tab.sleeping() ? 1U : 0U;
+        }
+    }
+    return count;
+}
+
+void BrowserWindow::ScheduleSleepTick() {
+    if (sleep_tick_scheduled_ || closing_) {
+        return;
+    }
+    sleep_tick_scheduled_ = true;
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(&BrowserWindow::RunSleepTick,
+                                                           CefRefPtr<BrowserWindow>(this))),
+                       kSleepTickMs);
+}
+
+void BrowserWindow::RunSleepTick() {
+    CEF_REQUIRE_UI_THREAD();
+    sleep_tick_scheduled_ = false;
+    if (closing_) {
+        return;
+    }
+    const TabSleepPolicy::Clock::time_point now = TabSleepPolicy::Clock::now();
+    TouchActiveTabs();
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            sleep_policy_.Observe(tab.id(), now);
+        }
+    }
+    for (const TabId id : sleep_policy_.Expired(CollectSleepInputs(), now)) {
+        if (Tab* tab = FindTabById(id)) {
+            static_cast<void>(BeginSleepProbe(*tab));
+        }
+    }
+    ScheduleSleepTick();
+}
+
+std::size_t BrowserWindow::SleepInactiveTabsNow() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return 0;
+    }
+    std::size_t started = 0;
+    for (const TabId id : sleep_policy_.AllEligible(CollectSleepInputs())) {
+        Tab* tab = FindTabById(id);
+        if (tab != nullptr && BeginSleepProbe(*tab)) {
+            ++started;
+        }
+    }
+    return started;
+}
+
+bool BrowserWindow::BeginSleepProbe(Tab& tab) {
+    const CefRefPtr<CefBrowser> browser = tab.browser();
+    const CefRefPtr<CefFrame> frame = browser != nullptr ? browser->GetMainFrame() : nullptr;
+    if (frame == nullptr) {
+        return false;
+    }
+    for (const auto& [token, probe] : sleep_probes_) {
+        if (probe.tab == tab.id()) {
+            return false;  // already asking
+        }
+    }
+    const std::string token = RandomHexToken();
+    sleep_probes_[token] = {.tab = tab.id(), .browser_id = browser->GetIdentifier()};
+    frame->ExecuteJavaScript(SleepProbeScript(token), frame->GetURL(), 0);
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(&BrowserWindow::ExpireSleepProbe,
+                                                           CefRefPtr<BrowserWindow>(this), token)),
+                       kSleepProbeTimeoutMs);
+    return true;
+}
+
+void BrowserWindow::ExpireSleepProbe(const std::string& token) {
+    // A page that did not answer in time is busy or hostile: it stays awake this round.
+    sleep_probes_.erase(token);
+}
+
+bool BrowserWindow::HandleSleepProbeMessage(CefRefPtr<CefBrowser> browser,
+                                            const std::string& text) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::size_t token_end = text.find(':', kSleepProbePrefix.size());
+    if (token_end == std::string::npos || browser == nullptr) {
+        return true;
+    }
+    const std::string token =
+        text.substr(kSleepProbePrefix.size(), token_end - kSleepProbePrefix.size());
+    const auto found = sleep_probes_.find(token);
+    if (found == sleep_probes_.end() || found->second.browser_id != browser->GetIdentifier()) {
+        return true;  // unknown token or a different browser: ignore
+    }
+    const SleepProbe probe = found->second;
+    sleep_probes_.erase(found);
+
+    double fields[4] = {0.0, 0.0, 0.0, 0.0};
+    const char* cursor = text.c_str() + token_end + 1;
+    for (double& field : fields) {
+        char* end = nullptr;
+        field = std::strtod(cursor, &end);
+        if (end == cursor) {
+            return true;
+        }
+        cursor = *end == ',' ? end + 1 : end;
+    }
+    if (fields[2] != 0.0 || fields[3] != 0.0) {
+        return true;  // unsaved input or playing media: skip this round
+    }
+    // The tab may have been selected, split or closed while the probe was in flight.
+    for (const TabSleepInput& input : CollectSleepInputs()) {
+        if (input.id == probe.tab) {
+            if (sleep_policy_.Eligible(input)) {
+                static_cast<void>(SleepTab(probe.tab, fields[0], fields[1]));
+            }
+            break;
+        }
+    }
+    return true;
+}
+
+bool BrowserWindow::SleepTab(TabId id, double scroll_x, double scroll_y) {
+    CEF_REQUIRE_UI_THREAD();
+    Tab* tab = FindTabById(id);
+    if (closing_ || tab == nullptr || tab->sleeping()) {
+        return false;
+    }
+    const Space& active = active_space();
+    if (active.has_active_tab() && active.active_tab_id() == id) {
+        return false;  // the page on screen never sleeps
+    }
+    const std::string url = WebUrlOf(*tab);
+    if (url.empty()) {
+        return false;
+    }
+    // The model keeps the committed page as the tab's startup URL (the same URL session save
+    // writes) and the scroll offset; title, favicon and navigation snapshot stay as they are.
+    tab->SetStartupUrl(url);
+    tab->SetSavedScroll(scroll_x, scroll_y);
+    tab->SetSleeping(true);
+    // Order matters: OnBrowserDestroyed tears the chrome down for any browser it can still map
+    // to a tab, so the tab forgets the browser and view before the close is requested.
+    const CefRefPtr<CefBrowser> browser = tab->browser();
+    tab->SetBrowser(nullptr);
+    tab->SetBrowserView(nullptr);
+    if (browser != nullptr) {
+        sleep_closing_browser_ids_.insert(browser->GetIdentifier());
+        browser->GetHost()->CloseBrowser(true);
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
+void BrowserWindow::RestoreSavedScroll(Tab& tab, CefRefPtr<CefFrame> frame) {
+    if (!tab.has_saved_scroll() || tab.sleeping() || frame == nullptr) {
+        return;
+    }
+    frame->ExecuteJavaScript(ScrollRestoreScript(tab.saved_scroll_x(), tab.saved_scroll_y()),
+                             frame->GetURL(), 0);
+    tab.ClearSavedScroll();
 }
 
 void BrowserWindow::OnSearchPaletteSubmitted(const SearchSubmission& submission) {
@@ -3035,7 +3472,10 @@ void BrowserWindow::ShowCommandPalette() {
             bookmarks.push_back({.title = item.title, .url = item.url});
         }
     }
-    command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks));
+    std::vector<PaletteCommandEntry> commands;
+    commands.push_back({.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"});
+    command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
+                           std::move(commands));
 }
 
 void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
@@ -3056,6 +3496,11 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             break;
         case PaletteEntryKind::kBookmark:
             OpenBookmark(selection.bookmark);
+            break;
+        case PaletteEntryKind::kCommand:
+            if (selection.command.id == "sleep_inactive_tabs") {
+                static_cast<void>(SleepInactiveTabsNow());
+            }
             break;
     }
     FocusBrowserView();

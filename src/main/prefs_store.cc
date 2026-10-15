@@ -11,6 +11,7 @@
 
 #include "agent_providers.h"
 #include "json_util.h"
+#include "tab_sleep_policy.h"
 
 namespace island {
 namespace {
@@ -92,6 +93,13 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             *field = value->string_val;
         }
     }
+    if (const json::Value* sleep_minutes = root.FindMember("tab_sleep_minutes")) {
+        if (!sleep_minutes->IsInt()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        state.tab_sleep_minutes =
+            NormalizeTabSleepMinutes(static_cast<int>(sleep_minutes->int_val));
+    }
     if (const json::Value* last_check = root.FindMember("last_update_check")) {
         if (!last_check->IsInt()) {
             return Fail(PrefsError::kSchemaError);
@@ -137,6 +145,8 @@ std::string SerializeToJson(const PrefsState& state) {
     w.BoolValue(state.include_prereleases);
     w.Key("search_engine");
     w.StringValue(state.search_engine);
+    w.Key("tab_sleep_minutes");
+    w.IntValue(state.tab_sleep_minutes);
     w.Key("start_mode");
     w.StringValue(state.start_mode);
     if (state.last_update_check != 0) {

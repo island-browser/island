@@ -445,6 +445,46 @@ TEST(BrowserWindowPagesTest, AddressBarSearchesInsteadOfRejectingNonUrls) {
     EXPECT_EQ(search->FindMember("engines")->array_val.size(), 3U);
 }
 
+TEST(BrowserWindowPagesTest, SettingsChoosesTheTabSleepTimeoutAmongTheOfferedValues) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_EQ(window->tab_sleep_minutes(), 30);
+
+    SendSettings(*window, R"({"type":"set_tab_sleep","minutes":15})");
+    EXPECT_EQ(window->tab_sleep_minutes(), 15);
+    SendSettings(*window, R"({"type":"set_tab_sleep","minutes":7})");
+    EXPECT_EQ(window->tab_sleep_minutes(), 15);
+    SendSettings(*window, R"({"type":"set_tab_sleep","minutes":0})");
+    EXPECT_EQ(window->tab_sleep_minutes(), 0);
+
+    const std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    const Value* tabs = state->FindMember("settings")->FindMember("tabs");
+    ASSERT_NE(tabs, nullptr);
+    EXPECT_EQ(tabs->IntOr("sleep_minutes", -1), 0);
+}
+
+TEST(BrowserWindowPagesTest, ASleepingTabKeepsItsPageAndTheActiveTabNeverSleeps) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->OpenNewTab("https://example.com/a"));
+    ASSERT_TRUE(window->OpenNewTab("https://example.com/b"));
+    const Space& space = window->spaces().front();
+    ASSERT_EQ(space.tab_count(), 3U);
+    const TabId first = space.tabs()[0].id();
+    const TabId active = space.active_tab_id();
+    EXPECT_EQ(window->sleeping_tab_count(), 0U);
+
+    // The tab on screen is refused; a background tab sleeps and keeps its URL.
+    EXPECT_FALSE(window->SleepTab(active));
+    EXPECT_TRUE(window->SleepTab(space.tabs()[1].id(), 0.0, 320.0));
+    EXPECT_EQ(window->sleeping_tab_count(), 1U);
+    const Tab& slept = window->spaces().front().tabs()[1];
+    EXPECT_TRUE(slept.sleeping());
+    EXPECT_EQ(slept.startup_url(), "https://example.com/a");
+    EXPECT_DOUBLE_EQ(slept.saved_scroll_y(), 320.0);
+    EXPECT_FALSE(window->SleepTab(slept.id()));  // already asleep
+    EXPECT_FALSE(window->SleepTab(first));       // never loaded a page: nothing to come back to
+    EXPECT_EQ(window->sleeping_tab_count(), 1U);
+}
+
 TEST(BrowserWindowPagesTest, TheStartPageRemembersItsModeAndStatesTheEngine) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     EXPECT_EQ(window->start_mode(), "search");

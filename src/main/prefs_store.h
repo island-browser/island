@@ -50,6 +50,9 @@ struct PrefsState {
     // values are resolved to the defaults where they are read.
     std::string search_engine = "google";
     std::string start_mode = "search";
+    // Minutes of inactivity before a background tab releases its browser (0 = never; see
+    // tab_sleep_policy.h). Optional key; a value that is not one of 0/15/30/60 means the default.
+    int tab_sleep_minutes = 30;
 
     bool operator==(const PrefsState&) const = default;
 };

@@ -105,13 +105,24 @@ std::vector<PaletteEntry> ComposePaletteResults(
     std::string_view query, const std::vector<PaletteTabEntry>& tabs,
     const std::vector<PaletteSpaceEntry>& spaces,
     const std::vector<PaletteBookmarkEntry>& bookmarks) {
+    return ComposePaletteResults(query, tabs, spaces, bookmarks, {});
+}
+
+std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
+                                                const std::vector<PaletteTabEntry>& tabs,
+                                                const std::vector<PaletteSpaceEntry>& spaces,
+                                                const std::vector<PaletteBookmarkEntry>& bookmarks,
+                                                const std::vector<PaletteCommandEntry>& commands) {
     std::vector<PaletteEntry> canonical;
-    canonical.reserve(tabs.size() + spaces.size() + bookmarks.size() + 1U);
+    canonical.reserve(tabs.size() + spaces.size() + commands.size() + bookmarks.size() + 1U);
     for (const PaletteTabEntry& tab : tabs) {
         canonical.push_back({.kind = PaletteEntryKind::kTab, .tab = tab});
     }
     for (const PaletteSpaceEntry& space : spaces) {
         canonical.push_back({.kind = PaletteEntryKind::kSpace, .space = space});
+    }
+    for (const PaletteCommandEntry& command : commands) {
+        canonical.push_back({.kind = PaletteEntryKind::kCommand, .command = command});
     }
     for (const PaletteBookmarkEntry& bookmark : bookmarks) {
         canonical.push_back({.kind = PaletteEntryKind::kBookmark, .bookmark = bookmark});
@@ -139,6 +150,9 @@ std::vector<PaletteEntry> ComposePaletteResults(
                 break;
             case PaletteEntryKind::kBookmark:
                 rank = RankBookmarkEntry(entry.bookmark, query);
+                break;
+            case PaletteEntryKind::kCommand:
+                rank = ClassifyPaletteMatch(entry.command.title, query);
                 break;
             case PaletteEntryKind::kSpace:
             case PaletteEntryKind::kUrl:
@@ -228,8 +242,13 @@ void CommandPaletteModel::SetBookmarks(std::vector<PaletteBookmarkEntry> bookmar
     highlighted_index_ = 0;
 }
 
+void CommandPaletteModel::SetCommands(std::vector<PaletteCommandEntry> commands) {
+    commands_ = std::move(commands);
+    highlighted_index_ = 0;
+}
+
 std::vector<PaletteEntry> CommandPaletteModel::Results() const {
-    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_);
+    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, commands_);
 }
 
 std::optional<PaletteSelection> CommandPaletteModel::Submit() {
@@ -263,6 +282,8 @@ std::optional<PaletteSelection> CommandPaletteModel::Submit() {
         selection.tab = entry.tab;
     } else if (entry.kind == PaletteEntryKind::kBookmark) {
         selection.bookmark = entry.bookmark;
+    } else if (entry.kind == PaletteEntryKind::kCommand) {
+        selection.command = entry.command;
     } else {
         selection.space = entry.space;
     }

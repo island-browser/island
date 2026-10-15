@@ -8,6 +8,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "active_tab_provider.h"
@@ -31,6 +33,7 @@
 #include "keymap.h"
 #include "local_page.h"
 #include "navigation_state.h"
+#include "peek_overlay.h"
 #include "prefs_store.h"
 #include "search_engine.h"
 #include "search_palette.h"
@@ -38,6 +41,7 @@
 #include "space.h"
 #include "space_rename_overlay.h"
 #include "tab.h"
+#include "tab_sleep_policy.h"
 #include "updater.h"
 #include "welcome_flow.h"
 
@@ -70,6 +74,8 @@ class BrowserWindow : public CefClient,
                       public CefDownloadHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
+                      public CefRequestHandler,
+                      public CefContextMenuHandler,
                       public CefWindowDelegate,
                       public CefBrowserViewDelegate,
                       public BrowserChromeHost,
@@ -77,6 +83,7 @@ class BrowserWindow : public CefClient,
                       public SearchPaletteHost,
                       public CommandPaletteHost,
                       public SpaceRenameOverlayHost,
+                      public PeekOverlayHost,
                       public WelcomeFlowHost,
                       public LocalPageDelegate,
                       public NavigationObserver {
@@ -267,6 +274,25 @@ class BrowserWindow : public CefClient,
 
     // Welcome flow (first-run import + appearance). ShowWelcomeFlow is a
     // no-op without a window, like the palette seams.
+    // Tab sleep (see tab_sleep_policy.h). SleepInactiveTabsNow probes every tab the policy
+    // allows to sleep right now and closes the ones whose page says they are idle (no unsaved
+    // input, no playing media); it returns how many probes started. The timed sweep runs the
+    // same path for tabs idle past the Settings timeout.
+    std::size_t SleepInactiveTabsNow();
+    // Puts |id| to sleep unconditionally (exclusions are the caller's job): the model keeps
+    // its URL, title and favicon, the browser and view are released. False when it cannot.
+    bool SleepTab(TabId id, double scroll_x = 0.0, double scroll_y = 0.0);
+    [[nodiscard]] std::size_t sleeping_tab_count() const;
+    [[nodiscard]] int tab_sleep_minutes() const noexcept { return prefs_.tab_sleep_minutes; }
+    bool SetTabSleepMinutes(int minutes);
+
+    // Peek (Little Arc): a floating card with its own browser over the current page.
+    // OpenPeek validates |url| like any address and replaces an open peek's page.
+    bool OpenPeek(std::string_view url);
+    void ClosePeek();
+    [[nodiscard]] bool peek_open() const noexcept { return peek_ != nullptr && peek_->open(); }
+    [[nodiscard]] const PeekOverlay* peek() const noexcept { return peek_.get(); }
+
     void ShowWelcomeFlow();
     // False while closing; a real change persists prefs and re-applies theme.
     bool SetThemePreference(ThemePreference preference);
@@ -332,6 +358,9 @@ class BrowserWindow : public CefClient,
     void OnSpaceRenameCommitted(std::string name) override;
     void OnSpaceRenameCancelled() override;
 
+    void OnPeekOpenAsTab(std::string url) override;
+    void OnPeekClosed() override;
+
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
 
@@ -339,6 +368,18 @@ class BrowserWindow : public CefClient,
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
     CefRefPtr<CefLoadHandler> GetLoadHandler() override;
+    CefRefPtr<CefRequestHandler> GetRequestHandler() override;
+    CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override;
+
+    bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                          const CefString& target_url, WindowOpenDisposition target_disposition,
+                          bool user_gesture) override;
+    void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                             CefRefPtr<CefContextMenuParams> params,
+                             CefRefPtr<CefMenuModel> model) override;
+    bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                              CefRefPtr<CefContextMenuParams> params, int command_id,
+                              EventFlags event_flags) override;
 
     void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                          const CefString& url) override;
@@ -541,6 +582,24 @@ class BrowserWindow : public CefClient,
     // page, or address editing owns the keyboard.
     [[nodiscard]] bool OverlayShown() const noexcept;
 
+    // Tab sleep internals.
+    struct SleepProbe {
+        TabId tab;
+        int browser_id = 0;
+    };
+    [[nodiscard]] std::vector<TabSleepInput> CollectSleepInputs() const;
+    [[nodiscard]] Tab* FindTabById(TabId id) noexcept;
+    bool BeginSleepProbe(Tab& tab);
+    void ExpireSleepProbe(const std::string& token);
+    bool HandleSleepProbeMessage(CefRefPtr<CefBrowser> browser, const std::string& text);
+    void ScheduleSleepTick();
+    void RunSleepTick();
+    void TouchActiveTabs();
+    void RestoreSavedScroll(Tab& tab, CefRefPtr<CefFrame> frame);
+    void DeferPeek(const std::string& url);
+    [[nodiscard]] PeekOverlay& EnsurePeek();
+    [[nodiscard]] bool IsPeekLinkSource(CefRefPtr<CefBrowser> browser) const;
+
     std::string initial_url_;
     mutable std::string start_page_url_;
     AddressBarModel address_bar_model_;
@@ -548,6 +607,13 @@ class BrowserWindow : public CefClient,
     std::unique_ptr<SearchPalette> search_palette_;
     std::unique_ptr<CommandPaletteView> command_palette_;
     std::unique_ptr<SpaceRenameOverlay> space_rename_overlay_;
+    std::unique_ptr<PeekOverlay> peek_;
+    TabSleepPolicy sleep_policy_;
+    std::unordered_map<std::string, SleepProbe> sleep_probes_;
+    // Identifiers of browsers closed on purpose for tab sleep: their OnBeforeClose is neither
+    // a tab teardown nor, during shutdown, the window's final close.
+    std::unordered_set<int> sleep_closing_browser_ids_;
+    bool sleep_tick_scheduled_ = false;
     SidebarState sidebar_state_;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
