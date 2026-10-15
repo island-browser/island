@@ -2,21 +2,31 @@
 
 ## Current state
 
-- Phases 1–3 are landing unit-by-unit on top of the Phase 0 infrastructure: the app opens one
-  native CEF window with a `CefBrowserView` content slot, starts from deterministic local `data:`
-  pages (or a clean-quit-restored session), and supports back/forward/reload, tabs and spaces (tab
-  strip, space switcher, rename via F2/menu, reorder via menu), split view (`Cmd/Ctrl+Shift+S`
-  pairs the active tab with its adjacent tab; the divider is keyboard-adjustable), the command
-  palette on `Cmd/Ctrl+K`, the search palette on `Cmd/Ctrl+Shift+K`, the hideable sidebar
-  (`Cmd/Ctrl+B` everywhere collapses it to a 52 DIP icon rail of tab favicons; no hover reveal), popup rejection, and shutdown through the
-  CEF close lifecycle. Phase 3 units U4/U5, U6, U7, and U8 have landed; U9's locally completable
-  part is done (workflows audited, docs updated — the green CI/package runs land with the next
-  push), U11's clean-checkout regression is green locally (fresh configure/build, 242 default +
-  150 search + 361 combined ctest, pytest, smoke run), and U10 (manual/visual acceptance) remains
-  outstanding — it needs a human with display access per docs/phase3-visual-acceptance.md. Documented deviations: on macOS `CefWindow::SetAccelerator` never dispatches (the
-  NSMenu owns the command keys), and the split divider is not drag-adjustable because the pinned
-  CEF distribution exposes no mouse events on custom views — the divider moves through the menu
-  items and `kMoveDividerLeft/Right` commands instead.
+- Island 0.6.0 through 0.6.2 shipped on 2026-10-15 as **unsigned GitHub prereleases**. The
+  shipped feature set: Alloy runtime style (the Chrome style crashed on deactivate/close, and Island
+  handles downloads itself); `--use-mock-keychain` in the app and the CEF test harness; overlays
+  that exist only while shown (`src/main/overlay_lifetime.h`, because a live `CefWindow` overlay
+  blocks all mouse input on macOS); tabs and spaces (tab strip, space switcher, rename via F2/menu,
+  reorder via menu); split view (`Cmd/Ctrl+Shift+S` pairs the active tab with its adjacent tab; the
+  divider is keyboard-adjustable); keyboard shortcuts; the command palette on `Cmd/Ctrl+K` and the
+  search palette on `Cmd/Ctrl+Shift+K`; a hideable sidebar (`Cmd/Ctrl+B` collapses it to a 52 DIP
+  icon rail of tab favicons; no hover reveal); popup rejection; shutdown through the CEF close
+  lifecycle; a search start page with Search / Ask agent / Research modes and Markdown agent
+  replies; Research mode with Report tabs; developer capture flags
+  (`--island-dev-actions`, `--island-dev-capture`, `--island-dev-delay`); native ad and tracker
+  blocking on Brave's Rust `adblock` engine (building it needs a Rust toolchain); on-device history
+  search; tab sleep and the Peek card (see `src/main/AGENTS.md`); Reader view and find in page
+  (`Cmd/Ctrl+F`).
+- Documented macOS deviations: `CefWindow::SetAccelerator` never dispatches (the NSMenu owns the
+  command keys), and the split divider is not drag-adjustable because the pinned CEF distribution
+  exposes no mouse events on custom views; the divider moves through the menu items and
+  `kMoveDividerLeft/Right` commands instead.
+- Phase 3 U10 (manual/visual acceptance) remains outstanding; it needs a human with display access
+  per `docs/phase3-visual-acceptance.md`.
+- Browser-store extensions are out of scope. They only work in CEF's Chrome runtime style, and
+  Island uses Alloy.
+- An Arc-style redesign is parked on branch `release/design` for a later release. Its style is
+  being chosen from design mockups and is not implemented yet.
 - Read `docs/superpowers/specs/2026-08-09-island-browser-phase3-design.md` and
   `docs/superpowers/plans/2026-08-09-island-browser-phase3.md` (plus the 2026-08-12 sidebar/palette
   spec and plan) before implementing anything. The Phase 0/1/2 design and plan documents remain
@@ -54,6 +64,9 @@
   `## [Unreleased]` in `CHANGELOG.md` as you land changes, and run
   `python3 scripts/version.py check` before committing version changes. A `VERSION` change
   on `main` is tagged `vX.Y.Z` by `version-tag.yml`.
+  Every release goes through a PR that also bumps `VERSION`. Once `vX.Y.Z` is tagged, a follow-up
+  fix needs a new patch version, because the release workflow only publishes `vX.Y.Z` for the
+  tagged commit. Merging PRs is done by the project owner.
 - The product site moved to its own repository, `island-browser/site` (served at
   https://island-browser.github.io/site/), on 2026-10-06 at the project owner's request. Its build
   reads `VERSION` and `CHANGELOG.md` from this repository's `main` (with its `ISLAND_READ_TOKEN`
@@ -66,6 +79,9 @@
   `tests/container/`) is present on `main`.
 
 ## Phase 1 contract
+
+Historical: this section describes Phase 1 only. The current feature set is under
+"Current state" above.
 
 - Island is a C++20 desktop browser built directly on CEF and native `cef_views`, not Electron or a
   web-based app shell. Phase 1 creates one top-level `CefWindow` with one `CefBrowserView`; there is
@@ -93,6 +109,16 @@
 - Use target-scoped CMake commands, not global `include_directories` or `link_libraries`.
 - Formatting is Google-based with 4-space indentation, 100-column lines, left-aligned pointers,
   and sorted includes; the plan adds the exact `.clang-format` before source code.
+
+## Cross-platform pitfalls
+
+- macOS clang accepts code that GCC and MSVC reject, so only the six-target CI run is evidence for
+  Linux and Windows.
+- GCC: `BrowserWindow` inherits several CEF handlers that each declare the same typedef (for
+  example `WindowOpenDisposition` in both `CefLifeSpanHandler` and `CefRequestHandler`), so
+  unqualified use is ambiguous. Use the C enum type (`cef_window_open_disposition_t`) or qualify it.
+- MSVC: sources are compiled with `/utf-8` (PUBLIC on `island_browser_core`, PRIVATE on
+  `island_tests`); any new target with non-ASCII literals needs the same option.
 
 ## Verification
 
