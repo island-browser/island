@@ -115,8 +115,8 @@ class PeekOverlay::Client final : public CefClient,
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
 
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int,
-                       const CefString& target_url, const CefString&, WindowOpenDisposition, bool,
-                       const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
+                       const CefString& target_url, const CefString&, cef_window_open_disposition_t,
+                       bool, const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
                        CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override {
         CEF_REQUIRE_UI_THREAD();
         const std::string url = target_url.ToString();

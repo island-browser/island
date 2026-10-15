@@ -61,7 +61,7 @@ class LocalPage::Client final : public CefClient,
 
     // CefLifeSpanHandler
     bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int, const CefString& target_url,
-                       const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool,
+                       const CefString&, cef_window_open_disposition_t, bool,
                        const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
                        CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override {
         ForwardLink(target_url.ToString());
