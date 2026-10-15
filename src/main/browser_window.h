@@ -475,7 +475,8 @@ class BrowserWindow : public CefClient,
     void FlushLocalPagesRender();
     void HandleAgentPageMessage(const json::Value& message);
     // The panel's "send" path, shared by the start page's Ask agent mode.
-    void SubmitAgentPrompt(std::string text, bool include_context);
+    // Returns false when the session refused the turn (it is busy with another one).
+    bool SubmitAgentPrompt(std::string text, bool include_context);
     // Pushes StartPageStateJson to every tab currently showing the start page.
     void RenderStartPages();
     void HandleSettingsMessage(const json::Value& message);

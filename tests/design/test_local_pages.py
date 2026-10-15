@@ -122,6 +122,15 @@ class StartPage(unittest.TestCase):
         self.assertIn(">Search</button>", self.html)
         self.assertIn(">Ask agent</button>", self.html)
 
+    def test_keeps_the_prompt_until_the_agent_accepts_it(self) -> None:
+        # A busy agent refuses the turn; the page must say so instead of
+        # clearing the input and claiming it was sent.
+        self.assertIn("window.islandAgentResult = function (sent)", self.html)
+        self.assertIn("The agent is busy", self.html)
+        submit = self.html[self.html.index("function submit()") :]
+        submit = submit[: submit.index("render();")]
+        self.assertNotIn('input.value = ""', submit)
+
     def test_posts_the_documented_bridge_messages(self) -> None:
         for message in ('type: "search"', 'type: "ask_agent"', 'type: "set_start_mode"'):
             self.assertIn(message, self.html)

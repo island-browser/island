@@ -1579,11 +1579,12 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
     ScheduleLocalPagesRender();
 }
 
-void BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
+bool BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
     EnsureAgentSession();
     const std::string context = include_context ? ActiveTabAgentContext() : std::string();
-    static_cast<void>(agent_session_->Send(std::move(text), context));
+    const bool sent = agent_session_->Send(std::move(text), context);
     ScheduleLocalPagesRender();
+    return sent;
 }
 
 std::string BrowserWindow::StartPageStateJson() const {
@@ -1683,7 +1684,16 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
         remember_mode(kStartModeAgent);
         // The same path as typing in the panel: open it, then send the turn.
         SetAgentPanelOpen(true);
-        SubmitAgentPrompt(std::string(prompt), /*include_context=*/true);
+        const bool sent = SubmitAgentPrompt(std::string(prompt), /*include_context=*/true);
+        // Tell the page whether the agent took the task, so a busy agent never
+        // silently swallows what the user typed.
+        const CefRefPtr<CefFrame> frame = source != nullptr ? source->GetMainFrame() : nullptr;
+        if (frame != nullptr) {
+            frame->ExecuteJavaScript(
+                std::string("window.islandAgentResult&&window.islandAgentResult(") +
+                    (sent ? "true" : "false") + ")",
+                StartPageUrl(), 0);
+        }
     }
 }
 

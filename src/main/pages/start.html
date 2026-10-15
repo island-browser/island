@@ -121,9 +121,9 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     var text = input.value.trim();
     if (!text) return;
     if (state.mode === "agent") {
+      // The text stays until Island confirms the agent took it (islandAgentResult).
       post({ type: "ask_agent", prompt: text });
-      input.value = "";
-      note.textContent = "Sent to the agent. Follow along in the agent panel.";
+      note.textContent = "Sending to the agent...";
     } else {
       post({ type: "search", query: text });
     }
@@ -167,6 +167,15 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     render();
   };
   window.islandFocus = function () { input.focus(); };
+  window.islandAgentResult = function (sent) {
+    if (sent) {
+      input.value = "";
+      note.textContent = "Sent to the agent. Follow along in the agent panel.";
+    } else {
+      note.textContent = "The agent is busy with another task. Try again when it finishes.";
+    }
+    render();
+  };
 
   render();
   input.focus();
