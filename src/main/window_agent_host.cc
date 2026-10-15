@@ -20,6 +20,12 @@ namespace island {
 
 namespace {
 
+// Island's own pages (start page, reports) are base64 data: documents; the
+// agent gets a short stand-in instead of the blob.
+std::string AgentVisibleUrl(const std::string& url) {
+    return url.rfind("data:", 0) == 0 ? std::string("island://local-page") : url;
+}
+
 void RunIfAlive(std::shared_ptr<WindowAgentHost::Guard> guard, std::function<void()> task) {
     CEF_REQUIRE_UI_THREAD();
     if (guard->host != nullptr && task) task();
@@ -109,7 +115,7 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
         tabs.push_back({.index = index,
                         .title = nav.page_title.empty() ? std::string("New Tab") : nav.page_title,
-                        .url = nav.url.empty() ? tab.startup_url() : nav.url,
+                        .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
                         .active = space.has_active_tab() && index == space.active_tab_index(),
                         .loading = nav.load_phase == LoadPhase::kLoading,
                         .pinned = tab.pinned()});

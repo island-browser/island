@@ -106,6 +106,7 @@ void AgentTranscript::Apply(const AcpEvent& event) {
                   .options = event.options});
             return;
         case AcpEvent::Type::kTurnEnded:
+            NoteTurnEnded(event.text.empty() ? "end_turn" : event.text);
             CancelOpenPermissions();
             if (event.text == "cancelled") {
                 AddNotice("Stopped.");
@@ -118,6 +119,7 @@ void AgentTranscript::Apply(const AcpEvent& event) {
         case AcpEvent::Type::kError:
             // A failed turn (or a dead agent) will never answer open prompts.
             CancelOpenPermissions();
+            NoteTurnEnded("error");
             Push({.kind = Kind::kError, .text = event.text});
             return;
         case AcpEvent::Type::kStateChanged:
@@ -143,6 +145,11 @@ void AgentTranscript::CancelOpenPermissions() {
             ++revision_;
         }
     }
+}
+
+void AgentTranscript::NoteTurnEnded(std::string reason) {
+    ++turns_ended_;
+    last_turn_end_ = std::move(reason);
 }
 
 void AgentTranscript::Clear() {

@@ -122,16 +122,35 @@ list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 
 # Embed the built-in pages (src/main/pages/*.html) as byte arrays (string
-# literals hit MSVC's length limit). Reconfigures when a page changes.
+# literals hit MSVC's length limit). Reconfigures when a page changes. A page
+# may carry the line "// @@ISLAND_MARKDOWN@@": it is replaced by the shared safe
+# Markdown renderer in src/main/pages/markdown.js (pages cannot load scripts, so
+# the module is inlined here, once per page that renders agent text).
+set(ISLAND_MARKDOWN_JS "${CMAKE_SOURCE_DIR}/src/main/pages/markdown.js")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ISLAND_MARKDOWN_JS}")
+file(READ "${ISLAND_MARKDOWN_JS}" ISLAND_MARKDOWN_SOURCE)
+string(REGEX REPLACE "\n+$" "" ISLAND_MARKDOWN_SOURCE "${ISLAND_MARKDOWN_SOURCE}")
 set(ISLAND_LOCAL_PAGE_SOURCES)
 foreach(_island_page IN ITEMS "agent.html:AgentPageHtml" "settings.html:SettingsPageHtml"
-                              "tab_overview.html:TabOverviewPageHtml" "start.html:StartPageHtml")
+                              "tab_overview.html:TabOverviewPageHtml" "start.html:StartPageHtml"
+                              "report.html:ReportPageHtml")
     string(REPLACE ":" ";" _island_page "${_island_page}")
     list(GET _island_page 0 ISLAND_PAGE_FILE)
     list(GET _island_page 1 ISLAND_PAGE_FUNCTION)
     set(_island_page_html "${CMAKE_SOURCE_DIR}/src/main/pages/${ISLAND_PAGE_FILE}")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_island_page_html}")
-    file(READ "${_island_page_html}" _island_page_hex HEX)
+    file(READ "${_island_page_html}" _island_page_text)
+    string(REPLACE "  // @@ISLAND_MARKDOWN@@" "${ISLAND_MARKDOWN_SOURCE}" _island_page_text
+                   "${_island_page_text}")
+    set(_island_page_built "${CMAKE_BINARY_DIR}/generated/pages/${ISLAND_PAGE_FILE}")
+    set(_island_page_previous "")
+    if(EXISTS "${_island_page_built}")
+        file(READ "${_island_page_built}" _island_page_previous)
+    endif()
+    if(NOT _island_page_previous STREQUAL _island_page_text)
+        file(WRITE "${_island_page_built}" "${_island_page_text}")
+    endif()
+    file(READ "${_island_page_built}" _island_page_hex HEX)
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ISLAND_PAGE_BYTES "${_island_page_hex}")
     set(_island_page_cc "${CMAKE_BINARY_DIR}/generated/local_page_html_${ISLAND_PAGE_FUNCTION}.cc")
     configure_file("${CMAKE_SOURCE_DIR}/cmake/local_page_html.cc.in" "${_island_page_cc}" @ONLY)

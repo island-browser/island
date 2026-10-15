@@ -39,6 +39,10 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // and load an address in the active tab through the address bar's own submit path.
     void SetSidebarExpanded(bool expanded);
     void NavigateActiveTab(const std::string& address);
+    // `research:<question>` starts a Research task as the start page does;
+    // `open_report` opens the newest report in a new tab.
+    void StartResearch(const std::string& question);
+    void OpenNewestReport();
     void ToggleAgentPanel();
     void ToggleSettings();
     void ToggleTabOverview();

@@ -64,6 +64,11 @@ PaletteMatchRank RankBookmarkEntry(const PaletteBookmarkEntry& bookmark, std::st
                     ClassifyPaletteMatch(bookmark.url, query));
 }
 
+PaletteMatchRank RankReportEntry(const PaletteReportEntry& report, std::string_view query) {
+    return std::min(ClassifyPaletteMatch(report.title, query),
+                    ClassifyPaletteMatch(report.question, query));
+}
+
 }  // namespace
 
 PaletteMatchRank ClassifyPaletteMatch(std::string_view candidate, std::string_view query) {
@@ -105,8 +110,16 @@ std::vector<PaletteEntry> ComposePaletteResults(
     std::string_view query, const std::vector<PaletteTabEntry>& tabs,
     const std::vector<PaletteSpaceEntry>& spaces,
     const std::vector<PaletteBookmarkEntry>& bookmarks) {
+    return ComposePaletteResults(query, tabs, spaces, bookmarks, {});
+}
+
+std::vector<PaletteEntry> ComposePaletteResults(
+    std::string_view query, const std::vector<PaletteTabEntry>& tabs,
+    const std::vector<PaletteSpaceEntry>& spaces,
+    const std::vector<PaletteBookmarkEntry>& bookmarks,
+    const std::vector<PaletteReportEntry>& reports) {
     std::vector<PaletteEntry> canonical;
-    canonical.reserve(tabs.size() + spaces.size() + bookmarks.size() + 1U);
+    canonical.reserve(tabs.size() + spaces.size() + bookmarks.size() + reports.size() + 1U);
     for (const PaletteTabEntry& tab : tabs) {
         canonical.push_back({.kind = PaletteEntryKind::kTab, .tab = tab});
     }
@@ -115,6 +128,9 @@ std::vector<PaletteEntry> ComposePaletteResults(
     }
     for (const PaletteBookmarkEntry& bookmark : bookmarks) {
         canonical.push_back({.kind = PaletteEntryKind::kBookmark, .bookmark = bookmark});
+    }
+    for (const PaletteReportEntry& report : reports) {
+        canonical.push_back({.kind = PaletteEntryKind::kReport, .report = report});
     }
 
     if (TrimAsciiWhitespace(query).empty()) {
@@ -139,6 +155,9 @@ std::vector<PaletteEntry> ComposePaletteResults(
                 break;
             case PaletteEntryKind::kBookmark:
                 rank = RankBookmarkEntry(entry.bookmark, query);
+                break;
+            case PaletteEntryKind::kReport:
+                rank = RankReportEntry(entry.report, query);
                 break;
             case PaletteEntryKind::kSpace:
             case PaletteEntryKind::kUrl:
@@ -228,8 +247,13 @@ void CommandPaletteModel::SetBookmarks(std::vector<PaletteBookmarkEntry> bookmar
     highlighted_index_ = 0;
 }
 
+void CommandPaletteModel::SetReports(std::vector<PaletteReportEntry> reports) {
+    reports_ = std::move(reports);
+    highlighted_index_ = 0;
+}
+
 std::vector<PaletteEntry> CommandPaletteModel::Results() const {
-    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_);
+    return ComposePaletteResults(query_, tabs_, spaces_, bookmarks_, reports_);
 }
 
 std::optional<PaletteSelection> CommandPaletteModel::Submit() {
@@ -263,6 +287,8 @@ std::optional<PaletteSelection> CommandPaletteModel::Submit() {
         selection.tab = entry.tab;
     } else if (entry.kind == PaletteEntryKind::kBookmark) {
         selection.bookmark = entry.bookmark;
+    } else if (entry.kind == PaletteEntryKind::kReport) {
+        selection.report = entry.report;
     } else {
         selection.space = entry.space;
     }

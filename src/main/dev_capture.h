@@ -8,7 +8,9 @@
 //   --island-dev-actions=welcome,theme:dark,command_palette
 //       Runs each action in order, a short pause apart, once the window is up.
 //       Besides the menu-backed names, `navigate:<address>` loads an address in the active
-//       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state.
+//       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state;
+//       `research:<question>` starts a Research task and `open_report` opens the
+//       newest stored report in a new tab.
 //   --island-dev-capture=/tmp/shot.png
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4

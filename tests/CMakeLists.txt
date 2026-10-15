@@ -36,6 +36,8 @@ add_executable(island_tests
     navigation_state_test.cpp
     overlay_lifetime_test.cpp
     prefs_store_test.cpp
+    report_store_test.cpp
+    research_prompt_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
@@ -60,6 +62,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/browser_window_research.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_address_parser.cc"
     "${CMAKE_SOURCE_DIR}/src/main/cef_update_fetcher.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
@@ -71,6 +74,8 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/report_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/research_prompt.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"

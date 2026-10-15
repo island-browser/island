@@ -147,7 +147,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     </button>
   </div>
   <nav aria-label="Sections">
-    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#agent">Agent &amp; tools</a>
+    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#agent">Agent &amp; tools</a><a href="#reports">Reports</a>
     <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
@@ -198,6 +198,12 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
         <span class="note" id="bridge-note"></span>
       </div>
     </div>
+  </section>
+
+  <section id="reports">
+    <h2>Reports</h2>
+    <p class="lead">Finished answers from Research mode on the start page. Open one to read it, copy it, save it, or continue it with the agent. Cmd/Ctrl+K finds them too.</p>
+    <div id="reports-list"></div>
   </section>
 
   <section id="shortcuts">
@@ -362,6 +368,30 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  function renderReports() {
+    var box = $("reports-list");
+    box.textContent = "";
+    var list = (state.settings.reports || []);
+    if (!list.length) {
+      box.appendChild(el("p", "note", "No reports yet. Switch the start page to Research and ask a question."));
+      return;
+    }
+    list.forEach(function (report) {
+      var row = el("div", "row");
+      var label = el("div", "label", report.title || "Report");
+      var when = report.created_ms ? new Date(report.created_ms).toLocaleString() : "";
+      label.appendChild(el("small", "", [report.question, when].filter(Boolean).join("  |  ")));
+      row.appendChild(label);
+      var open = el("button", "btn primary", "Open");
+      open.addEventListener("click", function () { post({ type: "open_report", id: report.id }); });
+      row.appendChild(open);
+      var remove = el("button", "btn quiet", "Delete");
+      remove.addEventListener("click", function () { post({ type: "delete_report", id: report.id }); });
+      row.appendChild(remove);
+      box.appendChild(row);
+    });
+  }
+
   var SOURCE_COLORS = { chrome: "#4285F4", edge: "#0C8A80", brave: "#FB542B", chromium: "#5C6BC0",
     vivaldi: "#EF3939", opera: "#E2242B", safari: "#1E88E5", firefox: "#FF7139", arc: "#7A5AF8" };
   function renderSources() {
@@ -515,6 +545,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("copy-config").disabled = !endpoint.config_json;
     $("bridge-note").textContent = endpoint.bridge_path ? "stdio bridge: " + endpoint.bridge_path : "";
     $("mac-note").hidden = !isMac();
+    renderReports();
     renderShortcuts();
     renderSources();
     renderUpdate();

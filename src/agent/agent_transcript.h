@@ -50,7 +50,16 @@ class AgentTranscript {
     // Marks every unanswered permission prompt as cancelled.
     void CancelOpenPermissions();
     void Clear();
+    // Records that a turn is over and why (an ACP stop reason such as
+    // "end_turn" or "cancelled", or "error"). Apply() calls this for turn-ended
+    // and error events; the session calls it when it drops a queued prompt.
+    void NoteTurnEnded(std::string reason);
 
+    // Turns that have ended since the transcript was created. Unlike the items
+    // this never resets, so a caller can snapshot it before sending a prompt and
+    // tell later whether that prompt's turn finished.
+    [[nodiscard]] std::uint64_t turns_ended() const noexcept { return turns_ended_; }
+    [[nodiscard]] const std::string& last_turn_end() const noexcept { return last_turn_end_; }
     [[nodiscard]] const std::vector<TranscriptItem>& items() const noexcept { return items_; }
     // Bumped on every change so the view can skip redundant re-renders.
     [[nodiscard]] std::uint64_t revision() const noexcept { return revision_; }
@@ -65,6 +74,8 @@ class AgentTranscript {
 
     std::vector<TranscriptItem> items_;
     std::uint64_t revision_ = 0;
+    std::uint64_t turns_ended_ = 0;
+    std::string last_turn_end_;
 };
 
 }  // namespace island::agent

@@ -109,7 +109,8 @@ TEST(LocalPageTest, AgentCommandResolutionPrefersTheEnvironment) {
 
 TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
     for (const LocalPageKind kind : {LocalPageKind::kAgent, LocalPageKind::kSettings,
-                                     LocalPageKind::kTabOverview, LocalPageKind::kStart}) {
+                                     LocalPageKind::kTabOverview, LocalPageKind::kStart,
+                                     LocalPageKind::kReport}) {
         const std::string html(LocalPageHtml(kind));
         EXPECT_EQ(html.rfind("<!doctype html>", 0), 0U);
         EXPECT_NE(html.find("window.islandRender = function"), std::string::npos);
@@ -122,6 +123,21 @@ TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
             EXPECT_LT(static_cast<unsigned char>(c), 0x80U);
             if (static_cast<unsigned char>(c) >= 0x80U) break;
         }
+    }
+}
+
+// The build inlines src/main/pages/markdown.js where a page carries the
+// placeholder line; the embedded pages must hold the renderer, not the marker.
+TEST(LocalPageTest, TheSharedMarkdownRendererIsInlinedIntoThePagesThatNeedIt) {
+    for (const LocalPageKind kind : {LocalPageKind::kAgent, LocalPageKind::kReport}) {
+        const std::string html(LocalPageHtml(kind));
+        EXPECT_NE(html.find("function islandMarkdown("), std::string::npos);
+        EXPECT_EQ(html.find("@@ISLAND_MARKDOWN@@"), std::string::npos);
+    }
+    for (const LocalPageKind kind :
+         {LocalPageKind::kSettings, LocalPageKind::kTabOverview, LocalPageKind::kStart}) {
+        EXPECT_EQ(std::string(LocalPageHtml(kind)).find("function islandMarkdown("),
+                  std::string::npos);
     }
 }
 

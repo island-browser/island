@@ -407,7 +407,8 @@ bool CaptureOwnWindows(const std::string& path) {
 }
 
 // Parameterized dev actions that have no menu item: `navigate:<address>` submits the address
-// the way the address bar does, `sidebar:expanded|collapsed` sets the persistent sidebar state.
+// the way the address bar does, `sidebar:expanded|collapsed` sets the persistent sidebar state,
+// `research:<question>` starts a Research task and `open_report` opens the newest report.
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -415,6 +416,15 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
     }
     if (action.compare(0, kNavigate.size(), kNavigate) == 0) {
         app->NavigateActiveTab(action.substr(kNavigate.size()));
+        return true;
+    }
+    constexpr std::string_view kResearch = "research:";
+    if (action.compare(0, kResearch.size(), kResearch) == 0) {
+        app->StartResearch(action.substr(kResearch.size()));
+        return true;
+    }
+    if (action == "open_report") {
+        app->OpenNewestReport();
         return true;
     }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {

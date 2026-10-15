@@ -46,11 +46,12 @@ struct SearchEngine {
 // "https://www.google.com/search?q=hello%20world".
 [[nodiscard]] std::string BuildSearchUrl(const SearchEngine& engine, std::string_view query);
 
-// What the start page's two-mode switch does with Enter, persisted as the
+// What the start page's three-mode switch does with Enter, persisted as the
 // last-used mode.
 inline constexpr std::string_view kStartModeSearch = "search";
 inline constexpr std::string_view kStartModeAgent = "agent";
-// Any value other than "agent" is Search, the default.
+inline constexpr std::string_view kStartModeResearch = "research";
+// Any value other than "agent" or "research" is Search, the default.
 [[nodiscard]] std::string_view NormalizeStartMode(std::string_view mode) noexcept;
 
 }  // namespace island

@@ -54,6 +54,17 @@ main { width: 100%; max-width: 640px; padding: 0 24px; margin-top: 22vh; align-s
 .go:disabled { opacity: .25; cursor: default; }
 .go svg { width: 16px; height: 16px; }
 .note { margin: 10px 2px 0; min-height: 22px; color: var(--text-2); font-size: 13px; }
+.research { margin: 6px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); font-size: 13px; display: flex; align-items: center; gap: 10px; }
+.research .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.research .text b { font-weight: 600; }
+.research.bad .text { color: #CD2B31; }
+.research .btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
+  padding: 4px 10px; font-size: 12.5px; font-weight: 500; flex: none; }
+.research .btn:hover { background: var(--surface-2); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border);
+  border-top-color: var(--text); animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
 ul { margin: 28px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
 li { display: flex; align-items: center; justify-content: space-between; padding: 10px 0;
   border-bottom: 1px solid var(--border); font-size: 14px; }
@@ -68,6 +79,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     <div class="modes" role="radiogroup" aria-label="Input mode" id="modes">
       <button type="button" role="radio" data-mode="search" aria-checked="true">Search</button>
       <button type="button" role="radio" data-mode="agent" aria-checked="false">Ask agent</button>
+      <button type="button" role="radio" data-mode="research" aria-checked="false">Research</button>
     </div>
   </div>
   <form class="field" id="form" autocomplete="off">
@@ -77,6 +89,12 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     </button>
   </form>
   <p class="note" id="note" aria-live="polite"></p>
+  <div class="research" id="research" role="status" hidden>
+    <span class="spin" id="research-spin" aria-hidden="true"></span>
+    <span class="text" id="research-text"></span>
+    <button class="btn" id="research-action" type="button" hidden></button>
+    <button class="btn" id="research-cancel" type="button" hidden>Cancel</button>
+  </div>
   <ul>
     <li>New tab<kbd>Cmd/Ctrl T</kbd></li>
     <li>Focus address<kbd>Cmd/Ctrl L</kbd></li>
@@ -87,28 +105,68 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
 "use strict";
 (function () {
   var MESSAGE_PREFIX = "\u0001island:";
-  var state = { mode: "search", engine: "Google" };
+  var MODES = ["search", "agent", "research"];
+  var state = { mode: "search", engine: "Google", research: null };
+  var dismissedSeq = 0;
   var input = document.getElementById("q");
   var go = document.getElementById("go");
   var note = document.getElementById("note");
+  var panel = document.getElementById("research");
+  var panelText = document.getElementById("research-text");
+  var panelSpin = document.getElementById("research-spin");
+  var panelAction = document.getElementById("research-action");
+  var panelCancel = document.getElementById("research-cancel");
   var modes = Array.prototype.slice.call(document.querySelectorAll("#modes button"));
 
   function post(message) { console.log(MESSAGE_PREFIX + JSON.stringify(message)); }
 
+  var PLACEHOLDERS = { search: null, agent: "Ask the agent to do something",
+    research: "Ask a question to research across the web" };
+  var LABELS = { search: "Search", agent: "Ask agent", research: "Research" };
+
+  function renderResearch() {
+    var r = state.research;
+    var show = !!r && r.state && r.state !== "idle" && r.seq !== dismissedSeq;
+    panel.hidden = !show;
+    if (!show) return;
+    var running = r.state === "running";
+    panel.className = "research" + (r.state === "failed" || r.state === "not_installed" ? " bad" : "");
+    panelSpin.hidden = !running;
+    panelCancel.hidden = !running;
+    panelText.textContent = "";
+    if (running) {
+      var label = document.createElement("b");
+      label.textContent = "Researching: ";
+      panelText.appendChild(label);
+      panelText.appendChild(document.createTextNode(r.question || ""));
+    } else if (r.state === "done") {
+      var done = document.createElement("b");
+      done.textContent = "Report ready: ";
+      panelText.appendChild(done);
+      panelText.appendChild(document.createTextNode(r.report_title || "Research report"));
+    } else {
+      panelText.textContent = r.message || "Research did not finish.";
+    }
+    var action = r.state === "done" ? "open_report" : r.state === "not_installed" ? "open_settings" : "";
+    panelAction.hidden = !action;
+    panelAction.setAttribute("data-action", action);
+    panelAction.textContent = action === "open_report" ? "Open report" : "Open Settings";
+  }
+
   function render() {
-    var agent = state.mode === "agent";
     modes.forEach(function (button) {
       var on = button.getAttribute("data-mode") === state.mode;
       button.setAttribute("aria-checked", on ? "true" : "false");
       button.tabIndex = on ? 0 : -1;
     });
-    input.placeholder = agent ? "Ask the agent to do something" : "Search " + state.engine;
-    go.setAttribute("aria-label", agent ? "Ask agent" : "Search");
+    input.placeholder = PLACEHOLDERS[state.mode] || "Search " + state.engine;
+    go.setAttribute("aria-label", LABELS[state.mode]);
     go.disabled = !input.value.trim();
+    renderResearch();
   }
 
   function setMode(mode, remember) {
-    if (mode !== "search" && mode !== "agent") return;
+    if (MODES.indexOf(mode) < 0) return;
     if (mode !== state.mode) {
       state.mode = mode;
       if (remember) post({ type: "set_start_mode", mode: mode });
@@ -124,6 +182,10 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
       // The text stays until Island confirms the agent took it (islandAgentResult).
       post({ type: "ask_agent", prompt: text });
       note.textContent = "Sending to the agent...";
+    } else if (state.mode === "research") {
+      // Island answers through the research state (islandRender), keeping the text on a refusal.
+      post({ type: "research", question: text });
+      note.textContent = "Starting research...";
     } else {
       post({ type: "search", query: text });
     }
@@ -146,7 +208,16 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     event.preventDefault();
     if (!event.isComposing) submit();
   });
-  input.addEventListener("input", function () { note.textContent = ""; render(); });
+  input.addEventListener("input", function () {
+    note.textContent = "";
+    if (state.research && state.research.state !== "running") dismissedSeq = state.research.seq;
+    render();
+  });
+  panelCancel.addEventListener("click", function () { post({ type: "cancel_research" }); });
+  panelAction.addEventListener("click", function () {
+    var action = panelAction.getAttribute("data-action");
+    if (action) post({ type: action });
+  });
 
   function applyTheme(theme) {
     if (!theme) return;
@@ -161,12 +232,19 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
   window.islandRender = function (next) {
     if (next.theme) applyTheme(next.theme);
     if (next.start) {
-      state.mode = next.start.mode === "agent" ? "agent" : "search";
+      state.mode = MODES.indexOf(next.start.mode) >= 0 ? next.start.mode : "search";
       state.engine = next.start.engine || "Google";
+      var previous = state.research;
+      state.research = next.start.research || null;
+      var fresh = state.research && (!previous || previous.seq !== state.research.seq);
+      if (fresh && state.research.state !== "idle") note.textContent = "";
+      // Island took the question: the field is free for the next one.
+      if (fresh && state.research.state === "running") input.value = "";
     }
     render();
   };
   window.islandFocus = function () { input.focus(); };
+  window.islandNote = function (text) { note.textContent = text || ""; };
   window.islandAgentResult = function (sent) {
     if (sent) {
       input.value = "";

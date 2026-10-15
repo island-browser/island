@@ -162,6 +162,22 @@ void IslandApp::NavigateActiveTab(const std::string& address) {
     }
 }
 
+void IslandApp::StartResearch(const std::string& question) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(browser_window_->StartResearch(question));
+    }
+}
+
+void IslandApp::OpenNewestReport() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr && !browser_window_->reports().reports.empty()) {
+        static_cast<void>(browser_window_->OpenReportTab(browser_window_->reports().reports[0].id));
+    }
+}
+
 void IslandApp::ToggleAgentPanel() {
     CEF_REQUIRE_UI_THREAD();
 

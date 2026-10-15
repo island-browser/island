@@ -149,6 +149,7 @@ bool AgentSession::Send(std::string text, std::string context) {
 void AgentSession::Cancel() {
     if (queued_prompt_.has_value()) {
         queued_prompt_.reset();
+        transcript_.NoteTurnEnded("cancelled");
         transcript_.AddNotice("Stopped.");
     }
     if (client_ != nullptr) client_->Cancel();

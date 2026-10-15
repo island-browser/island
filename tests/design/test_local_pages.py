@@ -20,6 +20,9 @@ from pathlib import Path
 REPOSITORY = Path(__file__).resolve().parents[2]
 PAGES = REPOSITORY / "src/main/pages"
 PAGE_FILES = sorted(PAGES.glob("*.html"))
+# Scripts the build inlines into pages (cmake/CMakeLists.txt, "@@ISLAND_MARKDOWN@@").
+SCRIPT_FILES = sorted(PAGES.glob("*.js"))
+PLACEHOLDER = "  // @@ISLAND_MARKDOWN@@"
 
 FORBIDDEN_FRAGMENTS = (
     "<script src",
@@ -55,9 +58,14 @@ def page(name: str) -> str:
     return (PAGES / name).read_text(encoding="utf-8")
 
 
+def built_page(name: str) -> str:
+    """The page as the build embeds it: the shared renderer replaces the placeholder."""
+    return page(name).replace(PLACEHOLDER, page("markdown.js").rstrip("\n"))
+
+
 def markdown_source() -> str:
-    match = MARKDOWN_BLOCK.search(page("agent.html"))
-    assert match, "agent.html must delimit its renderer with BEGIN/END MARKDOWN markers"
+    match = MARKDOWN_BLOCK.search(page("markdown.js"))
+    assert match, "markdown.js must delimit its renderer with BEGIN/END MARKDOWN markers"
     return match.group("code")
 
 
@@ -87,17 +95,50 @@ class EveryLocalPage(unittest.TestCase):
     def test_pages_exist(self) -> None:
         self.assertEqual(
             [path.name for path in PAGE_FILES],
-            ["agent.html", "settings.html", "start.html", "tab_overview.html"],
+            ["agent.html", "report.html", "settings.html", "start.html", "tab_overview.html"],
         )
+        self.assertEqual([path.name for path in SCRIPT_FILES], ["markdown.js"])
 
     def test_no_page_requests_an_external_resource(self) -> None:
-        for path in PAGE_FILES:
+        for path in PAGE_FILES + SCRIPT_FILES:
             text = path.read_text(encoding="utf-8")
             for fragment in FORBIDDEN_FRAGMENTS:
                 with self.subTest(page=path.name, fragment=fragment):
                     self.assertNotIn(fragment, text)
             for match in re.finditer(r"https?://[^\s\"'<>)]*", text):
                 self.fail(f"{path.name} embeds an absolute URL: {match.group(0)}")
+
+    def test_scripts_are_ascii(self) -> None:
+        for path in SCRIPT_FILES:
+            path.read_text(encoding="utf-8").encode("ascii")
+
+    def test_the_shared_renderer_is_inlined_into_the_pages_that_render_agent_text(self) -> None:
+        for name in ("agent.html", "report.html"):
+            with self.subTest(page=name):
+                self.assertEqual(page(name).count(PLACEHOLDER), 1)
+                built = built_page(name)
+                self.assertNotIn("@@ISLAND_MARKDOWN@@", built)
+                self.assertIn("function islandMarkdown(", built)
+                self.assertNotIn("function islandMarkdown(", page(name))
+        for name in ("settings.html", "start.html", "tab_overview.html"):
+            with self.subTest(page=name):
+                self.assertNotIn(PLACEHOLDER, page(name))
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_built_page_scripts_parse(self) -> None:
+        for path in PAGE_FILES:
+            built = built_page(path.name)
+            scripts = re.findall(r"<script>(.*?)</script>", built, re.DOTALL)
+            self.assertEqual(len(scripts), 1, path.name)
+            with self.subTest(page=path.name):
+                result = subprocess.run(
+                    [NODE, "--check", "-"],
+                    input=scripts[0],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_pages_are_ascii_and_speak_the_shared_bridge(self) -> None:
         for path in PAGE_FILES:
@@ -115,12 +156,34 @@ class StartPage(unittest.TestCase):
     def setUp(self) -> None:
         self.html = page("start.html")
 
-    def test_has_one_input_and_the_two_modes(self) -> None:
+    def test_has_one_input_and_the_three_modes(self) -> None:
         self.assertEqual(self.html.count("<input"), 1)
         self.assertIn('data-mode="search"', self.html)
         self.assertIn('data-mode="agent"', self.html)
+        self.assertIn('data-mode="research"', self.html)
         self.assertIn(">Search</button>", self.html)
         self.assertIn(">Ask agent</button>", self.html)
+        self.assertIn(">Research</button>", self.html)
+
+    def test_research_mode_speaks_the_documented_messages(self) -> None:
+        for message in (
+            'type: "research", question: text',
+            'post({ type: "cancel_research" })',
+            "post({ type: action })",
+            '"open_report"',
+            '"open_settings"',
+        ):
+            self.assertIn(message, self.html)
+        # A refusal never clears what the user typed; only a started task does.
+        submit = self.html[self.html.index("function submit()") :]
+        submit = submit[: submit.index("render();")]
+        self.assertNotIn('input.value = ""', submit)
+        self.assertIn('fresh && state.research.state === "running"', self.html)
+        self.assertIn("window.islandNote = function", self.html)
+
+    def test_research_status_is_rendered_as_text_not_markup(self) -> None:
+        # Questions and agent errors reach the page; they must stay text nodes.
+        self.assertNotIn("innerHTML", self.html)
 
     def test_keeps_the_prompt_until_the_agent_accepts_it(self) -> None:
         # A busy agent refuses the turn; the page must say so instead of
@@ -132,7 +195,12 @@ class StartPage(unittest.TestCase):
         self.assertNotIn('input.value = ""', submit)
 
     def test_posts_the_documented_bridge_messages(self) -> None:
-        for message in ('type: "search"', 'type: "ask_agent"', 'type: "set_start_mode"'):
+        for message in (
+            'type: "search"',
+            'type: "ask_agent"',
+            'type: "set_start_mode"',
+            'type: "research"',
+        ):
             self.assertIn(message, self.html)
 
     def test_never_navigates_by_itself(self) -> None:
@@ -151,11 +219,58 @@ class StartPage(unittest.TestCase):
         self.assertIn('"Geist Mono"', self.html)
 
 
+class ReportPage(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("report.html")
+        self.built = built_page("report.html")
+
+    def test_has_the_three_actions(self) -> None:
+        self.assertIn(">Copy Markdown</button>", self.html)
+        self.assertIn(">Save as .md...</button>", self.html)
+        self.assertIn(">Continue in agent panel</button>", self.html)
+        for message in ("copy_report", "save_report", "continue_in_agent", '"open_url"'):
+            self.assertIn(message, self.html)
+
+    def test_never_navigates_by_itself(self) -> None:
+        for fragment in ("location", "window.open", "target=", "<form", "href=\""):
+            self.assertNotIn(fragment, self.html)
+        # Links go to native, which opens them in new tabs; only http(s) is forwarded.
+        self.assertIn("event.preventDefault()", self.html)
+        self.assertIn('/^https?:\\/\\//i.test(href)', self.html)
+
+    def test_report_text_only_reaches_the_dom_through_the_safe_renderer(self) -> None:
+        self.assertIn("doc.innerHTML = islandMarkdown(report.markdown", self.html)
+        self.assertIn("doc.textContent = report.markdown", self.html)
+        assignments = re.findall(r"innerHTML\s*=\s*([^;]+);", self.built)
+        other = [a for a in assignments if not a.startswith("islandMarkdown(")]
+        self.assertEqual(other, [])
+        # Titles, questions and dates are text nodes.
+        self.assertIn('document.getElementById("title").textContent', self.html)
+
+    def test_follows_the_app_theme_with_a_system_fallback(self) -> None:
+        self.assertIn(':root:not([data-theme])', self.html)
+        self.assertIn('setAttribute("data-theme"', self.html)
+        for token in ("--bg", "--surface", "--surface-2", "--text", "--text-2", "--border", "--accent"):
+            self.assertIn(token + ":", self.html)
+
+    def test_reports_the_outcome_of_copy_and_save(self) -> None:
+        self.assertIn("window.islandReportResult = function", self.html)
+        for kind in ('"copied"', '"saved"', '"cancelled"'):
+            self.assertIn(kind, self.html)
+
+
+
 class SettingsPage(unittest.TestCase):
     def test_offers_the_search_engine_setting(self) -> None:
         html = page("settings.html")
         self.assertIn('id="engine"', html)
         self.assertIn('type: "set_search_engine"', html)
+
+    def test_lists_reports_with_open_and_delete(self) -> None:
+        html = page("settings.html")
+        self.assertIn('id="reports-list"', html)
+        self.assertIn('type: "open_report"', html)
+        self.assertIn('type: "delete_report"', html)
 
 
 class AgentMarkdownStatic(unittest.TestCase):

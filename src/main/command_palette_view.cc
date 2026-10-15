@@ -64,6 +64,8 @@ std::string PaletteKindLabel(const PaletteEntry& entry) {
             return "GO TO";
         case PaletteEntryKind::kBookmark:
             return "BOOKMARK";
+        case PaletteEntryKind::kReport:
+            return "REPORT";
     }
     return "";
 }
@@ -83,6 +85,8 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
                 entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
             return "Open bookmark: " + title + ", URL " + entry.bookmark.url;
         }
+        case PaletteEntryKind::kReport:
+            return "Open research report: " + entry.report.title;
     }
     return "Palette result";
 }
@@ -102,6 +106,8 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
             // An untitled bookmark falls back to its URL so the row is never
             // blank.
             return entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
+        case PaletteEntryKind::kReport:
+            return entry.report.title;
     }
     return "";
 }
@@ -116,6 +122,9 @@ std::string PaletteRowTooltipText(const PaletteEntry& entry) {
             return "Open the typed URL in the active tab";
         case PaletteEntryKind::kBookmark:
             return entry.bookmark.url;
+        case PaletteEntryKind::kReport:
+            return entry.report.question.empty() ? "Open the report in a new tab"
+                                                 : entry.report.question;
     }
     return "";
 }
@@ -341,7 +350,8 @@ int CommandPaletteView::PreferredContentHeightDip() const {
 
 void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
                               std::vector<PaletteSpaceEntry> spaces,
-                              std::vector<PaletteBookmarkEntry> bookmarks) {
+                              std::vector<PaletteBookmarkEntry> bookmarks,
+                              std::vector<PaletteReportEntry> reports) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || window_ == nullptr) {
         return;
@@ -352,10 +362,11 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     if (!overlay_.has_overlay()) {
         return;
     }
-    const std::size_t pool_size = tabs.size() + spaces.size() + 1;
+    const std::size_t pool_size = tabs.size() + spaces.size() + reports.size() + 1;
     model_.SetTabs(std::move(tabs));
     model_.SetSpaces(std::move(spaces));
     model_.SetBookmarks(std::move(bookmarks));
+    model_.SetReports(std::move(reports));
     // Worst case: every tab and every space matches plus the go-to-URL row
     // that a non-empty query appends.
     RebuildResultRows(pool_size);

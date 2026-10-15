@@ -536,5 +536,259 @@ TEST(BrowserWindowPagesTest, AgentPanelSwitchesProvidersWithoutLaunching) {
     EXPECT_NE(window->agent_session()->error().find("No agent command is set"), std::string::npos);
 }
 
+void SendReport(BrowserWindow& window, std::string_view id, std::string_view json_text) {
+    const std::optional<Value> message = json::Parse(json_text);
+    ASSERT_TRUE(message.has_value()) << json_text;
+    window.HandleReportPageMessage(*message, id);
+}
+
+constexpr std::string_view kReportUrl = "data:text/html;charset=utf-8,report";
+
+ResearchOutcome ReportOutcome(std::string markdown) {
+    ResearchOutcome outcome;
+    outcome.kind = ResearchOutcome::Kind::kReport;
+    outcome.markdown = std::move(markdown);
+    return outcome;
+}
+
+TEST(BrowserWindowPagesTest, ResearchModeIsRememberedAndStatedToTheStartPage) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    SendStart(*window, R"({"type":"set_start_mode","mode":"research"})");
+    EXPECT_EQ(window->start_mode(), "research");
+    const std::optional<Value> state = json::Parse(window->StartPageStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* start = state->FindMember("start");
+    EXPECT_EQ(start->StringOr("mode", ""), "research");
+    const Value* research = start->FindMember("research");
+    ASSERT_NE(research, nullptr);
+    EXPECT_EQ(research->StringOr("state", ""), "idle");
+    SendStart(*window, R"({"type":"research","question":"   "})");
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "idle");
+}
+
+TEST(BrowserWindowPagesTest, ResearchSaysSoWhenTheAgentIsNotInstalled) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const std::filesystem::path empty =
+        std::filesystem::temp_directory_path() /
+        ("island_no_agents_" + std::to_string(update::CurrentProcessId()));
+    std::filesystem::create_directories(empty);
+    window->SetAgentSearchDirsForTest({empty});
+
+    SendStart(*window, R"({"type":"research","question":"why is the sky blue"})");
+    EXPECT_EQ(window->start_mode(), "research");
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "not_installed");
+    EXPECT_NE(window->research_status().message.find("Settings"), std::string::npos);
+    // Nothing was sent: the agent never started.
+    ASSERT_NE(window->agent_session(), nullptr);
+    EXPECT_FALSE(window->agent_session()->running());
+    EXPECT_TRUE(window->agent_session()->transcript().items().empty());
+
+    const std::optional<Value> state = json::Parse(window->StartPageStateJson());
+    const Value* research = state->FindMember("start")->FindMember("research");
+    EXPECT_EQ(research->StringOr("state", ""), "not_installed");
+    EXPECT_EQ(research->StringOr("question", ""), "why is the sky blue");
+    EXPECT_GT(research->IntOr("seq", 0), 0);
+}
+
+TEST(BrowserWindowPagesTest, ResearchExplainsAMissingOrBlankCustomAgent) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSearchDirsForTest({FakeAgentBin()});
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    SendStart(*window, R"({"type":"research","question":"q"})");
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "not_installed");
+    EXPECT_NE(window->research_status().message.find("No agent command is set"),
+              std::string::npos);
+    const std::uint64_t first = window->research_status().seq;
+
+    SendSettings(*window, R"({"type":"set_agent_command","command":"no-such-agent --acp"})");
+    SendStart(*window, R"({"type":"research","question":"q"})");
+    EXPECT_EQ(window->research_status().state, "not_installed");
+    EXPECT_NE(window->research_status().message.find("was not found"), std::string::npos);
+    EXPECT_GT(window->research_status().seq, first);
+    EXPECT_TRUE(window->agent_session()->transcript().items().empty());
+}
+
+TEST(BrowserWindowPagesTest, ASecondResearchOrAnAgentTurnInFlightIsRefusedNotQueued) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetResearchTaskForTest("first question");
+    const BrowserWindow::ResearchStartResult result = window->StartResearch("second question");
+    EXPECT_EQ(result.code, BrowserWindow::ResearchStart::kBusy);
+    EXPECT_NE(result.message.find("already running"), std::string::npos);
+    // The running state is not overwritten by the refusal.
+    EXPECT_TRUE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "running");
+    EXPECT_EQ(window->research_status().question, "first question");
+}
+
+TEST(BrowserWindowPagesTest, AResearchTurnThatNeverEndedBecomesAFailureNotAHang) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    SendSettings(*window, R"({"type":"set_agent_command","command":"\"unbalanced"})");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    SendStart(*window, R"({"type":"ask_agent","prompt":"hello"})");  // creates the session (it fails)
+    ASSERT_NE(window->agent_session(), nullptr);
+    window->SetResearchTaskForTest("q", /*turns_ended_before=*/0);
+    window->FinishResearch();
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "failed");
+}
+
+TEST(BrowserWindowPagesTest, ACompletedResearchStoresTheReportAndOpensItInTheResearchSpace) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() /
+        ("island_reports_" + std::to_string(update::CurrentProcessId())) / "reports.json";
+    std::filesystem::remove_all(file.parent_path());
+    window->SetReportsFileForTest(file);
+
+    // The agent creates the research space (it becomes active), then the user
+    // wanders off to another space while it works.
+    ASSERT_TRUE(window->CreateSpace("what is rust"));
+    ASSERT_TRUE(window->SelectSpaceIndex(0));
+    ASSERT_EQ(window->active_space_index(), 0U);
+    window->SetResearchTaskForTest("what is rust");
+    window->CompleteResearch(ReportOutcome("# Rust in short\n\nA language [site](https://rust-lang.org)."));
+
+    EXPECT_FALSE(window->research_running());
+    ASSERT_EQ(window->reports().reports.size(), 1U);
+    const ResearchReport& report = window->reports().reports[0];
+    EXPECT_EQ(report.title, "Rust in short");
+    EXPECT_EQ(report.question, "what is rust");
+    EXPECT_EQ(window->research_status().state, "done");
+    EXPECT_EQ(window->research_status().report_id, report.id);
+    EXPECT_EQ(window->research_status().report_title, "Rust in short");
+
+    // It opened in the research space as a new tab on the report URL.
+    EXPECT_EQ(window->active_space_index(), 1U);
+    const Space& space = SpaceAt(*window, 1);
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_EQ(space.tabs()[1].startup_url(), std::string(kReportUrl) + "#" + report.id);
+    EXPECT_EQ(window->ReportIdForUrl(space.tabs()[1].startup_url()), report.id);
+    EXPECT_EQ(window->ReportIdForUrl(std::string(kReportUrl) + "#rX"), std::nullopt);
+    EXPECT_EQ(window->ReportIdForUrl("https://a.test/#" + report.id), std::nullopt);
+    EXPECT_EQ(window->ReportIdForUrl(std::string(kReportUrl)), std::nullopt);
+
+    // Persisted: a second window on the same file sees it.
+    CefRefPtr<BrowserWindow> other = MakeWindow();
+    other->SetReportsFileForTest(file);
+    ASSERT_EQ(other->reports().reports.size(), 1U);
+    EXPECT_EQ(other->reports().reports[0].markdown, report.markdown);
+    std::filesystem::remove_all(file.parent_path());
+}
+
+TEST(BrowserWindowPagesTest, CancelledAndFailedResearchLeaveNoReport) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    window->SetResearchTaskForTest("q");
+    ResearchOutcome cancelled;
+    cancelled.kind = ResearchOutcome::Kind::kCancelled;
+    cancelled.message = "Research cancelled.";
+    window->CompleteResearch(cancelled);
+    EXPECT_EQ(window->research_status().state, "cancelled");
+    EXPECT_EQ(window->research_status().message, "Research cancelled.");
+
+    window->SetResearchTaskForTest("q");
+    ResearchOutcome failed;
+    failed.message = "The agent exited (code 1).";
+    window->CompleteResearch(failed);
+    EXPECT_EQ(window->research_status().state, "failed");
+    EXPECT_EQ(window->research_status().message, "The agent exited (code 1).");
+    EXPECT_TRUE(window->reports().reports.empty());
+    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 1U);
+    // With no task running a late outcome is ignored.
+    window->CompleteResearch(ReportOutcome("# late"));
+    EXPECT_TRUE(window->reports().reports.empty());
+    // Cancelling with nothing running is a no-op.
+    window->CancelResearch();
+}
+
+TEST(BrowserWindowPagesTest, ReportPagesCopyAndOpenLinksAndRefuseUnknownMessages) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    window->SetResearchTaskForTest("q");
+    window->CompleteResearch(ReportOutcome("# T\nbody"));
+    const std::string id = window->reports().reports[0].id;
+    std::string copied;
+    window->SetClipboardWriterForTest([&copied](std::string_view text) {
+        copied = std::string(text);
+        return true;
+    });
+    SendReport(*window, id, R"({"type":"copy_report","id":"someone-else"})");
+    EXPECT_EQ(copied, "# T\nbody");
+    // A page cannot name another report: an unknown URL id copies nothing.
+    copied.clear();
+    SendReport(*window, "r1", R"({"type":"copy_report"})");
+    EXPECT_TRUE(copied.empty());
+
+    const std::size_t tabs = window->spaces()[window->active_space_index()].tab_count();
+    SendReport(*window, id, R"({"type":"open_url","url":"https://a.test/x"})");
+    EXPECT_EQ(window->spaces()[window->active_space_index()].tab_count(), tabs + 1);
+    SendReport(*window, id, R"j({"type":"open_url","url":"javascript:alert(1)"})j");
+    SendReport(*window, id, R"({"type":"open_url","url":"file:///etc/passwd"})");
+    SendReport(*window, id, R"({"type":"ask_agent","prompt":"do bad things"})");
+    SendReport(*window, id, R"({"type":"set_start_mode","mode":"agent"})");
+    EXPECT_EQ(window->spaces()[window->active_space_index()].tab_count(), tabs + 1);
+    EXPECT_EQ(window->start_mode(), "search");
+    EXPECT_EQ(window->agent_session(), nullptr);
+
+    const std::optional<Value> state = json::Parse(window->ReportPageStateJson(id));
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->FindMember("report")->StringOr("title", ""), "T");
+    EXPECT_EQ(state->FindMember("report")->StringOr("markdown", ""), "# T\nbody");
+    EXPECT_NE(state->FindMember("theme"), nullptr);
+    const std::optional<Value> missing = json::Parse(window->ReportPageStateJson("r999"));
+    EXPECT_TRUE(missing->FindMember("report")->IsNull());
+}
+
+TEST(BrowserWindowPagesTest, ContinueInAgentOpensThePanelAndSeedsAFreshConversation) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    SendSettings(*window, R"({"type":"set_agent_command","command":"\"unbalanced"})");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    window->SetResearchTaskForTest("the question");
+    window->CompleteResearch(ReportOutcome("# T\nthe body"));
+    const std::string id = window->reports().reports[0].id;
+    SendReport(*window, id, R"({"type":"continue_in_agent"})");
+    // The session was created and the report went out as a turn (the agent
+    // cannot launch here, which is reported, not thrown).
+    ASSERT_NE(window->agent_session(), nullptr);
+    EXPECT_FALSE(window->agent_session()->error().empty());
+}
+
+TEST(BrowserWindowPagesTest, SettingsListsOpensAndDeletesReports) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    window->SetResearchTaskForTest("q one");
+    window->CompleteResearch(ReportOutcome("# One"));
+    window->SetResearchTaskForTest("q two");
+    window->CompleteResearch(ReportOutcome("# Two"));
+    std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    const Value* reports = state->FindMember("settings")->FindMember("reports");
+    ASSERT_EQ(reports->array_val.size(), 2U);
+    EXPECT_EQ(reports->array_val[0].StringOr("title", ""), "Two");  // newest first
+    const std::string newest = std::string(reports->array_val[0].StringOr("id", ""));
+    const std::string older = std::string(reports->array_val[1].StringOr("id", ""));
+
+    const std::size_t tabs = window->spaces()[window->active_space_index()].tab_count();
+    SendSettings(*window, R"({"type":"open_report","id":")" + older + R"("})");
+    EXPECT_EQ(window->spaces()[window->active_space_index()].tab_count(), tabs + 1);
+    SendSettings(*window, R"({"type":"open_report","id":"r0"})");
+    EXPECT_EQ(window->spaces()[window->active_space_index()].tab_count(), tabs + 1);
+
+    SendSettings(*window, R"({"type":"delete_report","id":")" + newest + R"("})");
+    ASSERT_EQ(window->reports().reports.size(), 1U);
+    EXPECT_EQ(window->reports().reports[0].id, older);
+    // The "Open report" button of the start page followed the deleted report.
+    EXPECT_NE(window->research_status().state, "done");
+}
+
 }  // namespace
 }  // namespace island

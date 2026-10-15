@@ -14,6 +14,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 ## [Unreleased]
 
 ### Added
+- Start page **Research** mode: Enter sends the question to the configured agent with a prompt to research it with Island's browser tools (a new space named after the question, several sources in tabs, compared) and to finish with a Markdown report that cites every claim. The final report opens in a new **Report** tab (local page, shared safe Markdown renderer, links open in new tabs) with Copy Markdown, Save as .md... and Continue in agent panel. Clear messages for a missing agent (with an Open Settings button), a busy agent, and Cancel.
+- Reports list: persisted in `reports.json` under the support directory, listed in Settings > Reports and in Cmd/Ctrl+K as REPORT rows.
+- Dev capture actions `research:<question>` and `open_report`.
 
 - Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
   button per tab of the active space (pinned tabs first, the active tab highlighted like the

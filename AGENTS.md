@@ -37,6 +37,12 @@
   committing. At the project owner's request (2026-10-06), `build-release.yml` builds all six
   targets on every push to `main` that changes the app and publishes them as **unsigned GitHub
   prereleases** (`nightly`, plus `vX.Y.Z` once per version) for the in-browser updater.
+- Research mode (start page's third mode, 2026-10-15): `research_prompt.*` (prompt, space name,
+  report extraction, turn outcome), `report_store.*` (`reports.json`), `browser_window_research.cc`
+  (start/cancel/finish, Report tab, save/copy/continue), `pages/report.html`. The shared safe Markdown
+  renderer lives in `pages/markdown.js`; the root `CMakeLists.txt` inlines it where a page carries the
+  `// @@ISLAND_MARKDOWN@@` line. Report tabs are `data:` documents (`#<id>` fragment) and are not
+  restored after a restart (the report stays in the Reports list).
 - Versioning: `VERSION` is the only place the version is written. Bump it with
   `python3 scripts/version.py bump <part>` (never by hand-editing derived files), keep notes under
   `## [Unreleased]` in `CHANGELOG.md` as you land changes, and run

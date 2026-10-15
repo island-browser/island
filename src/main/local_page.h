@@ -27,6 +27,11 @@ enum class LocalPageKind : std::uint8_t {
     // search can navigate that tab. Its messages reach the window through the
     // tab client's console handler, only from the main frame at this page's URL.
     kStart,
+    // A finished research report. Like kStart it is the document a tab's own
+    // browser loads (the fixed page URL plus "#<report id>"), so reports sit in
+    // ordinary tabs; its messages are accepted from the main frame of such a
+    // tab only, and the report is the one named by the URL, never by the page.
+    kReport,
 };
 
 class LocalPageDelegate {
