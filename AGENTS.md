@@ -37,6 +37,9 @@
   committing. At the project owner's request (2026-10-06), `build-release.yml` builds all six
   targets on every push to `main` that changes the app and publishes them as **unsigned GitHub
   prereleases** (`nightly`, plus `vX.Y.Z` once per version) for the in-browser updater.
+- Native ad and tracker blocking is in scope as of 2026-10-15 at the project owner's request. It
+  uses Brave's Rust `adblock` engine with runtime-cached EasyList and EasyPrivacy data; browser
+  extensions remain out of scope.
 - Versioning: `VERSION` is the only place the version is written. Bump it with
   `python3 scripts/version.py bump <part>` (never by hand-editing derived files), keep notes under
   `## [Unreleased]` in `CHANGELOG.md` as you land changes, and run

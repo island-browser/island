@@ -15,6 +15,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Native ad and tracker blocking powered by Brave's `adblock` Rust engine. Island refreshes
+  EasyList and EasyPrivacy in the background at most every four days, keeps working from its
+  cached lists when an update fails, supports independent controls and a per-site allowlist in
+  Settings > Privacy, and reports per-tab blocked-request counts in All tabs.
 - More keyboard shortcuts, all listed and rebindable in Settings: Ctrl+Tab and Ctrl+Shift+Tab
   switch tabs (Control is now its own modifier on macOS), Cmd+9 selects the last tab, Cmd+Shift+T
   reopens the last closed tab, Cmd+=, Cmd+-, and Cmd+0 zoom the page, Cmd+Shift+R reloads ignoring
