@@ -13,6 +13,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the Linux build by using CEF's unambiguous window-open disposition type in popup and
+  new-tab callback signatures.
+
 ## [0.6.0] - 2026-10-15
 
 ### Added

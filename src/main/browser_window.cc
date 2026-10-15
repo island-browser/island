@@ -2460,9 +2460,10 @@ void BrowserWindow::OnFaviconDownloaded(TabId tab_id, const std::string& icon_ur
 
 bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int,
                                   const CefString& target_url, const CefString&,
-                                  WindowOpenDisposition target_disposition, bool user_gesture,
-                                  const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
-                                  CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) {
+                                  cef_window_open_disposition_t target_disposition,
+                                  bool user_gesture, const CefPopupFeatures&, CefWindowInfo&,
+                                  CefRefPtr<CefClient>&, CefBrowserSettings&,
+                                  CefRefPtr<CefDictionaryValue>&, bool*) {
     CEF_REQUIRE_UI_THREAD();
     // Popups and new windows stay rejected (Island is single-window). A user-initiated new-tab
     // open (Cmd/Ctrl+click, middle-click, target=_blank) becomes a peek instead.
@@ -2478,7 +2479,7 @@ CefRefPtr<CefContextMenuHandler> BrowserWindow::GetContextMenuHandler() { return
 
 bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                      const CefString& target_url,
-                                     WindowOpenDisposition target_disposition, bool) {
+                                     cef_window_open_disposition_t target_disposition, bool) {
     CEF_REQUIRE_UI_THREAD();
     if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
          target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
