@@ -31,6 +31,7 @@ add_executable(island_tests
     design_tokens_test.cpp
     download_path_test.cpp
     favicon_policy_test.cpp
+    history_recorder_test.cpp
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
@@ -68,6 +69,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/history_recorder.cc"
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
@@ -91,7 +93,7 @@ add_executable(island_tests
 target_compile_features(island_tests PRIVATE cxx_std_20)
 target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
-                      island_agent)
+                      island_agent island_search)
 # browser_window.cc references the platform bookmark-import and clipboard seams, so
 # mirror src/main's split.
 if(APPLE)
@@ -168,34 +170,38 @@ else()
 endif()
 gtest_discover_tests(island_cef_tests)
 
-if(ISLAND_ENABLE_SEARCH)
-    include(GoogleTest)
+include(GoogleTest)
 
-    add_executable(island_search_tests
-        search/benchmark_corpus_test.cpp
-        search/byte_lru_cache_test.cpp
-        search/mem_sampler_test.cpp
-        search/memtable_test.cpp
-        search/query_parser_test.cpp
-        search/ranker_test.cpp
-        search/segment_test.cpp
-        search/tokenizer_test.cpp
-        search/varint_crc32c_test.cpp
-        "${CMAKE_SOURCE_DIR}/bench/search/benchmark_corpus.cc"
-    )
-    target_compile_features(island_search_tests PRIVATE cxx_std_20)
-    # benchmark_corpus_test.cpp includes search/benchmark_corpus.h, which lives
-    # under bench/search/, so expose the bench/ root for that include form.
-    target_include_directories(island_search_tests PRIVATE "${CMAKE_SOURCE_DIR}/bench")
-    target_link_libraries(island_search_tests PRIVATE island_search GTest::gtest_main)
-    gtest_discover_tests(island_search_tests)
+add_executable(island_search_tests
+    search/benchmark_corpus_test.cpp
+    search/block_cache_test.cpp
+    search/byte_lru_cache_test.cpp
+    search/mem_sampler_test.cpp
+    search/membench_checkpoints_test.cpp
+    search/memtable_test.cpp
+    search/query_parser_test.cpp
+    search/ranker_test.cpp
+    search/search_ci_contract_test.cpp
+    search/search_index_test.cpp
+    search/segment_test.cpp
+    search/tokenizer_test.cpp
+    search/varint_crc32c_test.cpp
+    "${CMAKE_SOURCE_DIR}/bench/search/benchmark_corpus.cc"
+)
+target_compile_features(island_search_tests PRIVATE cxx_std_20)
+# benchmark_corpus_test.cpp includes search/benchmark_corpus.h, which lives
+# under bench/search/, so expose the bench/ root for that include form.
+target_include_directories(island_search_tests PRIVATE "${CMAKE_SOURCE_DIR}/bench")
+target_link_libraries(island_search_tests PRIVATE island_search GTest::gtest_main)
+target_compile_definitions(island_search_tests
+    PRIVATE ISLAND_SEARCH_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+gtest_discover_tests(island_search_tests)
 
-    # Self-contained standalone regression harness with its own main(); not part
-    # of the GTest tree.
-    add_executable(island_search_posting_codec_harness
-        search/posting_codec_test.cpp
-    )
-    target_compile_features(island_search_posting_codec_harness PRIVATE cxx_std_20)
-    target_link_libraries(island_search_posting_codec_harness PRIVATE island_search)
-    add_test(NAME PostingCodecStandaloneHarness COMMAND island_search_posting_codec_harness)
-endif()
+# Self-contained standalone regression harness with its own main(); not part
+# of the GTest tree.
+add_executable(island_search_posting_codec_harness
+    search/posting_codec_test.cpp
+)
+target_compile_features(island_search_posting_codec_harness PRIVATE cxx_std_20)
+target_link_libraries(island_search_posting_codec_harness PRIVATE island_search)
+add_test(NAME PostingCodecStandaloneHarness COMMAND island_search_posting_codec_harness)

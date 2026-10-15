@@ -11,10 +11,11 @@ it can be unit-tested and benchmarked in isolation.
 
 ## Status
 
-**Built and tested only behind an opt-in flag.** `src/search/CMakeLists.txt` defines the
-`island_search` static library, and the root `CMakeLists.txt` adds this directory with
-`add_subdirectory(src/search)` — but only inside `if(ISLAND_ENABLE_SEARCH)`, and that option is
-declared `OFF` by default. A plain `cmake -B build -S .` therefore builds **none** of this code.
+**Linked into the browser by default.** `src/search/CMakeLists.txt` defines the `island_search`
+static library, and the root browser build always adds the directory, links the library into
+`island_browser_core`, and registers the search unit tests. `ISLAND_ENABLE_SEARCH` remains as the
+required opt-in when this directory is configured as a standalone project and as a compatibility
+option for existing root configure commands.
 
 `.github/workflows/search.yml` exercises it across all six targets, using the standalone
 configuration described under Testing Requirements, but only when dispatched manually
@@ -54,9 +55,8 @@ not treat these interfaces as a settled contract.
 
 ### Testing Requirements
 
-Unit tests live in `tests/search/`. They **are** registered with CTest, but only when
-`ISLAND_ENABLE_SEARCH` is `ON` — which is not the default. `ctest` output from a default build says
-nothing about this directory.
+Unit tests live in `tests/search/`. They are registered by both the default browser root build and
+the standalone search build.
 
 Standalone (no CEF, no `scripts/setup_deps.sh` needed — this is what CI runs):
 

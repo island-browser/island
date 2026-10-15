@@ -10,14 +10,10 @@ corpus in `bench/search/`.
 
 ## Status
 
-**Registered with CTest, but not built by default.** `src/search/CMakeLists.txt` (standalone
-configuration) lists every file here, and `../CMakeLists.txt` lists a subset, both inside
-`if(ISLAND_ENABLE_SEARCH)`, and that option defaults to `OFF`. The standalone list is the complete
-one: `block_cache_test.cpp`, `search_index_test.cpp`, `membench_checkpoints_test.cpp` and
-`search_ci_contract_test.cpp` build only there. Registered and run-by-default
-are different claims: a plain `cmake -B build -S .` produces no search targets at all, so default
-`ctest` output says nothing about this directory. Pass `-DISLAND_ENABLE_SEARCH=ON` to build and run
-them.
+**Built by default from the browser root and by the standalone search configuration.**
+`src/search/CMakeLists.txt` and `../CMakeLists.txt` both list every file here. The standalone
+configuration still requires `-DISLAND_ENABLE_SEARCH=ON`; a plain browser-root configure includes
+the same tests without the option.
 
 ## Key Files
 
@@ -47,7 +43,7 @@ them.
 - `benchmark_corpus_test.cpp` tests code in `bench/search/`, not `src/search/`; a new target must
   add that include directory.
 - `search_ci_contract_test.cpp` reads repository files through the `ISLAND_SEARCH_REPO_ROOT` compile
-  definition, which only the standalone target sets.
+  definition, which both root and standalone targets set.
 - Thread-safety tests are only meaningful under TSan and ASan. Build those lanes in separate
   directories, e.g. with `-DCMAKE_CXX_FLAGS="-fsanitize=thread"`, and
   `-fsanitize=address,undefined -fno-sanitize-recover=undefined` (without `-fno-sanitize-recover`,
@@ -55,8 +51,7 @@ them.
 
 ### Testing Requirements
 
-These tests run only under `ISLAND_ENABLE_SEARCH=ON`. Standalone (no CEF required — this is the
-configuration `.github/workflows/search.yml` uses):
+Standalone (no CEF required — this is the configuration `.github/workflows/search.yml` uses):
 
 ```bash
 cmake -B build-search -S src/search -DISLAND_ENABLE_SEARCH=ON
@@ -68,8 +63,7 @@ Every `*_test.cpp` file here except `posting_codec_test.cpp`, plus
 `bench/search/benchmark_corpus.cc`, builds into `island_search_tests`. `posting_codec_test.cpp` is **not** part of that binary: it is a standalone
 harness with its own `main()`, registered separately as the `PostingCodecStandaloneHarness` test.
 
-Never cite default `ctest` output as evidence for a change in this directory — it does not cover
-it.
+The browser-root default `ctest` run also covers this directory.
 
 ## Dependencies
 

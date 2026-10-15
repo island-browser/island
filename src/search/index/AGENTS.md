@@ -10,7 +10,8 @@ It owns the MemTable, the active read-only `Segment`, and the `BlockCache`.
 
 ## Status
 
-Unit W5 of the Phase S0 plan. Built only behind `ISLAND_ENABLE_SEARCH`; see `../AGENTS.md`.
+Unit W5 of the Phase S0 plan. Built in the default browser root and in the standalone search
+configuration behind `ISLAND_ENABLE_SEARCH`; see `../AGENTS.md`.
 
 ## Key Files
 

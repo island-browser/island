@@ -48,9 +48,10 @@
   secret, since this repository is private) and imports
   `scripts/version.py` (`read_version`, `check`, `render_changelog_html`, the changelog markers),
   so keep those names stable; its CSS is checked against the `DESIGN.md` token contract there.
-- The Phase S0 search kernel under `src/search/` stays gated behind `ISLAND_ENABLE_SEARCH`
-  (declared `OFF`), and the hybrid native/container build lane (`docker/`, `tests/container/`) is
-  present on `main`.
+- The Phase S0 search kernel under `src/search/` is part of the default browser build and backs
+  local history search. `ISLAND_ENABLE_SEARCH` remains the opt-in switch for configuring
+  `src/search/` as a standalone project. The hybrid native/container build lane (`docker/`,
+  `tests/container/`) is present on `main`.
 
 ## Phase 1 contract
 
@@ -144,12 +145,12 @@ hand-maintained project instructions and take precedence over anything a nested 
 | `CHANGELOG.md` | Keep-a-Changelog release notes; the site repository renders them into its changelog page at build time |
 | `.clang-format` | Google base, 4-space indent, 100 columns, left-aligned pointers |
 
-### Search build (opt-in)
+### Search build
 
-The Verification commands above build and run the default suite only — **242 tests** on `main`
-as of 2026-09-19 (the count grows as units land; rerun `ctest -N` after adding tests). The
-Phase S0 search kernel under `src/search/` is guarded by `ISLAND_ENABLE_SEARCH`, which is declared
-`OFF`, so none of it is configured, compiled, or run by those commands.
+The Verification commands above build the Phase S0 search kernel, link it into
+`island_browser_core`, and run its tests as part of the default root suite. The option
+`ISLAND_ENABLE_SEARCH` is retained for compatibility with the standalone search configuration;
+it no longer excludes search from a browser-root build.
 
 The AI-agent kernel under `src/agent/` (MCP tools endpoint, ACP client) is CEF-free and always
 part of the root build; it also builds and tests standalone without `scripts/setup_deps.sh`:
@@ -169,15 +170,15 @@ cmake --build build-search
 ctest --test-dir build-search --output-on-failure
 ```
 
-That reports 175 tests (as of 2026-10-06). To build the browser and the search kernel together instead:
+The browser-root build includes the search kernel without an extra option:
 
 ```bash
-cmake -B build-search-root -S . -DISLAND_ENABLE_SEARCH=ON
+cmake -B build-search-root -S .
 cmake --build build-search-root
 ctest --test-dir build-search-root --output-on-failure
 ```
 
-That reports 469 tests (as of 2026-10-06; the combined target discovers a slightly different set than the sum of the standalone lanes). The Python suites are separate from `ctest` entirely:
+The Python suites are separate from `ctest` entirely:
 
 ```bash
 python3 -m pytest tests/deps tests/package tests/design tests/version

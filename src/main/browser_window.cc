@@ -135,6 +135,22 @@ std::int64_t UnixNow() {
         .count();
 }
 
+std::uint64_t UnixNowMs() {
+    return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::system_clock::now().time_since_epoch())
+                                          .count());
+}
+
+std::string UrlHost(std::string_view url) {
+    const std::size_t scheme = url.find("://");
+    if (scheme == std::string_view::npos) {
+        return {};
+    }
+    const std::size_t begin = scheme + 3;
+    const std::size_t end = url.find_first_of("/?#", begin);
+    return std::string(url.substr(begin, end - begin));
+}
+
 void RunAgentTask(std::function<void()> task) {
     if (task) {
         task();
@@ -173,6 +189,10 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
     if (persist_session_) {
         prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
         bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
+        HistoryRecorder::Options history_options;
+        history_options.segment_path =
+            PrefsStore::DefaultPrefsFilePath().parent_path() / "history" / "index.seg";
+        history_ = std::make_unique<HistoryRecorder>(std::move(history_options));
     }
     keymap_ = Keymap::WithOverrides(prefs_.keybindings);
     // The sidebar starts the way the last session left it (the headless and smoke shapes
@@ -982,6 +1002,8 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("search", Value::MakeObject()
                                .Set("engine", Value::String(std::string(search_engine().key)))
                                .Set("engines", std::move(engines)))
+            .Set("history",
+                 Value::MakeObject().Set("remember", Value::Bool(prefs_.remember_history)))
             .Set("platform", Value::String(platform))
             .Set("agent", std::move(agent))
             .Set("endpoint", std::move(endpoint))
@@ -1084,6 +1106,27 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
             prefs_.search_engine = std::string(id);
             SavePrefs();
             RenderStartPages();
+        }
+    } else if (type == "set_remember_history") {
+        const json::Value* remember = message.FindMember("value");
+        if (remember != nullptr && remember->IsBool()) {
+            prefs_.remember_history = remember->bool_val;
+            SavePrefs();
+        }
+    } else if (type == "clear_history") {
+        if (history_ != nullptr) {
+            history_->ClearAsync([window = CefRefPtr<BrowserWindow>(this)](bool cleared) {
+                CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                                        [](CefRefPtr<BrowserWindow> browser_window, bool ok) {
+                                            browser_window->settings_message_ =
+                                                ok ? "Browsing history cleared."
+                                                   : "Browsing history could not be cleared.";
+                                            browser_window->ScheduleLocalPagesRender();
+                                        },
+                                        window, cleared)));
+            });
+        } else {
+            settings_message_ = "Browsing history cleared.";
         }
     } else if (type == "set_agent_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
@@ -2066,7 +2109,12 @@ void BrowserWindow::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString
         return;
     }
 
-    owner->navigation_state().OnTitleChange(title.ToString());
+    const std::string page_title = title.ToString();
+    owner->navigation_state().OnTitleChange(page_title);
+    if (history_ != nullptr && prefs_.remember_history) {
+        static_cast<void>(
+            history_->UpdateTitle(owner->navigation_state().snapshot().url, page_title));
+    }
     UpdateWindowTitle();
 }
 
@@ -2239,6 +2287,14 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     }
 
     owner->navigation_state().OnLoadEnd(http_status_code);
+    if (history_ != nullptr && prefs_.remember_history) {
+        const NavigationSnapshot& navigation = owner->navigation_state().snapshot();
+        // Island has no private-mode model yet. Keep the explicit parameter so
+        // a future private tab cannot accidentally inherit history capture.
+        static_cast<void>(history_->RecordNavigation(frame->GetURL().ToString(),
+                                                     navigation.page_title, UnixNowMs(),
+                                                     /*private_mode=*/false));
+    }
     if (frame->GetURL().ToString() == StartPageUrl()) {
         frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
     }
@@ -2418,6 +2474,9 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         // smoke run never touches the session file.
         if (persist_session_) {
             SaveSession();
+        }
+        if (history_ != nullptr) {
+            history_->BeginShutdown();
         }
         for (Space& space : spaces_) {
             for (Tab& tab : space.tabs()) {
@@ -3038,6 +3097,40 @@ void BrowserWindow::ShowCommandPalette() {
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks));
 }
 
+void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || history_ == nullptr) {
+        return;
+    }
+    const std::string requested(query);
+    history_->QueryAsync(requested, UnixNowMs(), 8,
+                         [window = CefRefPtr<BrowserWindow>(this),
+                          requested](std::vector<HistoryResult> results) mutable {
+                             CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                                                     &BrowserWindow::ApplyHistoryResults, window,
+                                                     std::move(requested), std::move(results))));
+                         });
+}
+
+void BrowserWindow::ApplyHistoryResults(std::string query, std::vector<HistoryResult> results) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || command_palette_ == nullptr) {
+        return;
+    }
+    std::vector<PaletteHistoryEntry> history;
+    history.reserve(results.size());
+    for (HistoryResult& result : results) {
+        const std::string host = UrlHost(result.url);
+        history.push_back({.title = std::move(result.title),
+                           .url = std::move(result.url),
+                           .host = host,
+                           .visited_at_ms = result.visited_at_ms,
+                           .visit_count = result.visit_count,
+                           .score = result.score});
+    }
+    command_palette_->SetHistoryResults(query, std::move(history));
+}
+
 void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
                                               std::string_view url_query) {
     CEF_REQUIRE_UI_THREAD();
@@ -3056,6 +3149,9 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             break;
         case PaletteEntryKind::kBookmark:
             OpenBookmark(selection.bookmark);
+            break;
+        case PaletteEntryKind::kHistory:
+            OpenHistory(selection.history);
             break;
     }
     FocusBrowserView();
@@ -3162,6 +3258,14 @@ void BrowserWindow::OpenBookmark(const PaletteBookmarkEntry& bookmark) {
         return;
     }
     SubmitPaletteUrl(bookmark.url, address);
+}
+
+void BrowserWindow::OpenHistory(const PaletteHistoryEntry& history) {
+    CEF_REQUIRE_UI_THREAD();
+    const ValidatedAddress address = ParseAndValidate(history.url);
+    if (address.is_valid()) {
+        SubmitPaletteUrl(history.url, address);
+    }
 }
 
 void BrowserWindow::ActivatePaletteTab(TabId id) {

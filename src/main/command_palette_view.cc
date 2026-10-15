@@ -64,6 +64,8 @@ std::string PaletteKindLabel(const PaletteEntry& entry) {
             return "GO TO";
         case PaletteEntryKind::kBookmark:
             return "BOOKMARK";
+        case PaletteEntryKind::kHistory:
+            return "HISTORY";
     }
     return "";
 }
@@ -82,6 +84,11 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
             const std::string& title =
                 entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
             return "Open bookmark: " + title + ", URL " + entry.bookmark.url;
+        }
+        case PaletteEntryKind::kHistory: {
+            const std::string& title =
+                entry.history.title.empty() ? entry.history.url : entry.history.title;
+            return "Open history: " + title + ", URL " + entry.history.url;
         }
     }
     return "Palette result";
@@ -102,6 +109,9 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
             // An untitled bookmark falls back to its URL so the row is never
             // blank.
             return entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
+        case PaletteEntryKind::kHistory:
+            return (entry.history.title.empty() ? entry.history.url : entry.history.title) +
+                   (entry.history.host.empty() ? "" : "  —  " + entry.history.host);
     }
     return "";
 }
@@ -116,6 +126,8 @@ std::string PaletteRowTooltipText(const PaletteEntry& entry) {
             return "Open the typed URL in the active tab";
         case PaletteEntryKind::kBookmark:
             return entry.bookmark.url;
+        case PaletteEntryKind::kHistory:
+            return entry.history.url;
     }
     return "";
 }
@@ -236,12 +248,12 @@ void CommandPaletteView::BuildViews() {
     panel_->SetID(static_cast<int>(ChromeViewId::kCommandPalette));
     panel_->SetToBoxLayout(CommandPaletteLayout(tokens_));
 
-    textfield_delegate_ = new QueryTextfieldDelegate(
-        this, CefSize(SearchPaletteWidthDip(), kQueryHeightDip));
+    textfield_delegate_ =
+        new QueryTextfieldDelegate(this, CefSize(SearchPaletteWidthDip(), kQueryHeightDip));
     query_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
     query_field_->SetID(static_cast<int>(ChromeViewId::kCommandPaletteQuery));
     query_field_->SetAccessibleName("Command palette");
-    query_field_->SetPlaceholderText("Switch to tab, space, or type a URL");
+    query_field_->SetPlaceholderText("Search tabs, bookmarks, history, or type a URL");
     query_field_->SetFocusable(true);
     panel_->AddChildView(query_field_);
 
@@ -352,7 +364,9 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     if (!overlay_.has_overlay()) {
         return;
     }
-    const std::size_t pool_size = tabs.size() + spaces.size() + 1;
+    constexpr std::size_t kHistoryRowLimit = 8;
+    const std::size_t pool_size =
+        tabs.size() + spaces.size() + bookmarks.size() + kHistoryRowLimit + 1;
     model_.SetTabs(std::move(tabs));
     model_.SetSpaces(std::move(spaces));
     model_.SetBookmarks(std::move(bookmarks));
@@ -365,6 +379,16 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     overlay_.get()->SetVisible(true);
     ProjectResults();
     query_field_->RequestFocus();
+}
+
+void CommandPaletteView::SetHistoryResults(std::string_view query,
+                                           std::vector<PaletteHistoryEntry> history) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || !model_.visible() || model_.query() != query) {
+        return;
+    }
+    model_.SetHistory(std::move(history));
+    ProjectResults();
 }
 
 void CommandPaletteView::Hide() {
@@ -473,7 +497,11 @@ void CommandPaletteView::HandleQueryChanged(CefRefPtr<CefTextfield> textfield) {
         return;
     }
     model_.SetQuery(textfield->GetText().ToString());
+    model_.SetHistory({});
     ProjectResults();
+    if (host_ != nullptr) {
+        host_->OnCommandPaletteQueryChanged(model_.query());
+    }
 }
 
 void CommandPaletteView::HandleRowPressed(std::size_t index) {

@@ -116,7 +116,9 @@ if(NOT DEFINED PROJECT_ARCH AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     set(PROJECT_ARCH "arm64")
 endif()
 
-option(ISLAND_ENABLE_SEARCH "Build Island search index modules" OFF)
+# Kept for the standalone src/search lane and compatibility with existing
+# configure commands. The browser now always builds and links island_search.
+option(ISLAND_ENABLE_SEARCH "Enable search modules (always on in browser-root builds)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
@@ -144,11 +146,9 @@ add_subdirectory(tests)
 # built; src/main links it.
 add_subdirectory(src/agent)
 
-# Guarded Search S0 hook: the on-device search kernel is pure C++20 and never
-# links CEF. Default OFF keeps the Phase 0-3 flow byte-for-byte unchanged.
-if(ISLAND_ENABLE_SEARCH)
-    add_subdirectory(src/search)
-endif()
+# The on-device search kernel is pure C++20 and is now a browser dependency.
+# src/search still requires ISLAND_ENABLE_SEARCH=ON when configured directly.
+add_subdirectory(src/search)
 
 if(NOT APPLE AND NOT WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "Island Phase 0 supports Apple, Windows, and Linux hosts only.")

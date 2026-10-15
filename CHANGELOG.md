@@ -15,6 +15,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- On-device browsing history now records http/https page addresses and titles (never local,
+  credentialed, data, or future private-mode pages), keeps the newest 50,000 visits, and searches
+  them from Cmd/Ctrl+K alongside open tabs and bookmarks. The last typed word matches as a prefix. Results are URL-deduplicated, combine
+  BM25/recency with repeat-visit frequency, and stay entirely on the device. Settings can stop
+  remembering new visits or clear the persisted history.
+
 - Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
   button per tab of the active space (pinned tabs first, the active tab highlighted like the
   selected row, the page title as tooltip and accessible name), a "+" new-tab button and the

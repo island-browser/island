@@ -31,9 +31,10 @@ Two independent test systems live side by side here:
 | `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
 | `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
 | `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow` |
+| `history_recorder_test.cpp` | History URL/privacy filtering, deduplication and visit ranking, cap compaction, reopen rebuild, and clear |
 | `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |
-| `prefs_store_test.cpp` | Preferences round-trip, optional keys (agent provider, shortcuts, update checks), agent-command migration, schema errors |
+| `prefs_store_test.cpp` | Preferences round-trip, optional keys (history, agent provider, shortcuts, update checks), agent-command migration, schema errors |
 | `session_store_test.cpp` | Session JSON round-trip — **not currently listed in `CMakeLists.txt`**, so it has never run (PR #27 in flight) |
 
 ## Test targets
@@ -43,8 +44,8 @@ Two independent test systems live side by side here:
 | `island_tests` | `address_bar_model`, `address_policy`, `chrome/*`, `design_tokens`, `lifecycle_config`, `navigation_state`, `space`, `startup_options`, `tab` | `gtest_discover_tests` |
 | `island_resource_tests` | `resources/app_resources_test.cc` | `add_test(NAME ResourcePaths)` |
 | `island_cef_tests` | `cef_address_parser_test.cpp` (+ `address_policy.cc`) | `gtest_discover_tests`; macOS bundle on Apple, CEF runtime staged beside the binary |
-| `island_search_tests` | `search/*_test.cpp` (+ `bench/search/benchmark_corpus.cc`) | `gtest_discover_tests`, **only under `-DISLAND_ENABLE_SEARCH=ON`** |
-| `island_search_posting_codec_harness` | `search/posting_codec_test.cpp` | `add_test(NAME PostingCodecStandaloneHarness)`, same flag; own `main()`, not a GoogleTest binary |
+| `island_search_tests` | `search/*_test.cpp` (+ `bench/search/benchmark_corpus.cc`) | `gtest_discover_tests`; included in root and standalone search builds |
+| `island_search_posting_codec_harness` | `search/posting_codec_test.cpp` | `add_test(NAME PostingCodecStandaloneHarness)`; own `main()`, not a GoogleTest binary |
 
 `island_tests` and `island_cef_tests` both link CEF. The difference is staging: only
 `island_cef_tests` copies the CEF framework/resources next to the binary, and it is the only target
@@ -58,7 +59,7 @@ with a source that calls `CefInitialize` (`cef_address_parser_test.cpp`). Keep i
 | `chrome/` | Native chrome contract and style tests (see `chrome/AGENTS.md`) |
 | `resources/` | Runtime resource path resolution (see `resources/AGENTS.md`) |
 | `integration/` | CEF-linked chrome integration test, not in any CMake target (see `integration/AGENTS.md`) |
-| `search/` | Phase S0 search unit tests, built only under `ISLAND_ENABLE_SEARCH=ON` (see `search/AGENTS.md`) |
+| `search/` | Phase S0 search unit tests, built in the default root suite and standalone search lane (see `search/AGENTS.md`) |
 | `deps/` | pytest suite for `deps/` (see `deps/AGENTS.md`) |
 | `package/` | pytest suite for `scripts/package*.py` (see `package/AGENTS.md`) |
 | `design/` | pytest design-token drift guard (see `design/AGENTS.md`) |
@@ -73,9 +74,8 @@ with a source that calls `CefInitialize` (`cef_address_parser_test.cpp`). Keep i
   to a target in `CMakeLists.txt`, along with the `src/main/*.cc` files it exercises.
 - Two source sets are on disk but in no target at all: `session_store_test.cpp` (PR #27 in flight)
   and `integration/`. A default `ctest` run covers neither.
-- `search/` is a third case, and a different one: it *is* registered, but only inside
-  `if(ISLAND_ENABLE_SEARCH)`, and that option defaults to `OFF`. Registered is not the same as run
-  by default — do not cite a default `ctest` run as evidence for anything under `search/`.
+- `search/` is registered in both the default root build and the standalone search project. Keep
+  both source lists complete when adding a test.
 - GoogleTest is built with `gtest_force_shared_crt OFF` so it matches CEF's static CRT on Windows.
   Do not flip this.
 - The first configure downloads GoogleTest and therefore needs network access.
@@ -87,8 +87,8 @@ ctest --test-dir build --output-on-failure
 ctest --test-dir build -R <TestName> --output-on-failure
 ```
 
-On `origin/main` that reports **103 tests**. Adding `-DISLAND_ENABLE_SEARCH=ON` at configure time
-raises it to **187** by including the two search targets.
+Use `ctest --test-dir build -N` when an exact discovered-test count is needed; the root suite
+includes both the browser and search targets.
 
 Python suites run from the repository root:
 

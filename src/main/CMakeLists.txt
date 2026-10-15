@@ -22,6 +22,7 @@ add_library(island_browser_core STATIC
     devtools_bridge.cc
     download_path.cc
     icon_catalog.cc
+    history_recorder.cc
     island_app.cc
     keymap.cc
     navigation_state.cc
@@ -45,7 +46,7 @@ add_library(island_browser_core STATIC
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
-target_link_libraries(island_browser_core PUBLIC island_agent)
+target_link_libraries(island_browser_core PUBLIC island_agent island_search)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)

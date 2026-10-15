@@ -133,7 +133,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
 .dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
 #custom-command { margin-top: 10px; }
 #custom-command .label { display: block; margin-bottom: 6px; font-size: 13px; }
-#updates input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
+#updates input[type="checkbox"], #history input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
 #updates .status { font: 12px/1.5 var(--mono); }
 #updates .status.error { color: var(--danger); }
 </style>
@@ -147,7 +147,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     </button>
   </div>
   <nav aria-label="Sections">
-    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#agent">Agent &amp; tools</a>
+    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#history">History</a><a href="#agent">Agent &amp; tools</a>
     <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
@@ -168,6 +168,19 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     <div class="row">
       <div class="label">Search engine<small id="engine-hint">Google is the default.</small></div>
       <div class="segmented" role="group" aria-label="Search engine" id="engine"></div>
+    </div>
+  </section>
+
+  <section id="history">
+    <h2>History</h2>
+    <p class="lead">History stays on this computer and powers results in the command palette.</p>
+    <div class="row">
+      <label class="label" for="history-remember">Remember history<small>Save the address and title of web pages you visit.</small></label>
+      <input type="checkbox" id="history-remember">
+    </div>
+    <div class="row">
+      <div class="label">Browsing history<small>Remove every saved history result from this device.</small></div>
+      <button class="btn quiet" id="history-clear">Clear browsing history</button>
     </div>
   </section>
 
@@ -500,6 +513,10 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     });
   }
 
+  function renderHistory(history) {
+    $("history-remember").checked = history.remember !== false;
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
@@ -507,6 +524,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       button.setAttribute("aria-pressed", button.getAttribute("data-value") === s.theme_pref ? "true" : "false");
     });
     renderSearch(s.search || {});
+    renderHistory(s.history || {});
     renderAgent(s.agent || {});
     var endpoint = s.endpoint || {};
     $("endpoint-dot").className = "dot" + (endpoint.running ? " on" : "");
@@ -547,6 +565,12 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   });
   $("agent-open").addEventListener("click", function () { post({ type: "open_agent" }); });
   $("copy-config").addEventListener("click", function () { copyText($("endpoint-config").textContent); });
+  $("history-remember").addEventListener("change", function () {
+    post({ type: "set_remember_history", value: $("history-remember").checked });
+  });
+  $("history-clear").addEventListener("click", function () {
+    post({ type: "clear_history" });
+  });
   $("reset-keys").addEventListener("click", function () { recording = null; post({ type: "reset_shortcuts" }); });
   $("key-filter").addEventListener("input", renderShortcuts);
   $("close").addEventListener("click", function () { post({ type: "close" }); });

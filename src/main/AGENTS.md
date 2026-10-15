@@ -41,7 +41,8 @@ platform executable links.
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
 | `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; `pages/start.html` (`LocalPageKind::kStart`) is the exception: it is the document each new tab loads, and `BrowserWindow::OnConsoleMessage` accepts its `search` / `ask_agent` / `set_start_mode` messages only from a tab whose main frame is exactly that URL; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
 | `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping |
-| `prefs_store.{h,cc}` | Preferences JSON (theme, agent provider + custom command with migration from the old single command, agent panel state, shortcut overrides, update checks) |
+| `history_recorder.{h,cc}` | Single-sequence background owner of the on-device history `SearchIndex`; records web navigations, rebuilds/flushes the bounded segment, queries, and clears history |
+| `prefs_store.{h,cc}` | Preferences JSON (theme, history capture, agent provider + custom command with migration from the old single command, agent panel state, shortcut overrides, update checks) |
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
 | `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
 | `cef_update_fetcher.{h,cc}` | `UpdateFetcher` over `CefURLRequest` (manual, allow-listed redirects; capped, hashed streaming) |
@@ -87,6 +88,11 @@ platform executable links.
   Page messages: panel `set_provider {id}` / `open_settings` / `start {command?}`; Settings
   `set_agent_provider {id}` / `set_agent_command {command}` / `open_agent_docs {id}`. Availability
   is re-detected at most every 5 s and whenever the panel or Settings opens.
+- `HistoryRecorder` owns every `SearchIndex` call on one worker sequence. Browser navigation and
+  title callbacks only enqueue work; palette queries return asynchronously to the CEF UI thread;
+  periodic and clean-quit flushes never execute on it. On open, a persisted S0 segment is read back,
+  capped to the newest 50,000 logical visits, and re-ingested into a fresh MemTable before rewrite,
+  because S0 cannot flush a segment that predates its MemTable.
 - Platform selection is `if(APPLE) / elseif(WIN32) / elseif(Linux)` with a `FATAL_ERROR` fallback;
   each branch adds its own `font_registry_*` source and platform link libraries.
 

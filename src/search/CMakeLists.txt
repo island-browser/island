@@ -4,10 +4,9 @@
 # the CEF distribution, so this subtree builds and tests without
 # scripts/setup_deps.sh having run.
 #
-# When added by the browser root (guarded option(ISLAND_ENABLE_SEARCH)), this
-# file defines only the island_search static library; the search test targets
-# live in tests/CMakeLists.txt behind the same option, next to the repo's
-# other GoogleTest binaries.
+# When added by the browser root, this file defines island_search and its
+# memory-gate target; the search test targets live in tests/CMakeLists.txt next
+# to the repo's other GoogleTest binaries. The root always adds this directory.
 #
 # When configured from this directory as a standalone project root, the same
 # library plus its tests build with no browser scaffolding at all, but the
@@ -103,8 +102,8 @@ add_subdirectory(bench)
 
 # ---- Tests (standalone only) --------------------------------------------------
 # In the browser build the same test sources are compiled by tests/
-# CMakeLists.txt behind ISLAND_ENABLE_SEARCH; defining them again here would
-# collide, so they belong to the standalone configuration alone.
+# CMakeLists.txt by default; defining them again here would collide, so they
+# belong to the standalone configuration alone.
 if(ISLAND_SEARCH_STANDALONE)
     include(GoogleTest)
 
