@@ -1,0 +1,18 @@
+[package]
+name = "island_content_blocker_ffi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MPL-2.0"
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+adblock = { version = "=0.13.3", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

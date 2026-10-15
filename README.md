@@ -38,6 +38,9 @@ persistence, command bar, settings, extensions, and expanded CDP features are no
   release's `SHA256SUMS.txt`, and swaps it in on "Restart to update", keeping the previous version
   as a backup until the new one starts. Pre-releases are opt-in. Builds run from a CMake build
   directory never update themselves; `ISLAND_DISABLE_UPDATES=1` turns updates off.
+- **Native content blocking** (Settings > Privacy): EasyList and EasyPrivacy are evaluated by
+  Brave's `adblock` Rust engine before subresources load. Ads and trackers can be controlled
+  separately, sites can be allowlisted, and the All tabs view shows each tab's blocked count.
 
 ## Versions
 
@@ -81,6 +84,12 @@ CEF 150 and Geist are pinned in `deps/dependencies.lock.json` and installed outs
 
 The first CMake configure also needs network access for GoogleTest v1.15.2 through CMake
 `FetchContent`.
+
+The native content blocker needs a stable Rust toolchain (`cargo` and `rustc`). CMake enables
+`ISLAND_ENABLE_CONTENT_BLOCKER` by default when `cargo` is found and otherwise builds a no-op
+implementation. Pass `-DISLAND_ENABLE_CONTENT_BLOCKER=OFF` explicitly to test that fallback.
+The Rust crate and dependency graph are pinned by `src/content_blocker_ffi/Cargo.toml` and
+`Cargo.lock`; EasyList and EasyPrivacy themselves are downloaded at runtime and never committed.
 
 ```bash
 bash -n scripts/setup_deps.sh

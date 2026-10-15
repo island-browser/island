@@ -133,9 +133,12 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
 .dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
 #custom-command { margin-top: 10px; }
 #custom-command .label { display: block; margin-bottom: 6px; font-size: 13px; }
-#updates input[type="checkbox"], #history input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
+#updates input[type="checkbox"], #history input[type="checkbox"], #privacy input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
 #updates .status { font: 12px/1.5 var(--mono); }
 #updates .status.error { color: var(--danger); }
+.allow-sites { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.allow-site { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); }
+.allow-site span { flex: 1; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -147,7 +150,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     </button>
   </div>
   <nav aria-label="Sections">
-    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#history">History</a><a href="#agent">Agent &amp; tools</a>
+    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#history">History</a><a href="#agent">Agent &amp; tools</a><a href="#privacy">Privacy</a>
     <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
   </nav>
 
@@ -210,6 +213,31 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
         <button class="btn" id="copy-config">Copy config</button>
         <span class="note" id="bridge-note"></span>
       </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <h2>Privacy</h2>
+    <p class="lead">Block advertising and tracking requests with EasyList and EasyPrivacy.</p>
+    <div class="row">
+      <label class="label" for="privacy-ads">Block ads<small>Uses EasyList network rules.</small></label>
+      <input type="checkbox" id="privacy-ads">
+    </div>
+    <div class="row">
+      <label class="label" for="privacy-trackers">Block trackers<small>Uses EasyPrivacy network rules.</small></label>
+      <input type="checkbox" id="privacy-trackers">
+    </div>
+    <div class="row">
+      <div class="label">Filter lists<small id="privacy-status" role="status" aria-live="polite"></small></div>
+      <button class="btn" id="privacy-update">Update now</button>
+    </div>
+    <div class="row" style="display:block">
+      <label class="label" for="privacy-site">Allowed sites<small>Ads and trackers are allowed on these sites and their subdomains.</small></label>
+      <div class="inline" style="margin-top:8px">
+        <input class="field" id="privacy-site" placeholder="example.com" spellcheck="false">
+        <button class="btn" id="privacy-add">Add</button>
+      </div>
+      <div class="allow-sites" id="privacy-sites"></div>
     </div>
   </section>
 
@@ -494,6 +522,34 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("update-note").hidden = !note;
   }
 
+  function renderPrivacy() {
+    var privacy = state.settings.privacy || {};
+    $("privacy-ads").checked = !!privacy.block_ads;
+    $("privacy-trackers").checked = !!privacy.block_trackers;
+    $("privacy-update").disabled = !!privacy.updating || !privacy.compiled_in;
+    var status = "";
+    if (!privacy.compiled_in) status = "Unavailable in this build.";
+    else if (privacy.updating) status = privacy.ready ? "Updating in the background..." : "Loading in the background...";
+    else if (privacy.ready) status = (privacy.ads_rules || 0) + " ad rules and " +
+        (privacy.tracker_rules || 0) + " tracker rules" +
+        (privacy.last_updated ? "; updated " + new Date(privacy.last_updated * 1000).toLocaleString() : "");
+    else status = "Lists are not loaded yet.";
+    if (privacy.error) status += (status ? " " : "") + privacy.error;
+    $("privacy-status").textContent = status;
+    var sites = $("privacy-sites");
+    sites.textContent = "";
+    (privacy.allowlist || []).forEach(function (site) {
+      var row = el("div", "allow-site");
+      row.appendChild(el("span", "", site));
+      var remove = el("button", "btn quiet", "Remove");
+      remove.addEventListener("click", function () {
+        post({ type: "remove_content_blocker_site", site: site });
+      });
+      row.appendChild(remove);
+      sites.appendChild(row);
+    });
+  }
+
   function renderSearch(search) {
     var box = $("engine");
     var engines = search.engines || [];
@@ -535,6 +591,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("mac-note").hidden = !isMac();
     renderShortcuts();
     renderSources();
+    renderPrivacy();
     renderUpdate();
     var about = $("about-list");
     about.textContent = "";
@@ -574,6 +631,23 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   $("reset-keys").addEventListener("click", function () { recording = null; post({ type: "reset_shortcuts" }); });
   $("key-filter").addEventListener("input", renderShortcuts);
   $("close").addEventListener("click", function () { post({ type: "close" }); });
+  $("privacy-ads").addEventListener("change", function () {
+    post({ type: "set_content_blocker_pref", key: "ads", value: $("privacy-ads").checked });
+  });
+  $("privacy-trackers").addEventListener("change", function () {
+    post({ type: "set_content_blocker_pref", key: "trackers", value: $("privacy-trackers").checked });
+  });
+  $("privacy-update").addEventListener("click", function () { post({ type: "update_content_blocker" }); });
+  function addPrivacySite() {
+    var site = $("privacy-site").value.trim();
+    if (!site) return;
+    post({ type: "add_content_blocker_site", site: site });
+    $("privacy-site").value = "";
+  }
+  $("privacy-add").addEventListener("click", addPrivacySite);
+  $("privacy-site").addEventListener("keydown", function (event) {
+    if (event.key === "Enter") { event.preventDefault(); addPrivacySite(); }
+  });
   $("update-check").addEventListener("click", function () { post({ type: "check_updates" }); });
   $("update-notes").addEventListener("click", function () { post({ type: "open_release_notes" }); });
   $("update-install").addEventListener("click", function () {

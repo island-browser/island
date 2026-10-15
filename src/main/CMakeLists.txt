@@ -15,9 +15,12 @@ add_library(island_browser_core STATIC
     browser_chrome.cc
     browser_window.cc
     cef_address_parser.cc
+    cef_content_blocker.cc
     cef_update_fetcher.cc
     command_palette.cc
     command_palette_view.cc
+    content_blocker.cc
+    content_blocker_policy.cc
     design_tokens.cc
     devtools_bridge.cc
     download_path.cc
@@ -46,7 +49,7 @@ add_library(island_browser_core STATIC
 target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
-target_link_libraries(island_browser_core PUBLIC island_agent island_search)
+target_link_libraries(island_browser_core PUBLIC island_agent island_search island_content_blocker_ffi)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)

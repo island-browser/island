@@ -53,6 +53,11 @@ struct PrefsState {
     // Browsing-history capture is opt-out. Existing history remains searchable
     // while disabled and can be removed separately from Settings.
     bool remember_history = true;
+    // Native network filtering. Optional in schema v1 so existing profiles
+    // adopt the privacy-preserving defaults without migration.
+    bool block_ads = true;
+    bool block_trackers = true;
+    std::vector<std::string> content_blocker_allowlist;
 
     bool operator==(const PrefsState&) const = default;
 };

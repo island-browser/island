@@ -125,6 +125,34 @@ TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
 }
 
+TEST(BrowserWindowPagesTest, SettingsPrivacyMessagesUpdateNativeBlockerPolicy) {
+    CefRefPtr<BrowserWindow> window = BrowserWindow::CreateHeadlessForTest("");
+    window->OnLocalPageMessage(
+        LocalPageKind::kSettings,
+        *json::Parse(R"({"type":"set_content_blocker_pref","key":"ads","value":false})"));
+    window->OnLocalPageMessage(
+        LocalPageKind::kSettings,
+        *json::Parse(R"({"type":"add_content_blocker_site","site":" HTTPS://Example.COM/path "})"));
+
+    std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* privacy = state->FindMember("settings")->FindMember("privacy");
+    ASSERT_NE(privacy, nullptr);
+    ASSERT_TRUE(privacy->FindMember("block_ads")->IsBool());
+    ASSERT_TRUE(privacy->FindMember("block_trackers")->IsBool());
+    EXPECT_FALSE(privacy->FindMember("block_ads")->bool_val);
+    EXPECT_TRUE(privacy->FindMember("block_trackers")->bool_val);
+    ASSERT_EQ(privacy->FindMember("allowlist")->array_val.size(), 1U);
+    EXPECT_EQ(privacy->FindMember("allowlist")->array_val[0].string_val, "example.com");
+
+    window->OnLocalPageMessage(
+        LocalPageKind::kSettings,
+        *json::Parse(R"({"type":"remove_content_blocker_site","site":"example.com"})"));
+    state = json::Parse(window->SettingsStateJson());
+    privacy = state->FindMember("settings")->FindMember("privacy");
+    EXPECT_TRUE(privacy->FindMember("allowlist")->array_val.empty());
+}
+
 TEST(BrowserWindowPagesTest, OverviewOperationsWorkAcrossSpaces) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     ASSERT_TRUE(window->OpenNewTab("https://a.test/"));

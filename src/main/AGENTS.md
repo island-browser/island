@@ -46,6 +46,8 @@ platform executable links.
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
 | `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
 | `cef_update_fetcher.{h,cc}` | `UpdateFetcher` over `CefURLRequest` (manual, allow-listed redirects; capped, hashed streaming) |
+| `content_blocker.{h,cc}`, `content_blocker_policy.{h,cc}` | RAII wrapper for the Rust engine plus CEF-free request-type, bypass, allowlist, and four-day refresh policy |
+| `cef_content_blocker.{h,cc}` | Background EasyList/EasyPrivacy cache loading, `CefURLRequest` refreshes, atomic engine publication, and request checks |
 | `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers, Safari, Firefox (`.jsonlz4` bookmark backups) and Arc (spaces + pinned tabs) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
@@ -78,6 +80,10 @@ platform executable links.
   `cef_update_fetcher.cc` and the `BrowserWindow` glue touch CEF. The startup check is deferred and
   skipped for the smoke run (`persist_session` false) and under `ISLAND_DISABLE_UPDATES=1`, so
   startup stays offline. Release-contract details live in the comment at the top of `updater.h`.
+- The content blocker is native (not an extension). It never intercepts main-frame or local-page
+  requests. Cached lists live under the Island support directory in `content-blocker/`, refresh
+  no more often than every four days, compile on `TID_FILE_USER_BLOCKING`, and are atomically
+  published for IO-thread checks. `ISLAND_ENABLE_CONTENT_BLOCKER=OFF` exercises the no-op stub.
 - Currently **not** compiled into any target: `session_store.cc`. (PR #27 is in flight to add it to
   both `island_browser_core` and `island_tests`; until it merges, that file has never been
   compiled.) `space.cc` and `tab.cc` *are* in `island_browser_core` as of commit `043aa34`, and
@@ -150,6 +156,9 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 ### External
 
 - CEF (`libcef_dll_wrapper`, `CEF_STANDARD_LIBS`)
+- Rust/Cargo (optional): builds the pinned MPL-2.0 Brave `adblock` crate as a static library; CMake
+  disables the blocker by default when `cargo` is unavailable
 - macOS: CoreFoundation, CoreText — Windows: gdi32 — Linux: Fontconfig
 
 <!-- MANUAL: -->
+- Content blocker startup: cached lists load and compile on a file thread after the window exists, so requests of tabs restored at launch can pass until the engine is published (a few hundred ms); list downloads use `CefURLRequest` on the UI thread but compile off it, and `CefURLRequest` callbacks hand back a different wrapper object, so never compare it by pointer.

@@ -120,6 +120,88 @@ endif()
 # configure commands. The browser now always builds and links island_search.
 option(ISLAND_ENABLE_SEARCH "Enable search modules (always on in browser-root builds)" OFF)
 
+# Brave's adblock-rust engine is optional so contributors without a Rust
+# toolchain still get a complete browser build with a no-op C++ implementation.
+find_program(ISLAND_CARGO_EXECUTABLE cargo)
+if(ISLAND_CARGO_EXECUTABLE)
+    set(_island_content_blocker_default ON)
+else()
+    set(_island_content_blocker_default OFF)
+endif()
+option(ISLAND_ENABLE_CONTENT_BLOCKER "Build the native ad/tracker blocker" ${_island_content_blocker_default})
+
+if(ISLAND_ENABLE_CONTENT_BLOCKER)
+    if(NOT ISLAND_CARGO_EXECUTABLE)
+        message(FATAL_ERROR
+            "ISLAND_ENABLE_CONTENT_BLOCKER=ON requires cargo and rustc. Install Rust or configure with -DISLAND_ENABLE_CONTENT_BLOCKER=OFF.")
+    endif()
+
+    if(APPLE)
+        if(CMAKE_OSX_ARCHITECTURES MATCHES ";")
+            message(FATAL_ERROR "The Rust content blocker requires a single CMAKE_OSX_ARCHITECTURES value per build.")
+        elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR
+               (NOT CMAKE_OSX_ARCHITECTURES AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64"))
+            set(ISLAND_RUST_TARGET "x86_64-apple-darwin")
+        else()
+            set(ISLAND_RUST_TARGET "aarch64-apple-darwin")
+        endif()
+        set(ISLAND_RUST_STATICLIB "libisland_content_blocker_ffi.a")
+    elseif(WIN32)
+        if(CMAKE_GENERATOR_PLATFORM MATCHES "^(ARM64|arm64)$" OR
+           CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+            set(ISLAND_RUST_TARGET "aarch64-pc-windows-msvc")
+        else()
+            set(ISLAND_RUST_TARGET "x86_64-pc-windows-msvc")
+        endif()
+        set(ISLAND_RUST_STATICLIB "island_content_blocker_ffi.lib")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+            set(ISLAND_RUST_TARGET "aarch64-unknown-linux-gnu")
+        else()
+            set(ISLAND_RUST_TARGET "x86_64-unknown-linux-gnu")
+        endif()
+        set(ISLAND_RUST_STATICLIB "libisland_content_blocker_ffi.a")
+    endif()
+
+    set(ISLAND_CONTENT_BLOCKER_MANIFEST
+        "${CMAKE_SOURCE_DIR}/src/content_blocker_ffi/Cargo.toml")
+    set(ISLAND_CONTENT_BLOCKER_ARCHIVE
+        "${CMAKE_BINARY_DIR}/cargo/${ISLAND_RUST_TARGET}/release/${ISLAND_RUST_STATICLIB}")
+    add_custom_command(
+        OUTPUT "${ISLAND_CONTENT_BLOCKER_ARCHIVE}"
+        COMMAND "${ISLAND_CARGO_EXECUTABLE}" build --release --locked
+                --manifest-path "${ISLAND_CONTENT_BLOCKER_MANIFEST}"
+                --target "${ISLAND_RUST_TARGET}"
+                --target-dir "${CMAKE_BINARY_DIR}/cargo"
+        DEPENDS
+            "${ISLAND_CONTENT_BLOCKER_MANIFEST}"
+            "${CMAKE_SOURCE_DIR}/src/content_blocker_ffi/Cargo.lock"
+            "${CMAKE_SOURCE_DIR}/src/content_blocker_ffi/src/lib.rs"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/src/content_blocker_ffi"
+        COMMENT "Building Brave adblock-rust content blocker (${ISLAND_RUST_TARGET})"
+        VERBATIM
+    )
+    add_custom_target(island_content_blocker_rust DEPENDS "${ISLAND_CONTENT_BLOCKER_ARCHIVE}")
+    add_library(island_content_blocker_ffi INTERFACE)
+    add_dependencies(island_content_blocker_ffi island_content_blocker_rust)
+    target_compile_definitions(island_content_blocker_ffi INTERFACE ISLAND_ENABLE_CONTENT_BLOCKER=1)
+    target_link_libraries(island_content_blocker_ffi INTERFACE "${ISLAND_CONTENT_BLOCKER_ARCHIVE}")
+    if(APPLE)
+        target_link_libraries(island_content_blocker_ffi INTERFACE
+            "-framework CoreFoundation" "-framework Security" "-framework SystemConfiguration"
+            iconv resolv)
+    elseif(WIN32)
+        target_link_libraries(island_content_blocker_ffi INTERFACE
+            advapi32 bcrypt ntdll userenv ws2_32)
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(island_content_blocker_ffi INTERFACE dl m pthread)
+    endif()
+    message(STATUS "Native content blocker: ON (${ISLAND_RUST_TARGET})")
+else()
+    add_library(island_content_blocker_ffi INTERFACE)
+    message(STATUS "Native content blocker: OFF (no-op implementation)")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 

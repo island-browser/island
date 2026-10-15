@@ -97,14 +97,21 @@ jobs:
           - target: macosx64
             runner: macos-15-intel
             architecture: x86_64
+            rust_target: x86_64-apple-darwin
           - target: macosarm64
             runner: macos-15
             architecture: arm64
+            rust_target: aarch64-apple-darwin
     steps:
       - name: Check out resolved candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.prepare-candidate.outputs.sha }}
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -212,13 +219,20 @@ jobs:
         include:
           - target: linux64
             runner: ubuntu-24.04
+            rust_target: x86_64-unknown-linux-gnu
           - target: linuxarm64
             runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
     steps:
       - name: Check out resolved candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.prepare-candidate.outputs.sha }}
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -331,14 +345,21 @@ jobs:
           - target: windows64
             runner: windows-2022
             platform: x64
+            rust_target: x86_64-pc-windows-msvc
           - target: windowsarm64
             runner: windows-11-arm
             platform: ARM64
+            rust_target: aarch64-pc-windows-msvc
     steps:
       - name: Check out resolved candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.prepare-candidate.outputs.sha }}
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
