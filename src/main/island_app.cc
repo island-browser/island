@@ -240,6 +240,14 @@ void IslandApp::ToggleSettings() {
     }
 }
 
+void IslandApp::OpenSettingsSection(const std::string& section) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenSettingsSection(section);
+    }
+}
+
 void IslandApp::ToggleTabOverview() {
     CEF_REQUIRE_UI_THREAD();
 

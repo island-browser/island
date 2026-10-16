@@ -56,6 +56,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
     void ToggleSettings();
+    void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
     void BeginSpaceRenaming();
     // Space reorder menu entries; a move that would leave the space list is a

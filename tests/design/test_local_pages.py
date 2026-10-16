@@ -320,6 +320,91 @@ class SettingsPage(unittest.TestCase):
         self.assertIn('type: "delete_report"', html)
 
 
+    def test_settings_shell_has_a_section_list_search_and_version(self) -> None:
+        html = page("settings.html")
+        self.assertIn('<nav class="pane-nav"', html)
+        self.assertIn('aria-label="Settings sections"', html)
+        for pane in ("general", "appearance", "privacy", "tabs", "reader", "agent", "shortcuts", "about"):
+            with self.subTest(pane=pane):
+                self.assertIn(f'data-pane="{pane}"', html)
+                self.assertIn(f'<section id="{pane}">', html)
+        # The selected item is announced with aria-current, set by the script.
+        self.assertIn('setAttribute("aria-current", "page")', html)
+        # Up and Down move through the list like a native source list.
+        self.assertIn('"ArrowDown"', html)
+        self.assertIn('"ArrowUp"', html)
+        self.assertIn('<input id="settings-search" type="search"', html)
+        self.assertIn('placeholder="Search settings"', html)
+        self.assertIn('id="version"', html)
+        self.assertIn('<section id="reader">', html)  # existing anchors stay
+
+    def test_appearance_follows_the_native_mockup(self) -> None:
+        html = page("settings.html")
+        for group in (">Theme<", ">Color<", ">Layout<", ">Text<"):
+            with self.subTest(group=group):
+                self.assertIn(group, html)
+        self.assertIn(">Match system</button>", html)
+        self.assertIn('id="space-colors-row"', html)
+        self.assertIn('id="tint-row"', html)
+        self.assertIn("base_look", html)  # Native hides the space-color rows
+        self.assertIn("Changes apply right away to every window.", html)
+        # The space copy is only for looks that have space colors.
+        self.assertNotIn('<p class="lead">Each space tints', html)
+        self.assertIn("Each space tints the sidebar", html)
+        self.assertIn('id="reset-appearance"', html)
+        self.assertIn("var(--fill", html)
+        self.assertIn("var(--border-2", html)
+        self.assertIn("var(--accent-soft", html)
+
+    def test_a_focus_request_is_deduplicated_by_its_sequence_number(self) -> None:
+        # The same section can be requested twice in a row (privacy shield, click, shield again),
+        # so the page compares the native sequence number, not the section name.
+        html = page("settings.html")
+        self.assertIn("s.focus_seq", html)
+        self.assertIn("lastFocusSeq", html)
+        self.assertNotIn("s.focus !== lastFocus", html)
+
+    def test_search_matches_section_names_and_keeps_the_whole_pane(self) -> None:
+        html = page("settings.html")
+        search = html[html.index("function paneLabel("):html.index("// ---- Settings rows")]
+        # A pane whose nav label or title matches is shown whole.
+        self.assertIn('.pane-title', search)
+        self.assertIn('data-pane', search)
+        self.assertIn("paneMatch", search)
+
+    def test_search_treats_row_less_groups_as_one_searchable_unit(self) -> None:
+        # The Import source cards and the About list have no .row, so they match as a group.
+        html = page("settings.html")
+        search = html[html.index("function paneLabel("):html.index("// ---- Settings rows")]
+        self.assertIn("rows.length === 0", search)
+        self.assertIn("group.textContent", search)
+        self.assertIn('id="sources"', html)
+        self.assertIn('id="about-list"', html)
+
+    def test_selected_section_is_filled_with_semibold_text(self) -> None:
+        html = page("settings.html")
+        rule = re.search(r'\.nav-item\[aria-current="page"\]\s*\{([^}]*)\}', html)
+        self.assertIsNotNone(rule)
+        self.assertIn("var(--fill)", rule.group(1))
+        self.assertIn("font-weight: 600", rule.group(1))
+        self.assertNotIn("var(--selection)", rule.group(1))
+
+    def test_search_fields_use_the_interface_font_not_monospace(self) -> None:
+        html = page("settings.html")
+        rule = re.search(r"input\.field\.filter\s*\{([^}]*)\}", html)
+        self.assertIsNotNone(rule)
+        self.assertIn("font: inherit", rule.group(1))
+        self.assertIn('id="settings-search" type="search"', html)
+
+    def test_shortcuts_are_two_columns_of_grouped_cards(self) -> None:
+        html = page("settings.html")
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", html)
+        for group in ("Tabs", "Navigation", "Agent", "Spaces", "Window"):
+            with self.subTest(group=group):
+                self.assertIn(f'"{group}"', html)
+        self.assertIn("Search shortcuts", html)
+        self.assertIn('id="key-filter"', html)
+
     def test_shortcuts_record_resolve_conflicts_and_reset_all(self) -> None:
         html = page("settings.html")
         self.assertIn('type: "record_shortcut"', html)

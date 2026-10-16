@@ -45,6 +45,7 @@ add_executable(island_tests
     peek_state_test.cpp
     prefs_store_test.cpp
     reader_mode_test.cpp
+    settings_focus_test.cpp
     report_store_test.cpp
     research_prompt_test.cpp
     search_engine_test.cpp

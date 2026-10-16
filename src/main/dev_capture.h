@@ -13,6 +13,7 @@
 //       `sleep_report` logs the sleeping-tab count, `wait:<seconds>` pauses the sequence,
 //       `research:<question>` starts a Research task and `open_report` opens the newest stored
 //       report in a new tab, and `cheatsheet` opens the shortcut cheatsheet.
+//       `settings:<section>` opens Settings on one section (appearance, shortcuts, ...).
 //       `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
 //       density, font,
 //       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the
@@ -49,6 +50,10 @@ struct DevCaptureOptions {
 // The menu selector a menu-backed action name runs ("cheatsheet" -> "showCheatsheet:"), or ""
 // for parameterized and unknown actions.
 [[nodiscard]] std::string_view DevActionSelectorName(std::string_view action);
+
+// The Settings section a `settings:<section>` action opens ("settings:shortcuts" -> "shortcuts"),
+// or "" when the action is not one.
+[[nodiscard]] std::string_view DevSettingsSectionName(std::string_view action);
 
 }  // namespace island
 

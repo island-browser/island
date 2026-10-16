@@ -49,5 +49,13 @@ TEST(DevCaptureActions, MenuBackedNamesMapToTheirSelectors) {
     EXPECT_TRUE(DevActionSelectorName("no_such_action").empty());
 }
 
+TEST(DevCaptureActions, SettingsActionOpensANamedSection) {
+    EXPECT_EQ(DevSettingsSectionName("settings:shortcuts"), "shortcuts");
+    EXPECT_EQ(DevSettingsSectionName("settings:appearance"), "appearance");
+    EXPECT_TRUE(DevSettingsSectionName("settings:").empty());
+    EXPECT_TRUE(DevSettingsSectionName("settings").empty());
+    EXPECT_TRUE(DevSettingsSectionName("navigate:settings:shortcuts").empty());
+}
+
 }  // namespace
 }  // namespace island

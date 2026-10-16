@@ -54,6 +54,8 @@ class LocalPage final {
     // Sends a state update to the page. Updates sent before the page loaded
     // are replayed once it is ready.
     void Render(const std::string& state_json);
+    // True once the page has loaded; state rendered before that is only queued.
+    [[nodiscard]] bool loaded() const;
     // Focuses the page and asks it to focus its primary input.
     void Focus();
     // Stops delivering messages and closes the page's browser.

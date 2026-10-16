@@ -803,8 +803,12 @@ bool BrowserWindow::SetAgentProvider(std::string_view id) {
     return true;
 }
 
+void BrowserWindow::OpenSettingsSection(std::string section) {
+    ShowSettingsSection(std::move(section));
+}
+
 void BrowserWindow::ShowSettingsSection(std::string section) {
-    settings_focus_ = std::move(section);
+    settings_focus_.Request(std::move(section));
     if (internal_page_ == LocalPageKind::kSettings) {
         ScheduleLocalPagesRender();
     } else {
@@ -934,7 +938,11 @@ void BrowserWindow::FlushLocalPagesRender() {
     if (internal_page_ == LocalPageKind::kSettings && settings_page_ != nullptr) {
         settings_page_->Render(SettingsStateJson());
         settings_message_.clear();
-        settings_focus_.clear();
+        // A focus request waits until the page has loaded; a render queued before that
+        // would otherwise replace it with a state that has no focus.
+        if (settings_page_->loaded()) {
+            settings_focus_.Clear();
+        }
     } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
     }
@@ -1146,6 +1154,9 @@ std::string BrowserWindow::SettingsStateJson() const {
     Value appearance =
         Value::MakeObject()
             .Set("look", Value::String(std::string(LookName(MatchingLook(look)))))
+            // The preset the knobs were last picked from; "custom" hides which one, so
+            // Settings uses this to decide whether space colors apply.
+            .Set("base_look", Value::String(std::string(LookName(look.look))))
             .Set("sidebar_tint", Value::Int(look.sidebar_tint_percent))
             .Set("sidebar_side",
                  Value::String(look.sidebar_side == SidebarSide::kRight ? "right" : "left"))
@@ -1160,6 +1171,7 @@ std::string BrowserWindow::SettingsStateJson() const {
     Value settings =
         Value::MakeObject()
             .Set("theme_pref", Value::String(std::string(theme_pref)))
+            .Set("version", Value::String(ISLAND_VERSION_STRING))
             .Set("appearance", std::move(appearance))
             .Set("search", Value::MakeObject()
                                .Set("engine", Value::String(std::string(search_engine().key)))
@@ -1182,7 +1194,8 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("privacy", ContentBlockerStateJson())
             .Set("update", UpdateStateJson())
             .Set("message", Value::String(settings_message_))
-            .Set("focus", Value::String(settings_focus_));
+            .Set("focus", Value::String(settings_focus_.section()))
+            .Set("focus_seq", Value::Int(static_cast<std::int64_t>(settings_focus_.sequence())));
     if (shortcut_conflict_.has_value()) {
         settings.Set(
             "shortcut_conflict",

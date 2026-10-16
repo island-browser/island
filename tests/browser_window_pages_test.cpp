@@ -97,6 +97,23 @@ TEST(BrowserWindowPagesTest, SettingsStateListsShortcutsSourcesAndConflicts) {
     EXPECT_NE(state->FindMember("theme"), nullptr);
 }
 
+TEST(BrowserWindowPagesTest, SettingsStateCarriesTheVersionAndTheBaseLook) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const auto state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* settings = state->FindMember("settings");
+    ASSERT_NE(settings, nullptr);
+    // The sidebar footer and the About list show the same version string.
+    std::string about_version;
+    for (const Value& row : settings->FindMember("about")->FindMember("rows")->array_val) {
+        if (row.array_val[0].string_val == "Version") about_version = row.array_val[1].string_val;
+    }
+    EXPECT_FALSE(about_version.empty());
+    EXPECT_EQ(settings->StringOr("version", ""), about_version);
+    // Native is the default base; Settings uses it to hide the space-color rows.
+    EXPECT_EQ(settings->FindMember("appearance")->StringOr("base_look", ""), "native");
+}
+
 TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->OnLocalPageMessage(LocalPageKind::kSettings,

@@ -462,6 +462,11 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
                                    equals == std::string::npos ? "" : rest.substr(equals + 1));
         return true;
     }
+    const std::string_view settings_section = island::DevSettingsSectionName(action);
+    if (!settings_section.empty()) {
+        app->OpenSettingsSection(std::string(settings_section));
+        return true;
+    }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
         app->SetSidebarExpanded(action == "sidebar:expanded");
         return true;

@@ -13,6 +13,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Changed
+
+- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
+  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
+  version at the bottom, and one section shown at a time. Appearance groups its controls into
+  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
+  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
+  Native has no space color. Every existing setting keeps its behavior.
+
 ### Added
 
 - The Native sidebar bottom is redesigned: one full-width Agent button (sparkle, 32 DIP)
@@ -69,6 +78,16 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Research mode asks the agent for a branching plan first: each step is an ACP plan entry with
   `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
   until you approve the plan.
+
+### Fixed
+
+- Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
+  for them, and it finds the Import sources and the About list, which were hidden for every
+  query. A Settings section that is already selected opens again when it is requested again
+  (for example, the privacy shield after a click on another section), and an explicit request
+  clears the search first.
+- Settings > Appearance and Shortcuts use the interface font in their search fields, and the
+  selected section in the Settings list is filled with a semibold label instead of the accent.
 
 ## [0.6.2] - 2026-10-15
 

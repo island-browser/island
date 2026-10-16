@@ -82,4 +82,12 @@ std::string_view DevActionSelectorName(std::string_view action) {
     return {};
 }
 
+std::string_view DevSettingsSectionName(std::string_view action) {
+    constexpr std::string_view kPrefix = "settings:";
+    if (!action.starts_with(kPrefix)) {
+        return {};
+    }
+    return action.substr(kPrefix.size());
+}
+
 }  // namespace island
