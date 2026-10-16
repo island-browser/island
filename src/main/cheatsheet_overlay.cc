@@ -58,18 +58,6 @@ class CheatsheetOverlay::ButtonDelegate final : public CefButtonDelegate {
         }
     }
 
-    void OnFocus(CefRefPtr<CefView>) override {
-        if (overlay_ != nullptr) {
-            overlay_->lifetime_.FocusTaken();
-        }
-    }
-
-    void OnBlur(CefRefPtr<CefView>) override {
-        if (overlay_ != nullptr) {
-            overlay_->HandleCloseBlurred();
-        }
-    }
-
     void OnThemeChanged(CefRefPtr<CefView>) override {
         if (overlay_ != nullptr) {
             overlay_->ApplyColors();
@@ -81,6 +69,11 @@ class CheatsheetOverlay::ButtonDelegate final : public CefButtonDelegate {
 
     IMPLEMENT_REFCOUNTING(ButtonDelegate);
 };
+
+bool CheatsheetOverlay::ContainsDip(const CefRect& bounds, const CefPoint& point) noexcept {
+    return point.x >= bounds.x && point.x < bounds.x + bounds.width && point.y >= bounds.y &&
+           point.y < bounds.y + bounds.height;
+}
 
 DipRect CheatsheetOverlay::CardBounds(const DipRect& anchor, int content_height) noexcept {
     const int width = std::max(0, std::min(kContentWidthDip, anchor.width - 2 * kAnchorInsetDip));
@@ -170,16 +163,23 @@ void CheatsheetOverlay::BuildViews() {
 void CheatsheetOverlay::Apply(OverlayStep step) {
     switch (step) {
         case OverlayStep::kCreate:
-            // can_activate is true so the close button can hold focus; losing it to a click
-            // elsewhere closes the sheet. The overlay only exists while shown
-            // (see overlay_lifetime.h): a live overlay widget blocks mouse input on macOS.
+            // can_activate is true so the close button can hold focus for keyboard users. Focus
+            // does not close the sheet; a press outside the card does (see HandleMouseDown). The
+            // overlay only exists while shown (see overlay_lifetime.h): a live overlay widget
+            // blocks mouse input on macOS.
             overlay_.Adopt(window_->AddOverlayView(overlay_root_, CEF_DOCKING_MODE_CUSTOM,
                                                    /*can_activate=*/true));
             if (overlay_.has_overlay()) {
                 overlay_.get()->SetVisible(false);
+                if (CefWindowHandle handle = window_->GetWindowHandle(); handle != nullptr) {
+                    mouse_monitor_ = std::make_unique<MouseDownMonitor>(
+                        handle,
+                        [this](bool in_view, CefPoint point) { HandleMouseDown(in_view, point); });
+                }
             }
             return;
         case OverlayStep::kDestroy:
+            mouse_monitor_.reset();
             overlay_.Release();
             return;
         case OverlayStep::kNone:
@@ -205,7 +205,8 @@ void CheatsheetOverlay::Toggle(const std::vector<CheatsheetRow>& rows, const Cef
     UpdateBounds(anchor);
     overlay_.get()->SetVisible(true);
     // Showing can re-enter the window (focus moves while the overlay activates); give the close
-    // button focus only if the sheet is still open.
+    // button focus only if the sheet is still open. Focus is for keyboard users; nothing closes
+    // the sheet on focus loss.
     if (lifetime_.visible() && overlay_.has_overlay()) {
         close_->RequestFocus();
     }
@@ -226,6 +227,7 @@ void CheatsheetOverlay::UpdateBounds(const CefRect& anchor) {
     const DipRect card =
         CardBounds({.x = anchor.x, .y = anchor.y, .width = anchor.width, .height = anchor.height},
                    kContentHeightDip);
+    card_bounds_ = CefRect(card.x, card.y, card.width, card.height);
     card_.SetContentSize(card.width, card.height);
     overlay_.get()->SetBounds(
         OverlayCard::OverlayBoundsForContent(CefRect(card.x, card.y, card.width, card.height)));
@@ -255,6 +257,7 @@ void CheatsheetOverlay::Detach() {
         delegate->Detach();
     }
     static_cast<void>(lifetime_.Detach());
+    mouse_monitor_.reset();
     overlay_.DestroyNow();
     window_ = nullptr;
 }
@@ -268,16 +271,12 @@ void CheatsheetOverlay::SetRows(const std::vector<CheatsheetRow>& rows) {
     }
 }
 
-bool CheatsheetOverlay::PageFocusCloses() {
-    CEF_REQUIRE_UI_THREAD();
-    return !detached_ && lifetime_.FocusLeftCloses();
-}
-
-void CheatsheetOverlay::HandleCloseBlurred() {
-    if (detached_ || host_ == nullptr || !lifetime_.FocusLeftCloses()) {
-        return;
+void CheatsheetOverlay::HandleMouseDown(bool in_view, CefPoint point) {
+    // Runs inside the event monitor, so the close is handed to the host, which posts it.
+    const bool inside = in_view && ContainsDip(card_bounds_, point);
+    if (!detached_ && host_ != nullptr && lifetime_.OutsideMouseDownCloses(inside)) {
+        host_->OnCheatsheetCloseRequested(/*refocus_page=*/false);
     }
-    host_->OnCheatsheetCloseRequested(/*refocus_page=*/false);
 }
 
 void CheatsheetOverlay::HandleClosePressed() {

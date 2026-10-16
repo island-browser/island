@@ -136,9 +136,11 @@ gtest_discover_tests(island_content_blocker_stub_tests)
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
                     "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/mouse_down_mac.mm"
                     "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm")
     target_link_libraries(island_tests PRIVATE "-framework QuartzCore")
-    set_source_files_properties("${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm"
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/src/main/macos/mouse_down_mac.mm"
+                                "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm"
                                 PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"

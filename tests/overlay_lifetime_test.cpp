@@ -119,41 +119,54 @@ TEST(CheatsheetLifetimeTest, DetachDestroysAnOpenSheetAndItNeverReturns) {
     EXPECT_FALSE(cheatsheet.overlay_expected());
 }
 
-// Showing the activatable overlay hands focus back to the page before the close button takes
-// it; that page focus is not a click outside and must not close the sheet it just opened.
-TEST(CheatsheetLifetimeTest, GivenAJustOpenedSheetWhenThePageTakesFocusThenItStaysOpen) {
+// A click outside the card closes the sheet; focus or activation changes never do. Showing the
+// activatable overlay and switching apps both move focus, which is not a click, so the only
+// close-on-outside signal is a real mouse press (see mouse_down_monitor.h).
+TEST(CheatsheetLifetimeTest, GivenAnOpenSheetWhenAMouseDownLandsInsideTheCardThenItStaysOpen) {
     CheatsheetLifetime cheatsheet;
     ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
 
-    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+    EXPECT_FALSE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/true));
     EXPECT_TRUE(cheatsheet.visible());
 }
 
-TEST(CheatsheetLifetimeTest, GivenAFocusedSheetWhenFocusLeavesThenItClosesOnce) {
+TEST(CheatsheetLifetimeTest, GivenAnOpenSheetWhenAMouseDownLandsOutsideThenItCloses) {
     CheatsheetLifetime cheatsheet;
     ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
-    cheatsheet.FocusTaken();
 
-    EXPECT_TRUE(cheatsheet.FocusLeftCloses());
-    // The close button's blur and the page's focus both report the same click.
-    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+    EXPECT_TRUE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/false));
+    ASSERT_EQ(cheatsheet.Hide(), OverlayStep::kDestroy);
+    // The handler's close already ran, so a second press outside is a no-op.
+    EXPECT_FALSE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/false));
 }
 
-TEST(CheatsheetLifetimeTest, GivenAReopenedSheetWhenThePageTakesFocusEarlyThenItStaysOpen) {
+TEST(CheatsheetLifetimeTest, GivenAClosedSheetWhenAMouseDownLandsOutsideThenNothingCloses) {
+    CheatsheetLifetime cheatsheet;
+
+    EXPECT_FALSE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/false));
+    EXPECT_FALSE(cheatsheet.overlay_expected());
+}
+
+TEST(CheatsheetLifetimeTest, GivenAReopenedSheetWhenAMouseDownLandsOutsideThenItClosesAgain) {
     CheatsheetLifetime cheatsheet;
     ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
-    cheatsheet.FocusTaken();
+    ASSERT_TRUE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/false));
     ASSERT_EQ(cheatsheet.Hide(), OverlayStep::kDestroy);
     ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
 
-    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+    EXPECT_FALSE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/true));
+    EXPECT_TRUE(cheatsheet.OutsideMouseDownCloses(/*inside_card=*/false));
 }
 
-TEST(CheatsheetLifetimeTest, GivenAClosedSheetWhenFocusIsTakenThenNothingCloses) {
-    CheatsheetLifetime cheatsheet;
-    cheatsheet.FocusTaken();
+TEST(CheatsheetOverlayTest, APointCountsAsInsideTheCardFromItsTopLeftUpToButNotIncludingTheEdge) {
+    const CefRect card(10, 20, 30, 40);
 
-    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+    EXPECT_TRUE(CheatsheetOverlay::ContainsDip(card, CefPoint(10, 20)));
+    EXPECT_TRUE(CheatsheetOverlay::ContainsDip(card, CefPoint(39, 59)));
+    EXPECT_FALSE(CheatsheetOverlay::ContainsDip(card, CefPoint(40, 20)));
+    EXPECT_FALSE(CheatsheetOverlay::ContainsDip(card, CefPoint(10, 60)));
+    EXPECT_FALSE(CheatsheetOverlay::ContainsDip(card, CefPoint(9, 20)));
+    EXPECT_FALSE(CheatsheetOverlay::ContainsDip(card, CefPoint(20, 19)));
 }
 
 TEST(CheatsheetOverlayTest, TheCardSitsInTheBottomRightOfThePageCard) {

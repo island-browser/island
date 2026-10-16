@@ -135,7 +135,8 @@ void BrowserWindow::CloseCheatsheet(bool refocus_page) {
 
 void BrowserWindow::OnCheatsheetCloseRequested(bool refocus_page) {
     CEF_REQUIRE_UI_THREAD();
-    // Reached from the close button's blur or press handler: close once that dispatch is over.
+    // Reached from the close button's press or from a press outside the card: close once that
+    // dispatch is over.
     CefPostTask(TID_UI,
                 CefCreateClosureTask(base::BindOnce(&BrowserWindow::CloseCheatsheet,
                                                     CefRefPtr<BrowserWindow>(this), refocus_page)));
