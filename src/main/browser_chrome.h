@@ -137,6 +137,8 @@ enum class ChromeViewId : int {
     // Native-look toolbar. Existing IDs remain fixed; these append after the current range.
     kToolbar = 1068,
     kToolbarShare = 1069,
+    // Retired from the Native toolbar on 2026-10-16: the sidebar Agent entry replaces it. The
+    // id is kept so no later id moves; no view carries it any more.
     kToolbarAgent = 1070,
     kAddressIdleLabel = 1071,
     kFavoritesSectionHeader = 1072,
@@ -144,6 +146,9 @@ enum class ChromeViewId : int {
     // Address indicators (shield, agent dot); Reader reuses kReaderButton.
     kAddressShield = 1074,
     kAddressAgentDot = 1075,
+    // Native's bottom switcher row (the segment track plus the 24 DIP buttons). Added with the
+    // 2026-10-16 Native sidebar; it sits inside kRailFooter in Native only.
+    kRailSwitcherRow = 1076,
 };
 
 struct ChromeViewTreeNode {
@@ -447,16 +452,49 @@ class BrowserChrome final : public NavigationObserver {
                 tokens.look == LookPreset::kNative && active ? row.title : tokens.text_secondary,
         };
     }
+    // Native's Agent entry (2026-10-16): full width at the sidebar bottom. Open takes the
+    // accent_soft fill with accent_text; closed is the bare sidebar with an accent sparkle, and
+    // hover takes the hover token.
+    struct NativeAgentColors {
+        ArgbColor fill;
+        ArgbColor text;
+        ArgbColor sparkle;
+    };
+    [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
+                                                                  bool open, bool hovered) {
+        if (open) {
+            return {.fill = tokens.accent_soft,
+                    .text = tokens.accent_text,
+                    .sparkle = tokens.accent};
+        }
+        return {.fill = hovered ? tokens.hover : tokens.canvas,
+                .text = tokens.text,
+                .sparkle = tokens.accent};
+    }
+    // Native's space segmented control: a `fill` track, the selected segment on `surface`,
+    // the selected name in `text` and the others in `text_secondary`.
+    struct SegmentPalette {
+        ArgbColor track;
+        ArgbColor fill;
+        ArgbColor title;
+    };
+    [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
+                                                            bool active) {
+        return {.track = tokens.fill,
+                .fill = active ? tokens.surface : tokens.fill,
+                .title = active ? tokens.text : tokens.text_secondary};
+    }
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
-    // active chip, carry the state); the active chip's label takes --text.
+    // active chip, carry the state); the active chip's label takes --text. Native segments
+    // use NativeSegmentColors instead.
     [[nodiscard]] static EntryColors SpaceChipColors(const ChromeTokens& tokens, bool active) {
         const ArgbColor rail = tokens.canvas;
         if (tokens.look == LookPreset::kNative) {
-            const ArgbColor fill = active ? tokens.fill : rail;
+            const SegmentPalette segment = NativeSegmentColors(tokens, active);
             return {
-                .outline = fill,
-                .fill = fill,
-                .title = tokens.text,
+                .outline = segment.fill,
+                .fill = segment.fill,
+                .title = segment.title,
                 .trailing = tokens.text_secondary,
             };
         }
@@ -530,6 +568,7 @@ class BrowserChrome final : public NavigationObserver {
     // wires no real tab/space data yet. Per-entry structure is asserted
     // through CollectionCountContract below, not by absolute rail index.
     [[nodiscard]] static ChromeViewTreeNode ViewTreeContract(LookPreset look = LookPreset::kArc) {
+        const bool native = look == LookPreset::kNative;
         const ChromeViewTreeNode navigation = {
             ChromeViewId::kNavigationRow,
             {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}};
@@ -538,38 +577,52 @@ class BrowserChrome final : public NavigationObserver {
                                        {ChromeViewId::kAddress, {}},
                                        {ChromeViewId::kReload, {}},
                                        {ChromeViewId::kReaderButton, {}}}};
-        if (look == LookPreset::kNative) {
+        if (native) {
             address.children.insert(address.children.begin() + 2,
                                     {ChromeViewId::kAddressIdleLabel, {}});
         }
         std::vector<ChromeViewTreeNode> rail_children;
-        if (look != LookPreset::kNative) {
+        if (!native) {
             rail_children.push_back(navigation);
             rail_children.push_back(address);
         }
-        rail_children.insert(rail_children.end(), {{ChromeViewId::kValidationMessage, {}},
-                                                   {ChromeViewId::kRailNewTab, {}},
-                                                   {ChromeViewId::kTabStrip, {}},
+        rail_children.push_back({ChromeViewId::kValidationMessage, {}});
+        // Arc and Graphite list New Tab above the tabs; Native moves it to the list's end.
+        if (!native) {
+            rail_children.push_back({ChromeViewId::kRailNewTab, {}});
+        }
+        rail_children.insert(rail_children.end(), {{ChromeViewId::kTabStrip, {}},
                                                    {ChromeViewId::kSpacer, {}},
-                                                   {ChromeViewId::kDivider, {}},
-                                                   {ChromeViewId::kSpaceSwitcher, {}},
-                                                   {ChromeViewId::kRailFooter,
-                                                    {{ChromeViewId::kRailAgentButton, {}},
-                                                     {ChromeViewId::kRailTabsButton, {}},
-                                                     {ChromeViewId::kRailSettingsButton, {}},
-                                                     {ChromeViewId::kRailNewSpaceButton, {}}}},
-                                                   {ChromeViewId::kActivePage,
-                                                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
-                                                     {ChromeViewId::kActiveTab, {}},
-                                                     {ChromeViewId::kActivePageIndicator, {}}}}});
+                                                   {ChromeViewId::kDivider, {}}});
+        if (native) {
+            // Bottom-up the owner's layout reads: the full-width Agent entry at the very bottom,
+            // with the switcher row (segments plus the new-space, overview and settings buttons)
+            // above it.
+            rail_children.push_back(
+                {ChromeViewId::kRailFooter,
+                 {{ChromeViewId::kRailSwitcherRow,
+                   {{ChromeViewId::kSpaceSwitcher, {}},
+                    {ChromeViewId::kRailNewSpaceButton, {}},
+                    {ChromeViewId::kRailTabsButton, {}},
+                    {ChromeViewId::kRailSettingsButton, {}}}},
+                  {ChromeViewId::kRailAgentButton, {}}}});
+        } else {
+            rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
+            rail_children.push_back({ChromeViewId::kRailFooter,
+                                     {{ChromeViewId::kRailAgentButton, {}},
+                                      {ChromeViewId::kRailTabsButton, {}},
+                                      {ChromeViewId::kRailSettingsButton, {}},
+                                      {ChromeViewId::kRailNewSpaceButton, {}}}});
+        }
+        rail_children.push_back({ChromeViewId::kActivePage,
+                                 {{ChromeViewId::kActivePageFallbackFavicon, {}},
+                                  {ChromeViewId::kActiveTab, {}},
+                                  {ChromeViewId::kActivePageIndicator, {}}}});
         std::vector<ChromeViewTreeNode> root_children = {
             {ChromeViewId::kRail, std::move(rail_children)}};
-        if (look == LookPreset::kNative) {
+        if (native) {
             root_children.push_back({ChromeViewId::kToolbar,
-                                     {navigation,
-                                      address,
-                                      {ChromeViewId::kToolbarShare, {}},
-                                      {ChromeViewId::kToolbarAgent, {}}}});
+                                     {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
         }
         root_children.push_back(
             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
@@ -588,36 +641,59 @@ class BrowserChrome final : public NavigationObserver {
         const std::vector<TabStripEntrySnapshot>& tabs,
         const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look = LookPreset::kArc) {
         ChromeViewTreeNode tree = ViewTreeContract(look);
-        ChromeViewTreeNode& rail = tree.children[0];
-        for (ChromeViewTreeNode& child : rail.children) {
-            if (child.id == ChromeViewId::kTabStrip) {
-                child.children.reserve(tabs.size() + 2);
-                bool favorites_header_added = false;
-                bool tabs_header_added = false;
-                for (std::size_t i = 0; i < tabs.size(); ++i) {
-                    if (look == LookPreset::kNative && tabs[i].pinned && !favorites_header_added) {
-                        child.children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
-                        favorites_header_added = true;
-                    }
-                    if (look == LookPreset::kNative && !tabs[i].pinned && !tabs_header_added) {
-                        child.children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-                        tabs_header_added = true;
-                    }
-                    child.children.push_back({ChromeViewId::kTabStripEntry,
-                                              {{ChromeViewId::kTabStripEntryFavicon, {}},
-                                               {ChromeViewId::kTabStripEntryTitle, {}},
-                                               {ChromeViewId::kTabStripEntryClose, {}}}});
+        const bool native = look == LookPreset::kNative;
+        // Native nests the switcher inside the footer's switcher row, so it is found by id
+        // anywhere in the tree rather than only among the rail's direct children.
+        const auto find = [](ChromeViewTreeNode& node, ChromeViewId id,
+                             const auto& self) -> ChromeViewTreeNode* {
+            for (ChromeViewTreeNode& child : node.children) {
+                if (child.id == id) {
+                    return &child;
                 }
-                if (look == LookPreset::kNative && !tabs_header_added) {
-                    child.children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+                if (ChromeViewTreeNode* match = self(child, id, self); match != nullptr) {
+                    return match;
                 }
-            } else if (child.id == ChromeViewId::kSpaceSwitcher) {
-                child.children.reserve(spaces.size());
-                for (std::size_t i = 0; i < spaces.size(); ++i) {
-                    child.children.push_back({ChromeViewId::kSpaceSwitcherEntry,
-                                              {{ChromeViewId::kSpaceSwitcherEntryColorMark, {}},
-                                               {ChromeViewId::kSpaceSwitcherEntryName, {}}}});
+            }
+            return nullptr;
+        };
+        if (ChromeViewTreeNode* tab_strip = find(tree, ChromeViewId::kTabStrip, find);
+            tab_strip != nullptr) {
+            tab_strip->children.reserve(tabs.size() + 3);
+            bool favorites_header_added = false;
+            bool tabs_header_added = false;
+            for (std::size_t i = 0; i < tabs.size(); ++i) {
+                if (native && tabs[i].pinned && !favorites_header_added) {
+                    tab_strip->children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
+                    favorites_header_added = true;
                 }
+                if (native && !tabs[i].pinned && !tabs_header_added) {
+                    tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+                    tabs_header_added = true;
+                }
+                tab_strip->children.push_back({ChromeViewId::kTabStripEntry,
+                                               {{ChromeViewId::kTabStripEntryFavicon, {}},
+                                                {ChromeViewId::kTabStripEntryTitle, {}},
+                                                {ChromeViewId::kTabStripEntryClose, {}}}});
+            }
+            if (native && !tabs_header_added) {
+                tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+            }
+            // Native's New Tab row is the list's last row, after the last tab.
+            if (native) {
+                tab_strip->children.push_back({ChromeViewId::kRailNewTab, {}});
+            }
+        }
+        if (ChromeViewTreeNode* switcher = find(tree, ChromeViewId::kSpaceSwitcher, find);
+            switcher != nullptr) {
+            switcher->children.reserve(spaces.size());
+            for (std::size_t i = 0; i < spaces.size(); ++i) {
+                // Native segments carry only the name: the space color is never shown there.
+                ChromeViewTreeNode segment = {ChromeViewId::kSpaceSwitcherEntry, {}};
+                if (!native) {
+                    segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryColorMark, {}});
+                }
+                segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryName, {}});
+                switcher->children.push_back(std::move(segment));
             }
         }
         return tree;
@@ -826,7 +902,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> address_agent_dot_;
     AddressIndicators address_indicators_;
     CefRefPtr<CefLabelButton> share_button_;
-    CefRefPtr<CefLabelButton> toolbar_agent_button_;
+    CefRefPtr<CefPanel> switcher_row_;
     bool reader_available_ = false;
     bool reader_active_ = false;
     CefRefPtr<CefLabelButton> address_location_icon_;
@@ -856,7 +932,10 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> space_switcher_;
     CefRefPtr<CefLabelButton> new_tab_button_;
     CefRefPtr<CefPanel> rail_footer_;
+    CefRefPtr<SurfacePanelDelegate> rail_footer_delegate_;
     CefRefPtr<CefLabelButton> agent_button_;
+    // Native's Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
+    bool native_agent_hovered_ = false;
     CefRefPtr<CefLabelButton> new_space_button_;
     CefRefPtr<CefLabelButton> tabs_button_;
     CefRefPtr<CefLabelButton> settings_button_;

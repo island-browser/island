@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "browser_chrome.h"
 
 namespace island {
@@ -361,6 +363,124 @@ TEST(BrowserChromeContractTest,
         DipRect{.x = 0, .y = 0, .width = 500, .height = 560}, tokens, true, true);
     EXPECT_EQ(tiny.agent_panel_bounds.width, 0);
     EXPECT_EQ(tiny.browser_content_bounds.width, 500 - 286);
+}
+
+// Native (2026-10-16 owner request): one Agent entry at the sidebar bottom, no toolbar Agent,
+// New Tab as the last row of the tab list, and a switcher row with the space segments.
+const ChromeViewTreeNode* FindNative(const ChromeViewTreeNode& tree, ChromeViewId id) {
+    return FindChild(tree, id);
+}
+
+std::vector<ChromeViewId> ChildIds(const ChromeViewTreeNode& node) {
+    std::vector<ChromeViewId> ids;
+    for (const ChromeViewTreeNode& child : node.children) {
+        ids.push_back(child.id);
+    }
+    return ids;
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeLookWhenInspectedThenTheToolbarHasNoAgentButton) {
+    const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
+    const ChromeViewTreeNode* toolbar = FindNative(tree, ChromeViewId::kToolbar);
+    ASSERT_NE(toolbar, nullptr);
+    EXPECT_EQ(ChildIds(*toolbar),
+              (std::vector<ChromeViewId>{ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
+                                         ChromeViewId::kToolbarShare}));
+    EXPECT_EQ(FindNative(tree, ChromeViewId::kToolbarAgent), nullptr);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHoldsAgentAndSwitcher) {
+    const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
+    const ChromeViewTreeNode* rail = FindNative(tree, ChromeViewId::kRail);
+    ASSERT_NE(rail, nullptr);
+    // New Tab is no longer a rail row above the list; it lives in the tab list (below).
+    EXPECT_EQ(ChildIds(*rail),
+              (std::vector<ChromeViewId>{ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
+                                         ChromeViewId::kSpacer, ChromeViewId::kDivider,
+                                         ChromeViewId::kRailFooter, ChromeViewId::kActivePage}));
+    const ChromeViewTreeNode* footer = FindNative(*rail, ChromeViewId::kRailFooter);
+    ASSERT_NE(footer, nullptr);
+    // Top to bottom: the switcher row, then the full-width Agent button at the very bottom
+    // (the brief's bottom-up order: Agent first, then the switcher row above it).
+    EXPECT_EQ(ChildIds(*footer),
+              (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
+                                         ChromeViewId::kRailAgentButton}));
+    const ChromeViewTreeNode* switcher_row = FindNative(*footer, ChromeViewId::kRailSwitcherRow);
+    ASSERT_NE(switcher_row, nullptr);
+    EXPECT_EQ(ChildIds(*switcher_row),
+              (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcher,
+                                         ChromeViewId::kRailNewSpaceButton,
+                                         ChromeViewId::kRailTabsButton,
+                                         ChromeViewId::kRailSettingsButton}));
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kRailSwitcherRow), 1076);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFollowsTheLastTab) {
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {{.name = "Default", .active = true}};
+    for (const std::size_t count : {std::size_t{0}, std::size_t{1}, std::size_t{3}}) {
+        std::vector<TabStripEntrySnapshot> tabs(count, TabStripEntrySnapshot{.title = "Island"});
+        const ChromeViewTreeNode tree =
+            BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
+        const ChromeViewTreeNode* tab_strip = FindNative(tree, ChromeViewId::kTabStrip);
+        ASSERT_NE(tab_strip, nullptr);
+        ASSERT_FALSE(tab_strip->children.empty());
+        EXPECT_EQ(tab_strip->children.back().id, ChromeViewId::kRailNewTab);
+        // Exactly one New Tab row, and it is never a rail child in Native.
+        std::size_t new_tab_rows = 0;
+        for (const ChromeViewTreeNode& child : tab_strip->children) {
+            new_tab_rows += child.id == ChromeViewId::kRailNewTab ? 1 : 0;
+        }
+        EXPECT_EQ(new_tab_rows, 1U);
+        const ChromeViewTreeNode* rail = FindNative(tree, ChromeViewId::kRail);
+        ASSERT_NE(rail, nullptr);
+        EXPECT_EQ(std::count_if(rail->children.begin(), rail->children.end(),
+                                [](const ChromeViewTreeNode& child) {
+                                    return child.id == ChromeViewId::kRailNewTab;
+                                }),
+                  0);
+    }
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeSpacesWhenProjectedThenEachSegmentHasNoColorMark) {
+    const std::vector<TabStripEntrySnapshot> tabs = {{.title = "Island"}};
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
+        {.name = "Default", .active = true}, {.name = "Work"}};
+    const ChromeViewTreeNode tree =
+        BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
+    const ChromeViewTreeNode* switcher = FindNative(tree, ChromeViewId::kSpaceSwitcher);
+    ASSERT_NE(switcher, nullptr);
+    ASSERT_EQ(switcher->children.size(), spaces.size());
+    for (const ChromeViewTreeNode& segment : switcher->children) {
+        EXPECT_EQ(ChildIds(segment),
+                  (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcherEntryName}));
+    }
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAndClosedDiffer) {
+    const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const auto open = BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
+    EXPECT_EQ(open.fill, light.accent_soft);
+    EXPECT_EQ(open.text, light.accent_text);
+    const auto closed =
+        BrowserChrome::NativeAgentEntryColors(light, /*open=*/false, /*hovered=*/false);
+    EXPECT_EQ(closed.fill, light.canvas);
+    EXPECT_EQ(closed.text, light.text);
+    EXPECT_EQ(closed.sparkle, light.accent);
+    const auto hover =
+        BrowserChrome::NativeAgentEntryColors(dark, /*open=*/false, /*hovered=*/true);
+    EXPECT_EQ(hover.fill, dark.hover);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelectedOneIsSurface) {
+    const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const auto active = BrowserChrome::NativeSegmentColors(light, /*active=*/true);
+    EXPECT_EQ(active.fill, light.surface);
+    EXPECT_EQ(active.title, light.text);
+    const auto idle = BrowserChrome::NativeSegmentColors(light, /*active=*/false);
+    EXPECT_EQ(idle.fill, light.fill);
+    EXPECT_EQ(idle.title, light.text_secondary);
+    EXPECT_EQ(idle.track, light.fill);
 }
 
 }  // namespace

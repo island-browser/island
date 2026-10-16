@@ -356,6 +356,13 @@ struct RowImageSpec {
 };
 
 constexpr int kFaviconPlateDip = 22;
+// Native's bottom controls (2026-10-16 owner request): the Agent entry is 30-36 DIP tall, the
+// segmented track and its buttons 24 DIP.
+constexpr int kNativeAgentHeightDip = 32;
+constexpr int kNativeSwitcherSizeDip = 24;
+// The switcher row: the 24 DIP track and buttons plus the track's 2 DIP inset on each side.
+constexpr int kNativeSwitcherRowDip = 32;
+constexpr int kNativeSegmentRadiusDip = 6;
 constexpr int kFaviconPlateRadiusDip = 6;
 constexpr int kRowFillRadiusDip = 8;
 constexpr int kPatchPollMs = 150;
@@ -747,6 +754,9 @@ class BrowserChrome::SurfacePanelDelegate final : public CefPanelDelegate {
     }
 
     void SetPreferredSize(CefSize size) { preferred_size_ = size; }
+    // Pins a row's height in the box layout; a zero width means unbounded.
+    void SetMinimumSize(CefSize size) { minimum_size_ = size; }
+    void SetMaximumSize(CefSize size) { maximum_size_ = size; }
 
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
     CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
@@ -1201,10 +1211,23 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     }
     sidebar_->AddChildView(space_switcher_);
 
+    // Native's bottom switcher row: the segment track, then New Space, overview and settings as
+    // 24 DIP buttons. ApplyLookStructure parents it inside the footer for Native only.
+    CefRefPtr<SurfacePanelDelegate> switcher_row_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(switcher_row_delegate);
+    switcher_row_ = CefPanel::CreatePanel(switcher_row_delegate);
+    switcher_row_->SetID(static_cast<int>(ChromeViewId::kRailSwitcherRow));
+    CefBoxLayoutSettings switcher_row_settings;
+    switcher_row_settings.horizontal = static_cast<int>(true);
+    switcher_row_settings.between_child_spacing = tokens_.spacing_1_dip;
+    switcher_row_->SetToBoxLayout(switcher_row_settings);
+
     // Footer: the agent toggle on the left, New Space on the right.
     CefRefPtr<SurfacePanelDelegate> footer_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail);
     surface_delegates_.push_back(footer_delegate);
+    rail_footer_delegate_ = footer_delegate;
     rail_footer_ = CefPanel::CreatePanel(footer_delegate);
     rail_footer_->SetID(static_cast<int>(ChromeViewId::kRailFooter));
     CefBoxLayoutSettings footer_settings;
@@ -1399,13 +1422,6 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     share_button_->SetMinimumSize(CefSize(52, NativeToolbarButtonDip()));
     toolbar_content_->AddChildView(share_button_);
 
-    toolbar_agent_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Agent");
-    toolbar_agent_button_->SetID(static_cast<int>(ChromeViewId::kToolbarAgent));
-    toolbar_agent_button_->SetAccessibleName("Agent panel");
-    toolbar_agent_button_->SetTooltipText("Ask the agent (Ctrl/Cmd+J)");
-    toolbar_agent_button_->SetFocusable(true);
-    toolbar_agent_button_->SetMinimumSize(CefSize(56, NativeToolbarButtonDip()));
-    toolbar_content_->AddChildView(toolbar_agent_button_);
     toolbar_->AddChildView(toolbar_content_);
     toolbar_stack_layout->SetFlexForView(toolbar_content_, 1);
 
@@ -1657,7 +1673,9 @@ std::string BrowserChrome::ActiveSpaceSectionTitle() const {
 }
 
 void BrowserChrome::UpdateTabStripPreferredSize() {
-    const int count = static_cast<int>(tab_entries_.size());
+    // Native's New Tab row is a row of the list too.
+    const int count = static_cast<int>(tab_entries_.size()) +
+                      (tokens_.look == LookPreset::kNative ? 1 : 0);
     const int headers =
         (favorites_section_header_ != nullptr ? 1 : 0) + (tabs_section_header_ != nullptr ? 1 : 0);
     const int spacing = TabListLayout(tokens_).between_child_spacing;
@@ -1807,6 +1825,10 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         tabs_section_header_ =
             add_section_header(ActiveSpaceSectionTitle(), ChromeViewId::kTabsSectionHeader);
     }
+    // Native's New Tab row is the list's last row, right after the last tab.
+    if (native) {
+        tab_strip_->AddChildView(new_tab_button_);
+    }
     UpdateTabStripPreferredSize();
     RebuildCollapsedTabs();
     ApplyCollectionTheme();
@@ -1943,7 +1965,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     space_entries_ = entries;
     space_switcher_->RemoveAllChildViews();
 
-    const int pill_height = RowHeight();
+    const bool native = tokens_.look == LookPreset::kNative;
+    const int pill_height = native ? kNativeSwitcherSizeDip : RowHeight();
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         SpaceEntryViews views;
@@ -1961,18 +1984,23 @@ void BrowserChrome::SetSpaceSwitcherEntries(
 
         // The color mark is the space's dot: the same size for every chip, so the
         // active one is told apart by its full name and --text label, not by a box.
-        const int dot = tokens_.spacing_2_dip;
-        views.color_mark = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(dot, dot)));
-        views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
-        views.color_mark->SetVisible(tokens_.look != LookPreset::kNative);
-        views.inner->AddChildView(views.color_mark);
+        // Native segments have no dot at all (no space color in Native).
+        if (!native) {
+            const int dot = tokens_.spacing_2_dip;
+            views.color_mark = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(dot, dot)));
+            views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
+            views.inner->AddChildView(views.color_mark);
+        }
 
         CefRefPtr<CollectionButtonDelegate> name_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
         space_button_delegates_.push_back(name_delegate);
+        // Native segments show the full name; with more than four spaces the inactive ones
+        // shrink to their initial so the track still fits the sidebar.
+        const bool shrink = native && entries.size() > 4;
         views.name = CefLabelButton::CreateLabelButton(
-            name_delegate, tokens_.look == LookPreset::kNative ? TruncateCollectionTitle(entry.name)
-                                                               : SpacePillLabel(entry));
+            name_delegate, native && !shrink ? TruncateCollectionTitle(entry.name)
+                                             : SpacePillLabel(entry));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
@@ -2124,18 +2152,92 @@ void BrowserChrome::ApplyLookStructure() {
     const bool native = tokens_.look == LookPreset::kNative;
     const AddressPlateStyle address_style = AddressPlateStyleFor(tokens_);
     if (applied_look_ != tokens_.look) {
+        // Index of `child` among `parent`'s children, for putting a view back in its Arc place.
+        const auto index_of = [](const CefRefPtr<CefPanel>& parent,
+                                 const CefRefPtr<CefView>& child) {
+            for (std::size_t i = 0; i < parent->GetChildViewCount(); ++i) {
+                if (parent->GetChildViewAt(static_cast<int>(i)) == child) {
+                    return static_cast<int>(i);
+                }
+            }
+            return 0;
+        };
         if (native) {
             sidebar_->RemoveChildView(navigation_row_);
             sidebar_->RemoveChildView(address_row_);
             toolbar_content_->AddChildViewAt(navigation_row_, 0);
             toolbar_content_->AddChildViewAt(address_row_, 1);
+            // Native: New Tab moves into the tab list (SetTabStripEntries), the segments and
+            // the three buttons move into the switcher row, and the footer stacks it under the
+            // Agent entry.
+            sidebar_->RemoveChildView(new_tab_button_);
+            sidebar_->RemoveChildView(space_switcher_);
+            for (const CefRefPtr<CefLabelButton>& button :
+                 {tabs_button_, settings_button_, new_space_button_}) {
+                rail_footer_->RemoveChildView(button);
+            }
+            switcher_row_->AddChildView(space_switcher_);
+            switcher_row_->AddChildView(new_space_button_);
+            switcher_row_->AddChildView(tabs_button_);
+            switcher_row_->AddChildView(settings_button_);
+            rail_footer_->AddChildViewAt(switcher_row_, 0);
+            CefBoxLayoutSettings footer_settings;
+            footer_settings.horizontal = static_cast<int>(false);
+            footer_settings.between_child_spacing = tokens_.spacing_1_dip;
+            CefRefPtr<CefBoxLayout> native_footer_layout =
+                rail_footer_->SetToBoxLayout(footer_settings);
+            // The flex the Arc footer row gave the Agent entry stays on the view (box-layout
+            // flex is a view property), and in this vertical footer it would stretch the entry
+            // down the whole rail and push the tab list to zero height. Clear it.
+            native_footer_layout->SetFlexForView(agent_button_, 0);
+            CefBoxLayoutSettings row_settings;
+            row_settings.horizontal = static_cast<int>(true);
+            row_settings.between_child_spacing = tokens_.spacing_1_dip;
+            CefRefPtr<CefBoxLayout> row_layout = switcher_row_->SetToBoxLayout(row_settings);
+            row_layout->SetFlexForView(space_switcher_, 1);
+            CefBoxLayoutSettings track_settings;
+            track_settings.horizontal = static_cast<int>(true);
+            track_settings.between_child_spacing = 0;
+            track_settings.inside_border_insets = CefInsets(
+                kHairlineDip * 2, kHairlineDip * 2, kHairlineDip * 2, kHairlineDip * 2);
+            space_switcher_->SetToBoxLayout(track_settings);
         } else if (applied_look_ == LookPreset::kNative) {
             toolbar_content_->RemoveChildView(navigation_row_);
             toolbar_content_->RemoveChildView(address_row_);
             sidebar_->AddChildViewAt(navigation_row_, 0);
             sidebar_->AddChildViewAt(address_row_, 1);
+            // Arc and Graphite: the switcher sits above the footer row, New Tab above the list.
+            rail_footer_->RemoveChildView(switcher_row_);
+            switcher_row_->RemoveChildView(space_switcher_);
+            switcher_row_->RemoveChildView(new_space_button_);
+            switcher_row_->RemoveChildView(tabs_button_);
+            switcher_row_->RemoveChildView(settings_button_);
+            sidebar_->AddChildViewAt(space_switcher_, index_of(sidebar_, rail_footer_));
+            // A box-layout flex stays on the view itself across layouts and parents: the
+            // switcher row's flex must not make the space bar grow in the rail column.
+            if (CefRefPtr<CefBoxLayout> rail = sidebar_->GetLayout()->AsBoxLayout()) {
+                rail->SetFlexForView(space_switcher_, 0);
+            }
+            sidebar_->AddChildViewAt(new_tab_button_, index_of(sidebar_, tab_list_scroll_));
+            rail_footer_->AddChildView(tabs_button_);
+            rail_footer_->AddChildView(settings_button_);
+            rail_footer_->AddChildView(new_space_button_);
+            CefBoxLayoutSettings footer_settings;
+            footer_settings.horizontal = static_cast<int>(true);
+            footer_settings.between_child_spacing = tokens_.spacing_1_dip / 2;
+            CefRefPtr<CefBoxLayout> footer_layout = rail_footer_->SetToBoxLayout(footer_settings);
+            footer_layout->SetFlexForView(agent_button_, 1);
+            CefBoxLayoutSettings collection = CollectionLayout(tokens_);
+            collection.horizontal = static_cast<int>(true);
+            collection.between_child_spacing = tokens_.spacing_1_dip;
+            space_switcher_->SetToBoxLayout(collection);
         }
         applied_look_ = tokens_.look;
+        // Rows and segments take their structure at build time: rebuild them for the new look.
+        const std::vector<TabStripEntrySnapshot> tabs = tab_entries_;
+        const std::vector<SpaceSwitcherEntrySnapshot> spaces = space_entries_;
+        SetTabStripEntries(tabs);
+        SetSpaceSwitcherEntries(spaces);
     }
     toolbar_->SetVisible(native);
     const bool native_idle = native && !address_editing_;
@@ -2156,6 +2258,27 @@ void BrowserChrome::ApplyLookStructure() {
          {address_location_icon_, reload_button_, reader_button_}) {
         const int cell = AddressHeight() - address_style.outline_dip * 2;
         button->SetMinimumSize(CefSize(cell, cell));
+    }
+    // ApplyDensity sizes the footer buttons for Arc and Graphite; Native's Agent entry and
+    // switcher buttons have their own sizes.
+    const int control = tokens_.control_height_dip;
+    if (native) {
+        // The footer's fixed height (Agent entry, gap, switcher row) keeps the box layout from
+        // stretching the Agent entry down the rail.
+        const int footer_height = kNativeSwitcherRowDip + tokens_.spacing_1_dip + kNativeAgentHeightDip;
+        rail_footer_delegate_->SetPreferredSize(CefSize(0, footer_height));
+        agent_button_->SetMinimumSize(CefSize(0, kNativeAgentHeightDip));
+        for (const CefRefPtr<CefLabelButton>& button :
+             {tabs_button_, settings_button_, new_space_button_}) {
+            button->SetMinimumSize(CefSize(kNativeSwitcherSizeDip, kNativeSwitcherSizeDip));
+        }
+    } else {
+        rail_footer_delegate_->SetPreferredSize(CefSize());
+        agent_button_->SetMinimumSize(CefSize(0, control));
+        for (const CefRefPtr<CefLabelButton>& button :
+             {tabs_button_, settings_button_, new_space_button_}) {
+            button->SetMinimumSize(CefSize(control, control));
+        }
     }
     if (native) {
         if (CefRefPtr<CefBoxLayout> layout = toolbar_content_->GetLayout()->AsBoxLayout()) {
@@ -2290,6 +2413,7 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     agent_panel_open_ = open;
     agent_panel_->SetVisible(open);
     ApplyRailButtonTheme();
+    PushCornerPatches();
     root_delegate_->SetAgentPanelOpen(open);
     ApplyLayoutTokens();
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
@@ -2625,7 +2749,10 @@ void BrowserChrome::ApplyControlTheme() {
     address_row_->SetBackgroundColor(rail.argb);
     tab_strip_->SetBackgroundColor(rail.argb);
     tab_list_scroll_->SetBackgroundColor(rail.argb);
-    space_switcher_->SetBackgroundColor(rail.argb);
+    // Native's track is the `fill` well; its segments sit on it (ApplyCollectionTheme).
+    space_switcher_->SetBackgroundColor(
+        (tokens_.look == LookPreset::kNative ? tokens_.fill : rail).argb);
+    switcher_row_->SetBackgroundColor(rail.argb);
     rail_footer_->SetBackgroundColor(rail.argb);
     spacer_->SetBackgroundColor(rail.argb);
     divider_->SetBackgroundColor(hairline.argb);
@@ -2645,8 +2772,6 @@ void BrowserChrome::ApplyControlTheme() {
         forward_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
     }
     share_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
-    toolbar_agent_button_->SetBackgroundColor(
-        (agent_panel_open_ ? tokens_.accent_soft : tokens_.surface_secondary).argb);
     // The active-page card lifts to the primary surface against the tinted rail.
     active_page_->SetBackgroundColor(active_page_fill.argb);
     active_page_indicator_->SetBackgroundColor(accent.argb);
@@ -2670,9 +2795,6 @@ void BrowserChrome::ApplyControlTheme() {
     validation_message_->SetEnabledTextColors(tokens_.accent.argb);
     share_button_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     share_button_->SetEnabledTextColors(tokens_.text_secondary.argb);
-    toolbar_agent_button_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
-    toolbar_agent_button_->SetEnabledTextColors(
-        (agent_panel_open_ ? tokens_.accent_text : tokens_.text_secondary).argb);
 
     const std::optional<CefRefPtr<CefImage>> back =
         icon_catalog_.Load(ChromeIcon::kBack, NavigationIconTone(), ChromeIconSize::k16);
@@ -2696,8 +2818,7 @@ void BrowserChrome::ApplyControlTheme() {
         active_page_fallback_favicon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
     }
     for (const CefRefPtr<CefLabelButton>& button :
-         {back_button_, forward_button_, reload_button_, reader_button_, share_button_,
-          toolbar_agent_button_}) {
+         {back_button_, forward_button_, reload_button_, reader_button_, share_button_}) {
         button->SetInkDropEnabled(true);
     }
     ApplyRailButtonTheme();
@@ -2711,9 +2832,12 @@ void BrowserChrome::ApplyRailButtonTheme() {
     const ArgbColor surface = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
     const std::optional<CefRefPtr<CefImage>> plus =
         icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+    const bool native = tokens_.look == LookPreset::kNative;
+    // Native's sparkle is always the accent; the other looks take it only while the panel is open.
     const std::optional<CefRefPtr<CefImage>> sparkles =
         icon_catalog_.Load(ChromeIcon::kSparkles,
-                           agent_panel_open_ ? ChromeIconTone::kAccent : ChromeIconTone::kSecondary,
+                           agent_panel_open_ || native ? ChromeIconTone::kAccent
+                                                       : ChromeIconTone::kSecondary,
                            ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> grid =
         icon_catalog_.Load(ChromeIcon::kGrid, ChromeIconTone::kSecondary, ChromeIconSize::k16);
@@ -2741,9 +2865,11 @@ void BrowserChrome::ApplyRailButtonTheme() {
     if (sparkles.has_value()) {
         agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *sparkles);
     }
-    if (tokens_.look == LookPreset::kNative) {
-        agent_button_->SetBackgroundColor(tokens_.accent_soft.argb);
-        agent_button_->SetEnabledTextColors(tokens_.accent_text.argb);
+    if (native) {
+        const NativeAgentColors agent =
+            NativeAgentEntryColors(tokens_, agent_panel_open_, native_agent_hovered_);
+        agent_button_->SetBackgroundColor(agent.fill.argb);
+        agent_button_->SetEnabledTextColors(agent.text.argb);
     } else {
         // The agent toggle lifts to the surface (and takes the accent) while the
         // panel is open, like an active tab.
@@ -2751,13 +2877,6 @@ void BrowserChrome::ApplyRailButtonTheme() {
         agent_button_->SetEnabledTextColors(agent_panel_open_ ? tokens_.accent.argb
                                                               : tokens_.text_secondary.argb);
     }
-    if (sparkles.has_value()) {
-        toolbar_agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *sparkles);
-    }
-    toolbar_agent_button_->SetBackgroundColor(
-        (agent_panel_open_ ? tokens_.accent_soft : tokens_.surface_secondary).argb);
-    toolbar_agent_button_->SetEnabledTextColors(
-        (agent_panel_open_ ? tokens_.accent_text : tokens_.text_secondary).argb);
 }
 
 // Entry rows sit on the rail when inactive; the active tab and space take the
@@ -2787,9 +2906,9 @@ void BrowserChrome::ApplyCollectionTheme() {
         views.row->SetBackgroundColor(colors.outline.argb);
         views.inner->SetBackgroundColor(colors.fill.argb);
         views.name->SetBackgroundColor(colors.fill.argb);
-        views.color_mark->SetBackgroundColor(
-            (tokens_.look == LookPreset::kNative ? colors.fill : entry.color).argb);
-        views.color_mark->SetVisible(tokens_.look != LookPreset::kNative);
+        if (views.color_mark != nullptr) {
+            views.color_mark->SetBackgroundColor(entry.color.argb);
+        }
         views.name->SetEnabledTextColors(colors.title.argb);
     }
 }
@@ -2920,6 +3039,28 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
             sidebar_expanded_)) {
         patches.push_back(*patch);
     }
+    if (tokens_.look == LookPreset::kNative && sidebar_expanded_) {
+        const WindowRect agent = InWindow(agent_button_);
+        if (agent_panel_open_ || native_agent_hovered_) {
+            patches.push_back({agent.x, agent.y, agent.width, agent.height, kRowFillRadiusDip});
+        }
+        const WindowRect track = InWindow(space_switcher_);
+        if (track.width > 0 && track.height > 0) {
+            patches.push_back({track.x, track.y, track.width, track.height, kRowFillRadiusDip});
+        }
+        // The selected segment sits on the track, so its corners are repainted in the track fill.
+        for (std::size_t index = 0; index < space_entry_views_.size() && index < space_entries_.size();
+             ++index) {
+            if (!space_entries_[index].active) {
+                continue;
+            }
+            const WindowRect segment = InWindow(space_entry_views_[index].row);
+            if (segment.width > 0 && segment.height > 0) {
+                patches.push_back({segment.x, segment.y, segment.width, segment.height,
+                                   kNativeSegmentRadiusDip, tokens_.fill});
+            }
+        }
+    }
     if (sidebar_expanded_) {
         const WindowRect viewport = InWindow(tab_list_scroll_);
         for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
@@ -3012,6 +3153,14 @@ void BrowserChrome::RefreshRowHover() {
             views.hovered = hovered;
             ApplyCollapsedTabVisual(position);
         }
+    }
+    // Button state callbacks can arrive while the sidebar is still being built, before the
+    // Agent entry exists; it has no hover to track until then.
+    const bool agent_hovered = tokens_.look == LookPreset::kNative && agent_button_ != nullptr &&
+                               over(agent_button_);
+    if (agent_hovered != native_agent_hovered_) {
+        native_agent_hovered_ = agent_hovered;
+        ApplyRailButtonTheme();
     }
     PushCornerPatches();
 }

@@ -224,11 +224,13 @@ TEST(BrowserWindowTest, GivenNativeTreeWhenInspectedThenToolbarAndAddressIdsMatc
     EXPECT_EQ(FindChromeView(*rail, ChromeViewId::kNavigationRow), nullptr);
     EXPECT_EQ(FindChromeView(*rail, ChromeViewId::kAddressRow), nullptr);
     ASSERT_NE(toolbar, nullptr);
-    ASSERT_EQ(toolbar->children.size(), 4U);
+    // Native's toolbar holds navigation, the address field and Share; the Agent entry lives at
+    // the sidebar bottom (2026-10-16), so the toolbar has no Agent button.
+    ASSERT_EQ(toolbar->children.size(), 3U);
     EXPECT_EQ(toolbar->children[0].id, ChromeViewId::kNavigationRow);
     EXPECT_EQ(toolbar->children[1].id, ChromeViewId::kAddressRow);
     EXPECT_EQ(toolbar->children[2].id, ChromeViewId::kToolbarShare);
-    EXPECT_EQ(toolbar->children[3].id, ChromeViewId::kToolbarAgent);
+    EXPECT_EQ(FindChromeView(tree, ChromeViewId::kToolbarAgent), nullptr);
     ASSERT_NE(address, nullptr);
     ASSERT_EQ(address->children.size(), 5U);
     EXPECT_EQ(address->children[1].id, ChromeViewId::kAddress);
@@ -278,11 +280,13 @@ TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAre
     const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
 
     ASSERT_NE(tab_strip, nullptr);
-    ASSERT_EQ(tab_strip->children.size(), 4U);
+    // Native's New Tab row closes the list, after the last tab.
+    ASSERT_EQ(tab_strip->children.size(), 5U);
     EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kFavoritesSectionHeader);
     EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabStripEntry);
     EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
     EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
+    EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kRailNewTab);
 }
 
 TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThenInsetDoes) {
@@ -332,10 +336,11 @@ TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColor
     const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);
     const BrowserChrome::EntryColors idle = BrowserChrome::SpaceChipColors(tokens, false);
 
-    EXPECT_EQ(active.fill, tokens.fill);
-    EXPECT_EQ(active.outline, tokens.fill);
+    // Native segments: the selected one is `surface` on the `fill` track, the others sit on it.
+    EXPECT_EQ(active.fill, tokens.surface);
+    EXPECT_EQ(active.outline, tokens.surface);
     EXPECT_EQ(active.title, tokens.text);
-    EXPECT_EQ(idle.fill, tokens.canvas);
+    EXPECT_EQ(idle.fill, tokens.fill);
     EXPECT_NE(active.fill, tokens.selection);
     EXPECT_NE(active.fill, tokens.accent);
 }
