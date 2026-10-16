@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "browser_view_park.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/cef_task.h"
@@ -2066,6 +2067,28 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     collapsed_rail_->Layout();
 }
 
+namespace {
+
+// Hides a superseded browser view and removes it from the content slot after
+// kParkedBrowserViewRemovalMs, unless it was shown again in the meantime.
+void ParkSupersededBrowserView(CefRefPtr<CefBrowserView> view, CefRefPtr<CefPanel> content) {
+    view->SetVisible(false);
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(
+                           [](CefRefPtr<CefBrowserView> view, CefRefPtr<CefPanel> content) {
+                               CefRefPtr<CefView> parent = view->GetParentView();
+                               const bool in_content =
+                                   parent != nullptr && parent->IsSame(content);
+                               if (ShouldRemoveParkedView(view->IsVisible(), in_content)) {
+                                   content->RemoveChildView(view);
+                               }
+                           },
+                           view, content)),
+                       kParkedBrowserViewRemovalMs);
+}
+
+}  // namespace
+
 void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || browser_view == nullptr) {
@@ -2083,11 +2106,16 @@ void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
         return;
     }
     if (browser_view_ != nullptr) {
-        browser_content_->RemoveChildView(browser_view_);
+        // Parked, not removed: see browser_view_park.h.
+        ParkSupersededBrowserView(browser_view_, browser_content_);
     }
     browser_view_ = browser_view;
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
-    browser_content_->AddChildView(browser_view_);
+    browser_view_->SetVisible(true);
+    CefRefPtr<CefView> parent = browser_view_->GetParentView();
+    if (parent == nullptr || !parent->IsSame(browser_content_)) {
+        browser_content_->AddChildView(browser_view_);
+    }
     if (browser_content_layout_ != nullptr) {
         browser_content_layout_->SetFlexForView(browser_view_, 1);
     }

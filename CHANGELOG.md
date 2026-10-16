@@ -99,6 +99,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- Opening two tabs in the same UI turn (for example the Plan's grouped pages, or two agent
+  opens) crashed CEF a few seconds later. A tab view that is replaced is now hidden and removed
+  from the window after a short delay instead of at once, so the crash no longer happens.
+
 - Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
   for them, and it finds the Import sources and the About list, which were hidden for every
   query. A Settings section that is already selected opens again when it is requested again
