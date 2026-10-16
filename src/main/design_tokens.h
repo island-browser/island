@@ -3,7 +3,9 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 namespace island {
 
@@ -38,21 +40,30 @@ struct AppearanceSettings {
     LookPreset look = LookPreset::kNative;
     // How strongly the active space's color tints the sidebar and canvas, 0 (neutral graphite)
     // to 100 (vivid).
-    int sidebar_tint_percent = 60;
+    int sidebar_tint_percent = 0;
     SidebarSide sidebar_side = SidebarSide::kLeft;
     // Page card corner radius in DIP: one of 0, 6, 10, 14.
-    int card_radius_dip = 10;
+    int card_radius_dip = 0;
     Density density = Density::kComfortable;
     // Interface font: "" or "geist" = bundled Geist, "system" = the platform UI font, anything
     // else is an installed family name.
-    std::string font_family;
+    std::string font_family = "system";
     // The page card's single soft shadow.
-    bool card_shadow = true;
+    bool card_shadow = false;
     // Full-bleed: no inset, no radius, no shadow; the page fills its side edge to edge.
-    bool full_bleed = false;
+    bool full_bleed = true;
 
     bool operator==(const AppearanceSettings&) const = default;
 };
+
+// Applies every knob of a built-in look. Picking a preset after customization therefore restores
+// the preset completely instead of changing only its identity.
+[[nodiscard]] AppearanceSettings ApplyLookPreset(LookPreset look);
+[[nodiscard]] std::string_view LookName(std::optional<LookPreset> look) noexcept;
+[[nodiscard]] std::optional<LookPreset> ParseLook(std::string_view name) noexcept;
+// Returns the preset whose knobs match `settings`; the stored look identity is deliberately
+// ignored so changing any knob makes the Settings label read Custom.
+[[nodiscard]] std::optional<LookPreset> MatchingLook(const AppearanceSettings& settings);
 
 // Clamps tint to 0..100, snaps the radius to the nearest allowed value, and trims/limits the
 // font family (control characters and quotes dropped, 64 bytes at most).

@@ -15,6 +15,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Settings > Appearance now starts with a Look preset menu for Native, Arc, and Graphite. Native
+  is the default for new profiles; changing any individual appearance control labels the result
+  Custom, and existing profiles without a saved look keep their Arc appearance.
 - Native look color tokens: neutral source-list surfaces, system blue selection, accessible
   secondary/warning text pairs, and four plan-branch colors in light and dark themes. Native
   customization ignores space color so its canvas and accent stay fixed.

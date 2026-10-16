@@ -7,6 +7,80 @@
 
 namespace island {
 
+AppearanceSettings ApplyLookPreset(LookPreset look) {
+    switch (look) {
+        case LookPreset::kNative:
+            return {};
+        case LookPreset::kArc:
+            return {.look = LookPreset::kArc,
+                    .sidebar_tint_percent = 60,
+                    .sidebar_side = SidebarSide::kLeft,
+                    .card_radius_dip = 10,
+                    .density = Density::kComfortable,
+                    .font_family = "",
+                    .card_shadow = true,
+                    .full_bleed = false};
+        case LookPreset::kGraphite:
+            return {.look = LookPreset::kGraphite,
+                    .sidebar_tint_percent = 0,
+                    .sidebar_side = SidebarSide::kLeft,
+                    .card_radius_dip = 10,
+                    .density = Density::kComfortable,
+                    .font_family = "geist",
+                    .card_shadow = true,
+                    .full_bleed = false};
+    }
+    return {};
+}
+
+std::string_view LookName(std::optional<LookPreset> look) noexcept {
+    if (!look.has_value()) {
+        return "custom";
+    }
+    switch (*look) {
+        case LookPreset::kNative:
+            return "native";
+        case LookPreset::kArc:
+            return "arc";
+        case LookPreset::kGraphite:
+            return "graphite";
+    }
+    return "custom";
+}
+
+std::optional<LookPreset> ParseLook(std::string_view name) noexcept {
+    if (name == "native") {
+        return LookPreset::kNative;
+    }
+    if (name == "arc") {
+        return LookPreset::kArc;
+    }
+    if (name == "graphite") {
+        return LookPreset::kGraphite;
+    }
+    return std::nullopt;
+}
+
+namespace {
+
+bool SameLookKnobs(const AppearanceSettings& a, const AppearanceSettings& b) {
+    return a.sidebar_tint_percent == b.sidebar_tint_percent && a.sidebar_side == b.sidebar_side &&
+           a.card_radius_dip == b.card_radius_dip && a.density == b.density &&
+           a.font_family == b.font_family && a.card_shadow == b.card_shadow &&
+           a.full_bleed == b.full_bleed;
+}
+
+}  // namespace
+
+std::optional<LookPreset> MatchingLook(const AppearanceSettings& settings) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        if (SameLookKnobs(settings, ApplyLookPreset(look))) {
+            return look;
+        }
+    }
+    return std::nullopt;
+}
+
 ChromeTokens ChromeTokens::ForTheme(ChromeTheme theme) noexcept {
     return ForLook(LookPreset::kGraphite, theme);
 }
@@ -305,8 +379,11 @@ ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
     tokens.control_height_dip = compact ? 26 : 32;
     tokens.row_gap_dip = compact ? 0 : 2;
     const std::string& family = appearance.font_family;
-    if (family.empty() || family == "geist") {
+    if (family == "geist") {
         tokens.ui_font_family = "Geist";
+    } else if (family.empty()) {
+        // Keep the base look's family. This is Geist for Arc/Graphite and the system family for
+        // Native, including legacy or partially specified appearance values.
     } else if (family == "system") {
         tokens.ui_font_family = "system";
     } else {

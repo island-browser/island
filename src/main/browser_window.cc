@@ -1112,6 +1112,7 @@ std::string BrowserWindow::SettingsStateJson() const {
     }
     Value appearance =
         Value::MakeObject()
+            .Set("look", Value::String(std::string(LookName(MatchingLook(look)))))
             .Set("sidebar_tint", Value::Int(look.sidebar_tint_percent))
             .Set("sidebar_side",
                  Value::String(look.sidebar_side == SidebarSide::kRight ? "right" : "left"))
@@ -1352,6 +1353,12 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         ThemePreference preference = ThemePreference::kSystem;
         if (ThemePreferenceFromString(message.StringOr("value", ""), preference)) {
             static_cast<void>(SetThemePreference(preference));
+        }
+    } else if (type == "set_look") {
+        if (const std::optional<LookPreset> look = ParseLook(message.StringOr("look", ""))) {
+            prefs_.appearance = ApplyLookPreset(*look);
+            SavePrefs();
+            ApplyAppearance();
         }
     } else if (type == "set_appearance" || type == "set_space_color" ||
                type == "reset_appearance") {
@@ -2146,8 +2153,8 @@ void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
 }
 
 ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
-    ChromeTokens tokens =
-        ChromeTokens::ForTheme(theme).Customized(active_space().color(), theme, prefs_.appearance);
+    ChromeTokens tokens = ChromeTokens::ForLook(prefs_.appearance.look, theme)
+                              .Customized(active_space().color(), theme, prefs_.appearance);
     if (FramelessWindowSupported()) {
         tokens.titlebar_band_dip = BrowserChrome::TrafficLightBandDip();
     }

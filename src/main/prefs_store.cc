@@ -113,11 +113,23 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         state.reader_size =
             static_cast<int>(std::clamp<std::int64_t>(reader_size->int_val, 1, 1000));
     }
+    // Every valid prefs file predating look presets is an existing Arc profile. New profiles use
+    // the native in-memory default and new saves write appearance.look explicitly.
+    state.appearance = ApplyLookPreset(LookPreset::kArc);
     if (const json::Value* appearance = root.FindMember("appearance")) {
         if (!appearance->IsObject()) {
             return Fail(PrefsError::kSchemaError);
         }
         AppearanceSettings& a = state.appearance;
+        if (const json::Value* look = appearance->FindMember("look")) {
+            if (!look->IsString()) {
+                return Fail(PrefsError::kSchemaError);
+            }
+            if (const std::optional<LookPreset> preset = ParseLook(look->string_val)) {
+                a = ApplyLookPreset(*preset);
+            }
+            // Unknown names mean Custom. Keep the Arc-compatible base and load the stored knobs.
+        }
         for (const auto& [key, value] : appearance->object_val) {
             if (key == "sidebar_tint_percent" && value.IsInt()) {
                 a.sidebar_tint_percent = static_cast<int>(value.int_val);
@@ -220,26 +232,26 @@ std::string SerializeToJson(const PrefsState& state) {
     w.StringValue(state.reader_width);
     w.Key("reader_theme");
     w.StringValue(state.reader_theme);
-    if (state.appearance != AppearanceSettings{}) {
-        const AppearanceSettings& a = state.appearance;
-        w.Key("appearance");
-        w.StartObject();
-        w.Key("sidebar_tint_percent");
-        w.IntValue(a.sidebar_tint_percent);
-        w.Key("sidebar_side");
-        w.StringValue(a.sidebar_side == SidebarSide::kRight ? "right" : "left");
-        w.Key("card_radius");
-        w.IntValue(a.card_radius_dip);
-        w.Key("density");
-        w.StringValue(a.density == Density::kCompact ? "compact" : "comfortable");
-        w.Key("font");
-        w.StringValue(a.font_family);
-        w.Key("card_shadow");
-        w.BoolValue(a.card_shadow);
-        w.Key("full_bleed");
-        w.BoolValue(a.full_bleed);
-        w.EndObject();
-    }
+    const AppearanceSettings& a = state.appearance;
+    w.Key("appearance");
+    w.StartObject();
+    w.Key("look");
+    w.StringValue(LookName(a.look));
+    w.Key("sidebar_tint_percent");
+    w.IntValue(a.sidebar_tint_percent);
+    w.Key("sidebar_side");
+    w.StringValue(a.sidebar_side == SidebarSide::kRight ? "right" : "left");
+    w.Key("card_radius");
+    w.IntValue(a.card_radius_dip);
+    w.Key("density");
+    w.StringValue(a.density == Density::kCompact ? "compact" : "comfortable");
+    w.Key("font");
+    w.StringValue(a.font_family);
+    w.Key("card_shadow");
+    w.BoolValue(a.card_shadow);
+    w.Key("full_bleed");
+    w.BoolValue(a.full_bleed);
+    w.EndObject();
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);

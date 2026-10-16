@@ -69,8 +69,8 @@ struct PrefsState {
     std::string reader_width = "medium";
     std::string reader_theme = "auto";
 
-    // Arc-style customization (Settings > Appearance); optional "appearance" object, each key
-    // optional. Values are normalized on load.
+    // Look preset plus customization (Settings > Appearance). Legacy files without a look load
+    // as Arc; new saves always include the object and look identity.
     AppearanceSettings appearance;
 
     bool operator==(const PrefsState&) const = default;

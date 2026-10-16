@@ -168,8 +168,8 @@ TEST(ChromeTokens, ProvidesTheArcCardAndDensityDefaultsInEveryTheme) {
         EXPECT_TRUE(tokens.card_shadow);
         EXPECT_EQ(tokens.sidebar_side, SidebarSide::kLeft);
     }
-    const AppearanceSettings defaults;
-    EXPECT_EQ(defaults.look, LookPreset::kNative);
+    const AppearanceSettings defaults = ApplyLookPreset(LookPreset::kArc);
+    EXPECT_EQ(defaults.look, LookPreset::kArc);
     EXPECT_EQ(defaults.sidebar_tint_percent, 60);
     EXPECT_EQ(defaults.card_radius_dip, 10);
     EXPECT_EQ(defaults.density, Density::kComfortable);
