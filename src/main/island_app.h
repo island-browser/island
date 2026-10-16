@@ -53,6 +53,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // `open_report` opens the newest report in a new tab.
     void StartResearch(const std::string& question);
     void OpenNewestReport();
+    // Developer capture only: a Plan tab showing the sample plan waiting for approval.
+    void OpenPlanFixture();
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
     void ToggleSettings();

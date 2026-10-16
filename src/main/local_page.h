@@ -32,6 +32,9 @@ enum class LocalPageKind : std::uint8_t {
     // ordinary tabs; its messages are accepted from the main frame of such a
     // tab only, and the report is the one named by the URL, never by the page.
     kReport,
+    // The research plan (Plan tab). Like kReport it is the document of an ordinary tab, the
+    // fixed page URL; its messages are accepted from that tab's main frame only.
+    kPlan,
 };
 
 class LocalPageDelegate {

@@ -971,6 +971,9 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
             // Report pages live in tabs and reach HandleReportPageMessage through
             // the tab's console handler, which knows which report the URL names.
             return;
+        case LocalPageKind::kPlan:
+            // Plan pages live in tabs too and reach HandlePlanPageMessage the same way.
+            return;
     }
 }
 
@@ -1014,6 +1017,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
         case LocalPageKind::kAgent:
         case LocalPageKind::kStart:
         case LocalPageKind::kReport:
+        case LocalPageKind::kPlan:
             return nullptr;
     }
     return nullptr;
@@ -1028,7 +1032,8 @@ void BrowserWindow::OpenBlockerSettings() { ShowSettingsSection("privacy"); }
 void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent ||
-        kind == LocalPageKind::kStart || kind == LocalPageKind::kReport) {
+        kind == LocalPageKind::kStart || kind == LocalPageKind::kReport ||
+        kind == LocalPageKind::kPlan) {
         return;
     }
     if (internal_page_ == kind) {
@@ -2129,6 +2134,8 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     }
     const std::string frame_url = frame->GetURL().ToString();
     const bool is_start_page = frame_url == StartPageUrl();
+    // The Plan tab is a page of its own: its messages edit the research plan.
+    const bool is_plan_page = !is_start_page && IsPlanPageUrl(frame_url);
     // The reader document is the other page this bridge serves: the tab must be showing exactly
     // the data: URL Island built for it (and the message must carry that document's token).
     const auto reader = reader_sessions_.find(owner->id());
@@ -2138,7 +2145,7 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     // A report page speaks for the one report its URL names.
     const std::optional<std::string> report_id =
         is_start_page || is_reader_page ? std::nullopt : ReportIdForUrl(frame_url);
-    if (!is_start_page && !is_reader_page && !report_id) {
+    if (!is_start_page && !is_reader_page && !is_plan_page && !report_id) {
         return false;
     }
     const std::optional<json::Value> decoded = LocalPage::DecodeMessage(text);
@@ -2149,6 +2156,8 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
         HandleReaderMessage(*owner, *decoded);
     } else if (report_id) {
         HandleReportPageMessage(*decoded, *report_id, browser);
+    } else if (is_plan_page) {
+        HandlePlanPageMessage(*decoded, browser);
     } else {
         HandleStartPageMessage(*decoded, browser);
     }
@@ -2975,6 +2984,8 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     } else if (const std::optional<std::string> report_id =
                    ReportIdForUrl(frame->GetURL().ToString())) {
         RenderReportFrame(frame, *report_id);
+    } else if (IsPlanPageUrl(frame->GetURL().ToString())) {
+        RenderPlanFrame(frame);
     }
 }
 

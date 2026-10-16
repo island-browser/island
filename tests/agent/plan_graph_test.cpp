@@ -236,5 +236,25 @@ TEST(PlanGraphTest, JsonCarriesTheLayout) {
     EXPECT_TRUE(found);
 }
 
+TEST(PlanGraphTest, SpecPlanNodesCarryReadableTitles) {
+    const PlanGraph graph = BuildPlanGraph(SpecPlan(), {});
+    std::map<std::string, std::string> titles;
+    for (const PlanNode& node : graph.nodes) {
+        titles[node.id] = node.title;
+        EXPECT_NE(node.title, node.id) << node.id;
+    }
+    EXPECT_EQ(titles["a2"], "Known problems in open issues");
+    EXPECT_EQ(titles["m"], "Weigh reviews, prices and owner reports");
+    EXPECT_EQ(titles["r"], "Write the recommendation");
+}
+
+TEST(PlanGraphTest, PlainPlanGetsGeneratedIdsAndAChain) {
+    EXPECT_EQ(PlanEntryIds(PlainPlan()), (std::vector<std::string>{"p0", "p1", "p2"}));
+    const PlanGraph graph = BuildPlanGraph(PlainPlan(), {});
+    ASSERT_EQ(graph.nodes.size(), 3U);
+    EXPECT_EQ(graph.nodes[2].after, (std::vector<std::string>{"p1"}));
+    EXPECT_EQ(graph.nodes[0].title, "Find two sources");
+}
+
 }  // namespace
 }  // namespace island::agent

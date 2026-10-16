@@ -35,6 +35,10 @@ struct PlanGraph {
 // Branch nesting allowed; a node nested deeper becomes a Needs-you node asking first.
 inline constexpr int kMaxBranchDepth = 3;
 
+// The id each entry has in the graph, in plan order: `_meta.island.id` when the entry carries
+// one, else the generated "p<index>" that plain ACP entries get. Edits key on these ids.
+[[nodiscard]] std::vector<std::string> PlanEntryIds(const std::vector<AcpPlanEntry>& entries);
+
 [[nodiscard]] PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
                                        const std::set<std::string>& skipped_ids);
 

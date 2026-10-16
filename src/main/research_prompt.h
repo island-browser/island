@@ -39,18 +39,24 @@ inline constexpr std::size_t kMaxResearchQuestionBytes = 2000;
 
 // How a research turn ended, from the transcript of the session that ran it.
 struct ResearchOutcome {
-    enum class Kind : std::uint8_t { kReport, kCancelled, kFailed };
+    // kAwaitingApproval: the turn proposed a plan and stopped; nothing runs until the person
+    // approves it. The research stays in flight for the next turn.
+    enum class Kind : std::uint8_t { kReport, kCancelled, kFailed, kAwaitingApproval };
     Kind kind = Kind::kFailed;
     std::string markdown;  // kReport
-    std::string message;   // kCancelled / kFailed: what to tell the user
+    std::string message;   // kCancelled / kFailed / kAwaitingApproval: what to tell the user
 };
 
 // Classifies the turn that started when `turns_ended_before` turns had ended.
 // A turn that never ended (the session was reset, the agent died while the
 // prompt was queued) is a failure carrying `session_error` when there is one.
+// A plan in the turn that the person has not approved yet (`plan_approved` false) means
+// the agent is waiting: only a marked report can end the research then. Once a Run is
+// approved, its unmarked final text is the report.
 [[nodiscard]] ResearchOutcome ClassifyResearchTurn(const agent::AgentTranscript& transcript,
                                                    std::uint64_t turns_ended_before,
-                                                   std::string_view session_error);
+                                                   std::string_view session_error,
+                                                   bool plan_approved = false);
 
 // A safe file name for saving a report: the title, sanitized, ending in ".md".
 [[nodiscard]] std::string ReportFileName(std::string_view title);

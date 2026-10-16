@@ -38,6 +38,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   no color dot), a "+" button for a new space, and overview and settings icon buttons at its
   right end. With more than four spaces the inactive segments show only their initial.
 - Native's "New Tab" row moves below the last tab. Arc and Graphite keep their sidebar.
+- Research opens a Plan tab, pinned first in the space, that shows the agent's plan as a graph
+  (or a list) of steps, branches, a join and a result. Nothing runs until you approve: Run plan,
+  Run one branch only, or Cancel. You can skip and restore steps, write an instruction for a
+  step, branch from a step (at most 3 levels deep) or ask the agent to expand one. A research
+  turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
+  Plain ACP plans open in List view with stable p0, p1, ... step ids, and each research reuses
+  its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab.
 - ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,

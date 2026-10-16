@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Research plan</title>
+<style>
+:root {
+  --bg: #FAFAFA; --surface: #FFFFFF; --surface-2: #F2F2F2; --text: #0A0A0A; --text-2: #636366;
+  --text-3: #8E8E93; --border: #E5E5E5; --border-2: #C7C7CC; --fill: #EFEFF4; --accent: #0A64D8;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent); --accent-text: #0A64D8;
+  --selection: #0A64D8; --warn-bg: #FFF4D6; --warn-border: #E7B33B; --warn-text: #7A5300;
+  --success: #18794E; --danger: #CD2B31;
+  --branch-a: #0A64D8; --branch-b: #8E44AD; --branch-c: #C2410C; --branch-d: #0F766E;
+  --radius: 10px; --radius-sm: 6px;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { --bg: #1C1C1E; --surface: #2C2C2E; --surface-2: #242426; --text: #F2F2F7;
+    --text-2: #AEAEB2; --text-3: #8E8E93; --border: #3A3A3C; --border-2: #545458; --fill: #3A3A3C;
+    --accent: #0A84FF; --accent-text: #6CB6FF; --selection: #0A6FE0; color-scheme: dark; }
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 13px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .45; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+/* Toolbar (52) */
+.toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px;
+  border-bottom: 1px solid var(--border); background: var(--surface); }
+.graph-icon { width: 18px; height: 18px; flex: none; color: var(--text-2); }
+.title { font-weight: 600; font-size: 14px; white-space: nowrap; }
+.pill { border-radius: 999px; padding: 3px 10px; font-size: 12px; background: var(--fill);
+  color: var(--text-2); white-space: nowrap; }
+.pill[data-tone="awaiting"] { background: var(--accent-soft); color: var(--accent-text); }
+.pill[data-tone="approval"] { background: var(--warn-bg); color: var(--warn-text); }
+.pill[data-tone="running"] { background: var(--accent-soft); color: var(--accent-text); }
+.pill[data-tone="done"] { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+.pill[data-tone="bad"] { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  overflow: hidden; }
+.segmented button { border: 0; background: var(--surface); padding: 4px 12px; font-size: 12px; }
+.segmented button[aria-pressed="true"] { background: var(--surface-2); font-weight: 600; }
+.tool { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
+  padding: 4px 10px; font-size: 12px; }
+.tool:hover:not(:disabled) { background: var(--surface-2); }
+.spacer { flex: 1; }
+
+.notice { flex: none; padding: 6px 16px; font-size: 12px; background: var(--warn-bg);
+  color: var(--warn-text); border-bottom: 1px solid var(--border); }
+.notice[hidden] { display: none; }
+
+/* Body: canvas + inspector */
+.body { flex: 1; min-height: 0; display: flex; }
+.canvas-wrap { position: relative; flex: 1; min-width: 0; overflow: auto; background-color: #FBFBFD;
+  background-image: radial-gradient(circle, var(--border-2) 1px, transparent 1px);
+  background-size: 20px 20px; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .canvas-wrap { background-color: #1F1F21; } }
+:root[data-theme="dark"] .canvas-wrap { background-color: #1F1F21; }
+.stage { position: relative; transform-origin: 0 0; }
+.stage svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.node { position: absolute; width: 148px; height: 92px; border-radius: 10px; padding: 8px 10px;
+  text-align: left; border: 1px solid var(--border-2); background: var(--surface);
+  display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+.node:hover:not(:disabled) { border-color: var(--text-3); }
+.node[aria-selected="true"] { box-shadow: 0 0 0 2px var(--selection); }
+.node[data-kind="step"] { border-left: 3px solid var(--node-branch, var(--border-2)); }
+.node[data-kind="question"] { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
+.node[data-kind="needs_you"] { background: var(--warn-bg); border-color: var(--warn-border); }
+.node[data-state="skipped"] { background: var(--surface-2); border-style: dashed; border-color: var(--text-3); color: var(--text-2); }
+.node[data-state="skipped"] .node-title { text-decoration: line-through; }
+.node[data-state="queued"] { opacity: .6; }
+.node[data-state="running"] { box-shadow: 0 0 0 2px var(--accent); }
+.node[data-state="waiting"] { border-color: var(--warn-border); animation: wait-pulse 1.2s ease-out 1; }
+.node[data-state="failed"] { border-color: var(--danger); }
+.node[data-state="done"] .kicker::after { content: " \2713"; color: var(--success); }
+.node.add { border-style: dashed; color: var(--text-2); align-items: center; justify-content: center;
+  text-align: center; touch-action: auto; }
+.node:not(.add) { cursor: grab; touch-action: none; }
+.node:not(.add):active { cursor: grabbing; }
+.kicker { font: 500 10px/1.3 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); }
+.spinner { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%;
+  border: 1.5px solid var(--fill); border-top-color: var(--accent); animation: spin .7s linear infinite; }
+.node-title { font-weight: 600; font-size: 12.5px; line-height: 1.3; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chips { margin-top: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+.chip { font-size: 10px; border-radius: 4px; padding: 1px 5px; background: var(--fill); color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.chip.mono { font-family: var(--mono); }
+.chip.warn { background: var(--warn-bg); color: var(--warn-text); }
+.edge.running { stroke-dasharray: 7 5; animation: edge-flow .8s linear infinite; }
+.legend { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 10px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
+  font-size: 11px; color: var(--text-2); }
+.zoom { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); padding: 2px; }
+.zoom button { border: 0; background: transparent; padding: 2px 8px; font-size: 13px; }
+.zoom output { min-width: 44px; text-align: center; font-size: 11px; color: var(--text-2); }
+
+/* List view */
+.list { position: absolute; inset: 0; overflow: auto; padding: 16px 20px; margin: 0; list-style: none; }
+.list ul { list-style: none; padding-left: 18px; margin: 4px 0; }
+.list > li { margin-bottom: 8px; }
+.list .group-title { font-weight: 600; margin: 8px 0 4px; color: var(--text-2); }
+.row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0;
+  background: transparent; padding: 6px 8px; border-radius: var(--radius-sm); }
+.row:hover { background: var(--surface-2); }
+.row[aria-selected="true"] { background: var(--selection); color: #FFFFFF; }
+.row[aria-selected="true"] .kicker { color: #FFFFFF; }
+.row .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Inspector (316) */
+.inspector { width: 316px; flex: none; border-left: 1px solid var(--border); background: var(--surface-2);
+  display: flex; flex-direction: column; min-height: 0; }
+.inspector-top { flex: 1; overflow: auto; padding: 16px; }
+.inspector-bottom { border-top: 1px solid var(--border); padding: 14px 16px; background: var(--surface); }
+.inspector h2 { font-size: 17px; line-height: 1.25; margin: 4px 0 12px; font-weight: 650; }
+.kv { display: grid; grid-template-columns: 84px 1fr; gap: 6px 10px; margin: 0 0 12px; font-size: 12px; }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.kv dd.mono { font-family: var(--mono); font-size: 11.5px; }
+.note { border-radius: var(--radius-sm); border: 1px solid var(--warn-border); background: var(--warn-bg);
+  color: var(--warn-text); padding: 8px 10px; font-size: 12px; margin: 0 0 12px; }
+.approval-card { border-radius: 8px; border: 1px solid var(--warn-border); background: var(--warn-bg);
+  color: var(--warn-text); padding: 10px 12px; font-size: 12px; margin: 0 0 12px;
+  animation: wait-pulse 1.2s ease-out 1; }
+label.field { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+.field input { width: 100%; border: 1px solid var(--border-2); border-radius: var(--radius-sm);
+  background: var(--surface); padding: 6px 8px; font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; }
+.actions .tool { font-size: 12px; }
+.summary { font-size: 12px; color: var(--text-2); margin: 0 0 8px; }
+.perms { list-style: none; margin: 0 0 12px; padding: 0; font-size: 12px; }
+.perms li { margin: 2px 0; color: var(--text); }
+.run-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn { border: 1px solid var(--border-2); background: var(--surface); border-radius: var(--radius-sm);
+  padding: 6px 12px; font-size: 12.5px; font-weight: 500; }
+.btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
+.btn:hover:not(:disabled) { background: var(--surface-2); }
+.btn.primary:hover:not(:disabled) { opacity: .9; background: var(--text); }
+.empty { color: var(--text-2); padding: 24px; font-size: 13px; }
+
+@media (max-width: 760px) {
+  .body { flex-direction: column; }
+  .inspector { width: auto; max-height: 50%; border-left: 0; border-top: 1px solid var(--border); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes edge-flow { to { stroke-dashoffset: -24; } }
+@keyframes wait-pulse { 50% { box-shadow: 0 0 0 3px var(--warn-border); } }
+@media (prefers-reduced-motion: reduce) {
+  *, .node[data-state="waiting"], .approval-card, .edge.running {
+    animation: none !important; transition: none !important;
+  }
+}
+</style>
+</head>
+<body>
+<header class="toolbar">
+  <svg class="graph-icon" viewBox="0 0 18 18" aria-hidden="true">
+    <path d="M5 5.5 13 3.5M5 5.5l8 8M13 3.5v10" fill="none" stroke="currentColor"
+      stroke-width="1.5"/>
+    <circle cx="5" cy="5.5" r="2" fill="var(--surface)" stroke="currentColor"/>
+    <circle cx="13" cy="3.5" r="2" fill="var(--surface)" stroke="currentColor"/>
+    <circle cx="13" cy="13.5" r="2" fill="var(--surface)" stroke="currentColor"/>
+  </svg>
+  <span class="title" id="title">Research plan</span>
+  <span class="pill" id="pill" data-tone="idle">No research running</span>
+  <div class="segmented" role="group" aria-label="Plan view">
+    <button type="button" id="view-graph" aria-label="Graph view" aria-pressed="true">Graph</button>
+    <button type="button" id="view-list" aria-label="List view" aria-pressed="false">List</button>
+  </div>
+  <span class="spacer"></span>
+  <button type="button" class="tool" id="tidy" aria-label="Tidy up the graph">Tidy up</button>
+</header>
+<div class="notice" id="notice" role="status" hidden></div>
+<div class="body">
+  <div class="canvas-wrap" id="canvas-wrap">
+    <div class="stage" id="stage" role="tree" aria-label="Research plan graph" tabindex="-1"></div>
+    <ul class="list" id="list" role="tree" aria-label="Research plan" hidden></ul>
+    <div class="legend" id="legend" aria-hidden="true">
+      <span>Question</span><span>Step</span><span>Asks first</span><span>Skipped</span>
+    </div>
+    <div class="zoom" role="group" aria-label="Zoom">
+      <button type="button" id="zoom-out" aria-label="Zoom out">&minus;</button>
+      <output id="zoom-level" aria-live="polite">100%</output>
+      <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+    </div>
+  </div>
+  <aside class="inspector" aria-label="Inspector">
+    <div class="inspector-top" id="inspector-top"></div>
+    <div class="inspector-bottom">
+      <p class="summary" id="summary"></p>
+      <ul class="perms" id="perms"></ul>
+      <div class="run-row">
+        <button type="button" class="btn primary" id="run" aria-label="Run plan">Run plan</button>
+        <button type="button" class="btn" id="run-branch" aria-label="Run the selected branch only">Run A only</button>
+        <button type="button" class="btn" id="cancel" aria-label="Cancel research">Cancel</button>
+      </div>
+    </div>
+  </aside>
+</div>
+<script>
+(function () {
+  "use strict";
+  var NODE_W = 148, NODE_H = 92, PITCH_X = 188, PITCH_Y = 112, PAD = 16;
+  var BRANCH_COLORS = ["var(--branch-a)", "var(--branch-b)", "var(--branch-c)", "var(--branch-d)"];
+  var state = {
+    theme: null, graph: { nodes: [], branching: false },
+    edits: { skipped: [], instructions: {} },
+    status: { state: "idle", message: "" }, awaiting: false, running: false,
+    selected: "", view: "graph", notice: "", depth_limit: 3, question: ""
+  };
+  var zoomLevel = 1;
+  var lastSelected = "";
+  var movedPositions = {};
+  var activeDrag = null;
+  var suppressClickId = "";
+
+  function $(id) { return document.getElementById(id); }
+  function post(message) { console.log("\u0001island:" + JSON.stringify(message)); }
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function applyTheme(theme) {
+    if (!theme) return;
+    var root = document.documentElement;
+    ["bg", "surface", "surface-2", "text", "text-2", "border", "accent"].forEach(function (key) {
+      var value = theme[key.replace("-", "_")];
+      if (value) root.style.setProperty("--" + key, value);
+    });
+    [
+      ["fill", "--fill"], ["border_2", "--border-2"], ["text_3", "--text-3"],
+      ["selection", "--selection"], ["accent_soft", "--accent-soft"],
+      ["accent_text", "--accent-text"], ["warn_bg", "--warn-bg"],
+      ["warn_border", "--warn-border"], ["warn_text", "--warn-text"],
+      ["success", "--success"], ["danger", "--danger"]
+    ].forEach(function (mapping) {
+      var value = theme[mapping[0]];
+      if (value) root.style.setProperty(mapping[1], value);
+    });
+    ["--branch-a", "--branch-b", "--branch-c", "--branch-d"].forEach(function (variable, index) {
+      var value = theme.branch && theme.branch[index];
+      if (value) root.style.setProperty(variable, value);
+    });
+    root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+  }
+
+  // Branch letters in order of first appearance; each gets one --branch-* color.
+  function branchIndex(label) {
+    if (!label) return -1;
+    var labels = [];
+    state.graph.nodes.forEach(function (node) {
+      if (node.branch && labels.indexOf(node.branch) < 0) labels.push(node.branch);
+    });
+    return labels.indexOf(label) % 4;
+  }
+  function branchVar(label) {
+    var index = branchIndex(label);
+    return index < 0 ? "var(--text-3)" : BRANCH_COLORS[index];
+  }
+
+  function nodeById(id) {
+    for (var i = 0; i < state.graph.nodes.length; i++) {
+      if (state.graph.nodes[i].id === id) return state.graph.nodes[i];
+    }
+    return null;
+  }
+  function childrenOf(id) {
+    return state.graph.nodes.filter(function (node) { return node.after.indexOf(id) >= 0; });
+  }
+  function isSkipped(id) { return state.edits.skipped.indexOf(id) >= 0; }
+  function stepNumber(node) {
+    var count = 0;
+    for (var i = 0; i < state.graph.nodes.length; i++) {
+      var other = state.graph.nodes[i];
+      if (other.branch === node.branch && other.kind === "step") count++;
+      if (other.id === node.id) break;
+    }
+    return count;
+  }
+  function kindOf(node) {
+    if (node.kind === "question") return "question";
+    if (node.kind === "join") return "join";
+    if (node.kind === "result") return "result";
+    return node.needs_you ? "needs_you" : "step";
+  }
+  function kickerOf(node) {
+    if (node.kind === "question") return "Question";
+    if (node.kind === "join") return "Join";
+    if (node.kind === "result") return "Result";
+    return node.branch ? "Branch " + node.branch : "Step";
+  }
+  function stateOf(node) {
+    return isSkipped(node.id) ? "skipped" : node.state;
+  }
+  function isWaiting(node) {
+    return state.running && !!node.needs_you && stateOf(node) === "running";
+  }
+
+  function ensureSelection() {
+    if (state.selected && nodeById(state.selected)) return;
+    state.selected = state.graph.nodes.length ? state.graph.nodes[0].id : "";
+  }
+
+  function select(id) {
+    state.selected = id;
+    post({ type: "select", id: id });
+    document.querySelectorAll("[data-plan-node-id]").forEach(function (button) {
+      button.setAttribute("aria-selected",
+        button.getAttribute("data-plan-node-id") === id ? "true" : "false");
+    });
+    renderToolbar();
+    renderInspector();
+    if (state.view === "graph") renderCanvasSelection();
+    lastSelected = id;
+    var current = $("node-" + id);
+    if (current && current.scrollIntoView && state.view === "graph") {
+      current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  // Arrow keys: right/left follow the edges, up/down move among the nodes of one column.
+  function neighbourOf(key) {
+    var current = nodeById(state.selected);
+    if (!current) return null;
+    var pick = null;
+    if (key === "ArrowRight") {
+      var kids = childrenOf(current.id);
+      pick = kids.length ? kids[0] : null;
+    } else if (key === "ArrowLeft") {
+      pick = current.after.length ? nodeById(current.after[0]) : null;
+    } else {
+      var step = key === "ArrowDown" ? 1 : -1;
+      var best = null;
+      state.graph.nodes.forEach(function (node) {
+        if (node.column !== current.column || node.row === current.row) return;
+        if ((node.row - current.row) * step <= 0) return;
+        if (!best || Math.abs(node.row - current.row) < Math.abs(best.row - current.row)) best = node;
+      });
+      pick = best;
+    }
+    return pick;
+  }
+
+  function layoutForCanvas(nodes) {
+    var positions = {}, stackedResults = {}, maxColumn = 0;
+    nodes.forEach(function (node) { maxColumn = Math.max(maxColumn, node.column); });
+    var naturalWidth = PAD * 2 + maxColumn * PITCH_X + NODE_W;
+    var canvasWidth = $("canvas-wrap").clientWidth || naturalWidth;
+    var narrow = naturalWidth > canvasWidth;
+    if (narrow) {
+      nodes.forEach(function (node) {
+        if (node.kind !== "result" || node.after.length !== 1) return;
+        var parent = nodeById(node.after[0]);
+        if (parent && parent.kind === "join") {
+          stackedResults[node.id] = true;
+        }
+      });
+    }
+    var layoutMaxColumn = 0;
+    nodes.forEach(function (node) {
+      if (!stackedResults[node.id]) layoutMaxColumn = Math.max(layoutMaxColumn, node.column);
+    });
+    var fitPitch = layoutMaxColumn > 0 ?
+      (canvasWidth - PAD * 2 - NODE_W) / layoutMaxColumn : PITCH_X;
+    var pitchX = narrow ? Math.max(NODE_W + 12, Math.min(PITCH_X, fitPitch)) : PITCH_X;
+    var maxBaseY = PAD;
+    nodes.forEach(function (node) {
+      if (stackedResults[node.id]) return;
+      positions[node.id] = { x: PAD + node.column * pitchX, y: PAD + node.row * PITCH_Y };
+      maxBaseY = Math.max(maxBaseY, positions[node.id].y);
+    });
+    nodes.forEach(function (node) {
+      if (!stackedResults[node.id]) return;
+      var parent = nodeById(node.after[0]);
+      var parentPosition = positions[parent.id];
+      positions[node.id] = {
+        x: parentPosition.x,
+        y: Math.max(parentPosition.y + PITCH_Y, maxBaseY + PITCH_Y)
+      };
+    });
+    nodes.forEach(function (node) {
+      var moved = movedPositions[node.id];
+      if (!moved) return;
+      positions[node.id].x += moved.x;
+      positions[node.id].y += moved.y;
+    });
+    var edges = [];
+    nodes.forEach(function (node) {
+      node.after.forEach(function (fromId) {
+        var parent = nodeById(fromId);
+        if (!parent || !positions[fromId]) return;
+        edges.push({
+          from: parent,
+          to: node,
+          vertical: !!stackedResults[node.id] && parent.kind === "join"
+        });
+      });
+    });
+    return { positions: positions, edges: edges, pitchX: pitchX, canvasWidth: canvasWidth };
+  }
+
+  function addEdge(svg, svgNS, edge, layout, dashed) {
+    var from = layout.positions[edge.from.id], to = layout.positions[edge.to.id];
+    var sx = edge.vertical ? from.x + NODE_W / 2 : from.x + NODE_W;
+    var sy = edge.vertical ? from.y + NODE_H : from.y + NODE_H / 2;
+    var tx = edge.vertical ? to.x + NODE_W / 2 : to.x;
+    var ty = edge.vertical ? to.y : to.y + NODE_H / 2;
+    var edgePath = edge.vertical ? "M" + sx + "," + sy + " L" + tx + "," + ty :
+      "M" + sx + "," + sy + " C" + (sx + 60) + "," + sy + " " +
+        (tx - 60) + "," + ty + " " + tx + "," + ty;
+    var path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", edgePath);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke-width", 2);
+    path.style.stroke = edge.to.branch ? branchVar(edge.to.branch) : "var(--text-3)";
+    if (dashed || isSkipped(edge.to.id)) path.setAttribute("stroke-dasharray", "5 4");
+    if (stateOf(edge.to) === "running") path.setAttribute("class", "edge running");
+    svg.appendChild(path);
+    var dot = document.createElementNS(svgNS, "circle");
+    dot.setAttribute("cx", tx); dot.setAttribute("cy", ty); dot.setAttribute("r", 3.5);
+    dot.style.fill = path.style.stroke;
+    svg.appendChild(dot);
+  }
+
+  function ghostPosition(selected, layout) {
+    var origin = layout.positions[selected.id];
+    var position = { x: origin.x + layout.pitchX, y: origin.y };
+    if (position.x + NODE_W + PAD > layout.canvasWidth) {
+      position.x = origin.x;
+      position.y = origin.y + PITCH_Y;
+    }
+    var occupied = true;
+    while (occupied) {
+      occupied = state.graph.nodes.some(function (node) {
+        var other = layout.positions[node.id];
+        return Math.abs(other.x - position.x) < NODE_W + 12 &&
+          Math.abs(other.y - position.y) < NODE_H + 12;
+      });
+      if (occupied) position.y += PITCH_Y;
+    }
+    return position;
+  }
+
+  function renderCanvas() {
+    var stage = $("stage");
+    clear(stage);
+    var nodes = state.graph.nodes;
+    if (!nodes.length) {
+      stage.appendChild(el("p", "empty", "The agent has not sent a plan yet."));
+      return;
+    }
+    var layout = layoutForCanvas(nodes);
+    var selected = nodeById(state.selected);
+    var ghost = selected ? ghostPosition(selected, layout) : null;
+    var width = layout.canvasWidth;
+    var height = PAD * 2 + NODE_H;
+    nodes.forEach(function (node) {
+      var position = layout.positions[node.id];
+      width = Math.max(width, position.x + NODE_W + PAD);
+      height = Math.max(height, position.y + NODE_H + PAD);
+    });
+    if (ghost) {
+      width = Math.max(width, ghost.x + NODE_W + PAD);
+      height = Math.max(height, ghost.y + NODE_H + PAD);
+    }
+    stage.style.width = width + "px";
+    stage.style.height = height + "px";
+    stage.style.transform = "scale(" + zoomLevel + ")";
+
+    // The SVG namespace identifier, not a request: nothing is fetched from it.
+    var svgNS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    svg.setAttribute("aria-hidden", "true");
+
+    // Lanes: one soft band per branch behind its nodes.
+    var lanes = {};
+    nodes.forEach(function (node) {
+      if (!node.branch) return;
+      var position = layout.positions[node.id], x = position.x, y = position.y;
+      var lane = lanes[node.branch] || (lanes[node.branch] = { x0: x, y0: y, x1: x, y1: y });
+      lane.x0 = Math.min(lane.x0, x); lane.y0 = Math.min(lane.y0, y);
+      lane.x1 = Math.max(lane.x1, x + NODE_W); lane.y1 = Math.max(lane.y1, y + NODE_H);
+    });
+    Object.keys(lanes).forEach(function (label) {
+      var lane = lanes[label];
+      var rect = document.createElementNS(svgNS, "rect");
+      rect.setAttribute("x", lane.x0 - 10); rect.setAttribute("y", lane.y0 - 10);
+      rect.setAttribute("width", lane.x1 - lane.x0 + 20);
+      rect.setAttribute("height", lane.y1 - lane.y0 + 20);
+      rect.setAttribute("rx", 12);
+      rect.style.fill = "color-mix(in srgb, " + branchVar(label) + " 4%, transparent)";
+      svg.appendChild(rect);
+    });
+
+    layout.edges.forEach(function (edge) { addEdge(svg, svgNS, edge, layout, false); });
+    if (ghost && selected) {
+      layout.positions.__add_branch__ = ghost;
+      var ghostEdge = document.createElementNS(svgNS, "g");
+      ghostEdge.id = "ghost-edge";
+      addEdge(ghostEdge, svgNS,
+        { from: selected, to: { id: "__add_branch__", branch: selected.branch },
+          vertical: ghost.x === layout.positions[selected.id].x }, layout, true);
+      svg.appendChild(ghostEdge);
+    }
+    stage.appendChild(svg);
+
+    nodes.forEach(function (node) {
+      stage.appendChild(nodeButton(node, layout.positions[node.id]));
+    });
+    if (ghost && selected) stage.appendChild(addBranchButton(selected, ghost));
+  }
+
+  function nodeButton(node, position) {
+    var button = el("button", "node");
+    var kind = kindOf(node);
+    var nodeState = stateOf(node);
+    var waiting = isWaiting(node);
+    var depthLocked = node.depth >= state.depth_limit;
+    button.type = "button";
+    button.setAttribute("role", "treeitem");
+    button.setAttribute("aria-selected", node.id === state.selected ? "true" : "false");
+    button.setAttribute("aria-label", kickerOf(node) + ": " + node.title +
+      (nodeState === "skipped" ? ", skipped" : ""));
+    button.setAttribute("data-plan-node-id", node.id);
+    button.setAttribute("data-kind", kind);
+    button.setAttribute("data-state", waiting ? "waiting" : nodeState);
+    button.id = "node-" + node.id;
+    button.style.left = position.x + "px";
+    button.style.top = position.y + "px";
+    button.style.setProperty("--node-branch", branchVar(node.branch));
+    button.title = depthLocked && node.kind === "step" ? "Plans branch at most 3 levels deep" : "";
+    var kicker = el("span", "kicker");
+    if (nodeState === "running") {
+      var spinner = el("span");
+      spinner.className = "spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      kicker.appendChild(spinner);
+    }
+    kicker.appendChild(document.createTextNode(kickerOf(node)));
+    button.appendChild(kicker);
+    button.appendChild(el("span", "node-title", node.title));
+    var chips = el("span", "chips");
+    if (node.tool) chips.appendChild(el("span", "chip mono", node.tool));
+    if (node.site) chips.appendChild(el("span", "chip", node.site));
+    if (nodeState === "skipped") chips.appendChild(el("span", "chip", "Skipped by you"));
+    if (node.needs_you && nodeState !== "skipped") chips.appendChild(el("span", "chip warn", "Asks first"));
+    if (node.kind === "join") chips.appendChild(el("span", "chip", "Joins " + node.after.map(function (id) {
+      var parent = nodeById(id);
+      return parent && parent.branch ? "Branch " + parent.branch : id;
+    }).join(" + ")));
+    button.appendChild(chips);
+    button.addEventListener("click", function () {
+      if (suppressClickId === node.id) { suppressClickId = ""; return; }
+      select(node.id);
+    });
+    button.addEventListener("dblclick", function () { select(node.id); focusInstruction(); });
+    button.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0) return;
+      var moved = movedPositions[node.id] || { x: 0, y: 0 };
+      activeDrag = {
+        id: node.id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY,
+        baseX: moved.x, baseY: moved.y, left: position.x, top: position.y, button: button,
+        dragged: false
+      };
+      button.setPointerCapture(event.pointerId);
+    });
+    button.addEventListener("pointermove", function (event) {
+      if (!activeDrag || activeDrag.id !== node.id || activeDrag.pointer !== event.pointerId) return;
+      var dx = (event.clientX - activeDrag.startX) / zoomLevel;
+      var dy = (event.clientY - activeDrag.startY) / zoomLevel;
+      activeDrag.dragged = activeDrag.dragged || Math.abs(dx) + Math.abs(dy) > 3;
+      movedPositions[node.id] = { x: activeDrag.baseX + dx, y: activeDrag.baseY + dy };
+      button.style.left = activeDrag.left + dx + "px";
+      button.style.top = activeDrag.top + dy + "px";
+    });
+    function finishDrag(event) {
+      if (!activeDrag || activeDrag.id !== node.id || activeDrag.pointer !== event.pointerId) return;
+      var dragged = activeDrag.dragged;
+      if (dragged) suppressClickId = node.id;
+      if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+      activeDrag = null;
+      if (dragged) renderCanvas();
+    }
+    button.addEventListener("pointerup", finishDrag);
+    button.addEventListener("pointercancel", finishDrag);
+    return button;
+  }
+
+  function addBranchButton(selected, position) {
+    var button = el("button", "node add", "\u002b Add a branch");
+    var depthLocked = selected.depth >= state.depth_limit;
+    button.type = "button";
+    button.id = "add-branch-ghost";
+    button.setAttribute("aria-label", "Add a branch after " + selected.title);
+    button.style.left = position.x + "px";
+    button.style.top = position.y + "px";
+    button.disabled = !state.awaiting || depthLocked;
+    button.title = depthLocked ? "Plans branch at most 3 levels deep" : "";
+    button.addEventListener("click", function () {
+      post({ type: "branch_from", id: selected.id });
+    });
+    return button;
+  }
+
+  function renderCanvasSelection() {
+    var stage = $("stage");
+    var svg = stage.querySelector("svg");
+    if (!svg) return;
+    var oldEdge = $("ghost-edge");
+    if (oldEdge) oldEdge.remove();
+    var oldButton = $("add-branch-ghost");
+    if (oldButton) oldButton.remove();
+
+    var selected = nodeById(state.selected);
+    if (!selected) return;
+    var layout = layoutForCanvas(state.graph.nodes);
+    var ghost = ghostPosition(selected, layout);
+    layout.positions.__add_branch__ = ghost;
+    var width = layout.canvasWidth;
+    var height = PAD * 2 + NODE_H;
+    state.graph.nodes.forEach(function (node) {
+      var position = layout.positions[node.id];
+      width = Math.max(width, position.x + NODE_W + PAD);
+      height = Math.max(height, position.y + NODE_H + PAD);
+    });
+    width = Math.max(width, ghost.x + NODE_W + PAD);
+    height = Math.max(height, ghost.y + NODE_H + PAD);
+    stage.style.width = width + "px";
+    stage.style.height = height + "px";
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    var ghostEdge = document.createElementNS(svgNS, "g");
+    ghostEdge.id = "ghost-edge";
+    addEdge(ghostEdge, svgNS,
+      { from: selected, to: { id: "__add_branch__", branch: selected.branch },
+        vertical: ghost.x === layout.positions[selected.id].x }, layout, true);
+    svg.appendChild(ghostEdge);
+    stage.appendChild(addBranchButton(selected, ghost));
+  }
+
+  function renderList() {
+    var list = $("list");
+    clear(list);
+    var groups = [];
+    var byBranch = {};
+    state.graph.nodes.forEach(function (node) {
+      var key = node.branch || "";
+      if (!byBranch[key]) {
+        byBranch[key] = [];
+        groups.push(key);
+      }
+      byBranch[key].push(node);
+    });
+    groups.forEach(function (key) {
+      var holder = key ? el("li") : list;
+      if (key) {
+        holder.setAttribute("role", "treeitem");
+        holder.setAttribute("aria-expanded", "true");
+        holder.setAttribute("aria-label", "Branch " + key);
+        holder.appendChild(el("div", "group-title", "Branch " + key));
+        var inner = el("ul");
+        inner.setAttribute("role", "group");
+        holder.appendChild(inner);
+        list.appendChild(holder);
+        holder = inner;
+      }
+      byBranch[key].forEach(function (node) {
+        var item = el("li");
+        item.setAttribute("role", "none");
+        var row = el("button", "row");
+        row.type = "button";
+        row.setAttribute("role", "treeitem");
+        row.setAttribute("aria-selected", node.id === state.selected ? "true" : "false");
+        row.setAttribute("aria-label", kickerOf(node) + ": " + node.title + ", " + stateOf(node));
+        row.setAttribute("data-plan-node-id", node.id);
+        row.appendChild(el("span", "kicker", kickerOf(node)));
+        row.appendChild(el("span", "row-title", node.title));
+        row.appendChild(el("span", "chip", stateOf(node)));
+        row.addEventListener("click", function () { select(node.id); });
+        item.appendChild(row);
+        holder.appendChild(item);
+      });
+    });
+  }
+
+  function renderInspector() {
+    var top = $("inspector-top");
+    clear(top);
+    var node = nodeById(state.selected);
+    if (!node) {
+      top.appendChild(el("p", "empty", "Select a step to see its details."));
+      return;
+    }
+    var nodeState = stateOf(node);
+    var skipped = isSkipped(node.id);
+    var kicker = node.branch ? "Branch " + node.branch + " \u00b7 step " + stepNumber(node) : kickerOf(node);
+    top.appendChild(el("div", "kicker", kicker));
+    top.appendChild(el("h2", "", node.title));
+    var list = el("dl", "kv");
+    function row(label, value, mono) {
+      list.appendChild(el("dt", "", label));
+      list.appendChild(el("dd", mono ? "mono" : "", value || "\u2014"));
+    }
+    row("Tool", node.tool, true);
+    row("Site", node.site, false);
+    row("Runs after", node.after.map(function (id) { var p = nodeById(id); return p ? p.title : id; }).join(", "), false);
+    row("Feeds", childrenOf(node.id).map(function (c) { return c.title; }).join(", "), false);
+    top.appendChild(list);
+    if (isWaiting(node)) {
+      var approval = el("div", "approval-card",
+        "Waiting for your approval: this step needs you for " + node.needs_you + ".");
+      approval.setAttribute("role", "status");
+      top.appendChild(approval);
+    } else if (node.needs_you) {
+      top.appendChild(el("p", "note", "Asks first: this step needs you for " + node.needs_you + "."));
+    }
+    var label = el("label", "field", "Instruction for this step");
+    label.setAttribute("for", "instruction");
+    top.appendChild(label);
+    var input = document.createElement("input");
+    input.type = "text";
+    input.id = "instruction";
+    input.maxLength = 1000;
+    input.placeholder = "Optional: how this step should work";
+    input.setAttribute("aria-label", "Instruction for this step");
+    input.value = state.edits.instructions[node.id] || "";
+    input.addEventListener("change", function () {
+      post({ type: "instruction", id: node.id, text: input.value });
+    });
+    input.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") { event.preventDefault(); focusCanvas(); }
+    });
+    top.appendChild(input);
+
+    var actions = el("div", "actions");
+    var branch = el("button", "tool", "Branch from here");
+    branch.type = "button";
+    branch.setAttribute("aria-label", "Branch from here");
+    branch.disabled = !state.awaiting || node.depth >= state.depth_limit;
+    branch.title = node.depth >= state.depth_limit ? "Plans branch at most 3 levels deep" : "";
+    branch.addEventListener("click", function () { post({ type: "branch_from", id: node.id }); });
+    if (nodeState === "failed") {
+      var retry = el("button", "tool retry", "Retry");
+      retry.type = "button";
+      retry.setAttribute("aria-label", "Retry this step");
+      retry.addEventListener("click", function () { post({ type: "retry", id: node.id }); });
+      actions.appendChild(retry);
+    }
+    var toggle = el("button", "tool", skipped ? "Restore" : "Skip");
+    toggle.type = "button";
+    toggle.setAttribute("aria-label", skipped ? "Restore this step" : "Skip this step");
+    toggle.addEventListener("click", function () {
+      post({ type: skipped ? "restore" : "skip", id: node.id });
+    });
+    var expand = el("button", "tool", "Ask agent to expand");
+    expand.type = "button";
+    expand.setAttribute("aria-label", "Ask agent to expand this step");
+    expand.disabled = !state.awaiting;
+    expand.addEventListener("click", function () { post({ type: "expand", id: node.id }); });
+    actions.appendChild(branch);
+    actions.appendChild(toggle);
+    actions.appendChild(expand);
+    top.appendChild(actions);
+  }
+
+  function renderSummary() {
+    var nodes = state.graph.nodes;
+    var skipped = nodes.filter(function (node) { return isSkipped(node.id); }).length;
+    var steps = nodes.filter(function (node) { return node.kind === "step" && !isSkipped(node.id); }).length;
+    var branches = {};
+    nodes.forEach(function (node) { if (node.branch && !isSkipped(node.id)) branches[node.branch] = true; });
+    var liveBranches = Object.keys(branches).length;
+    var minutes = Math.max(1, Math.round(steps / 2));
+    $("summary").textContent = steps + " steps \u00b7 " + liveBranches + " live branch" +
+      (liveBranches === 1 ? "" : "es") + " \u00b7 " + skipped + " skipped \u00b7 about " + minutes + " min";
+    var sites = [];
+    nodes.forEach(function (node) {
+      if (node.site && sites.indexOf(node.site) < 0 && !isSkipped(node.id)) sites.push(node.site);
+    });
+    var perms = $("perms");
+    clear(perms);
+    perms.appendChild(el("li", "", "\u2713 reads pages on " + (sites.length ? sites.join(", ") : "the sites it opens")));
+    perms.appendChild(el("li", "", "! signs in to a site only after asking you"));
+    perms.appendChild(el("li", "", "\u2298 never purchases, posts or deletes"));
+    perms.appendChild(el("li", "", "\u2298 never types passwords or payment details"));
+  }
+
+  function renderToolbar() {
+    var pill = $("pill");
+    var total = state.graph.nodes.length;
+    var done = state.graph.nodes.filter(function (node) { return node.state === "done"; }).length;
+    var text = "No research running";
+    var tone = "idle";
+    if (state.awaiting) {
+      text = "Paused \u00b7 nothing runs until you approve";
+      tone = "awaiting";
+    } else if (state.running) {
+      text = "Running \u00b7 " + done + " of " + total;
+      tone = "running";
+    } else if (state.status.state === "done") {
+      text = "Done";
+      tone = "done";
+    } else if (state.status.state === "failed" || state.status.state === "not_installed") {
+      text = state.status.message || "Failed";
+      tone = "bad";
+    } else if (state.status.state === "cancelled") {
+      text = "Cancelled";
+    } else if (state.status.state === "awaiting_approval") {
+      text = state.status.message || "Waiting for approval";
+      tone = "approval";
+    }
+    pill.textContent = text;
+    pill.setAttribute("data-tone", tone);
+    $("title").textContent = state.question ? "Research plan \u00b7 " + state.question : "Research plan";
+    $("view-graph").setAttribute("aria-pressed", state.view === "graph" ? "true" : "false");
+    $("view-list").setAttribute("aria-pressed", state.view === "list" ? "true" : "false");
+    $("stage").hidden = state.view !== "graph";
+    $("legend").hidden = state.view !== "graph";
+    $("list").hidden = state.view !== "list";
+    $("zoom-level").textContent = Math.round(zoomLevel * 100) + "%";
+
+    var notice = $("notice");
+    notice.textContent = state.notice || "";
+    notice.hidden = !state.notice;
+
+    var selected = nodeById(state.selected);
+    var canRun = state.awaiting && total > 0;
+    $("run").disabled = !canRun;
+    $("cancel").disabled = !(state.awaiting || state.running);
+    var branchLabel = selected && selected.branch && !isSkipped(selected.id) ? selected.branch : "";
+    $("run-branch").disabled = !(canRun && branchLabel);
+    $("run-branch").textContent = branchLabel ? "Run " + branchLabel + " only" : "Run A only";
+    $("run-branch").setAttribute("aria-label", branchLabel ? "Run branch " + branchLabel + " only" : "Run one branch only");
+  }
+
+  function render() {
+    applyTheme(state.theme);
+    ensureSelection();
+    renderToolbar();
+    renderSummary();
+    renderInspector();
+    if (state.view === "graph") renderCanvas(); else renderList();
+    if (state.selected !== lastSelected) {
+      lastSelected = state.selected;
+      var current = $("node-" + state.selected);
+      if (current && current.scrollIntoView && state.view === "graph") {
+        current.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }
+  }
+
+  function focusCanvas() { $("stage").focus(); }
+  function focusInstruction() { var input = $("instruction"); if (input) input.focus(); }
+
+  $("view-graph").addEventListener("click", function () { state.view = "graph"; post({ type: "view", mode: "graph" }); render(); });
+  $("view-list").addEventListener("click", function () { state.view = "list"; post({ type: "view", mode: "list" }); render(); });
+  $("tidy").addEventListener("click", function () {
+    movedPositions = {};
+    zoomLevel = 1;
+    var wrap = $("canvas-wrap");
+    wrap.scrollLeft = 0; wrap.scrollTop = 0;
+    render();
+  });
+  function zoomBy(delta) {
+    zoomLevel = Math.min(1.4, Math.max(0.6, Math.round((zoomLevel + delta) * 10) / 10));
+    render();
+  }
+  $("zoom-out").addEventListener("click", function () { zoomBy(-0.1); });
+  $("zoom-in").addEventListener("click", function () { zoomBy(0.1); });
+  $("run").addEventListener("click", function () { post({ type: "run" }); });
+  $("run-branch").addEventListener("click", function () {
+    var selected = nodeById(state.selected);
+    if (selected && selected.branch) post({ type: "run_branch", branch: selected.branch });
+  });
+  $("cancel").addEventListener("click", function () { post({ type: "cancel" }); });
+
+  // Keyboard: arrows move along the plan, Return edits, Backspace skips or restores,
+  // B branches, Cmd/Ctrl+Return runs, Escape returns focus to the canvas.
+  document.addEventListener("keydown", function (event) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      if (!$("run").disabled) post({ type: "run" });
+      return;
+    }
+    if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
+    var selected = nodeById(state.selected);
+    if (event.key === "Escape") { focusCanvas(); return; }
+    if (!selected) return;
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+      var next = neighbourOf(event.key);
+      if (next) {
+        event.preventDefault();
+        select(next.id);
+        var target = $("node-" + next.id);
+        if (target) target.focus();
+      }
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      focusInstruction();
+    } else if (event.key === "Backspace" || event.key === "Delete") {
+      event.preventDefault();
+      post({ type: isSkipped(selected.id) ? "restore" : "skip", id: selected.id });
+    } else if (event.key === "b" || event.key === "B") {
+      if (state.awaiting && selected.depth < state.depth_limit) {
+        post({ type: "branch_from", id: selected.id });
+      }
+    }
+  });
+
+  window.islandRender = function (next) {
+    if (next.theme) state.theme = next.theme;
+    if (next.graph) state.graph = next.graph;
+    if (next.edits) state.edits = next.edits;
+    if (next.status) state.status = next.status;
+    if (next.hasOwnProperty("awaiting")) state.awaiting = !!next.awaiting;
+    if (next.hasOwnProperty("running")) state.running = !!next.running;
+    if (next.hasOwnProperty("selected")) state.selected = next.selected || "";
+    if (next.view) state.view = next.view;
+    if (next.hasOwnProperty("notice")) state.notice = next.notice || "";
+    if (next.depth_limit) state.depth_limit = next.depth_limit;
+    if (next.hasOwnProperty("question")) state.question = next.question || "";
+    render();
+  };
+  window.islandFocus = function () { focusCanvas(); };
+  window.addEventListener("resize", function () { if (state.view === "graph") renderCanvas(); });
+
+  render();
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

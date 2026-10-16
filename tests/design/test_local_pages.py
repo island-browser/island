@@ -67,6 +67,8 @@ THEME_VARIABLES = {
     "danger": "--danger",
 }
 BRANCH_VARIABLES = ("--branch-a", "--branch-b", "--branch-c", "--branch-d")
+# The namespace the Plan page names for its inline SVG; it identifies XML, it is not fetched.
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"
 
 
 def page(name: str) -> str:
@@ -110,7 +112,8 @@ class EveryLocalPage(unittest.TestCase):
     def test_pages_exist(self) -> None:
         self.assertEqual(
             [path.name for path in PAGE_FILES],
-            ["agent.html", "report.html", "settings.html", "start.html", "tab_overview.html"],
+            ["agent.html", "plan.html", "report.html", "settings.html", "start.html",
+             "tab_overview.html"],
         )
         self.assertEqual([path.name for path in SCRIPT_FILES], ["markdown.js"])
 
@@ -121,6 +124,8 @@ class EveryLocalPage(unittest.TestCase):
                 with self.subTest(page=path.name, fragment=fragment):
                     self.assertNotIn(fragment, text)
             for match in re.finditer(r"https?://[^\s\"'<>)]*", text):
+                if match.group(0) == SVG_NAMESPACE:
+                    continue  # an XML namespace identifier that createElementNS needs, not a request
                 self.fail(f"{path.name} embeds an absolute URL: {match.group(0)}")
 
     def test_scripts_are_ascii(self) -> None:
@@ -338,6 +343,124 @@ class ReportPage(unittest.TestCase):
         for kind in ('"copied"', '"saved"', '"cancelled"'):
             self.assertIn(kind, self.html)
 
+
+
+class PlanPage(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("plan.html")
+
+    def test_has_the_toolbar_graph_list_tidy_up_and_the_run_actions(self) -> None:
+        for element_id in ("view-graph", "view-list", "tidy", "run", "run-branch", "cancel"):
+            with self.subTest(id=element_id):
+                self.assertIn(f'id="{element_id}"', self.html)
+        self.assertIn("Tidy up", self.html)
+        self.assertIn('role="tree"', self.html)
+
+    def test_posts_the_documented_messages(self) -> None:
+        for message in ("select", "skip", "restore", "instruction", "branch_from", "expand",
+                        "run", "run_branch", "cancel", "view"):
+            with self.subTest(message=message):
+                self.assertIn(f'"{message}"', self.html)
+
+    def test_places_nodes_on_the_documented_grid(self) -> None:
+        self.assertIn("NODE_W = 148", self.html)
+        self.assertIn("NODE_H = 92", self.html)
+        self.assertIn("PITCH_X = 188", self.html)
+        self.assertIn("PITCH_Y = 112", self.html)
+        self.assertIn("PAD = 16", self.html)
+        self.assertIn("radial-gradient(circle, var(--border-2) 1px", self.html)
+
+    def test_branch_from_is_limited_by_the_depth_the_native_side_sends(self) -> None:
+        self.assertIn("node.depth >= state.depth_limit", self.html)
+        self.assertIn("Plans branch at most 3 levels deep", self.html)
+
+    def test_graph_builds_an_accessible_add_branch_ghost_for_the_selection(self) -> None:
+        self.assertRegex(self.html, r'el\("button", "node add", "\\u002b Add a branch"\)')
+        self.assertIn('setAttribute("aria-label", "Add a branch after " + selected.title)', self.html)
+        self.assertIn('post({ type: "branch_from", id: selected.id })', self.html)
+        self.assertIn("selected.depth >= state.depth_limit", self.html)
+        ghost = self.html[self.html.index("function addBranchButton(selected, position)") :]
+        ghost = ghost[: ghost.index("function renderList()")]
+        self.assertNotIn('setAttribute("role", "treeitem")', ghost)
+
+    def test_drag_offsets_are_page_state_and_tidy_clears_them(self) -> None:
+        self.assertIn("var movedPositions = {}", self.html)
+        self.assertIn('addEventListener("pointerdown"', self.html)
+        self.assertIn('addEventListener("pointermove"', self.html)
+        self.assertIn('addEventListener("pointerup"', self.html)
+        tidy = self.html[self.html.index('$("tidy").addEventListener') :]
+        tidy = tidy[: tidy.index("function zoomBy")]
+        self.assertIn("movedPositions = {}", tidy)
+        self.assertIn("zoomLevel = 1", tidy)
+
+    def test_pointerup_only_rebuilds_the_canvas_after_a_drag(self) -> None:
+        finish = self.html[self.html.index("function finishDrag(event)") :]
+        finish = finish[: finish.index('button.addEventListener("pointerup"')]
+        self.assertIn("var dragged = activeDrag.dragged", finish)
+        self.assertRegex(finish, r"if \(dragged\)\s+renderCanvas\(\);")
+
+    def test_select_updates_the_existing_nodes_for_reliable_double_click(self) -> None:
+        select = self.html[self.html.index("function select(id)") :]
+        select = select[: select.index("function neighbourOf(key)")]
+        self.assertNotIn("render();", select)
+        self.assertIn('setAttribute("aria-selected"', select)
+
+    def test_narrow_layout_stacks_result_below_join_with_a_vertical_edge(self) -> None:
+        self.assertIn("function layoutForCanvas(nodes)", self.html)
+        self.assertIn('node.kind === "result"', self.html)
+        self.assertIn('parent.kind === "join"', self.html)
+        self.assertIn('vertical: !!stackedResults[node.id] && parent.kind === "join"', self.html)
+        self.assertRegex(self.html, r'edge\.vertical\s*\?\s*"M"')
+
+    def test_running_states_have_spinner_retry_approval_and_edge_motion(self) -> None:
+        self.assertIn('className = "spinner"', self.html)
+        self.assertIn('data-state="waiting"', self.html)
+        self.assertIn('el("div", "approval-card"', self.html)
+        self.assertIn('el("button", "tool retry", "Retry")', self.html)
+        self.assertIn('post({ type: "retry", id: node.id })', self.html)
+        self.assertIn('path.setAttribute("class", "edge running")', self.html)
+        reduced = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{([^}]|}(?!\s*</style>))*",
+                            self.html)
+        self.assertIsNotNone(reduced)
+        self.assertIn("animation: none", reduced.group(0))
+
+    def test_run_shortcut_is_handled_before_inputs_return_early(self) -> None:
+        keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]
+        shortcut = keyboard.index('(event.metaKey || event.ctrlKey) && event.key === "Enter"')
+        input_guard = keyboard.index('event.target.tagName === "INPUT"')
+        self.assertLess(shortcut, input_guard)
+
+    def test_toolbar_has_a_graph_icon_and_paused_uses_accent_tokens(self) -> None:
+        self.assertIn('class="graph-icon"', self.html)
+        awaiting = re.search(r'\.pill\[data-tone="awaiting"\]\s*\{([^}]*)\}', self.html)
+        self.assertIsNotNone(awaiting)
+        self.assertIn("var(--accent-soft)", awaiting.group(1))
+        self.assertIn("var(--accent-text)", awaiting.group(1))
+
+    def test_never_navigates_by_itself(self) -> None:
+        self.assertNotIn("window.open", self.html)
+        self.assertNotIn("location.href", self.html)
+        self.assertNotIn("location.assign", self.html)
+
+    def test_every_button_it_builds_has_an_accessible_name(self) -> None:
+        for match in re.finditer(r'el\("button"|createElement\("button"\)|<button', self.html):
+            window = self.html[match.start() : match.start() + 400]
+            with self.subTest(at=match.group(0)):
+                self.assertIn("aria-label", window)
+
+    def test_uses_only_defined_css_variables(self) -> None:
+        defined = set(re.findall(r"(--[a-z0-9-]+)\s*:", self.html))
+        defined |= set(re.findall(r'"(--[a-z0-9-]+)"', self.html))
+        used = set(re.findall(r"var\((--[a-z0-9-]+)", self.html))
+        self.assertEqual(used - defined, set())
+
+    def test_text_reaches_the_dom_as_text_not_markup(self) -> None:
+        self.assertNotIn("innerHTML", self.html)
+        self.assertNotIn("insertAdjacentHTML", self.html)
+
+    def test_follows_the_app_theme_with_a_system_fallback(self) -> None:
+        self.assertIn("prefers-color-scheme: dark", self.html)
+        self.assertIn('[data-theme="dark"]', self.html)
 
 
 class SettingsPage(unittest.TestCase):
