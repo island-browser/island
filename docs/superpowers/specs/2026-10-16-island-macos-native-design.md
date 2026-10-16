@@ -114,7 +114,7 @@ and 5.0:1 dark; white on `selection` 5.5:1 light and 4.8:1 dark (white on the da
 ## 3. Window anatomy
 
 ```
-┌ sidebar 248 ─────────┬ toolbar 52: ‹ ›  [ 🛡14  example.com   ≡  • ]  share  agent ┐
+┌ sidebar 248 ─────────┬ toolbar 52: ‹ ›  [ ⛨14  example.com    R  • ]  share  agent ┐
 │ ● ● ●                │                                                                 │
 │ Favorites            │                                                                 │
 │  ▢ Mail              │                         page (full bleed)                       │
