@@ -880,6 +880,14 @@ class BrowserWindow : public CefClient,
     bool keep_internal_page_ = false;
     // A one-shot notice for the Settings page (import results, errors).
     std::string settings_message_;
+    // A recorded chord that is already taken, waiting for Replace or Cancel
+    // in Settings → Shortcuts.
+    struct ShortcutConflict {
+        KeyAction action;
+        KeyBinding binding;
+        KeyAction holder;
+    };
+    std::optional<ShortcutConflict> shortcut_conflict_;
     std::unique_ptr<agent::AgentSession> agent_session_;
     // Provider availability (see ProviderStatuses) and its test override.
     mutable std::optional<std::vector<agent::AgentProviderStatus>> provider_statuses_;

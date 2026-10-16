@@ -89,6 +89,17 @@ TEST(KeymapTest, ConflictsAreReportedAndResetRestoresTheDefault) {
     EXPECT_EQ(keymap, Keymap::Defaults());
 }
 
+TEST(KeymapTest, ConflictForReportsTheOtherActionBoundToAChord) {
+    const Keymap keymap = Keymap::Defaults();
+    EXPECT_EQ(keymap.ConflictFor(KeyAction::kNewTab, *ParseKeyBinding("Mod+B")),
+              KeyAction::kToggleSidebar);
+    EXPECT_EQ(keymap.ConflictFor(KeyAction::kNewTab, *ParseKeyBinding("Mod+Shift+Y")),
+              std::nullopt);
+    // Its own current chord is not a conflict.
+    EXPECT_EQ(keymap.ConflictFor(KeyAction::kToggleSidebar, *ParseKeyBinding("Mod+B")),
+              std::nullopt);
+}
+
 TEST(KeymapTest, MacKeyEquivalentsUseMenuConventions) {
     const auto letter = ToMacKeyEquivalent(*ParseKeyBinding("Mod+Shift+K"));
     ASSERT_TRUE(letter.has_value());

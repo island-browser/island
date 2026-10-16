@@ -15,6 +15,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Settings > Keyboard shortcuts records a new shortcut when you click a row: the row shows an
+  accent outline and "Press keys…", and Esc cancels. A chord another action already uses is not
+  taken silently: an amber banner says "⌘B is already used by Toggle sidebar." with Replace
+  (moves the chord and unbinds the other action) and Cancel. Bindings show as keycaps, unbound
+  actions offer "Add shortcut", and "Reset all" restores every default.
 - The Native address field shows page state as 20 DIP indicators instead of a status bar: a
   shield with the blocked-request count at the left edge (capped at "9999+", hidden at 0; click
   opens Settings > Privacy), Reader at the right edge only on pages that have a reader view, and

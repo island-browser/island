@@ -146,6 +146,39 @@ TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
 }
 
+TEST(BrowserWindowPagesTest, RecordReplaceAndResetShortcutMessages) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
+                                            R"("binding":"Mod+B"})"));
+    EXPECT_EQ(window->keymap(), Keymap::Defaults());
+    auto state = json::Parse(window->SettingsStateJson());
+    const Value* pending = state->FindMember("settings")->FindMember("shortcut_conflict");
+    ASSERT_NE(pending, nullptr);
+    EXPECT_EQ(pending->StringOr("conflict", ""), "Toggle sidebar");
+    EXPECT_EQ(pending->StringOr("action", ""), "new_tab");
+    EXPECT_EQ(pending->StringOr("binding", ""), "Mod+B");
+
+    // A free chord binds at once and clears any pending conflict.
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
+                                            R"("binding":"Mod+Shift+Y"})"));
+    EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Shift+Y"));
+    state = json::Parse(window->SettingsStateJson());
+    EXPECT_EQ(state->FindMember("settings")->FindMember("shortcut_conflict"), nullptr);
+
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"replace_shortcut","action":"new_tab",)"
+                                            R"("binding":"Mod+B"})"));
+    EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+B"));
+    EXPECT_FALSE(window->keymap().Binding(KeyAction::kToggleSidebar).has_value());
+    EXPECT_TRUE(window->keymap().Conflicts().empty());
+
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"reset_shortcuts"})"));
+    EXPECT_EQ(window->keymap(), Keymap::Defaults());
+}
+
 TEST(BrowserWindowPagesTest, SettingsPrivacyMessagesUpdateNativeBlockerPolicy) {
     CefRefPtr<BrowserWindow> window = BrowserWindow::CreateHeadlessForTest("");
     window->OnLocalPageMessage(

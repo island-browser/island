@@ -120,6 +120,10 @@ class Keymap {
     [[nodiscard]] std::optional<KeyAction> ActionFor(const KeyBinding& binding) const;
     // Pairs of actions sharing one binding (the earlier action wins).
     [[nodiscard]] std::vector<std::pair<KeyAction, KeyAction>> Conflicts() const;
+    // The other action already bound to `binding`, if any; `action`'s own
+    // current binding is not a conflict.
+    [[nodiscard]] std::optional<KeyAction> ConflictFor(KeyAction action,
+                                                       const KeyBinding& binding) const;
     // The differences from the defaults, for persistence.
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> Overrides() const;
 

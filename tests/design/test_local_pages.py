@@ -320,6 +320,26 @@ class SettingsPage(unittest.TestCase):
         self.assertIn('type: "delete_report"', html)
 
 
+    def test_shortcuts_record_resolve_conflicts_and_reset_all(self) -> None:
+        html = page("settings.html")
+        self.assertIn('type: "record_shortcut"', html)
+        self.assertIn('type: "replace_shortcut"', html)
+        self.assertIn('type: "cancel_shortcut"', html)
+        self.assertIn('type: "reset_shortcuts"', html)
+        self.assertNotIn('post({ type: "set_binding", action: recording', html)
+        self.assertIn('id="key-conflict"', html)
+        self.assertIn("var(--warn-bg", html)
+        self.assertIn(r"Press keys\u2026", html)
+        self.assertIn('"Add shortcut"', html)
+        self.assertIn(">Reset all<", html)
+        self.assertIn('id="mac-note"', html)
+        keycap = re.search(r"\.keycap \{[^}]*\}", html)
+        self.assertIsNotNone(keycap)
+        self.assertIn("min-width: 24px", keycap.group(0))
+        self.assertIn("border-radius: 5px", keycap.group(0))
+        self.assertIn("var(--border-2", keycap.group(0))
+
+
 class AgentMarkdownStatic(unittest.TestCase):
     def test_renderer_escapes_before_emitting_and_allows_three_schemes(self) -> None:
         source = markdown_source()

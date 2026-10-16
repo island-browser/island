@@ -80,13 +80,24 @@ pre.code { margin: 10px 0 0; background: var(--surface-2); border: 1px solid var
 .key-row:first-child { border-top: 0; }
 .key-row:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
 .key-row .name { flex: 1; font-size: 13px; }
-.chip { min-width: 96px; text-align: center; border: 1px solid var(--border); border-bottom-width: 2px;
-  background: var(--surface); border-radius: var(--radius-sm); padding: 2px 10px; font: 12px var(--mono);
-  transition: border-color .16s; }
-.chip:hover { border-color: var(--text-2); }
-.chip.recording { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.chip.unbound { color: var(--text-2); font-family: var(--font); border-style: dashed; border-bottom-width: 1px; }
-.chip.conflict { border-color: var(--danger); color: var(--danger); }
+.key-row { cursor: pointer; }
+.chip { display: inline-flex; gap: 3px; align-items: center; justify-content: flex-end; min-height: 26px;
+  padding: 0 2px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; }
+.chip.recording { padding: 0 10px; border-color: var(--accent); background: var(--accent-soft);
+  color: var(--accent); font-size: 12px; }
+.chip.unbound { padding: 0 10px; color: var(--text-2); font-size: 12px; }
+.chip.unbound:hover { background: var(--fill, var(--surface-2)); color: var(--text); }
+.keycap { display: inline-block; min-width: 24px; height: 22px; padding: 0 5px; text-align: center;
+  border-radius: 5px; border: 1px solid var(--border-2, var(--border)); background: var(--surface);
+  box-shadow: 0 1px 0 var(--border-2, var(--border)); font: 12px/20px var(--font); color: var(--text); }
+.chip.conflict .keycap { border-color: var(--warn-border, #E8B54A); background: var(--warn-bg, #FFF6DB);
+  color: var(--warn-text, #7A4B00); }
+.key-conflict { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 12px;
+  border-radius: var(--radius-sm); border: 1px solid var(--warn-border, #E8B54A);
+  background: var(--warn-bg, #FFF6DB); color: var(--warn-text, #7A4B00); font-size: 13px; }
+.key-conflict span { flex: 1; }
+.shortcuts-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.shortcuts-top .filter { flex: 1; margin-bottom: 0; }
 .key-row .changed { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .filter { margin-bottom: 10px; }
 .sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
@@ -345,12 +356,17 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   <section id="shortcuts">
     <h2>Keyboard shortcuts</h2>
     <p class="lead">Click a shortcut, then press the new keys. Esc cancels. Shortcuts need Ctrl/Cmd or Alt, except function keys.</p>
-    <input class="field filter" id="key-filter" placeholder="Filter shortcuts" aria-label="Filter shortcuts">
-    <div class="keys" id="keys"></div>
-    <div class="inline" style="margin-top:10px">
-      <button class="btn quiet" id="reset-keys">Reset all to defaults</button>
-      <span class="note" id="mac-note" hidden>On macOS, menu shortcuts update after Island restarts.</span>
+    <div class="shortcuts-top">
+      <input class="field filter" id="key-filter" placeholder="Filter shortcuts" aria-label="Filter shortcuts">
+      <button class="btn quiet" id="reset-keys">Reset all</button>
     </div>
+    <div class="key-conflict" id="key-conflict" role="alert" hidden>
+      <span id="key-conflict-text"></span>
+      <button class="btn" id="key-replace">Replace</button>
+      <button class="btn quiet" id="key-cancel">Cancel</button>
+    </div>
+    <div class="keys" id="keys"></div>
+    <p class="note" id="mac-note" hidden>On macOS the menu bar picks up changes after a restart.</p>
   </section>
 
   <section id="import">
@@ -467,9 +483,32 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     toast(ok ? "Copied" : "Select the text and copy it");
   }
 
+  // One keycap per modifier and the key: "\u2318", "\u21e7", "K" on macOS; "Ctrl", "Shift", "K" elsewhere.
+  function keycaps(binding) {
+    if (!isMac()) return displayBinding(binding).split(/\+(?!$)/);
+    var text = displayBinding(binding);
+    var caps = [];
+    while (text && "\u2303\u2325\u21e7\u2318".indexOf(text.charAt(0)) >= 0) {
+      caps.push(text.charAt(0));
+      text = text.slice(1);
+    }
+    if (text === "\u238b") text = "esc";
+    if (text) caps.push(text);
+    return caps;
+  }
+
+  function renderShortcutConflict() {
+    var pending = state.settings.shortcut_conflict;
+    $("key-conflict").hidden = !pending;
+    if (!pending) return;
+    $("key-conflict-text").textContent =
+      displayBinding(pending.binding) + " is already used by " + pending.conflict + ".";
+  }
+
   function renderShortcuts() {
     var settings = state.settings;
     var list = $("keys");
+    renderShortcutConflict();
     var filter = $("key-filter").value.trim().toLowerCase();
     list.textContent = "";
     (settings.shortcuts || []).forEach(function (row) {
@@ -485,12 +524,24 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       }
       var chip = el("button", "chip");
       var isRecording = recording === row.id;
-      chip.textContent = isRecording ? "Press keys..." : displayBinding(row.binding);
-      if (isRecording) chip.classList.add("recording");
-      else if (!row.binding) chip.classList.add("unbound");
+      if (isRecording) {
+        chip.classList.add("recording");
+        chip.textContent = "Press keys\u2026";
+      } else if (!row.binding) {
+        chip.classList.add("unbound");
+        chip.textContent = "Add shortcut";
+      } else {
+        keycaps(row.binding).forEach(function (cap) { chip.appendChild(el("kbd", "keycap", cap)); });
+      }
       if (row.conflict) { chip.classList.add("conflict"); chip.title = "Also used by another shortcut"; }
       chip.setAttribute("aria-label", row.label + ": " + displayBinding(row.binding) + ". Activate to change.");
-      chip.addEventListener("click", function () { recording = isRecording ? null : row.id; renderShortcuts(); });
+      // Clicking anywhere on the row (but its buttons) starts or stops recording.
+      line.addEventListener("click", function (event) {
+        var button = event.target.closest("button");
+        if (button && button !== chip) return;
+        recording = isRecording ? null : row.id;
+        renderShortcuts();
+      });
       line.appendChild(chip);
       var clear = el("button", "btn quiet", "Remove");
       clear.disabled = !row.binding;
@@ -893,6 +944,11 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     post({ type: "clear_history" });
   });
   $("reset-keys").addEventListener("click", function () { recording = null; post({ type: "reset_shortcuts" }); });
+  $("key-replace").addEventListener("click", function () {
+    var pending = state.settings.shortcut_conflict;
+    if (pending) post({ type: "replace_shortcut", action: pending.action, binding: pending.binding });
+  });
+  $("key-cancel").addEventListener("click", function () { post({ type: "cancel_shortcut" }); });
   $("key-filter").addEventListener("input", renderShortcuts);
   $("close").addEventListener("click", function () { post({ type: "close" }); });
   $("privacy-ads").addEventListener("change", function () {
@@ -941,9 +997,14 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       var binding = bindingFromEvent(event);
       if (!binding) { toast("That key can't be used for a shortcut"); return; }
       if (!binding.valid) { toast("Add " + (isMac() ? "Cmd" : "Ctrl") + " or Alt"); return; }
-      post({ type: "set_binding", action: recording, binding: binding.text });
+      post({ type: "record_shortcut", action: recording, binding: binding.text });
       recording = null;
       renderShortcuts();
+      return;
+    }
+    if (event.key === "Escape" && state.settings && state.settings.shortcut_conflict) {
+      event.preventDefault();
+      post({ type: "cancel_shortcut" });
       return;
     }
     if (event.key === "Escape" && document.activeElement && document.activeElement.tagName !== "INPUT") {

@@ -1168,6 +1168,16 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("update", UpdateStateJson())
             .Set("message", Value::String(settings_message_))
             .Set("focus", Value::String(settings_focus_));
+    if (shortcut_conflict_.has_value()) {
+        settings.Set(
+            "shortcut_conflict",
+            Value::MakeObject()
+                .Set("action",
+                     Value::String(std::string(KeyActionInfoFor(shortcut_conflict_->action).id)))
+                .Set("binding", Value::String(FormatKeyBinding(shortcut_conflict_->binding)))
+                .Set("conflict", Value::String(std::string(
+                                     KeyActionInfoFor(shortcut_conflict_->holder).label))));
+    }
     return json::Serialize(
         Value::MakeObject().Set("theme", ThemeJson()).Set("settings", std::move(settings)));
 }
@@ -1480,7 +1490,31 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         return;
     } else if (type == "delete_report") {
         static_cast<void>(DeleteReport(message.StringOr("id", "")));
+    } else if (type == "record_shortcut" || type == "replace_shortcut") {
+        // Recording binds a free chord at once; a taken chord waits for
+        // Replace, which unbinds the holder and moves the chord over.
+        shortcut_conflict_.reset();
+        const std::optional<KeyAction> action = KeyActionFromId(message.StringOr("action", ""));
+        const std::optional<KeyBinding> binding = ParseKeyBinding(message.StringOr("binding", ""));
+        if (!action.has_value()) {
+            return;
+        }
+        if (!binding.has_value()) {
+            settings_message_ = "That shortcut needs Ctrl/Cmd or Alt.";
+        } else if (const std::optional<KeyAction> holder = keymap_.ConflictFor(*action, *binding)) {
+            if (type == "record_shortcut") {
+                shortcut_conflict_ = ShortcutConflict{*action, *binding, *holder};
+            } else {
+                keymap_.SetBinding(*holder, std::nullopt);
+                static_cast<void>(SetKeyBinding(*action, binding));
+            }
+        } else {
+            static_cast<void>(SetKeyBinding(*action, binding));
+        }
+    } else if (type == "cancel_shortcut") {
+        shortcut_conflict_.reset();
     } else if (type == "set_binding" || type == "reset_binding") {
+        shortcut_conflict_.reset();
         const std::optional<KeyAction> action = KeyActionFromId(message.StringOr("action", ""));
         if (!action.has_value()) {
             return;
@@ -1498,6 +1532,7 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
             }
         }
     } else if (type == "reset_shortcuts") {
+        shortcut_conflict_.reset();
         ResetKeymap();
         settings_message_ = "Shortcuts reset to defaults.";
     } else if (type == "import") {
