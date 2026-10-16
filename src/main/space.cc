@@ -30,6 +30,24 @@ void Space::AppendTab(Tab tab) {
     active_tab_index_ = tabs_.size() - 1;
 }
 
+TabId Space::AppendChildTab(TabId parent, Tab tab) {
+    const TabId id = tab.id();
+    const std::optional<std::size_t> parent_index = IndexOfTab(parent);
+    if (!parent_index.has_value()) {
+        AppendTab(std::move(tab));
+        return id;
+    }
+    tab.SetGroupParent(parent);
+    std::size_t insert_at = *parent_index + 1;
+    while (insert_at < tabs_.size() && tabs_[insert_at].group_parent() == parent) {
+        ++insert_at;
+    }
+    tabs_.insert(tabs_.begin() + static_cast<std::vector<Tab>::difference_type>(insert_at),
+                 std::move(tab));
+    active_tab_index_ = insert_at;
+    return id;
+}
+
 Tab* Space::FindTab(TabId id) {
     for (Tab& tab : tabs_) {
         if (tab.id() == id) {
@@ -104,6 +122,12 @@ std::optional<Tab> Space::RemoveTab(TabId id) {
 
     if (split_.has_value() && (split_->first == id || split_->second == id)) {
         split_.reset();
+    }
+
+    for (Tab& tab : tabs_) {
+        if (tab.group_parent() == id) {
+            tab.SetGroupParent(std::nullopt);
+        }
     }
 
     const std::size_t removed_index = *index;

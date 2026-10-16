@@ -124,7 +124,7 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
 }
 
 agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
-    return StatusFor(window_->OpenNewTab(url), "Could not open that address.");
+    return StatusFor(window_->OpenAgentTab(url), "Could not open that address.");
 }
 
 agent::HostStatus WindowAgentHost::Navigate(std::optional<std::size_t> tab, std::string_view url) {

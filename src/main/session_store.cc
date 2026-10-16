@@ -44,6 +44,14 @@ void WriteTabState(json::Writer& w, const TabState& tab) {
         w.Key("pinned");
         w.BoolValue(true);
     }
+    if (tab.group_parent.has_value()) {
+        w.Key("group_parent");
+        w.Uint64Value(tab.group_parent->value);
+    }
+    if (!tab.group_label.empty()) {
+        w.Key("group_label");
+        w.StringValue(tab.group_label);
+    }
     w.EndObject();
 }
 
@@ -190,6 +198,18 @@ LoadResult ParseSessionState(const json::Value& root) {
                     return {SessionState::Default(), SessionError::kSchemaError};
                 }
                 tab_state.pinned = pinned->bool_val;
+            }
+            if (const json::Value* parent = tab_val.FindMember("group_parent")) {
+                if (!parent->IsInt() || parent->int_val <= 0) {
+                    return {SessionState::Default(), SessionError::kSchemaError};
+                }
+                tab_state.group_parent = TabId{static_cast<std::uint64_t>(parent->int_val)};
+            }
+            if (const json::Value* label = tab_val.FindMember("group_label")) {
+                if (!label->IsString()) {
+                    return {SessionState::Default(), SessionError::kSchemaError};
+                }
+                tab_state.group_label = label->string_val;
             }
             space_state.tabs.push_back(std::move(tab_state));
         }

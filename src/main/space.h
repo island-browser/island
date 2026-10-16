@@ -8,10 +8,9 @@
 #include <vector>
 
 #include "design_tokens.h"
+#include "include/cef_request_context.h"
 #include "tab.h"
 #include "tab_id.h"
-
-#include "include/cef_request_context.h"
 
 namespace island {
 
@@ -54,6 +53,9 @@ class Space {
 
     // The appended tab becomes the active tab.
     void AppendTab(Tab tab);
+    // Inserts a one-level grouped tab immediately after the parent's existing children and makes
+    // it active. An unknown parent falls back to a regular append.
+    [[nodiscard]] TabId AppendChildTab(TabId parent, Tab tab);
     [[nodiscard]] Tab* FindTab(TabId id);
     [[nodiscard]] const Tab* FindTab(TabId id) const;
     [[nodiscard]] std::optional<std::size_t> IndexOfTab(TabId id) const;
@@ -71,7 +73,8 @@ class Space {
     // Returns the removed tab and keeps the active-tab invariant: removing a tab
     // before the active one keeps the same active tab; removing the active tab
     // selects its right neighbor, or the left neighbor at the end; removing the
-    // only tab leaves no active tab. Unknown ids remove nothing.
+    // only tab leaves no active tab. Removing a group parent ungroups its children; closing one
+    // child leaves the rest of the group intact. Unknown ids remove nothing.
     std::optional<Tab> RemoveTab(TabId id);
 
     // Reorders; the active tab keeps its identity. Rejects out-of-range positions.

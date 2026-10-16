@@ -149,6 +149,13 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
 .btn:hover:not(:disabled) { background: var(--surface-2); }
 .btn.primary:hover:not(:disabled) { opacity: .9; background: var(--text); }
 .empty { color: var(--text-2); padding: 24px; font-size: 13px; }
+.confirm-scrim { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
+  background: color-mix(in srgb, #000 20%, transparent); }
+.confirm-card { width: 320px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); padding: 18px; box-shadow: 0 12px 36px color-mix(in srgb, #000 24%, transparent); }
+.confirm-card h2 { margin: 0 0 6px; font-size: 17px; }
+.confirm-card p { margin: 0 0 16px; color: var(--text-2); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 760px) {
   .body { flex-direction: column; }
@@ -208,6 +215,17 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       </div>
     </div>
   </aside>
+</div>
+<div class="confirm-scrim" id="close-confirm" role="alertdialog" aria-modal="true"
+  aria-labelledby="close-confirm-title" aria-describedby="close-confirm-copy" hidden>
+  <div class="confirm-card">
+    <h2 id="close-confirm-title">Stop the research?</h2>
+    <p id="close-confirm-copy">The Plan tab is the hub for this research.</p>
+    <div class="confirm-actions">
+      <button type="button" class="btn" id="keep-running" aria-label="Keep running">Keep running</button>
+      <button type="button" class="btn primary" id="stop-research" aria-label="Stop research">Stop</button>
+    </div>
+  </div>
 </div>
 <script>
 (function () {
@@ -599,6 +617,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
       activeDrag = null;
       if (dragged) renderCanvas();
+      if (dragged) setTimeout(function () { suppressClickId = ""; }, 0);
     }
     button.addEventListener("pointerup", finishDrag);
     button.addEventListener("pointercancel", finishDrag);
@@ -895,6 +914,18 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     if (selected && selected.branch) post({ type: "run_branch", branch: selected.branch });
   });
   $("cancel").addEventListener("click", function () { post({ type: "cancel" }); });
+  $("keep-running").addEventListener("click", function () {
+    $("close-confirm").hidden = true;
+    post({ type: "confirm_close", stop: false });
+  });
+  $("stop-research").addEventListener("click", function () {
+    $("close-confirm").hidden = true;
+    post({ type: "confirm_close", stop: true });
+  });
+  window.islandConfirmResearchClose = function () {
+    $("close-confirm").hidden = false;
+    $("stop-research").focus();
+  };
 
   // Keyboard: arrows move along the plan, Return edits, Backspace skips or restores,
   // B branches, Cmd/Ctrl+Return runs, Escape returns focus to the canvas.

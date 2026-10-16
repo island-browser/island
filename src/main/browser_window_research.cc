@@ -13,8 +13,6 @@
 // bases hold CefRefPtr<CefWindow>/<CefPanel>/<CefOverlayController> by value.
 #include "browser_window.h"
 #include "download_path.h"
-#include "plan_dev_fixture.h"
-#include "plan_graph.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/cef_browser.h"
@@ -26,6 +24,8 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
+#include "plan_dev_fixture.h"
+#include "plan_graph.h"
 
 namespace island {
 namespace {
@@ -43,8 +43,8 @@ std::string Trimmed(std::string_view text) {
                            text[begin] == '\r')) {
         ++begin;
     }
-    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t' ||
-                           text[end - 1] == '\n' || text[end - 1] == '\r')) {
+    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t' || text[end - 1] == '\n' ||
+                           text[end - 1] == '\r')) {
         --end;
     }
     return std::string(text.substr(begin, end - begin));
@@ -166,7 +166,8 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     const agent::ResolvedAgentCommand resolved = ResolvedAgent();
     if (resolved.source != agent::AgentCommandSource::kEnvironment) {
         for (const agent::AgentProviderStatus& status : ProviderStatuses()) {
-            if (status.provider == nullptr || status.provider->id != resolved.provider_id || status.available) {
+            if (status.provider == nullptr || status.provider->id != resolved.provider_id ||
+                status.available) {
                 continue;
             }
             std::string message;
@@ -202,6 +203,7 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     plan_entries_.clear();
     plan_edits_ = {};
     plan_selected_.clear();
+    plan_node_tabs_.clear();
     plan_view_.reset();
     plan_notice_.clear();
     SetResearchStatus("running", {});
@@ -304,7 +306,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     research_status_.seq += 1;
     research_status_.state = "done";
     research_status_.message.clear();
-    OpenReportTab(id, task.space_name);
+    OpenReportTabImpl(id, task.space_name, /*group_with_plan=*/true);
     RenderStartPages();
     ScheduleLocalPagesRender();
 }
@@ -413,8 +415,8 @@ void BrowserWindow::RenderPlanFrame(CefRefPtr<CefFrame> frame) const {
     if (frame == nullptr) {
         return;
     }
-    frame->ExecuteJavaScript(LocalPage::RenderScript(PlanStateJson()),
-                             frame->GetURL().ToString(), 0);
+    frame->ExecuteJavaScript(LocalPage::RenderScript(PlanStateJson()), frame->GetURL().ToString(),
+                             0);
 }
 
 void BrowserWindow::RenderPlanPages() {
@@ -441,6 +443,78 @@ std::optional<std::pair<std::size_t, std::size_t>> BrowserWindow::TabLocation(Ta
         }
     }
     return std::nullopt;
+}
+
+std::optional<agent::PlanNode> BrowserWindow::RunningPlanNode() const {
+    const agent::PlanGraph graph = agent::BuildPlanGraph(plan_entries_, plan_edits_.skipped);
+    for (const agent::PlanNode& node : graph.nodes) {
+        if (node.state == agent::PlanNodeState::kRunning) {
+            return node;
+        }
+    }
+    return std::nullopt;
+}
+
+TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string node_id,
+                                        std::string label) {
+    if (!plan_tab_.has_value()) {
+        AppendTabToActiveSpace(std::move(startup_url));
+        return active_tab() != nullptr ? active_tab()->id() : TabId{};
+    }
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*plan_tab_);
+    if (!location.has_value()) {
+        AppendTabToActiveSpace(std::move(startup_url));
+        return active_tab() != nullptr ? active_tab()->id() : TabId{};
+    }
+    if (active_space_index_ != location->first) {
+        static_cast<void>(SelectSpaceIndex(location->first));
+    }
+
+    Space& space = active_space();
+    DetachActiveTabObservers();
+    Tab tab{NextTabId()};
+    const TabId id = tab.id();
+    tab.SetStartupUrl(std::move(startup_url));
+    tab.SetGroupLabel(std::move(label));
+    static_cast<void>(space.AppendChildTab(*plan_tab_, std::move(tab)));
+    Tab* appended = space.FindTab(id);
+    if (chrome_ != nullptr && appended != nullptr) {
+        CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+            this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
+            space.request_context(), this);
+        appended->SetBrowserView(browser_view);
+    }
+    AttachActiveTabObservers();
+    if (!node_id.empty()) {
+        plan_node_tabs_[std::move(node_id)] = id;
+    }
+    return id;
+}
+
+bool BrowserWindow::OpenAgentTab(std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return false;
+    }
+    std::string url;
+    if (!text.empty()) {
+        const std::optional<std::string> resolved =
+            ResolveAgentNavigation(text, address_validator_);
+        if (!resolved.has_value()) {
+            return false;
+        }
+        url = *resolved;
+    }
+    if (!research_.has_value() || !plan_tab_.has_value()) {
+        AppendTabToActiveSpace(std::move(url));
+        return true;
+    }
+    const std::optional<agent::PlanNode> node = RunningPlanNode();
+    const std::string label = node.has_value()
+                                  ? (node->branch.empty() ? "Step" : "Branch " + node->branch)
+                                  : std::string();
+    static_cast<void>(AppendPlanChildTab(std::move(url), node.has_value() ? node->id : "", label));
+    return true;
 }
 
 void BrowserWindow::OpenPlanTab() {
@@ -498,6 +572,104 @@ void BrowserWindow::OpenPlanTab() {
     HideInternalPage();
 }
 
+void BrowserWindow::MovePlanTabToActiveResearchSpace() {
+    if (!plan_tab_.has_value()) {
+        return;
+    }
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*plan_tab_);
+    if (!location.has_value() || location->first == active_space_index_) {
+        return;
+    }
+
+    DetachActiveTabObservers();
+    Space& target = spaces_[active_space_index_];
+    std::optional<Tab> placeholder;
+    if (target.tab_count() == 1) {
+        placeholder = target.RemoveTab(target.tabs()[0].id());
+    }
+    std::optional<Tab> plan = spaces_[location->first].RemoveTab(*plan_tab_);
+    if (!plan.has_value()) {
+        if (placeholder.has_value()) {
+            target.AppendTab(std::move(*placeholder));
+        }
+        AttachActiveTabObservers();
+        return;
+    }
+    target.AppendTab(std::move(*plan));
+    const std::optional<std::size_t> plan_index = target.IndexOfTab(*plan_tab_);
+    if (plan_index.has_value() && *plan_index != 0) {
+        static_cast<void>(target.MoveTab(*plan_index, 0));
+    }
+    static_cast<void>(target.SelectTab(*plan_tab_));
+    AttachActiveTabObservers();
+    if (placeholder.has_value() && placeholder->browser() != nullptr) {
+        placeholder->browser()->GetHost()->CloseBrowser(true);
+    }
+}
+
+bool BrowserWindow::ConfirmPlanTabClose(TabId id) {
+    if (closing_plan_after_confirmation_ || !research_.has_value() || !plan_tab_.has_value() ||
+        id != *plan_tab_) {
+        return true;
+    }
+    constexpr std::string_view kTitle = "Stop the research?";
+    constexpr std::string_view kStop = "Stop";
+    constexpr std::string_view kKeepRunning = "Keep running";
+    if (plan_close_confirmation_for_test_) {
+        const bool stop = plan_close_confirmation_for_test_(kTitle, kStop, kKeepRunning);
+        if (stop) {
+            CancelResearch();
+        }
+        return stop;
+    }
+    ShowPlanCloseConfirmation();
+    return false;
+}
+
+void BrowserWindow::ShowPlanCloseConfirmation() {
+    if (!plan_tab_.has_value()) {
+        return;
+    }
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*plan_tab_);
+    if (!location.has_value()) {
+        return;
+    }
+    static_cast<void>(ActivateTabAt(location->first, location->second));
+    const Tab* tab = active_tab();
+    RunInMainFrame(tab != nullptr ? tab->browser() : nullptr,
+                   "window.islandConfirmResearchClose&&window.islandConfirmResearchClose()",
+                   PlanPageUrl());
+}
+
+void BrowserWindow::CompletePlanCloseConfirmation(bool stop) {
+    if (!stop || !plan_tab_.has_value()) {
+        return;
+    }
+    const TabId plan = *plan_tab_;
+    CancelResearch();
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(plan);
+    if (!location.has_value()) {
+        return;
+    }
+    closing_plan_after_confirmation_ = true;
+    static_cast<void>(CloseTabAt(location->first, location->second));
+    closing_plan_after_confirmation_ = false;
+}
+
+void BrowserWindow::ForgetPlanTabMapping(TabId id) {
+    for (auto it = plan_node_tabs_.begin(); it != plan_node_tabs_.end();) {
+        if (it->second == id) {
+            it = plan_node_tabs_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    if (plan_tab_.has_value() && *plan_tab_ == id) {
+        plan_tab_.reset();
+        plan_node_tabs_.clear();
+    }
+}
+
 void BrowserWindow::RemoveStalePlanTabAt(std::size_t space_index, std::size_t tab_index) {
     if (space_index >= spaces_.size() || tab_index >= spaces_[space_index].tab_count()) {
         return;
@@ -515,6 +687,7 @@ void BrowserWindow::RemoveStalePlanTabAt(std::size_t space_index, std::size_t ta
         space.AppendTab(Tab{NextTabId()});
     }
     std::optional<Tab> removed = space.RemoveTab(stale);
+    ForgetPlanTabMapping(stale);
     if (active_tab) {
         AttachActiveTabObservers();
     }
@@ -524,7 +697,7 @@ void BrowserWindow::RemoveStalePlanTabAt(std::size_t space_index, std::size_t ta
     UpdateChromeCollections();
 }
 
-void BrowserWindow::OpenPlanFixtureTab() {
+void BrowserWindow::OpenPlanFixtureTab(bool include_child_tabs) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return;
@@ -532,6 +705,7 @@ void BrowserWindow::OpenPlanFixtureTab() {
     plan_entries_ = DevPlanFixture();
     plan_edits_ = {};
     plan_selected_.clear();
+    plan_node_tabs_.clear();
     plan_view_.reset();
     plan_notice_.clear();
     if (!research_.has_value()) {
@@ -543,6 +717,14 @@ void BrowserWindow::OpenPlanFixtureTab() {
     research_status_.question = "Sample plan";
     SetResearchStatus("awaiting_approval", "Waiting for approval");
     OpenPlanTab();
+    if (include_child_tabs && plan_tab_.has_value()) {
+        static_cast<void>(AppendPlanChildTab("https://developer.apple.com/", "a", "Branch A"));
+        static_cast<void>(AppendPlanChildTab("https://support.apple.com/", "b", "Branch B"));
+        if (const std::optional<std::pair<std::size_t, std::size_t>> location =
+                TabLocation(*plan_tab_)) {
+            static_cast<void>(ActivateTabAt(location->first, location->second));
+        }
+    }
 }
 
 void BrowserWindow::RefreshPlanFromTranscript() {
@@ -586,6 +768,10 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
         CancelResearch();
         return;
     }
+    if (type == "confirm_close") {
+        CompletePlanCloseConfirmation(message.BoolOr("stop", false));
+        return;
+    }
     if (type == "run" || type == "run_branch") {
         std::optional<std::string> branch;
         if (type == "run_branch") {
@@ -602,6 +788,15 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
     }
     if (type == "select") {
         plan_selected_ = id;
+        const auto opened = plan_node_tabs_.find(id);
+        if (opened != plan_node_tabs_.end()) {
+            if (const std::optional<std::pair<std::size_t, std::size_t>> location =
+                    TabLocation(opened->second)) {
+                static_cast<void>(ActivateTabAt(location->first, location->second));
+            } else {
+                plan_node_tabs_.erase(opened);
+            }
+        }
         // plan.html applies selection and inspector state in place so the pressed button
         // survives long enough to receive a second click. No native state changed that another
         // Plan page needs to render.
@@ -611,9 +806,8 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
     } else if (type == "restore") {
         plan_edits_.skipped.erase(id);
     } else if (type == "instruction") {
-        const std::string text =
-            ClipPlanText(std::string(Trimmed(message.StringOr("text", ""))),
-                         kMaxPlanInstructionBytes);
+        const std::string text = ClipPlanText(std::string(Trimmed(message.StringOr("text", ""))),
+                                              kMaxPlanInstructionBytes);
         if (text.empty()) {
             plan_edits_.instructions.erase(id);
         } else {
@@ -622,8 +816,8 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
     } else if (type == "branch_from") {
         const std::set<std::string> skipped = plan_edits_.skipped;
         if (PlanNodeDepth(plan_entries_, skipped, id) >= agent::kMaxBranchDepth) {
-            plan_notice_ = "Plans branch at most " + std::to_string(agent::kMaxBranchDepth) +
-                           " levels deep";
+            plan_notice_ =
+                "Plans branch at most " + std::to_string(agent::kMaxBranchDepth) + " levels deep";
             RenderPlanPages();
             return;
         }
@@ -631,6 +825,9 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
         return;
     } else if (type == "expand") {
         SendPlanTurn(agent::BuildExpandMessage(id));
+        return;
+    } else if (type == "retry") {
+        SendPlanTurn(agent::BuildRetryMessage(id), /*approves_plan=*/true);
         return;
     }
     RenderPlanPages();
@@ -675,6 +872,11 @@ std::optional<std::string> BrowserWindow::ReportIdForUrl(std::string_view url) c
 }
 
 bool BrowserWindow::OpenReportTab(std::string_view id, std::string_view space_name) {
+    return OpenReportTabImpl(id, space_name, /*group_with_plan=*/false);
+}
+
+bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view space_name,
+                                      bool group_with_plan) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || ReportStore::Find(reports_, id) == nullptr) {
         return false;
@@ -688,7 +890,20 @@ bool BrowserWindow::OpenReportTab(std::string_view id, std::string_view space_na
             }
         }
     }
-    AppendTabToActiveSpace(ReportPageUrlFor(id));
+    if (group_with_plan && plan_tab_.has_value()) {
+        std::string result_node;
+        for (const agent::PlanNode& node :
+             agent::BuildPlanGraph(plan_entries_, plan_edits_.skipped).nodes) {
+            if (node.kind == agent::PlanNodeKind::kResult) {
+                result_node = node.id;
+                break;
+            }
+        }
+        static_cast<void>(
+            AppendPlanChildTab(ReportPageUrlFor(id), std::move(result_node), "Result"));
+    } else {
+        AppendTabToActiveSpace(ReportPageUrlFor(id));
+    }
     HideInternalPage();
     return true;
 }
@@ -812,8 +1027,8 @@ void BrowserWindow::ContinueReportInAgent(const ResearchReport& report,
                                           CefRefPtr<CefBrowser> source) {
     EnsureAgentSession();
     SetAgentPanelOpen(true);
-    const bool in_conversation = report_in_session_ == report.id &&
-                                 !agent_session_->transcript().items().empty();
+    const bool in_conversation =
+        report_in_session_ == report.id && !agent_session_->transcript().items().empty();
     if (in_conversation) {
         return;
     }

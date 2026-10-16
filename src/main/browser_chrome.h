@@ -31,6 +31,7 @@
 #include "page_card.h"
 #include "row_raster.h"
 #include "sidebar_state.h"
+#include "tab_id.h"
 
 class CefBoxLayout;
 class CefView;
@@ -173,6 +174,8 @@ struct TabStripEntrySnapshot {
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;
+    std::optional<TabId> group_parent;
+    std::string group_label;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -329,6 +332,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr int NativeAddressHeightDip() { return 30; }
     [[nodiscard]] static constexpr int NativeAddressRadiusDip() { return 8; }
     [[nodiscard]] static constexpr int NativeSectionHeaderHeightDip() { return 20; }
+    [[nodiscard]] static constexpr int GroupedTabIndentDip() { return 16; }
+    [[nodiscard]] static constexpr int GroupedTabKickerFontPx() { return 10; }
     // The address field's plate: Native draws a `fill` plate with radius 8 and no hairline on the
     // toolbar; the other looks keep the hairline-outlined well on the canvas.
     [[nodiscard]] static AddressPlateStyle AddressPlateStyleFor(const ChromeTokens& tokens);
@@ -463,9 +468,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
                                                                   bool open, bool hovered) {
         if (open) {
-            return {.fill = tokens.accent_soft,
-                    .text = tokens.accent_text,
-                    .sparkle = tokens.accent};
+            return {
+                .fill = tokens.accent_soft, .text = tokens.accent_text, .sparkle = tokens.accent};
         }
         return {.fill = hovered ? tokens.hover : tokens.canvas,
                 .text = tokens.text,
@@ -609,14 +613,13 @@ class BrowserChrome final : public NavigationObserver {
             // Bottom-up the owner's layout reads: the full-width Agent entry at the very bottom,
             // with the switcher row (segments plus the new-space, overview and settings buttons)
             // above it.
-            rail_children.push_back(
-                {ChromeViewId::kRailFooter,
-                 {{ChromeViewId::kRailSwitcherRow,
-                   {{ChromeViewId::kSpaceSwitcher, {}},
-                    {ChromeViewId::kRailNewSpaceButton, {}},
-                    {ChromeViewId::kRailTabsButton, {}},
-                    {ChromeViewId::kRailSettingsButton, {}}}},
-                  {ChromeViewId::kRailAgentButton, {}}}});
+            rail_children.push_back({ChromeViewId::kRailFooter,
+                                     {{ChromeViewId::kRailSwitcherRow,
+                                       {{ChromeViewId::kSpaceSwitcher, {}},
+                                        {ChromeViewId::kRailNewSpaceButton, {}},
+                                        {ChromeViewId::kRailTabsButton, {}},
+                                        {ChromeViewId::kRailSettingsButton, {}}}},
+                                      {ChromeViewId::kRailAgentButton, {}}}});
         } else {
             rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
             rail_children.push_back({ChromeViewId::kRailFooter,
@@ -632,8 +635,8 @@ class BrowserChrome final : public NavigationObserver {
         std::vector<ChromeViewTreeNode> root_children = {
             {ChromeViewId::kRail, std::move(rail_children)}};
         if (native) {
-            root_children.push_back({ChromeViewId::kToolbar,
-                                     {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
+            root_children.push_back(
+                {ChromeViewId::kToolbar, {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
         }
         root_children.push_back(
             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
@@ -677,7 +680,8 @@ class BrowserChrome final : public NavigationObserver {
                     tab_strip->children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
                     favorites_header_added = true;
                 }
-                if (native && !tabs[i].pinned && !tabs_header_added) {
+                if (native && !tabs[i].pinned && !tabs[i].group_parent.has_value() &&
+                    !tabs_header_added) {
                     tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
                     tabs_header_added = true;
                 }
@@ -954,7 +958,9 @@ class BrowserChrome final : public NavigationObserver {
     struct TabEntryViews {
         CefRefPtr<CefPanel> row;
         CefRefPtr<CefPanel> inner;
+        CefRefPtr<CefPanel> text;
         CefRefPtr<CefLabelButton> favicon;
+        CefRefPtr<CefLabelButton> kicker;
         CefRefPtr<CefLabelButton> title;
         CefRefPtr<CefLabelButton> close;
         // The glyph sources the row's edge-button images are re-rendered from (favicon or the

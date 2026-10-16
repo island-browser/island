@@ -45,6 +45,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
   Plain ACP plans open in List view with stable p0, p1, ... step ids, and each research reuses
   its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab.
+- Pages opened while research runs now sit under the Plan tab as indented child rows with their
+  branch label, and selecting their plan node returns to the opened page. The final Result opens
+  as a grouped Report tab. Closing the Plan hub asks whether to stop or keep the research running,
+  and failed plan steps can be retried from the inspector.
 - ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,

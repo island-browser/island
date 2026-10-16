@@ -1145,6 +1145,93 @@ TEST(BrowserWindowPagesTest, RunBranchSendsTheBranchRunMessage) {
     EXPECT_EQ(sent[0], agent::BuildPlanRunMessage(agent::SpecPlan(), {}, std::string("A")));
 }
 
+TEST(BrowserWindowPagesTest, RetrySendsTheFailedStepBackToTheAgent) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetResearchTaskForTest("q");
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+
+    SendPlanMessage(*window, R"({"type":"retry","id":"a"})");
+
+    ASSERT_EQ(sent.size(), 1U);
+    EXPECT_EQ(sent[0], "Retry step a.");
+    EXPECT_EQ(window->research_status().state, "running");
+}
+
+TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivatesThem) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "in_progress";
+    window->SetPlanEntriesForTest(std::move(plan));
+
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+
+    const Space& space = SpaceAt(*window, 0);
+    ASSERT_EQ(space.tab_count(), 3U);
+    const TabId plan_id = space.tabs()[0].id();
+    const TabId research_tab = space.tabs()[1].id();
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan_id);
+    EXPECT_EQ(space.tabs()[1].group_label(), "Branch A");
+    EXPECT_EQ(window->active_tab_id(), research_tab);
+
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    SendPlanMessage(*window, R"({"type":"select","id":"a"})");
+    EXPECT_EQ(window->active_tab_id(), research_tab);
+}
+
+TEST(BrowserWindowPagesTest, TheResearchSpaceTakesThePlanHubWithIt) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+
+    ASSERT_TRUE(window->CreateSpace("Research topic"));
+
+    ASSERT_EQ(window->space_count(), 2U);
+    for (const Tab& tab : SpaceAt(*window, 0).tabs()) {
+        EXPECT_NE(tab.startup_url(), std::string(kPlanUrl));
+    }
+    ASSERT_EQ(SpaceAt(*window, 1).tab_count(), 1U);
+    EXPECT_EQ(SpaceAt(*window, 1).tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(SpaceAt(*window, 1).tabs()[0].pinned());
+}
+
+TEST(BrowserWindowPagesTest, ResearchResultOpensAsAGroupedReportTab) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetReportPageUrlForTest("data:text/html,report");
+    const auto path = std::filesystem::temp_directory_path() / "island_grouped_report.json";
+    std::filesystem::remove(path);
+    window->SetReportsFileForTest(path);
+    window->OpenPlanFixtureTab();
+
+    ResearchOutcome report;
+    report.kind = ResearchOutcome::Kind::kReport;
+    report.markdown = "# Grouped result\n\nDone.";
+    window->CompleteResearch(report);
+
+    const Space& space = SpaceAt(*window, 0);
+    ASSERT_EQ(space.tab_count(), 3U);
+    EXPECT_EQ(space.tabs()[1].group_parent(), space.tabs()[0].id());
+    EXPECT_EQ(space.tabs()[1].group_label(), "Result");
+    const TabId report_tab = space.tabs()[1].id();
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    SendPlanMessage(*window, R"({"type":"select","id":"r"})");
+    EXPECT_EQ(window->active_tab_id(), report_tab);
+    std::filesystem::remove(path);
+}
+
 TEST(BrowserWindowPagesTest, SkipReRendersThePlanWithTheNodeInTheEdits) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanEntriesForTest(agent::SpecPlan());

@@ -24,6 +24,28 @@ Space MakeSpace(std::string name = "Work") {
 
 Tab MakeTab() { return Tab(NextTabId()); }
 
+Tab MakeTab(std::string title) {
+    Tab tab = MakeTab();
+    tab.navigation_state().OnTitleChange(std::move(title));
+    return tab;
+}
+
+Space MakeTitledSpace(std::initializer_list<std::string> titles) {
+    Space space = MakeSpace();
+    for (const std::string& title : titles) {
+        space.AppendTab(MakeTab(title));
+    }
+    return space;
+}
+
+std::vector<std::string> Titles(const Space& space) {
+    std::vector<std::string> titles;
+    for (const Tab& tab : space.tabs()) {
+        titles.push_back(tab.navigation_state().snapshot().page_title);
+    }
+    return titles;
+}
+
 std::vector<TabId> TabIds(const Space& space) {
     std::vector<TabId> ids;
     for (const Tab& tab : space.tabs()) {
@@ -474,6 +496,39 @@ TEST(Space, PinningKeepsThePinnedGroupContiguousAtTheFront) {
     EXPECT_EQ(space.pinned_count(), 1U);
     EXPECT_TRUE(space.SetTabPinned(b, true));  // already pinned: no-op success
     EXPECT_FALSE(space.SetTabPinned(TabId{987654}, true));
+}
+
+TEST(Space, ChildTabsFollowTheirParent) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other"}));
+}
+
+TEST(Space, ClosingAChildKeepsTheGroup) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId c1 = space.AppendChildTab(plan, MakeTab("c1"));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+
+    space.RemoveTab(c1);
+
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan);
+}
+
+TEST(Space, RemovingTheParentUngroupsChildren) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+
+    space.RemoveTab(plan);
+
+    ASSERT_EQ(space.tab_count(), 1U);
+    EXPECT_FALSE(space.tabs()[0].group_parent().has_value());
 }
 
 }  // namespace

@@ -61,5 +61,22 @@ TEST(Tab, KeepsItsIdAcrossMovesIndependentOfAnyCollectionPosition) {
     EXPECT_EQ(moved.navigation_state().snapshot().url, "https://example.test/");
 }
 
+TEST(Tab, StoresItsOptionalGroupParentAndBranchLabel) {
+    Tab tab(NextTabId());
+    const TabId parent = NextTabId();
+
+    EXPECT_FALSE(tab.group_parent().has_value());
+    EXPECT_TRUE(tab.group_label().empty());
+
+    tab.SetGroupParent(parent);
+    tab.SetGroupLabel("Branch A");
+
+    EXPECT_EQ(tab.group_parent(), parent);
+    EXPECT_EQ(tab.group_label(), "Branch A");
+
+    tab.SetGroupParent(std::nullopt);
+    EXPECT_FALSE(tab.group_parent().has_value());
+}
+
 }  // namespace
 }  // namespace island

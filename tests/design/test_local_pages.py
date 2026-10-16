@@ -399,6 +399,11 @@ class PlanPage(unittest.TestCase):
         self.assertIn("var dragged = activeDrag.dragged", finish)
         self.assertRegex(finish, r"if \(dragged\)\s+renderCanvas\(\);")
 
+    def test_drag_click_suppression_clears_after_the_synthetic_click(self) -> None:
+        finish = self.html[self.html.index("function finishDrag(event)") :]
+        finish = finish[: finish.index('button.addEventListener("pointerup"')]
+        self.assertIn('setTimeout(function () { suppressClickId = ""; }, 0)', finish)
+
     def test_select_updates_the_existing_nodes_for_reliable_double_click(self) -> None:
         select = self.html[self.html.index("function select(id)") :]
         select = select[: select.index("function neighbourOf(key)")]
@@ -423,6 +428,14 @@ class PlanPage(unittest.TestCase):
                             self.html)
         self.assertIsNotNone(reduced)
         self.assertIn("animation: none", reduced.group(0))
+
+    def test_plan_close_confirmation_uses_the_required_actions(self) -> None:
+        self.assertIn("Stop the research?", self.html)
+        self.assertIn(">Keep running</button>", self.html)
+        self.assertIn(">Stop</button>", self.html)
+        self.assertIn('post({ type: "confirm_close", stop: false })', self.html)
+        self.assertIn('post({ type: "confirm_close", stop: true })', self.html)
+        self.assertIn("window.islandConfirmResearchClose = function", self.html)
 
     def test_run_shortcut_is_handled_before_inputs_return_early(self) -> None:
         keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]

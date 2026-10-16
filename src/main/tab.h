@@ -2,6 +2,7 @@
 #define ISLAND_TAB_H_
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -45,6 +46,14 @@ class Tab {
     // and persist with the session. Ordering is the Space's job (SetTabPinned).
     void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
     [[nodiscard]] bool pinned() const noexcept { return pinned_; }
+
+    // Research pages are ordinary tabs grouped one level below their Plan tab. The optional
+    // parent is a stable TabId so reordering never breaks the relationship; the label is the
+    // small branch kicker shown above the child title in the sidebar.
+    void SetGroupParent(std::optional<TabId> parent);
+    [[nodiscard]] std::optional<TabId> group_parent() const noexcept;
+    void SetGroupLabel(std::string label);
+    [[nodiscard]] const std::string& group_label() const noexcept;
 
     // The page's downloaded favicon (null until one arrives).
     void SetFavicon(CefRefPtr<CefImage> favicon) { favicon_ = std::move(favicon); }
@@ -102,6 +111,8 @@ class Tab {
     double saved_scroll_y_ = 0.0;
     std::string startup_url_;
     bool pinned_ = false;
+    std::optional<TabId> group_parent_;
+    std::string group_label_;
     NavigationState navigation_state_;
 
     CefRefPtr<CefBrowserView> browser_view_;

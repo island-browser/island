@@ -179,3 +179,7 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 
 <!-- MANUAL: -->
 - Content blocker startup: cached lists load and compile on a file thread after the window exists, so requests of tabs restored at launch can pass until the engine is published (a few hundred ms); list downloads use `CefURLRequest` on the UI thread but compile off it, and `CefURLRequest` callbacks hand back a different wrapper object, so never compare it by pointer.
+- Research source tabs use `Tab::group_parent` to stay immediately below the current Plan tab;
+  `BrowserWindow` maps the running `BuildPlanGraph` node id to the opened `TabId`, and moves the
+  Plan hub into the agent-created research space before sources open. Closing the Plan tab while
+  `research_` is active is deferred to the in-content Stop / Keep running confirmation.

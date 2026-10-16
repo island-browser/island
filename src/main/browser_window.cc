@@ -337,6 +337,8 @@ bool BrowserWindow::RestoreSession() {
                 tab.SetStartupUrl(address.url);
             }
             tab.SetPinned(tab_state.pinned);
+            tab.SetGroupParent(tab_state.group_parent);
+            tab.SetGroupLabel(tab_state.group_label);
             space.AppendTab(std::move(tab));
         }
         if (space_state.active_tab_id.has_value()) {
@@ -373,7 +375,8 @@ void BrowserWindow::SaveSession() const {
         space_state.color_argb = space.color().argb;
         for (const Tab& tab : space.tabs()) {
             // A reader view is saved as the page it was made from, never as its data: URL.
-            space_state.tabs.push_back(TabState{tab.id(), EffectiveUrl(tab), tab.pinned()});
+            space_state.tabs.push_back(TabState{tab.id(), EffectiveUrl(tab), tab.pinned(),
+                                                tab.group_parent(), tab.group_label()});
         }
         space_state.active_tab_id =
             space.has_active_tab() ? std::optional<TabId>(space.active_tab_id()) : std::nullopt;
@@ -706,6 +709,9 @@ bool BrowserWindow::CreateSpace(std::string_view name) {
     ExecuteCommand(BrowserCommand::kNewSpace);
     if (!name.empty()) {
         static_cast<void>(RenameSpace(active_space_index_, std::string(name)));
+    }
+    if (research_.has_value() && plan_tab_.has_value() && name == research_->space_name) {
+        MovePlanTabToActiveResearchSpace();
     }
     return true;
 }
@@ -1758,15 +1764,27 @@ bool BrowserWindow::CloseTabAt(std::size_t space_index, std::size_t tab) {
     if (space_index == active_space_index_) {
         closed = CloseActiveSpaceTabIndex(tab);
     } else if (spaces_[space_index].tab_count() == 1) {
+        const TabId closed_id = spaces_[space_index].tabs()[tab].id();
+        if (!ConfirmPlanTabClose(closed_id)) {
+            keep_internal_page_ = false;
+            return false;
+        }
         // The space's last tab: the space goes with it, like in the rail.
         RememberClosedTab(spaces_[space_index].tabs()[tab]);
+        ForgetPlanTabMapping(closed_id);
         Space removed = RemoveSpaceAtIndex(space_index);
         AttachActiveTabObservers();
         CloseSpaceBrowsers(removed);
     } else {
         Space& space = spaces_[space_index];
+        const TabId closed_id = space.tabs()[tab].id();
+        if (!ConfirmPlanTabClose(closed_id)) {
+            keep_internal_page_ = false;
+            return false;
+        }
         RememberClosedTab(space.tabs()[tab]);
-        std::optional<Tab> removed = space.RemoveTab(space.tabs()[tab].id());
+        std::optional<Tab> removed = space.RemoveTab(closed_id);
+        ForgetPlanTabMapping(closed_id);
         if (removed.has_value() && removed->browser() != nullptr) {
             removed->browser()->GetHost()->CloseBrowser(true);
         }
@@ -2329,11 +2347,17 @@ bool BrowserWindow::CloseActiveSpaceTabIndex(std::size_t index) {
         return false;
     }
 
+    const TabId closed_id = space.tabs()[index].id();
+    if (!ConfirmPlanTabClose(closed_id)) {
+        return false;
+    }
+
     RememberClosedTab(space.tabs()[index]);
     if (space.tab_count() == 1) {
         // Encoded fallback: closing the last tab of a space closes that space,
         // which may in turn recreate a fresh default space when it was the
         // last remaining one. The model is mutated before any CEF teardown.
+        ForgetPlanTabMapping(closed_id);
         Space removed = RemoveSpaceAtIndex(active_space_index_);
         AttachActiveTabObservers();
         CloseSpaceBrowsers(removed);
@@ -2341,7 +2365,8 @@ bool BrowserWindow::CloseActiveSpaceTabIndex(std::size_t index) {
     }
 
     DetachActiveTabObservers();
-    const std::optional<Tab> removed = active_space().RemoveTab(space.tabs()[index].id());
+    const std::optional<Tab> removed = active_space().RemoveTab(closed_id);
+    ForgetPlanTabMapping(closed_id);
     AttachActiveTabObservers();
     if (removed.has_value() && removed->browser() != nullptr) {
         removed->browser()->GetHost()->CloseBrowser(true);
@@ -3634,7 +3659,9 @@ void BrowserWindow::UpdateChromeCollections() {
                         .active = active != nullptr && tab.id() == active->id(),
                         .pinned = tab.pinned(),
                         .favicon = tab.favicon(),
-                        .sleeping = tab.sleeping()});
+                        .sleeping = tab.sleeping(),
+                        .group_parent = tab.group_parent(),
+                        .group_label = tab.group_label()});
     }
     std::vector<SpaceSwitcherEntrySnapshot> spaces;
     spaces.reserve(spaces_.size());
