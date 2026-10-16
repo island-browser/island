@@ -59,6 +59,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   (0/6/10/14), density (comfortable/compact), interface font (Geist, System, or any installed
   family), the page card's shadow and "full bleed" (no inset, no rounding, no shadow). Theme stays
   System/Light/Dark.
+- Research mode asks the agent for a branching plan first: each step is an ACP plan entry with
+  `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
+  until you approve the plan.
 
 ## [0.6.2] - 2026-10-15
 

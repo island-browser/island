@@ -25,6 +25,29 @@ std::string ContentText(const Value* content) {
     return {};
 }
 
+// Reads `_meta.island`; only an object with a non-empty string id counts.
+std::optional<IslandPlanMeta> ParseIslandPlanMeta(const Value& meta) {
+    const Value* island = meta.FindMember("island");
+    if (island == nullptr || !island->IsObject()) return std::nullopt;
+    const Value* id = island->FindMember("id");
+    if (id == nullptr || !id->IsString() || id->string_val.empty()) return std::nullopt;
+    IslandPlanMeta out;
+    out.id = id->string_val;
+    if (const Value* after = island->FindMember("after"); after && after->IsArray()) {
+        bool all_strings = true;
+        for (const Value& item : after->array_val) all_strings = all_strings && item.IsString();
+        if (all_strings) {
+            for (const Value& item : after->array_val) out.after.push_back(item.string_val);
+        }
+    }
+    out.branch = std::string(island->StringOr("branch", ""));
+    out.kind = std::string(island->StringOr("kind", ""));
+    out.tool = std::string(island->StringOr("tool", ""));
+    out.site = std::string(island->StringOr("site", ""));
+    out.needs_you = std::string(island->StringOr("needs_you", ""));
+    return out;
+}
+
 }  // namespace
 
 std::string_view AcpStateName(AcpState state) {
@@ -339,8 +362,14 @@ void AcpClient::HandleSessionUpdate(const json::Value& params) {
         event.type = AcpEvent::Type::kPlan;
         if (const Value* entries = update->FindMember("entries"); entries && entries->IsArray()) {
             for (const Value& entry : entries->array_val) {
-                event.plan.push_back({std::string(entry.StringOr("content", "")),
-                                      std::string(entry.StringOr("status", "pending"))});
+                AcpPlanEntry parsed;
+                parsed.content = std::string(entry.StringOr("content", ""));
+                parsed.status = std::string(entry.StringOr("status", "pending"));
+                if (const Value* meta = entry.FindMember("_meta"); meta && meta->IsObject()) {
+                    parsed.raw_meta = json::Serialize(*meta);
+                    parsed.island = ParseIslandPlanMeta(*meta);
+                }
+                event.plan.push_back(std::move(parsed));
             }
         }
         Emit(std::move(event));

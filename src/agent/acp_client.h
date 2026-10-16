@@ -43,9 +43,24 @@ struct AcpPermissionOption {
     bool operator==(const AcpPermissionOption&) const = default;
 };
 
+// Island's plan-graph metadata, carried in a plan entry's `_meta.island`.
+struct IslandPlanMeta {
+    std::string id;
+    std::vector<std::string> after;
+    std::string branch;     // free label, "" for the trunk
+    std::string kind;       // "question" | "step" | "join" | "result"; "" means "step"
+    std::string tool;
+    std::string site;
+    std::string needs_you;  // "", "sign-in", "approval", "depth"
+
+    bool operator==(const IslandPlanMeta&) const = default;
+};
+
 struct AcpPlanEntry {
     std::string content;
     std::string status;  // pending | in_progress | completed
+    std::optional<IslandPlanMeta> island;  // absent for plain ACP agents
+    std::string raw_meta;                  // the entry's _meta re-serialized, "" if none
 
     bool operator==(const AcpPlanEntry&) const = default;
 };

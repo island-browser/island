@@ -3,6 +3,7 @@
 #include <cctype>
 
 #include "download_path.h"
+#include "plan_graph.h"
 
 namespace island {
 namespace {
@@ -79,7 +80,25 @@ std::string BuildResearchPrompt(std::string_view question) {
     prompt += "Use the island-browser tools (browser_*, page_read, page_snapshot, page_click, ";
     prompt += "page_type) to do it in the real browser.\n\nThe question:\n\"\"\"\n";
     prompt += asked;
-    prompt += "\n\"\"\"\n\nHow to work:\n";
+    prompt += "\n\"\"\"\n\nPlan first. Before you open any page, send the research plan as a plan ";
+    prompt +=
+        "update with one entry per step. Put Island's branching in each entry's _meta.island, ";
+    prompt += "for example:\n";
+    prompt += R"({"content": "Known problems in open issues", "status": "pending",)";
+    prompt += R"( "priority": "medium", "_meta": {"island": {"id": "a2", "after": ["a"],)";
+    prompt += R"( "branch": "A", "kind": "step", "tool": "browser_open_tab",)";
+    prompt += R"( "site": "github.com", "needs_you": "sign-in"}}})"
+              "\n";
+    prompt += "Each id is unique. after lists the ids a step waits for, and several ids make a ";
+    prompt +=
+        "join. kind is question, step, join or result. branch names a branch (A, B, ...) and ";
+    prompt +=
+        "is left out for trunk steps. Branch only where the work really splits, with at most " +
+        std::to_string(agent::kMaxBranchDepth) + " levels of branching; a step that needs a ";
+    prompt +=
+        "deeper split, or needs the person to sign in or approve, gets needs_you set and asks ";
+    prompt += "first. After you send the plan, wait for approval before running it. The person ";
+    prompt += "approves in Island; waiting for that is not asking a question.\n\nHow to work:\n";
     prompt += "1. Create a new space named exactly \"" + space + "\" with browser_new_space, so ";
     prompt += "everything for this question stays together. Do not touch the user's other spaces.\n";
     prompt += "2. Search the web for the question, then open at least four relevant and diverse ";

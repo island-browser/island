@@ -68,6 +68,7 @@ add_library(island_agent STATIC
     http_server.cc
     jsonrpc.cc
     mcp_server.cc
+    plan_graph.cc
 )
 target_compile_features(island_agent PUBLIC cxx_std_20)
 # json_util.h is the repository's shared CEF-free JSON header; it lives in
@@ -101,6 +102,7 @@ if(TARGET GTest::gtest_main)
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/browser_tools_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/json_util_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/mcp_server_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/plan_graph_test.cpp"
     )
     target_link_libraries(island_agent_tests PRIVATE island_agent GTest::gtest_main)
     target_compile_definitions(island_agent_tests PRIVATE
