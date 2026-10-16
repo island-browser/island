@@ -279,6 +279,22 @@ class StartPage(unittest.TestCase):
     def test_tiles_row_hides_when_there_is_no_history(self) -> None:
         self.assertIn('tiles.hidden = !list.length', self.html)
 
+    def test_the_shortcut_list_is_gone_and_the_page_ends_after_the_speed_dial(self) -> None:
+        # The Native start page has no shortcut section (spec 4.1, S2-Start).
+        self.assertNotIn("shortcuts", self.html)
+        self.assertNotIn("<kbd", self.html)
+        self.assertNotIn("Cmd/Ctrl", self.html)
+        self.assertNotIn("Command palette", self.html)
+        self.assertTrue(self.html.index('id="tiles"') < self.html.index("</main>"))
+
+    def test_ip_literal_hosts_get_a_globe_instead_of_a_digit(self) -> None:
+        # 127.0.0.1 and [::1] say nothing about the site; a neutral globe stands in for them.
+        self.assertIn(r"/^\d{1,3}(\.\d{1,3}){3}$/", self.html)
+        self.assertIn('host.charAt(0) === "["', self.html)
+        self.assertIn('<template id="globe">', self.html)
+        self.assertIn('getElementById("globe")', self.html)
+        self.assertIn("isIpLiteral(host)", self.html)
+
 
 class ReportPage(unittest.TestCase):
     def setUp(self) -> None:

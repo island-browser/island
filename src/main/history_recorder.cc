@@ -35,7 +35,44 @@ bool StartsWithAsciiCaseInsensitive(std::string_view text, std::string_view pref
     return true;
 }
 
+std::string LowerAscii(std::string_view text) {
+    std::string lower(text);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return lower;
+}
+
 }  // namespace
+
+std::optional<std::string> WebUrlHost(std::string_view url) {
+    const std::size_t scheme_end = url.find("://");
+    if (scheme_end == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::string scheme = LowerAscii(url.substr(0, scheme_end));
+    if (scheme != "http" && scheme != "https") {
+        return std::nullopt;
+    }
+    const std::string_view rest = url.substr(scheme_end + 3);
+    const std::string_view authority = rest.substr(0, rest.find_first_of("/?#"));
+    if (authority.find('@') != std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::string_view host = authority;
+    if (host.starts_with('[')) {
+        const std::size_t close = host.find(']');
+        if (close == std::string_view::npos) {
+            return std::nullopt;
+        }
+        host = host.substr(0, close + 1);
+    } else {
+        host = host.substr(0, host.find(':'));
+    }
+    if (host.empty()) {
+        return std::nullopt;
+    }
+    return LowerAscii(host);
+}
 
 struct HistoryRecorder::Visit {
     std::string url;
@@ -304,13 +341,19 @@ std::vector<HistoryResult> QueryHistory(HistoryRecorder::WorkerState& state, std
     return results;
 }
 
-// Every logged visit, grouped by URL: the visit count is the score, and the title and time of the
-// latest visit are kept. Most visits first, then the most recent visit, then the URL.
+// Every logged visit, grouped by normalized host: the visit count is the site's score, and the
+// page, title and time of the latest visit represent the site. Grouping happens before the limit,
+// so one host with many pages cannot push other sites out of the list. Most visits first, then
+// the most recent visit, then the URL.
 std::vector<HistoryResult> MostVisited(const HistoryRecorder::WorkerState& state,
                                        std::size_t max_results) {
-    std::unordered_map<std::string, HistoryResult> by_url;
+    std::unordered_map<std::string, HistoryResult> by_host;
     for (const HistoryRecorder::Visit& visit : state.visits) {
-        HistoryResult& result = by_url[visit.url];
+        const std::optional<std::string> host = WebUrlHost(visit.url);
+        if (!host) {
+            continue;
+        }
+        HistoryResult& result = by_host[*host];
         ++result.visit_count;
         if (result.url.empty() || visit.visited_at_ms >= result.visited_at_ms) {
             result.url = visit.url;
@@ -320,8 +363,8 @@ std::vector<HistoryResult> MostVisited(const HistoryRecorder::WorkerState& state
     }
 
     std::vector<HistoryResult> results;
-    results.reserve(by_url.size());
-    for (auto& [url, result] : by_url) {
+    results.reserve(by_host.size());
+    for (auto& [host, result] : by_host) {
         result.score = static_cast<double>(result.visit_count);
         results.push_back(std::move(result));
     }

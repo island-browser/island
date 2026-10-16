@@ -174,9 +174,6 @@ std::string ScrollRestoreScript(double x, double y) {
 
 // Closed tabs kept for Reopen Closed Tab; the oldest drops first.
 constexpr std::size_t kClosedTabLimit = 20;
-// How many most-visited pages the start page's tiles are picked from. One tile per host, so
-// this is a candidate pool, not the tile count.
-constexpr std::size_t kStartTileCandidates = 48;
 
 // The stdio MCP bridge ships next to the browser binary; agents without MCP
 // over HTTP launch it. Empty when it is not there.
@@ -4144,8 +4141,8 @@ void BrowserWindow::RefreshStartTiles() {
     if (closing_ || history_ == nullptr) {
         return;
     }
-    history_->MostVisitedAsync(kStartTileCandidates, [window = CefRefPtr<BrowserWindow>(this)](
-                                                         std::vector<HistoryResult> results) {
+    history_->MostVisitedAsync(kStartTileLimit, [window = CefRefPtr<BrowserWindow>(this)](
+                                                    std::vector<HistoryResult> results) {
         CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::ApplyStartTiles,
                                                                 window, std::move(results))));
     });

@@ -6,6 +6,9 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <vector>
+
+#include "start_tiles.h"
 
 namespace island {
 namespace {
@@ -136,7 +139,7 @@ TEST(HistoryRecorderTest, GivenStoredHistoryWhenClearedThenMemoryAndSegmentAreRe
     EXPECT_FALSE(std::filesystem::exists(quarantined));
 }
 
-TEST(HistoryRecorderTest, GivenRepeatedVisitsWhenMostVisitedThenTheFrequentSitesComeFirst) {
+TEST(HistoryRecorderTest, GivenRepeatedVisitsWhenMostVisitedThenTheFrequentHostsComeFirst) {
     HistoryRecorder recorder(TestOptions(HistoryPath("most_visited")));
     ASSERT_TRUE(recorder.RecordNavigation("https://quiet.test/", "Quiet", 500));
     ASSERT_TRUE(recorder.RecordNavigation("https://busy.test/a", "Busy A", 100));
@@ -146,20 +149,41 @@ TEST(HistoryRecorderTest, GivenRepeatedVisitsWhenMostVisitedThenTheFrequentSites
     ASSERT_TRUE(recorder.RecordNavigation("https://mid.test/", "Mid", 450));
 
     const std::vector<HistoryResult> all = recorder.MostVisitedForTest(10);
-    ASSERT_EQ(all.size(), 4U);
-    // Visit count first, then the most recent visit: mid (2 visits, last at 450) beats
-    // busy/a (2 visits, last at 300); the one-visit sites follow, most recent first.
-    EXPECT_EQ(all[0].url, "https://mid.test/");
-    EXPECT_EQ(all[0].visit_count, 2U);
-    EXPECT_EQ(all[1].url, "https://busy.test/a");
-    EXPECT_EQ(all[1].title, "Busy A again");
+    // Visits are counted per host: busy.test has three visits and is represented by its most
+    // recent page. Visit count first, then the latest visit; one visit each for quiet.test.
+    ASSERT_EQ(all.size(), 3U);
+    EXPECT_EQ(all[0].url, "https://busy.test/a");
+    EXPECT_EQ(all[0].title, "Busy A again");
+    EXPECT_EQ(all[0].visit_count, 3U);
+    EXPECT_EQ(all[1].url, "https://mid.test/");
     EXPECT_EQ(all[1].visit_count, 2U);
     EXPECT_EQ(all[2].url, "https://quiet.test/");
-    EXPECT_EQ(all[3].url, "https://busy.test/b");
 
     const std::vector<HistoryResult> top_two = recorder.MostVisitedForTest(2);
     ASSERT_EQ(top_two.size(), 2U);
-    EXPECT_EQ(top_two[1].url, "https://busy.test/a");
+    EXPECT_EQ(top_two[1].url, "https://mid.test/");
+}
+
+TEST(HistoryRecorderTest, GivenManyPagesOfOneHostThenTheTileLimitStillReachesOtherSites) {
+    HistoryRecorder recorder(TestOptions(HistoryPath("host_limit")));
+    std::uint64_t when = 1;
+    // Sixty pages of one host, each visited twice: at page level they would fill any top list.
+    for (int page = 0; page < 60; ++page) {
+        const std::string url = "https://docs.test/page" + std::to_string(page);
+        ASSERT_TRUE(recorder.RecordNavigation(url, "Docs", when++));
+        ASSERT_TRUE(recorder.RecordNavigation(url, "Docs", when++));
+    }
+    for (int site = 0; site < 6; ++site) {
+        ASSERT_TRUE(recorder.RecordNavigation("https://site" + std::to_string(site) + ".test/",
+                                              "Site", when++));
+    }
+
+    const std::vector<StartTile> tiles = BuildStartTiles(recorder.MostVisitedForTest(6));
+
+    ASSERT_EQ(tiles.size(), 6U);
+    EXPECT_EQ(tiles[0].host, "docs.test");
+    EXPECT_EQ(tiles[1].host, "site5.test");
+    EXPECT_EQ(tiles[5].host, "site1.test");
 }
 
 }  // namespace

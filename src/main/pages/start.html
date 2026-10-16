@@ -84,15 +84,11 @@ main { width: 560px; max-width: calc(100% - 32px); margin-top: 22vh; align-self:
 .tile-plate { width: 56px; height: 56px; border-radius: 12px; background: var(--fill); color: var(--text-2);
   display: grid; place-items: center; font: 600 22px/1 var(--font); box-shadow: 0 1px 3px rgba(0,0,0,.15);
   transition: background .16s; }
+.tile-plate svg { width: 24px; height: 24px; }
 .tile:hover .tile-plate { background: var(--border-2); }
 .tile-label { max-width: 78px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   font-size: 11px; line-height: 1.3; }
 
-.shortcuts { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
-.shortcuts li { display: flex; align-items: center; justify-content: space-between; height: 30px;
-  border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
-kbd { min-width: 24px; padding: 1px 6px; border: 1px solid var(--border-2); border-bottom-width: 2px;
-  border-radius: 5px; color: var(--text-2); font: 12px/1.4 var(--mono); text-align: center; }
 </style>
 </head>
 <body>
@@ -116,12 +112,8 @@ kbd { min-width: 24px; padding: 1px 6px; border: 1px solid var(--border-2); bord
     <button class="btn" id="research-cancel" type="button" hidden>Cancel</button>
   </div>
   <div class="tiles" id="tiles" role="group" aria-label="Most visited" hidden></div>
-  <ul class="shortcuts">
-    <li>New tab<kbd>Cmd/Ctrl T</kbd></li>
-    <li>Focus address<kbd>Cmd/Ctrl L</kbd></li>
-    <li>Command palette<kbd>Cmd/Ctrl K</kbd></li>
-  </ul>
 </main>
+<template id="globe"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg></template>
 <script>
 "use strict";
 (function () {
@@ -176,6 +168,12 @@ kbd { min-width: 24px; padding: 1px 6px; border: 1px solid var(--border-2); bord
     panelAction.textContent = action === "open_report" ? "Open report" : "Open Settings";
   }
 
+  // IPv4 and IPv6 literals name no site, so their plate is a neutral globe, not a digit.
+  var IPV4_LITERAL = /^\d{1,3}(\.\d{1,3}){3}$/;
+  function isIpLiteral(host) {
+    return IPV4_LITERAL.test(host) || host.charAt(0) === "[" || host.indexOf(":") >= 0;
+  }
+
   // The speed dial: a letter plate, not a fetched icon, and the site's title, ellipsized.
   // Built with DOM calls only: titles come from the web and stay text.
   function renderTiles() {
@@ -196,8 +194,12 @@ kbd { min-width: 24px; padding: 1px 6px; border: 1px solid var(--border-2); bord
       var plate = document.createElement("span");
       plate.className = "tile-plate";
       plate.setAttribute("aria-hidden", "true");
-      var letter = /[a-z0-9]/i.exec(host.replace(/^www\./, ""));
-      plate.textContent = letter ? letter[0].toUpperCase() : "";
+      if (isIpLiteral(host)) {
+        plate.appendChild(document.getElementById("globe").content.firstElementChild.cloneNode(true));
+      } else {
+        var letter = /[a-z0-9]/i.exec(host.replace(/^www\./, ""));
+        plate.textContent = letter ? letter[0].toUpperCase() : "";
+      }
       var label = document.createElement("span");
       label.className = "tile-label";
       label.textContent = name;
