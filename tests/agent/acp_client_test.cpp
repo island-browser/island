@@ -247,5 +247,43 @@ TEST_F(AcpClientTest, MalformedIslandMetaIsIgnoredNotFatal) {
     EXPECT_FALSE(events_.at(0).plan.at(0).island.has_value());  // id must be a non-empty string
 }
 
+TEST_F(AcpClientTest, NonArrayAfterDefaultsToNoDependencies) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":"a","after":"b"}}}]}}})");
+    const AcpPlanEntry& entry = events_.at(0).plan.at(0);
+    ASSERT_TRUE(entry.island.has_value());
+    EXPECT_TRUE(entry.island->after.empty());
+}
+
+TEST_F(AcpClientTest, NonStringAfterElementDefaultsToNoDependencies) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":"a","after":["b",7]}}}]}}})");
+    const AcpPlanEntry& entry = events_.at(0).plan.at(0);
+    ASSERT_TRUE(entry.island.has_value());
+    EXPECT_TRUE(entry.island->after.empty());
+}
+
+TEST_F(AcpClientTest, EmptyIslandMetaIdIsIgnored) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":""}}}]}}})");
+    EXPECT_FALSE(events_.at(0).plan.at(0).island.has_value());
+}
+
+TEST_F(AcpClientTest, MissingIslandMetaKindDefaultsToStep) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":"a"}}}]}}})");
+    const AcpPlanEntry& entry = events_.at(0).plan.at(0);
+    ASSERT_TRUE(entry.island.has_value());
+    EXPECT_TRUE(entry.island->kind.empty());  // PlanGraph maps the empty default to step.
+}
+
 }  // namespace
 }  // namespace island::agent
