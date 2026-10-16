@@ -61,6 +61,9 @@ class HistoryRecorder final {
     void QueryAsync(std::string query, std::uint64_t query_now_ms, std::size_t max_results,
                     QueryCallback callback);
     void ClearAsync(ClearCallback callback = {});
+    // The most visited pages, most visits first (then the latest visit). `score` is the visit
+    // count. Feeds the start page's speed-dial tiles; it does not depend on a query.
+    void MostVisitedAsync(std::size_t max_results, QueryCallback callback);
 
     // Stops accepting work and asks the worker to flush after all queued work.
     // The flush itself stays off the caller's thread. Destruction joins it.
@@ -71,6 +74,7 @@ class HistoryRecorder final {
     [[nodiscard]] std::vector<HistoryResult> QueryForTest(std::string query,
                                                           std::uint64_t query_now_ms,
                                                           std::size_t max_results = 8);
+    [[nodiscard]] std::vector<HistoryResult> MostVisitedForTest(std::size_t max_results);
     [[nodiscard]] std::size_t EntryCountForTest();
 
     [[nodiscard]] static std::string NormalizeHistoryUrl(std::string_view url);

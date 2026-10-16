@@ -6,85 +6,105 @@
 <meta name="color-scheme" content="light dark">
 <title>Island</title>
 <style>
+/* The Native look's tokens (spec section 2.1). Before the first state arrives the page follows
+   the system scheme; once the app sends its theme, data-theme wins so the page matches the app. */
 :root {
-  --bg: #FAFAFA; --surface: #FFFFFF; --surface-2: #F2F2F2; --text: #0A0A0A; --text-2: #666666;
-  --border: #E5E5E5; --accent: #0068D6;
-  --radius: 10px; --radius-sm: 6px;
-  --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bg: #EBEBEF; --surface: #FFFFFF; --surface-2: #F6F6F8; --fill: #E8E8ED; --text: #1D1D1F;
+  --text-2: #636366; --text-3: #8E8E93; --border: #E5E5EA; --border-2: #D2D2D7; --accent: #0A64D8;
+  --selection: #0A64D8; --accent-soft: #DFE9F8; --accent-text: #0A4FA8; --warn-bg: #FFF8E6;
+  --warn-border: #F5D38A; --warn-text: #6A4A00; --success: #248A3D; --danger: #D70015;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: light;
 }
-/* Before the first state arrives the page follows the system scheme; once the
-   app sends its theme, data-theme wins so the page matches the app. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) { --bg: #0A0A0A; --surface: #111111; --surface-2: #1A1A1A;
-    --text: #EDEDED; --text-2: #A1A1A1; --border: #2A2A2A; --accent: #3291FF; color-scheme: dark; }
+  :root:not([data-theme]) {
+    --bg: #2A2A2D; --surface: #1E1E20; --surface-2: #252527; --fill: #3A3A3D; --text: #F5F5F7;
+    --text-2: #98989D; --text-3: #6E6E73; --border: #38383A; --border-2: #48484A; --accent: #0A84FF;
+    --selection: #0A6FE0; --accent-soft: #16324F; --accent-text: #64B5FF; --warn-bg: #3A2E12;
+    --warn-border: #6B5420; --warn-text: #FFD60A; --success: #30D158; --danger: #FF453A;
+    color-scheme: dark;
+  }
 }
-:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="dark"] {
+  --bg: #2A2A2D; --surface: #1E1E20; --surface-2: #252527; --fill: #3A3A3D; --text: #F5F5F7;
+  --text-2: #98989D; --text-3: #6E6E73; --border: #38383A; --border-2: #48484A; --accent: #0A84FF;
+  --selection: #0A6FE0; --accent-soft: #16324F; --accent-text: #64B5FF; --warn-bg: #3A2E12;
+  --warn-border: #6B5420; --warn-text: #FFD60A; --success: #30D158; --danger: #FF453A;
+  color-scheme: dark;
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--surface); color: var(--text); font: 15px/1.55 var(--font);
+body { background: var(--surface); color: var(--text); font: 13px/1.45 var(--font);
   -webkit-font-smoothing: antialiased; display: flex; justify-content: center; }
 button, input { font: inherit; color: inherit; }
 button { cursor: pointer; }
-:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
-main { width: 100%; max-width: 640px; padding: 0 24px; margin-top: 22vh; align-self: flex-start;
-  animation: rise .48s cubic-bezier(.16, 1, .3, 1); }
+main { width: 560px; max-width: calc(100% - 32px); margin-top: 22vh; align-self: flex-start;
+  display: flex; flex-direction: column; gap: 22px; animation: rise .48s cubic-bezier(.16, 1, .3, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { main { animation: none; } * { transition: none !important; } }
-.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.label { margin: 0; color: var(--text-2); font: 500 11px/1.4 var(--mono); letter-spacing: .08em;
-  text-transform: uppercase; }
-.modes { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 2px; }
-.modes button { border: 0; background: transparent; padding: 4px 12px; border-radius: 4px;
-  font-size: 13px; color: var(--text-2); transition: color .16s, background .16s; }
-.modes button:hover { color: var(--text); }
-.modes button[aria-checked="true"] { background: var(--surface); color: var(--text); font-weight: 500;
-  box-shadow: 0 0 0 1px var(--border); }
-.field { display: flex; align-items: center; gap: 10px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 0 8px 0 16px; transition: border-color .16s; }
-.field:focus-within { border-color: var(--accent); }
-.field input { flex: 1; min-width: 0; height: 52px; border: 0; background: transparent; outline: none;
-  font-size: 17px; letter-spacing: -.01em; }
-.field input::placeholder { color: var(--text-2); }
-.go { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 0; background: var(--text);
-  color: var(--surface); display: grid; place-items: center; flex: none; transition: opacity .16s; }
-.go:disabled { opacity: .25; cursor: default; }
+
+/* Segmented control: a fill track with a surface segment for the chosen mode. */
+.modes { display: flex; align-self: center; padding: 2px; border-radius: 8px; background: var(--fill); }
+.modes button { height: 24px; padding: 0 16px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text); font-size: 13px; line-height: 24px; transition: background .16s; }
+.modes button[aria-checked="true"] { background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+/* Search field: 44 px, with a 4 px accent halo while focused. */
+.field { display: flex; align-items: center; height: 44px; padding: 0 6px 0 16px; border: 1px solid var(--border-2);
+  border-radius: 10px; background: var(--surface); transition: box-shadow .16s; }
+.field:focus-within { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.field input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none;
+  font-size: 16px; }
+.field input::placeholder { color: var(--text-3); }
+.go { width: 32px; height: 32px; border-radius: 6px; border: 0; background: var(--selection); color: #FFFFFF;
+  display: grid; place-items: center; flex: none; transition: opacity .16s; }
+.go:disabled { opacity: .3; cursor: default; }
 .go svg { width: 16px; height: 16px; }
-.note { margin: 10px 2px 0; min-height: 22px; color: var(--text-2); font-size: 13px; }
-.research { margin: 6px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg); font-size: 13px; display: flex; align-items: center; gap: 10px; }
+.note { margin: -12px 0 0; min-height: 18px; color: var(--text-2); font-size: 12px; }
+
+.research { margin: -10px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-2); font-size: 13px; display: flex; align-items: center; gap: 10px; }
 .research .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .research .text b { font-weight: 600; }
-.research.bad .text { color: #CD2B31; }
-.research .btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
-  padding: 4px 10px; font-size: 12.5px; font-weight: 500; flex: none; }
-.research .btn:hover { background: var(--surface-2); }
-.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border);
+.research.bad .text { color: var(--danger); }
+.research .btn { border: 1px solid var(--border-2); background: var(--surface); border-radius: 6px;
+  padding: 4px 10px; font-size: 12px; font-weight: 500; flex: none; }
+.research .btn:hover { background: var(--fill); }
+.spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--border-2);
   border-top-color: var(--text); animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-ul { margin: 28px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
-li { display: flex; align-items: center; justify-content: space-between; padding: 10px 0;
-  border-bottom: 1px solid var(--border); font-size: 14px; }
-kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px;
-  color: var(--text-2); font: 500 12px/1.4 var(--mono); }
+
+/* Speed dial: six 56 px tiles at 78 px columns (560 px with 18 px gaps), labels 11 px. */
+.tiles { display: flex; gap: 18px; padding-top: 14px; }
+.tile { flex: none; width: 78px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 0; border: 0; background: transparent; color: var(--text); }
+.tile-plate { width: 56px; height: 56px; border-radius: 12px; background: var(--fill); color: var(--text-2);
+  display: grid; place-items: center; font: 600 22px/1 var(--font); box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  transition: background .16s; }
+.tile:hover .tile-plate { background: var(--border-2); }
+.tile-label { max-width: 78px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 11px; line-height: 1.3; }
+
+.shortcuts { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border); }
+.shortcuts li { display: flex; align-items: center; justify-content: space-between; height: 30px;
+  border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-2); }
+kbd { min-width: 24px; padding: 1px 6px; border: 1px solid var(--border-2); border-bottom-width: 2px;
+  border-radius: 5px; color: var(--text-2); font: 12px/1.4 var(--mono); text-align: center; }
 </style>
 </head>
 <body>
 <main>
-  <div class="top">
-    <p class="label">Island</p>
-    <div class="modes" role="radiogroup" aria-label="Input mode" id="modes">
-      <button type="button" role="radio" data-mode="search" aria-checked="true">Search</button>
-      <button type="button" role="radio" data-mode="agent" aria-checked="false">Ask agent</button>
-      <button type="button" role="radio" data-mode="research" aria-checked="false">Research</button>
-    </div>
+  <div class="modes" role="radiogroup" aria-label="Input mode" id="modes">
+    <button type="button" role="radio" data-mode="search" aria-checked="true">Search</button>
+    <button type="button" role="radio" data-mode="agent" aria-checked="false">Ask Agent</button>
+    <button type="button" role="radio" data-mode="research" aria-checked="false">Research</button>
   </div>
   <form class="field" id="form" autocomplete="off">
-    <input id="q" type="text" autofocus spellcheck="false" autocomplete="off" aria-label="Search or ask the agent">
-    <button class="go" id="go" type="submit" aria-label="Go" disabled>
+    <input id="q" type="text" autofocus spellcheck="false" autocomplete="off" placeholder="Search with Google" aria-label="Search or ask the agent">
+    <button class="go" id="go" type="submit" aria-label="Search" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
     </button>
   </form>
@@ -95,7 +115,8 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     <button class="btn" id="research-action" type="button" hidden></button>
     <button class="btn" id="research-cancel" type="button" hidden>Cancel</button>
   </div>
-  <ul>
+  <div class="tiles" id="tiles" role="group" aria-label="Most visited" hidden></div>
+  <ul class="shortcuts">
     <li>New tab<kbd>Cmd/Ctrl T</kbd></li>
     <li>Focus address<kbd>Cmd/Ctrl L</kbd></li>
     <li>Command palette<kbd>Cmd/Ctrl K</kbd></li>
@@ -106,7 +127,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
 (function () {
   var MESSAGE_PREFIX = "\u0001island:";
   var MODES = ["search", "agent", "research"];
-  var state = { mode: "search", engine: "Google", research: null };
+  var state = { mode: "search", engine: "Google", research: null, tiles: [] };
   var dismissedSeq = 0;
   var input = document.getElementById("q");
   var go = document.getElementById("go");
@@ -116,13 +137,15 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
   var panelSpin = document.getElementById("research-spin");
   var panelAction = document.getElementById("research-action");
   var panelCancel = document.getElementById("research-cancel");
+  var tiles = document.getElementById("tiles");
   var modes = Array.prototype.slice.call(document.querySelectorAll("#modes button"));
+  var tilesKey = "";
 
   function post(message) { console.log(MESSAGE_PREFIX + JSON.stringify(message)); }
 
-  var PLACEHOLDERS = { search: null, agent: "Ask the agent to do something",
-    research: "Ask a question to research across the web" };
-  var LABELS = { search: "Search", agent: "Ask agent", research: "Research" };
+  var PLACEHOLDERS = { search: null, agent: "Ask about this tab or anything",
+    research: "Research a question \u2014 you'll see the plan first" };
+  var LABELS = { search: "Search", agent: "Ask Agent", research: "Research" };
 
   function renderResearch() {
     var r = state.research;
@@ -153,16 +176,49 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     panelAction.textContent = action === "open_report" ? "Open report" : "Open Settings";
   }
 
+  // The speed dial: a letter plate, not a fetched icon, and the site's title, ellipsized.
+  // Built with DOM calls only: titles come from the web and stay text.
+  function renderTiles() {
+    var list = state.tiles;
+    tiles.hidden = !list.length;
+    var key = JSON.stringify(list);
+    if (key === tilesKey) return;
+    tilesKey = key;
+    while (tiles.firstChild) tiles.removeChild(tiles.firstChild);
+    list.forEach(function (tile) {
+      var host = String(tile.host || "");
+      var name = tile.title || host;
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "tile";
+      button.title = name;
+      button.setAttribute("aria-label", name);
+      var plate = document.createElement("span");
+      plate.className = "tile-plate";
+      plate.setAttribute("aria-hidden", "true");
+      var letter = /[a-z0-9]/i.exec(host.replace(/^www\./, ""));
+      plate.textContent = letter ? letter[0].toUpperCase() : "";
+      var label = document.createElement("span");
+      label.className = "tile-label";
+      label.textContent = name;
+      button.appendChild(plate);
+      button.appendChild(label);
+      button.addEventListener("click", function () { post({ type: "open_tile", url: tile.url }); });
+      tiles.appendChild(button);
+    });
+  }
+
   function render() {
     modes.forEach(function (button) {
       var on = button.getAttribute("data-mode") === state.mode;
       button.setAttribute("aria-checked", on ? "true" : "false");
       button.tabIndex = on ? 0 : -1;
     });
-    input.placeholder = PLACEHOLDERS[state.mode] || "Search " + state.engine;
+    input.placeholder = PLACEHOLDERS[state.mode] || "Search with " + state.engine;
     go.setAttribute("aria-label", LABELS[state.mode]);
     go.disabled = !input.value.trim();
     renderResearch();
+    renderTiles();
   }
 
   function setMode(mode, remember) {
@@ -203,6 +259,15 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
       setMode(next.getAttribute("data-mode"), true);
       next.focus();
     });
+  });
+  // While the field has focus, Tab and Shift+Tab step through the modes (wrapping) and focus
+  // stays in the field. Elsewhere Tab moves focus as usual.
+  input.addEventListener("keydown", function (event) {
+    if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return;
+    event.preventDefault();
+    var index = MODES.indexOf(state.mode);
+    setMode(MODES[(index + (event.shiftKey ? -1 : 1) + MODES.length) % MODES.length], true);
+    input.focus();
   });
   document.getElementById("form").addEventListener("submit", function (event) {
     event.preventDefault();
@@ -249,6 +314,7 @@ kbd { padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2p
     if (next.start) {
       state.mode = MODES.indexOf(next.start.mode) >= 0 ? next.start.mode : "search";
       state.engine = next.start.engine || "Google";
+      state.tiles = Array.isArray(next.start.tiles) ? next.start.tiles : [];
       var previous = state.research;
       state.research = next.start.research || null;
       var fresh = state.research && (!previous || previous.seq !== state.research.seq);

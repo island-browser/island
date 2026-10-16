@@ -19,6 +19,7 @@
 #include "json_util.h"
 #include "keymap.h"
 #include "sha256.h"
+#include "start_tiles.h"
 #include "updater.h"
 
 namespace island {
@@ -653,6 +654,37 @@ TEST(BrowserWindowPagesTest, TheStartPageRemembersItsModeAndStatesTheEngine) {
     EXPECT_EQ(window->start_mode(), "search");
     SendStart(*window, R"({"type":"search","query":"   "})");
     SendStart(*window, R"({"type":"bogus"})");
+    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, TheStartPageStatesItsSpeedDialTilesAndOpensOnlyWebTiles) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::optional<Value> state = json::Parse(window->StartPageStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* tiles = state->FindMember("start")->FindMember("tiles");
+    ASSERT_NE(tiles, nullptr);
+    EXPECT_TRUE(tiles->IsArray());
+    EXPECT_TRUE(tiles->array_val.empty());
+
+    window->SetStartTilesForTest(BuildStartTiles({
+        {.url = "https://docs.test/guide", .title = "Guide", .visit_count = 3},
+        {.url = "https://docs.test/other", .title = "Other", .visit_count = 2},
+        {.url = "https://news.test/", .title = "", .visit_count = 1},
+    }));
+    state = json::Parse(window->StartPageStateJson());
+    ASSERT_TRUE(state.has_value());
+    tiles = state->FindMember("start")->FindMember("tiles");
+    ASSERT_EQ(tiles->array_val.size(), 2U);
+    EXPECT_EQ(tiles->array_val[0].StringOr("title", ""), "Guide");
+    EXPECT_EQ(tiles->array_val[0].StringOr("url", ""), "https://docs.test/guide");
+    EXPECT_EQ(tiles->array_val[0].StringOr("host", ""), "docs.test");
+    EXPECT_EQ(tiles->array_val[1].StringOr("title", ""), "news.test");
+
+    // Only http and https open from a tile; anything else is ignored. (Headless: no browser
+    // to load into, so a web tile is a no-op too, and nothing else changes.)
+    SendStart(*window, R"json({"type":"open_tile","url":"javascript:alert(1)"})json");
+    SendStart(*window, R"json({"type":"open_tile","url":"file:///etc/hosts"})json");
+    SendStart(*window, R"json({"type":"open_tile","url":"https://docs.test/guide"})json");
     EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 1U);
 }
 

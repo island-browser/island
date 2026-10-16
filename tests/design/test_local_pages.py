@@ -194,7 +194,7 @@ class StartPage(unittest.TestCase):
         self.assertIn('data-mode="agent"', self.html)
         self.assertIn('data-mode="research"', self.html)
         self.assertIn(">Search</button>", self.html)
-        self.assertIn(">Ask agent</button>", self.html)
+        self.assertIn(">Ask Agent</button>", self.html)
         self.assertIn(">Research</button>", self.html)
 
     def test_research_mode_speaks_the_documented_messages(self) -> None:
@@ -246,9 +246,38 @@ class StartPage(unittest.TestCase):
         for token in ("--bg", "--surface", "--surface-2", "--text", "--text-2", "--border", "--accent"):
             self.assertIn(token + ":", self.html)
 
-    def test_uses_the_graphite_type_stack(self) -> None:
-        self.assertIn("Geist, ui-sans-serif", self.html)
-        self.assertIn('"Geist Mono"', self.html)
+    def test_uses_the_native_system_font_stack(self) -> None:
+        # Native has no bundled face: the system stack, as settings.html does.
+        self.assertIn('-apple-system, BlinkMacSystemFont, "SF Pro Text"', self.html)
+        self.assertIn('ui-monospace, "SF Mono"', self.html)
+        self.assertNotIn("Geist", self.html)
+
+    def test_placeholders_follow_the_mode_verbatim(self) -> None:
+        self.assertIn('placeholder="Search with Google"', self.html)
+        self.assertIn('"Search with " + state.engine', self.html)
+        self.assertIn('"Ask about this tab or anything"', self.html)
+        self.assertIn('"Research a question \\u2014 you\'ll see the plan first"', self.html)
+
+    def test_tab_cycles_the_segments_only_from_the_field(self) -> None:
+        self.assertIn('input.addEventListener("keydown"', self.html)
+        self.assertIn('event.key !== "Tab"', self.html)
+        self.assertIn("event.shiftKey ? -1 : 1", self.html)
+        self.assertIn("% MODES.length", self.html)
+        self.assertIn("event.preventDefault()", self.html)
+
+    def test_speed_dial_tiles_are_buttons_with_accessible_names(self) -> None:
+        self.assertIn('id="tiles"', self.html)
+        self.assertIn("state.tiles", self.html)
+        self.assertIn('document.createElement("button")', self.html)
+        self.assertNotIn('document.createElement("a")', self.html)
+        self.assertIn('setAttribute("aria-label"', self.html)
+        self.assertIn('type: "open_tile"', self.html)
+        # Titles come from the web: text nodes only, and no fetched favicons.
+        self.assertNotIn("<img", self.html)
+        self.assertNotIn("favicon", self.html.lower())
+
+    def test_tiles_row_hides_when_there_is_no_history(self) -> None:
+        self.assertIn('tiles.hidden = !list.length', self.html)
 
 
 class ReportPage(unittest.TestCase):

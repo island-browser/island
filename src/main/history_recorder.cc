@@ -304,6 +304,43 @@ std::vector<HistoryResult> QueryHistory(HistoryRecorder::WorkerState& state, std
     return results;
 }
 
+// Every logged visit, grouped by URL: the visit count is the score, and the title and time of the
+// latest visit are kept. Most visits first, then the most recent visit, then the URL.
+std::vector<HistoryResult> MostVisited(const HistoryRecorder::WorkerState& state,
+                                       std::size_t max_results) {
+    std::unordered_map<std::string, HistoryResult> by_url;
+    for (const HistoryRecorder::Visit& visit : state.visits) {
+        HistoryResult& result = by_url[visit.url];
+        ++result.visit_count;
+        if (result.url.empty() || visit.visited_at_ms >= result.visited_at_ms) {
+            result.url = visit.url;
+            result.title = visit.title;
+            result.visited_at_ms = visit.visited_at_ms;
+        }
+    }
+
+    std::vector<HistoryResult> results;
+    results.reserve(by_url.size());
+    for (auto& [url, result] : by_url) {
+        result.score = static_cast<double>(result.visit_count);
+        results.push_back(std::move(result));
+    }
+    std::sort(results.begin(), results.end(),
+              [](const HistoryResult& lhs, const HistoryResult& rhs) {
+                  if (lhs.visit_count != rhs.visit_count) {
+                      return lhs.visit_count > rhs.visit_count;
+                  }
+                  if (lhs.visited_at_ms != rhs.visited_at_ms) {
+                      return lhs.visited_at_ms > rhs.visited_at_ms;
+                  }
+                  return lhs.url < rhs.url;
+              });
+    if (results.size() > max_results) {
+        results.resize(max_results);
+    }
+    return results;
+}
+
 bool ClearHistory(const HistoryRecorder::Options& options, HistoryRecorder::WorkerState& state) {
     state.index.reset();
     state.visits.clear();
@@ -448,6 +485,16 @@ void HistoryRecorder::QueryAsync(std::string query, std::uint64_t query_now_ms,
     }));
 }
 
+void HistoryRecorder::MostVisitedAsync(std::size_t max_results, QueryCallback callback) {
+    static_cast<void>(
+        Enqueue([max_results, callback = std::move(callback)](WorkerState& state) mutable {
+            std::vector<HistoryResult> results = MostVisited(state, max_results);
+            if (callback) {
+                callback(std::move(results));
+            }
+        }));
+}
+
 void HistoryRecorder::ClearAsync(ClearCallback callback) {
     static_cast<void>(Enqueue([this, callback = std::move(callback)](WorkerState& state) mutable {
         const bool cleared = ClearHistory(options_, state);
@@ -523,6 +570,15 @@ std::vector<HistoryResult> HistoryRecorder::QueryForTest(std::string query,
                [completed](std::vector<HistoryResult> results) mutable {
                    completed->set_value(std::move(results));
                });
+    return future.get();
+}
+
+std::vector<HistoryResult> HistoryRecorder::MostVisitedForTest(std::size_t max_results) {
+    auto completed = std::make_shared<std::promise<std::vector<HistoryResult>>>();
+    std::future<std::vector<HistoryResult>> future = completed->get_future();
+    MostVisitedAsync(max_results, [completed](std::vector<HistoryResult> results) mutable {
+        completed->set_value(std::move(results));
+    });
     return future.get();
 }
 

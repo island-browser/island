@@ -136,5 +136,31 @@ TEST(HistoryRecorderTest, GivenStoredHistoryWhenClearedThenMemoryAndSegmentAreRe
     EXPECT_FALSE(std::filesystem::exists(quarantined));
 }
 
+TEST(HistoryRecorderTest, GivenRepeatedVisitsWhenMostVisitedThenTheFrequentSitesComeFirst) {
+    HistoryRecorder recorder(TestOptions(HistoryPath("most_visited")));
+    ASSERT_TRUE(recorder.RecordNavigation("https://quiet.test/", "Quiet", 500));
+    ASSERT_TRUE(recorder.RecordNavigation("https://busy.test/a", "Busy A", 100));
+    ASSERT_TRUE(recorder.RecordNavigation("https://busy.test/b", "Busy B", 200));
+    ASSERT_TRUE(recorder.RecordNavigation("https://busy.test/a", "Busy A again", 300));
+    ASSERT_TRUE(recorder.RecordNavigation("https://mid.test/", "Mid", 400));
+    ASSERT_TRUE(recorder.RecordNavigation("https://mid.test/", "Mid", 450));
+
+    const std::vector<HistoryResult> all = recorder.MostVisitedForTest(10);
+    ASSERT_EQ(all.size(), 4U);
+    // Visit count first, then the most recent visit: mid (2 visits, last at 450) beats
+    // busy/a (2 visits, last at 300); the one-visit sites follow, most recent first.
+    EXPECT_EQ(all[0].url, "https://mid.test/");
+    EXPECT_EQ(all[0].visit_count, 2U);
+    EXPECT_EQ(all[1].url, "https://busy.test/a");
+    EXPECT_EQ(all[1].title, "Busy A again");
+    EXPECT_EQ(all[1].visit_count, 2U);
+    EXPECT_EQ(all[2].url, "https://quiet.test/");
+    EXPECT_EQ(all[3].url, "https://busy.test/b");
+
+    const std::vector<HistoryResult> top_two = recorder.MostVisitedForTest(2);
+    ASSERT_EQ(top_two.size(), 2U);
+    EXPECT_EQ(top_two[1].url, "https://busy.test/a");
+}
+
 }  // namespace
 }  // namespace island

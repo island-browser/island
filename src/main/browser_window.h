@@ -53,6 +53,7 @@
 #include "sidebar_state.h"
 #include "space.h"
 #include "space_rename_overlay.h"
+#include "start_tiles.h"
 #include "tab.h"
 #include "tab_sleep_policy.h"
 #include "updater.h"
@@ -179,9 +180,16 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] const std::string& StartPageUrl() const;
     // The state the start page renders, exposed for tests.
     [[nodiscard]] std::string StartPageStateJson() const;
-    // Applies one start page message ({search}, {ask_agent}, {set_start_mode})
-    // coming from the tab `source` (nullptr in tests: the active tab).
+    // Applies one start page message ({search}, {ask_agent}, {research}, {set_start_mode},
+    // {open_tile}, {ready}) coming from the tab `source` (nullptr in tests: the active tab).
     void HandleStartPageMessage(const json::Value& message, CefRefPtr<CefBrowser> source = nullptr);
+    // Reloads the speed-dial tiles from the most visited history (the page's {ready}
+    // message asks for it). The query runs on the history worker; the answer lands on the UI
+    // thread in ApplyStartTiles, which re-renders the start pages.
+    void RefreshStartTiles();
+    void ApplyStartTiles(std::vector<HistoryResult> most_visited);
+    // Test seam: installs the tiles a refresh would have produced.
+    void SetStartTilesForTest(std::vector<StartTile> tiles) { start_tiles_ = std::move(tiles); }
 
     // --- Research mode (the start page's third mode) -------------------------
     // The start page shows this and drives it: it is also what a second start
@@ -808,6 +816,8 @@ class BrowserWindow : public CefClient,
 
     std::string initial_url_;
     mutable std::string start_page_url_;
+    // The start page's speed-dial tiles, refreshed from history when the page loads.
+    std::vector<StartTile> start_tiles_;
     mutable std::string report_page_url_;
     // The research task in flight: what was asked, the space the agent was told
     // to create, and how many turns had ended before the prompt went out.
