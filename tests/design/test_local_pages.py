@@ -326,6 +326,54 @@ class PlanPage(unittest.TestCase):
         self.assertIn("node.depth >= state.depth_limit", self.html)
         self.assertIn("Plans branch at most 3 levels deep", self.html)
 
+    def test_graph_builds_an_accessible_add_branch_ghost_for_the_selection(self) -> None:
+        self.assertRegex(self.html, r'el\("button", "node add", "\\u002b Add a branch"\)')
+        self.assertIn('setAttribute("aria-label", "Add a branch after " + selected.title)', self.html)
+        self.assertIn('post({ type: "branch_from", id: selected.id })', self.html)
+        self.assertIn("selected.depth >= state.depth_limit", self.html)
+
+    def test_drag_offsets_are_page_state_and_tidy_clears_them(self) -> None:
+        self.assertIn("var movedPositions = {}", self.html)
+        self.assertIn('addEventListener("pointerdown"', self.html)
+        self.assertIn('addEventListener("pointermove"', self.html)
+        self.assertIn('addEventListener("pointerup"', self.html)
+        tidy = self.html[self.html.index('$("tidy").addEventListener') :]
+        tidy = tidy[: tidy.index("function zoomBy")]
+        self.assertIn("movedPositions = {}", tidy)
+        self.assertIn("zoomLevel = 1", tidy)
+
+    def test_narrow_layout_stacks_result_below_join_with_a_vertical_edge(self) -> None:
+        self.assertIn("function layoutForCanvas(nodes)", self.html)
+        self.assertIn('node.kind === "result"', self.html)
+        self.assertIn('parent.kind === "join"', self.html)
+        self.assertIn('vertical: !!stackedResults[node.id] && parent.kind === "join"', self.html)
+        self.assertRegex(self.html, r'edge\.vertical\s*\?\s*"M"')
+
+    def test_running_states_have_spinner_retry_approval_and_edge_motion(self) -> None:
+        self.assertIn('className = "spinner"', self.html)
+        self.assertIn('data-state="waiting"', self.html)
+        self.assertIn('el("div", "approval-card"', self.html)
+        self.assertIn('el("button", "tool retry", "Retry")', self.html)
+        self.assertIn('post({ type: "retry", id: node.id })', self.html)
+        self.assertIn('path.setAttribute("class", "edge running")', self.html)
+        reduced = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{([^}]|}(?!\s*</style>))*",
+                            self.html)
+        self.assertIsNotNone(reduced)
+        self.assertIn("animation: none", reduced.group(0))
+
+    def test_run_shortcut_is_handled_before_inputs_return_early(self) -> None:
+        keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]
+        shortcut = keyboard.index('(event.metaKey || event.ctrlKey) && event.key === "Enter"')
+        input_guard = keyboard.index('event.target.tagName === "INPUT"')
+        self.assertLess(shortcut, input_guard)
+
+    def test_toolbar_has_a_graph_icon_and_paused_uses_accent_tokens(self) -> None:
+        self.assertIn('class="graph-icon"', self.html)
+        awaiting = re.search(r'\.pill\[data-tone="awaiting"\]\s*\{([^}]*)\}', self.html)
+        self.assertIsNotNone(awaiting)
+        self.assertIn("var(--accent-soft)", awaiting.group(1))
+        self.assertIn("var(--accent-text)", awaiting.group(1))
+
     def test_never_navigates_by_itself(self) -> None:
         self.assertNotIn("window.open", self.html)
         self.assertNotIn("location.href", self.html)

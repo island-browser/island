@@ -37,10 +37,12 @@ button:disabled { cursor: default; opacity: .45; }
 /* Toolbar (52) */
 .toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px;
   border-bottom: 1px solid var(--border); background: var(--surface); }
+.graph-icon { width: 18px; height: 18px; flex: none; color: var(--text-2); }
 .title { font-weight: 600; font-size: 14px; white-space: nowrap; }
 .pill { border-radius: 999px; padding: 3px 10px; font-size: 12px; background: var(--fill);
   color: var(--text-2); white-space: nowrap; }
-.pill[data-tone="awaiting"] { background: var(--warn-bg); color: var(--warn-text); }
+.pill[data-tone="awaiting"] { background: var(--accent-soft); color: var(--accent-text); }
+.pill[data-tone="approval"] { background: var(--warn-bg); color: var(--warn-text); }
 .pill[data-tone="running"] { background: var(--accent-soft); color: var(--accent-text); }
 .pill[data-tone="done"] { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
 .pill[data-tone="bad"] { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
@@ -79,9 +81,16 @@ button:disabled { cursor: default; opacity: .45; }
 .node[data-state="skipped"] .node-title { text-decoration: line-through; }
 .node[data-state="queued"] { opacity: .6; }
 .node[data-state="running"] { box-shadow: 0 0 0 2px var(--accent); }
+.node[data-state="waiting"] { border-color: var(--warn-border); animation: wait-pulse 1.2s ease-out 1; }
 .node[data-state="failed"] { border-color: var(--danger); }
 .node[data-state="done"] .kicker::after { content: " \2713"; color: var(--success); }
+.node.add { border-style: dashed; color: var(--text-2); align-items: center; justify-content: center;
+  text-align: center; touch-action: auto; }
+.node:not(.add) { cursor: grab; touch-action: none; }
+.node:not(.add):active { cursor: grabbing; }
 .kicker { font: 500 10px/1.3 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--text-2); }
+.spinner { display: inline-block; width: 9px; height: 9px; margin-right: 4px; border-radius: 50%;
+  border: 1.5px solid var(--fill); border-top-color: var(--accent); animation: spin .7s linear infinite; }
 .node-title { font-weight: 600; font-size: 12.5px; line-height: 1.3; display: -webkit-box;
   -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .chips { margin-top: auto; display: flex; gap: 4px; flex-wrap: wrap; }
@@ -89,6 +98,7 @@ button:disabled { cursor: default; opacity: .45; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .chip.mono { font-family: var(--mono); }
 .chip.warn { background: var(--warn-bg); color: var(--warn-text); }
+.edge.running { stroke-dasharray: 7 5; animation: edge-flow .8s linear infinite; }
 .legend { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 10px; padding: 6px 10px;
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
   font-size: 11px; color: var(--text-2); }
@@ -121,6 +131,9 @@ button:disabled { cursor: default; opacity: .45; }
 .kv dd.mono { font-family: var(--mono); font-size: 11.5px; }
 .note { border-radius: var(--radius-sm); border: 1px solid var(--warn-border); background: var(--warn-bg);
   color: var(--warn-text); padding: 8px 10px; font-size: 12px; margin: 0 0 12px; }
+.approval-card { border-radius: 8px; border: 1px solid var(--warn-border); background: var(--warn-bg);
+  color: var(--warn-text); padding: 10px 12px; font-size: 12px; margin: 0 0 12px;
+  animation: wait-pulse 1.2s ease-out 1; }
 label.field { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
 .field input { width: 100%; border: 1px solid var(--border-2); border-radius: var(--radius-sm);
   background: var(--surface); padding: 6px 8px; font-size: 13px; }
@@ -141,11 +154,25 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
   .body { flex-direction: column; }
   .inspector { width: auto; max-height: 50%; border-left: 0; border-top: 1px solid var(--border); }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes edge-flow { to { stroke-dashoffset: -24; } }
+@keyframes wait-pulse { 50% { box-shadow: 0 0 0 3px var(--warn-border); } }
+@media (prefers-reduced-motion: reduce) {
+  *, .node[data-state="waiting"], .approval-card, .edge.running {
+    animation: none !important; transition: none !important;
+  }
+}
 </style>
 </head>
 <body>
 <header class="toolbar">
+  <svg class="graph-icon" viewBox="0 0 18 18" aria-hidden="true">
+    <path d="M5 5.5 13 3.5M5 5.5l8 8M13 3.5v10" fill="none" stroke="currentColor"
+      stroke-width="1.5"/>
+    <circle cx="5" cy="5.5" r="2" fill="var(--surface)" stroke="currentColor"/>
+    <circle cx="13" cy="3.5" r="2" fill="var(--surface)" stroke="currentColor"/>
+    <circle cx="13" cy="13.5" r="2" fill="var(--surface)" stroke="currentColor"/>
+  </svg>
   <span class="title" id="title">Research plan</span>
   <span class="pill" id="pill" data-tone="idle">No research running</span>
   <div class="segmented" role="group" aria-label="Plan view">
@@ -195,6 +222,9 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
   };
   var zoomLevel = 1;
   var lastSelected = "";
+  var movedPositions = {};
+  var activeDrag = null;
+  var suppressClickId = "";
 
   function $(id) { return document.getElementById(id); }
   function post(message) { console.log("\u0001island:" + JSON.stringify(message)); }
@@ -278,6 +308,9 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
   function stateOf(node) {
     return isSkipped(node.id) ? "skipped" : node.state;
   }
+  function isWaiting(node) {
+    return state.running && !!node.needs_you && stateOf(node) === "running";
+  }
 
   function ensureSelection() {
     if (state.selected && nodeById(state.selected)) return;
@@ -313,6 +346,106 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     return pick;
   }
 
+  function layoutForCanvas(nodes) {
+    var positions = {}, stackedResults = {}, maxColumn = 0;
+    nodes.forEach(function (node) { maxColumn = Math.max(maxColumn, node.column); });
+    var naturalWidth = PAD * 2 + maxColumn * PITCH_X + NODE_W;
+    var canvasWidth = $("canvas-wrap").clientWidth || naturalWidth;
+    var narrow = naturalWidth > canvasWidth;
+    if (narrow) {
+      nodes.forEach(function (node) {
+        if (node.kind !== "result" || node.after.length !== 1) return;
+        var parent = nodeById(node.after[0]);
+        if (parent && parent.kind === "join") {
+          stackedResults[node.id] = true;
+        }
+      });
+    }
+    var layoutMaxColumn = 0;
+    nodes.forEach(function (node) {
+      if (!stackedResults[node.id]) layoutMaxColumn = Math.max(layoutMaxColumn, node.column);
+    });
+    var fitPitch = layoutMaxColumn > 0 ?
+      (canvasWidth - PAD * 2 - NODE_W) / layoutMaxColumn : PITCH_X;
+    var pitchX = narrow ? Math.max(NODE_W + 12, Math.min(PITCH_X, fitPitch)) : PITCH_X;
+    var maxBaseY = PAD;
+    nodes.forEach(function (node) {
+      if (stackedResults[node.id]) return;
+      positions[node.id] = { x: PAD + node.column * pitchX, y: PAD + node.row * PITCH_Y };
+      maxBaseY = Math.max(maxBaseY, positions[node.id].y);
+    });
+    nodes.forEach(function (node) {
+      if (!stackedResults[node.id]) return;
+      var parent = nodeById(node.after[0]);
+      var parentPosition = positions[parent.id];
+      positions[node.id] = {
+        x: parentPosition.x,
+        y: Math.max(parentPosition.y + PITCH_Y, maxBaseY + PITCH_Y)
+      };
+    });
+    nodes.forEach(function (node) {
+      var moved = movedPositions[node.id];
+      if (!moved) return;
+      positions[node.id].x += moved.x;
+      positions[node.id].y += moved.y;
+    });
+    var edges = [];
+    nodes.forEach(function (node) {
+      node.after.forEach(function (fromId) {
+        var parent = nodeById(fromId);
+        if (!parent || !positions[fromId]) return;
+        edges.push({
+          from: parent,
+          to: node,
+          vertical: !!stackedResults[node.id] && parent.kind === "join"
+        });
+      });
+    });
+    return { positions: positions, edges: edges, pitchX: pitchX, canvasWidth: canvasWidth };
+  }
+
+  function addEdge(svg, svgNS, edge, layout, dashed) {
+    var from = layout.positions[edge.from.id], to = layout.positions[edge.to.id];
+    var sx = edge.vertical ? from.x + NODE_W / 2 : from.x + NODE_W;
+    var sy = edge.vertical ? from.y + NODE_H : from.y + NODE_H / 2;
+    var tx = edge.vertical ? to.x + NODE_W / 2 : to.x;
+    var ty = edge.vertical ? to.y : to.y + NODE_H / 2;
+    var edgePath = edge.vertical ? "M" + sx + "," + sy + " L" + tx + "," + ty :
+      "M" + sx + "," + sy + " C" + (sx + 60) + "," + sy + " " +
+        (tx - 60) + "," + ty + " " + tx + "," + ty;
+    var path = document.createElementNS(svgNS, "path");
+    path.setAttribute("d", edgePath);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke-width", 2);
+    path.style.stroke = edge.to.branch ? branchVar(edge.to.branch) : "var(--text-3)";
+    if (dashed || isSkipped(edge.to.id)) path.setAttribute("stroke-dasharray", "5 4");
+    if (stateOf(edge.to) === "running") path.setAttribute("class", "edge running");
+    svg.appendChild(path);
+    var dot = document.createElementNS(svgNS, "circle");
+    dot.setAttribute("cx", tx); dot.setAttribute("cy", ty); dot.setAttribute("r", 3.5);
+    dot.style.fill = path.style.stroke;
+    svg.appendChild(dot);
+  }
+
+  function ghostPosition(selected, layout) {
+    var origin = layout.positions[selected.id];
+    var position = { x: origin.x + layout.pitchX, y: origin.y };
+    if (position.x + NODE_W + PAD > layout.canvasWidth) {
+      position.x = origin.x;
+      position.y = origin.y + PITCH_Y;
+    }
+    var occupied = true;
+    while (occupied) {
+      occupied = state.graph.nodes.some(function (node) {
+        var other = layout.positions[node.id];
+        return Math.abs(other.x - position.x) < NODE_W + 12 &&
+          Math.abs(other.y - position.y) < NODE_H + 12;
+      });
+      if (occupied) position.y += PITCH_Y;
+    }
+    return position;
+  }
+
   function renderCanvas() {
     var stage = $("stage");
     clear(stage);
@@ -321,13 +454,20 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       stage.appendChild(el("p", "empty", "The agent has not sent a plan yet."));
       return;
     }
-    var maxColumn = 0, maxRow = 0;
+    var layout = layoutForCanvas(nodes);
+    var selected = nodeById(state.selected);
+    var ghost = selected ? ghostPosition(selected, layout) : null;
+    var width = layout.canvasWidth;
+    var height = PAD * 2 + NODE_H;
     nodes.forEach(function (node) {
-      if (node.column > maxColumn) maxColumn = node.column;
-      if (node.row > maxRow) maxRow = node.row;
+      var position = layout.positions[node.id];
+      width = Math.max(width, position.x + NODE_W + PAD);
+      height = Math.max(height, position.y + NODE_H + PAD);
     });
-    var width = PAD * 2 + maxColumn * PITCH_X + NODE_W;
-    var height = PAD * 2 + maxRow * PITCH_Y + NODE_H;
+    if (ghost) {
+      width = Math.max(width, ghost.x + NODE_W + PAD);
+      height = Math.max(height, ghost.y + NODE_H + PAD);
+    }
     stage.style.width = width + "px";
     stage.style.height = height + "px";
     stage.style.transform = "scale(" + zoomLevel + ")";
@@ -344,7 +484,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     var lanes = {};
     nodes.forEach(function (node) {
       if (!node.branch) return;
-      var x = PAD + node.column * PITCH_X, y = PAD + node.row * PITCH_Y;
+      var position = layout.positions[node.id], x = position.x, y = position.y;
       var lane = lanes[node.branch] || (lanes[node.branch] = { x0: x, y0: y, x1: x, y1: y });
       lane.x0 = Math.min(lane.x0, x); lane.y0 = Math.min(lane.y0, y);
       lane.x1 = Math.max(lane.x1, x + NODE_W); lane.y1 = Math.max(lane.y1, y + NODE_H);
@@ -353,44 +493,32 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       var lane = lanes[label];
       var rect = document.createElementNS(svgNS, "rect");
       rect.setAttribute("x", lane.x0 - 10); rect.setAttribute("y", lane.y0 - 10);
-      rect.setAttribute("width", lane.x1 - lane.x0 + 20); rect.setAttribute("height", lane.y1 - lane.y0 + 20);
+      rect.setAttribute("width", lane.x1 - lane.x0 + 20);
+      rect.setAttribute("height", lane.y1 - lane.y0 + 20);
       rect.setAttribute("rx", 12);
       rect.style.fill = "color-mix(in srgb, " + branchVar(label) + " 4%, transparent)";
       svg.appendChild(rect);
     });
 
-    // Edges: cubic curves from the right middle of a node to the left middle of the next.
-    nodes.forEach(function (node) {
-      node.after.forEach(function (fromId) {
-        var from = nodeById(fromId);
-        if (!from) return;
-        var sx = PAD + from.column * PITCH_X + NODE_W, sy = PAD + from.row * PITCH_Y + NODE_H / 2;
-        var tx = PAD + node.column * PITCH_X, ty = PAD + node.row * PITCH_Y + NODE_H / 2;
-        var path = document.createElementNS(svgNS, "path");
-        path.setAttribute("d", "M" + sx + "," + sy + " C" + (sx + 60) + "," + sy + " " +
-          (tx - 60) + "," + ty + " " + tx + "," + ty);
-        path.setAttribute("fill", "none");
-        path.setAttribute("stroke-width", 2);
-        path.style.stroke = node.branch ? branchVar(node.branch) : "var(--text-3)";
-        if (isSkipped(node.id)) path.setAttribute("stroke-dasharray", "5 4");
-        svg.appendChild(path);
-        var dot = document.createElementNS(svgNS, "circle");
-        dot.setAttribute("cx", tx); dot.setAttribute("cy", ty); dot.setAttribute("r", 3.5);
-        dot.style.fill = path.style.stroke;
-        svg.appendChild(dot);
-      });
-    });
+    layout.edges.forEach(function (edge) { addEdge(svg, svgNS, edge, layout, false); });
+    if (ghost && selected) {
+      layout.positions.__add_branch__ = ghost;
+      addEdge(svg, svgNS, { from: selected, to: { id: "__add_branch__", branch: selected.branch },
+        vertical: ghost.x === layout.positions[selected.id].x }, layout, true);
+    }
     stage.appendChild(svg);
 
     nodes.forEach(function (node) {
-      stage.appendChild(nodeButton(node));
+      stage.appendChild(nodeButton(node, layout.positions[node.id]));
     });
+    if (ghost && selected) stage.appendChild(addBranchButton(selected, ghost));
   }
 
-  function nodeButton(node) {
+  function nodeButton(node, position) {
     var button = el("button", "node");
     var kind = kindOf(node);
     var nodeState = stateOf(node);
+    var waiting = isWaiting(node);
     var depthLocked = node.depth >= state.depth_limit;
     button.type = "button";
     button.setAttribute("role", "treeitem");
@@ -398,13 +526,21 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     button.setAttribute("aria-label", kickerOf(node) + ": " + node.title +
       (nodeState === "skipped" ? ", skipped" : ""));
     button.setAttribute("data-kind", kind);
-    button.setAttribute("data-state", nodeState);
+    button.setAttribute("data-state", waiting ? "waiting" : nodeState);
     button.id = "node-" + node.id;
-    button.style.left = (PAD + node.column * PITCH_X) + "px";
-    button.style.top = (PAD + node.row * PITCH_Y) + "px";
+    button.style.left = position.x + "px";
+    button.style.top = position.y + "px";
     button.style.setProperty("--node-branch", branchVar(node.branch));
     button.title = depthLocked && node.kind === "step" ? "Plans branch at most 3 levels deep" : "";
-    button.appendChild(el("span", "kicker", kickerOf(node)));
+    var kicker = el("span", "kicker");
+    if (nodeState === "running") {
+      var spinner = el("span");
+      spinner.className = "spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      kicker.appendChild(spinner);
+    }
+    kicker.appendChild(document.createTextNode(kickerOf(node)));
+    button.appendChild(kicker);
     button.appendChild(el("span", "node-title", node.title));
     var chips = el("span", "chips");
     if (node.tool) chips.appendChild(el("span", "chip mono", node.tool));
@@ -416,8 +552,55 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       return parent && parent.branch ? "Branch " + parent.branch : id;
     }).join(" + ")));
     button.appendChild(chips);
-    button.addEventListener("click", function () { select(node.id); });
+    button.addEventListener("click", function () {
+      if (suppressClickId === node.id) { suppressClickId = ""; return; }
+      select(node.id);
+    });
     button.addEventListener("dblclick", function () { select(node.id); focusInstruction(); });
+    button.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0) return;
+      var moved = movedPositions[node.id] || { x: 0, y: 0 };
+      activeDrag = {
+        id: node.id, pointer: event.pointerId, startX: event.clientX, startY: event.clientY,
+        baseX: moved.x, baseY: moved.y, left: position.x, top: position.y, button: button,
+        dragged: false
+      };
+      button.setPointerCapture(event.pointerId);
+    });
+    button.addEventListener("pointermove", function (event) {
+      if (!activeDrag || activeDrag.id !== node.id || activeDrag.pointer !== event.pointerId) return;
+      var dx = (event.clientX - activeDrag.startX) / zoomLevel;
+      var dy = (event.clientY - activeDrag.startY) / zoomLevel;
+      activeDrag.dragged = activeDrag.dragged || Math.abs(dx) + Math.abs(dy) > 3;
+      movedPositions[node.id] = { x: activeDrag.baseX + dx, y: activeDrag.baseY + dy };
+      button.style.left = activeDrag.left + dx + "px";
+      button.style.top = activeDrag.top + dy + "px";
+    });
+    function finishDrag(event) {
+      if (!activeDrag || activeDrag.id !== node.id || activeDrag.pointer !== event.pointerId) return;
+      if (activeDrag.dragged) suppressClickId = node.id;
+      if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
+      activeDrag = null;
+      renderCanvas();
+    }
+    button.addEventListener("pointerup", finishDrag);
+    button.addEventListener("pointercancel", finishDrag);
+    return button;
+  }
+
+  function addBranchButton(selected, position) {
+    var button = el("button", "node add", "\u002b Add a branch");
+    var depthLocked = selected.depth >= state.depth_limit;
+    button.type = "button";
+    button.setAttribute("role", "treeitem");
+    button.setAttribute("aria-label", "Add a branch after " + selected.title);
+    button.style.left = position.x + "px";
+    button.style.top = position.y + "px";
+    button.disabled = !state.awaiting || depthLocked;
+    button.title = depthLocked ? "Plans branch at most 3 levels deep" : "";
+    button.addEventListener("click", function () {
+      post({ type: "branch_from", id: selected.id });
+    });
     return button;
   }
 
@@ -488,7 +671,12 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     row("Runs after", node.after.map(function (id) { var p = nodeById(id); return p ? p.title : id; }).join(", "), false);
     row("Feeds", childrenOf(node.id).map(function (c) { return c.title; }).join(", "), false);
     top.appendChild(list);
-    if (node.needs_you) {
+    if (isWaiting(node)) {
+      var approval = el("div", "approval-card",
+        "Waiting for your approval: this step needs you for " + node.needs_you + ".");
+      approval.setAttribute("role", "status");
+      top.appendChild(approval);
+    } else if (node.needs_you) {
       top.appendChild(el("p", "note", "Asks first: this step needs you for " + node.needs_you + "."));
     }
     var label = el("label", "field", "Instruction for this step");
@@ -516,6 +704,13 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     branch.disabled = !state.awaiting || node.depth >= state.depth_limit;
     branch.title = node.depth >= state.depth_limit ? "Plans branch at most 3 levels deep" : "";
     branch.addEventListener("click", function () { post({ type: "branch_from", id: node.id }); });
+    if (nodeState === "failed") {
+      var retry = el("button", "tool retry", "Retry");
+      retry.type = "button";
+      retry.setAttribute("aria-label", "Retry this step");
+      retry.addEventListener("click", function () { post({ type: "retry", id: node.id }); });
+      actions.appendChild(retry);
+    }
     var toggle = el("button", "tool", skipped ? "Restore" : "Skip");
     toggle.type = "button";
     toggle.setAttribute("aria-label", skipped ? "Restore this step" : "Skip this step");
@@ -577,7 +772,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       text = "Cancelled";
     } else if (state.status.state === "awaiting_approval") {
       text = state.status.message || "Waiting for approval";
-      tone = "awaiting";
+      tone = "approval";
     }
     pill.textContent = text;
     pill.setAttribute("data-tone", tone);
@@ -625,6 +820,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
   $("view-graph").addEventListener("click", function () { state.view = "graph"; post({ type: "view", mode: "graph" }); render(); });
   $("view-list").addEventListener("click", function () { state.view = "list"; post({ type: "view", mode: "list" }); render(); });
   $("tidy").addEventListener("click", function () {
+    movedPositions = {};
     zoomLevel = 1;
     var wrap = $("canvas-wrap");
     wrap.scrollLeft = 0; wrap.scrollTop = 0;
@@ -646,12 +842,12 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
   // Keyboard: arrows move along the plan, Return edits, Backspace skips or restores,
   // B branches, Cmd/Ctrl+Return runs, Escape returns focus to the canvas.
   document.addEventListener("keydown", function (event) {
-    if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
       event.preventDefault();
       if (!$("run").disabled) post({ type: "run" });
       return;
     }
+    if (event.target && (event.target.tagName === "INPUT" || event.target.tagName === "TEXTAREA")) return;
     var selected = nodeById(state.selected);
     if (event.key === "Escape") { focusCanvas(); return; }
     if (!selected) return;
@@ -691,6 +887,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     render();
   };
   window.islandFocus = function () { focusCanvas(); };
+  window.addEventListener("resize", function () { if (state.view === "graph") renderCanvas(); });
 
   render();
   post({ type: "ready" });
