@@ -624,6 +624,9 @@ class BrowserWindow : public CefClient,
     // Recomputes the active tab's address indicators from its blocked count, Reader availability
     // and the agent session, and pushes them to the chrome when they changed.
     void RefreshAddressIndicators();
+    // Hands the current address indicators to the chrome, if it exists yet. The chrome is created
+    // after early refreshes, so window setup calls this once it exists.
+    void DeliverAddressIndicators();
     [[nodiscard]] bool ReaderAvailableForActiveTab() const;
     [[nodiscard]] AgentTabState AgentStateForActiveTab() const;
     // Navigates the active tab to a stored bookmark URL through the single

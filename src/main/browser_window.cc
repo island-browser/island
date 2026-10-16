@@ -2930,6 +2930,8 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     chrome_->OnNavigationChanged(tab != nullptr ? tab->navigation_state().snapshot()
                                                 : NavigationSnapshot{});
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    // Refreshes that ran before the chrome existed updated the cache without delivering it.
+    DeliverAddressIndicators();
     UpdateChromeCollections();
     window_->AddChildView(chrome_->root());
     chrome_->SetCornerPatchSink([this](const std::vector<CornerPatch>& patches) {
@@ -4188,6 +4190,10 @@ void BrowserWindow::RefreshAddressIndicators() {
         return;
     }
     address_indicators_ = next;
+    DeliverAddressIndicators();
+}
+
+void BrowserWindow::DeliverAddressIndicators() {
     if (chrome_ != nullptr) {
         chrome_->SetAddressIndicators(address_indicators_);
     }
