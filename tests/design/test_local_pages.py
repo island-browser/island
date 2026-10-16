@@ -167,11 +167,13 @@ class EveryLocalPage(unittest.TestCase):
                 self.assertIn('post({ type: "ready" })', text)
 
     def test_pages_map_every_theme_key(self) -> None:
+        checked_pages = 0
         for path in PAGE_FILES:
             text = path.read_text(encoding="utf-8")
             marker = "function applyTheme(theme)"
             if marker not in text:
                 continue
+            checked_pages += 1
             apply_theme = text[
                 text.index(marker) : text.index("window.islandRender", text.index(marker))
             ]
@@ -182,6 +184,7 @@ class EveryLocalPage(unittest.TestCase):
                 self.assertIn("theme.branch", apply_theme)
                 for variable in BRANCH_VARIABLES:
                     self.assertIn(f'"{variable}"', apply_theme)
+        self.assertGreater(checked_pages, 0)
 
 
 class StartPage(unittest.TestCase):

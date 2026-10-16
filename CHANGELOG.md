@@ -88,6 +88,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   clears the search first.
 - Settings > Appearance and Shortcuts use the interface font in their search fields, and the
   selected section in the Settings list is filled with a semibold label instead of the accent.
+- Plan graphs with a cycle keep valid dependencies from that cycle to downstream steps.
 
 ## [0.6.2] - 2026-10-15
 

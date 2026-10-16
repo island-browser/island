@@ -70,6 +70,17 @@ bool SameLookKnobs(const AppearanceSettings& a, const AppearanceSettings& b) {
            a.full_bleed == b.full_bleed;
 }
 
+ChromeTokens CompleteNativeTokens(ChromeTokens tokens) {
+    tokens.canvas = tokens.background;
+    tokens.selected = tokens.selection;
+    tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
+    tokens.well = tokens.fill;
+    tokens.plate = tokens.surface;
+    tokens.ui_font_family = "system";
+    tokens.look = LookPreset::kNative;
+    return tokens;
+}
+
 }  // namespace
 
 std::optional<LookPreset> MatchingLook(const AppearanceSettings& settings) {
@@ -88,7 +99,7 @@ ChromeTokens ChromeTokens::ForTheme(ChromeTheme theme) noexcept {
 ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept {
     if (look == LookPreset::kNative) {
         if (theme == ChromeTheme::kDark) {
-            ChromeTokens tokens{
+            return CompleteNativeTokens(ChromeTokens{
                 .background = {.argb = 0xFF2A2A2DU},
                 .surface = {.argb = 0xFF1E1E20U},
                 .surface_secondary = {.argb = 0xFF252527U},
@@ -111,18 +122,10 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
                             {.argb = 0xFFBF5AF2U},
                             {.argb = 0xFFFF9F0AU},
                             {.argb = 0xFF40C8A0U}}},
-            };
-            tokens.canvas = tokens.background;
-            tokens.selected = tokens.selection;
-            tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
-            tokens.well = tokens.fill;
-            tokens.plate = tokens.surface;
-            tokens.ui_font_family = "system";
-            tokens.look = LookPreset::kNative;
-            return tokens;
+            });
         }
 
-        ChromeTokens tokens{
+        return CompleteNativeTokens(ChromeTokens{
             .background = {.argb = 0xFFEBEBEFU},
             .surface = {.argb = 0xFFFFFFFFU},
             .surface_secondary = {.argb = 0xFFF6F6F8U},
@@ -145,15 +148,7 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
                         {.argb = 0xFF8E44ADU},
                         {.argb = 0xFFC25400U},
                         {.argb = 0xFF1F8A70U}}},
-        };
-        tokens.canvas = tokens.background;
-        tokens.selected = tokens.selection;
-        tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
-        tokens.well = tokens.fill;
-        tokens.plate = tokens.surface;
-        tokens.ui_font_family = "system";
-        tokens.look = LookPreset::kNative;
-        return tokens;
+        });
     }
 
     if (theme == ChromeTheme::kDark) {
