@@ -26,6 +26,8 @@ class LocalPage::Client final : public CefClient,
 
     void Detach() { delegate_ = nullptr; }
 
+    [[nodiscard]] bool loaded() const { return loaded_; }
+
     void Render(std::string state_json) {
         CEF_REQUIRE_UI_THREAD();
         if (browser_ == nullptr || !loaded_) {
@@ -131,6 +133,8 @@ LocalPage::LocalPage(LocalPageKind kind, LocalPageDelegate& delegate)
 }
 
 LocalPage::~LocalPage() { Close(); }
+
+bool LocalPage::loaded() const { return client_ != nullptr && client_->loaded(); }
 
 void LocalPage::Render(const std::string& state_json) {
     if (client_ != nullptr) client_->Render(state_json);

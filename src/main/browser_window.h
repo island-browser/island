@@ -301,6 +301,8 @@ class BrowserWindow : public CefClient,
     // too. No-op without chrome.
     void ToggleTabOverview() override;
     void ToggleSettings() override;
+    // Opens Settings on one section (the Settings page names: appearance, shortcuts, ...).
+    void OpenSettingsSection(std::string section);
     void OpenBlockerSettings() override;
     void ToggleInternalPage(LocalPageKind kind);
     [[nodiscard]] std::optional<LocalPageKind> internal_page() const noexcept {

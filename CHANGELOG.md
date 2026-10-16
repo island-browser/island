@@ -13,6 +13,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Changed
+
+- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
+  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
+  version at the bottom, and one section shown at a time. Appearance groups its controls into
+  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
+  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
+  Native has no space color. Every existing setting keeps its behavior.
+
 ### Added
 
 - ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
