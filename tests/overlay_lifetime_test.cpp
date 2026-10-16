@@ -119,6 +119,43 @@ TEST(CheatsheetLifetimeTest, DetachDestroysAnOpenSheetAndItNeverReturns) {
     EXPECT_FALSE(cheatsheet.overlay_expected());
 }
 
+// Showing the activatable overlay hands focus back to the page before the close button takes
+// it; that page focus is not a click outside and must not close the sheet it just opened.
+TEST(CheatsheetLifetimeTest, GivenAJustOpenedSheetWhenThePageTakesFocusThenItStaysOpen) {
+    CheatsheetLifetime cheatsheet;
+    ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
+
+    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+    EXPECT_TRUE(cheatsheet.visible());
+}
+
+TEST(CheatsheetLifetimeTest, GivenAFocusedSheetWhenFocusLeavesThenItClosesOnce) {
+    CheatsheetLifetime cheatsheet;
+    ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
+    cheatsheet.FocusTaken();
+
+    EXPECT_TRUE(cheatsheet.FocusLeftCloses());
+    // The close button's blur and the page's focus both report the same click.
+    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+}
+
+TEST(CheatsheetLifetimeTest, GivenAReopenedSheetWhenThePageTakesFocusEarlyThenItStaysOpen) {
+    CheatsheetLifetime cheatsheet;
+    ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
+    cheatsheet.FocusTaken();
+    ASSERT_EQ(cheatsheet.Hide(), OverlayStep::kDestroy);
+    ASSERT_EQ(cheatsheet.Show(), OverlayStep::kCreate);
+
+    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+}
+
+TEST(CheatsheetLifetimeTest, GivenAClosedSheetWhenFocusIsTakenThenNothingCloses) {
+    CheatsheetLifetime cheatsheet;
+    cheatsheet.FocusTaken();
+
+    EXPECT_FALSE(cheatsheet.FocusLeftCloses());
+}
+
 TEST(CheatsheetOverlayTest, TheCardSitsInTheBottomRightOfThePageCard) {
     const DipRect card =
         CheatsheetOverlay::CardBounds({.x = 300, .y = 50, .width = 900, .height = 700},

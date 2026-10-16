@@ -27,15 +27,39 @@ class CheatsheetLifetime {
   public:
     // ⌘/ (Ctrl+/ elsewhere): opens a closed sheet and closes an open one.
     OverlayStep Toggle() { return lifetime_.overlay_expected() ? Hide() : Show(); }
-    OverlayStep Show() { return lifetime_.Show(); }
-    OverlayStep Hide() { return lifetime_.Hide(); }
-    OverlayStep Detach() { return lifetime_.Detach(); }
+    OverlayStep Show() {
+        focused_ = false;
+        return lifetime_.Show();
+    }
+    OverlayStep Hide() {
+        focused_ = false;
+        return lifetime_.Hide();
+    }
+    OverlayStep Detach() {
+        focused_ = false;
+        return lifetime_.Detach();
+    }
+
+    // The close button took focus, so the sheet now owns it.
+    void FocusTaken() noexcept { focused_ = visible(); }
+
+    // Focus left the sheet (the close button blurred or the page took focus): true, once, when
+    // that is a click outside that closes it. Only a sheet whose close button has held focus
+    // closes, so the page taking focus while the overlay is being shown (before the close
+    // button has taken it) does not close the sheet it just opened. The close button's blur
+    // and the page's focus can both report one click; the second report is false.
+    [[nodiscard]] bool FocusLeftCloses() noexcept {
+        const bool closes = visible() && focused_;
+        focused_ = false;
+        return closes;
+    }
 
     [[nodiscard]] bool visible() const noexcept { return lifetime_.overlay_expected(); }
     [[nodiscard]] bool overlay_expected() const noexcept { return lifetime_.overlay_expected(); }
 
   private:
     OverlayLifetime lifetime_;
+    bool focused_ = false;
 };
 
 // The window-side seam: the close button, Escape and a click outside the card all end here,
@@ -70,6 +94,10 @@ class CheatsheetOverlay final {
     void Detach();
 
     [[nodiscard]] bool visible() const noexcept { return lifetime_.visible(); }
+
+    // The page took focus: true when that is a click outside that closes the sheet (see
+    // CheatsheetLifetime::FocusLeftCloses).
+    [[nodiscard]] bool PageFocusCloses();
 
     static constexpr int kContentWidthDip = 320;
     static constexpr int kAnchorInsetDip = 12;
@@ -116,9 +144,6 @@ class CheatsheetOverlay final {
     CheatsheetLifetime lifetime_;
     CefRefPtr<ButtonDelegate> button_delegate_;
     std::vector<CefRefPtr<SurfaceDelegate>> surface_delegates_;
-    // A blur only counts once the close button has actually taken focus, so a stray early blur
-    // while the overlay activates cannot close the sheet the moment it opens.
-    bool close_focused_ = false;
     bool detached_ = false;
 };
 

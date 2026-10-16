@@ -60,7 +60,7 @@ class CheatsheetOverlay::ButtonDelegate final : public CefButtonDelegate {
 
     void OnFocus(CefRefPtr<CefView>) override {
         if (overlay_ != nullptr) {
-            overlay_->close_focused_ = true;
+            overlay_->lifetime_.FocusTaken();
         }
     }
 
@@ -180,7 +180,6 @@ void CheatsheetOverlay::Apply(OverlayStep step) {
             }
             return;
         case OverlayStep::kDestroy:
-            close_focused_ = false;
             overlay_.Release();
             return;
         case OverlayStep::kNone:
@@ -205,7 +204,11 @@ void CheatsheetOverlay::Toggle(const std::vector<CheatsheetRow>& rows, const Cef
     SetRows(rows);
     UpdateBounds(anchor);
     overlay_.get()->SetVisible(true);
-    close_->RequestFocus();
+    // Showing can re-enter the window (focus moves while the overlay activates); give the close
+    // button focus only if the sheet is still open.
+    if (lifetime_.visible() && overlay_.has_overlay()) {
+        close_->RequestFocus();
+    }
 }
 
 void CheatsheetOverlay::Hide() {
@@ -265,11 +268,15 @@ void CheatsheetOverlay::SetRows(const std::vector<CheatsheetRow>& rows) {
     }
 }
 
+bool CheatsheetOverlay::PageFocusCloses() {
+    CEF_REQUIRE_UI_THREAD();
+    return !detached_ && lifetime_.FocusLeftCloses();
+}
+
 void CheatsheetOverlay::HandleCloseBlurred() {
-    if (detached_ || !visible() || !close_focused_ || host_ == nullptr) {
+    if (detached_ || host_ == nullptr || !lifetime_.FocusLeftCloses()) {
         return;
     }
-    close_focused_ = false;
     host_->OnCheatsheetCloseRequested(/*refocus_page=*/false);
 }
 

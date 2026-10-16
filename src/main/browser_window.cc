@@ -3419,8 +3419,11 @@ void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
     if (!closing_ && tab != nullptr && tab->browser_view() != nullptr && view != nullptr &&
         view->IsSame(tab->browser_view())) {
         CancelAddressEditing();
-        // A click in the page is a click outside the cheatsheet.
-        CloseCheatsheet(/*refocus_page=*/false);
+        // A click in the page is a click outside the cheatsheet, but the page also takes focus
+        // while the sheet's overlay is being shown; the sheet decides which this is.
+        if (cheatsheet_open() && cheatsheet_->PageFocusCloses()) {
+            CloseCheatsheet(/*refocus_page=*/false);
+        }
     }
 }
 
