@@ -6,8 +6,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -72,6 +74,18 @@ const Space& ActiveSpace(const BrowserWindow& window) {
     const Space* space = window.FindSpace(window.active_space_id());
     assert(space != nullptr);
     return *space;
+}
+
+const ChromeViewTreeNode* FindChromeView(const ChromeViewTreeNode& node, ChromeViewId id) {
+    if (node.id == id) {
+        return &node;
+    }
+    for (const ChromeViewTreeNode& child : node.children) {
+        if (const ChromeViewTreeNode* found = FindChromeView(child, id); found != nullptr) {
+            return found;
+        }
+    }
+    return nullptr;
 }
 
 // The model keeps spaces_ private, so order is probed through the selection:
@@ -140,11 +154,177 @@ TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAn
     EXPECT_EQ(BrowserChrome::NativeToolbarHeightDip(), 52);
     EXPECT_EQ(BrowserChrome::NativeToolbarButtonDip(), 28);
     EXPECT_EQ(BrowserChrome::NativeAddressHeightDip(), 30);
-    EXPECT_EQ(BrowserChrome::NativeAddressRadiusDip(), 8);
     EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 248, .height = 900}));
+    EXPECT_EQ(geometry.toolbar_bounds, (DipRect{.x = 248, .y = 0, .width = 1192, .height = 52}));
+    EXPECT_EQ(geometry.toolbar_leading_inset_dip, tokens.spacing_3_dip);
     EXPECT_EQ(geometry.browser_content_bounds,
               (DipRect{.x = 248, .y = 52, .width = 1192, .height = 848}));
     EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+}
+
+TEST(BrowserWindowTest, GivenNativeAddressWhenStyledThenItIsARoundedFillPlateWithoutAnOutline) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+
+    const AddressPlateStyle style = BrowserChrome::AddressPlateStyleFor(tokens);
+
+    EXPECT_EQ(style.fill, tokens.fill);
+    EXPECT_EQ(style.outside, tokens.surface_secondary);
+    EXPECT_EQ(style.outline_dip, 0);
+    EXPECT_EQ(style.radius_dip, 8);
+}
+
+TEST(BrowserWindowTest,
+     GivenNativeAddressWhenPatchedThenItIsRoundedOnTheToolbarInEverySidebarState) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const DipRect address = {.x = 320, .y = 11, .width = 600, .height = 30};
+
+    for (const bool expanded : {true, false}) {
+        const std::optional<CornerPatch> patch =
+            BrowserChrome::AddressCornerPatch(tokens, address, expanded);
+        ASSERT_TRUE(patch.has_value());
+        EXPECT_EQ(*patch, (CornerPatch{.x = 320,
+                                       .y = 11,
+                                       .width = 600,
+                                       .height = 30,
+                                       .radius = 8,
+                                       .outside = tokens.surface_secondary}));
+    }
+}
+
+TEST(BrowserWindowTest, GivenArcAddressWhenPatchedThenItKeepsTheRailPillOnlyWhileExpanded) {
+    const ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kLight);
+    const DipRect address = {.x = 12, .y = 40, .width = 260, .height = 32};
+
+    const std::optional<CornerPatch> expanded =
+        BrowserChrome::AddressCornerPatch(tokens, address, /*sidebar_expanded=*/true);
+    ASSERT_TRUE(expanded.has_value());
+    EXPECT_EQ(expanded->radius, BrowserChrome::AddressPlateStyleFor(tokens).radius_dip);
+    EXPECT_EQ(expanded->outside, ArgbColor{});
+    EXPECT_FALSE(
+        BrowserChrome::AddressCornerPatch(tokens, address, /*sidebar_expanded=*/false).has_value());
+}
+
+TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenNoHairlineOrRingIsPainted) {
+    const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
+
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/false), native.fill);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/true), native.fill);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/false), arc.border);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
+}
+
+TEST(BrowserWindowTest, GivenNativeTreeWhenInspectedThenToolbarAndAddressIdsMatchRuntime) {
+    const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
+    const ChromeViewTreeNode* rail = FindChromeView(tree, ChromeViewId::kRail);
+    const ChromeViewTreeNode* toolbar = FindChromeView(tree, ChromeViewId::kToolbar);
+    const ChromeViewTreeNode* address = FindChromeView(tree, ChromeViewId::kAddressRow);
+
+    ASSERT_NE(rail, nullptr);
+    EXPECT_EQ(FindChromeView(*rail, ChromeViewId::kNavigationRow), nullptr);
+    EXPECT_EQ(FindChromeView(*rail, ChromeViewId::kAddressRow), nullptr);
+    ASSERT_NE(toolbar, nullptr);
+    ASSERT_EQ(toolbar->children.size(), 4U);
+    EXPECT_EQ(toolbar->children[0].id, ChromeViewId::kNavigationRow);
+    EXPECT_EQ(toolbar->children[1].id, ChromeViewId::kAddressRow);
+    EXPECT_EQ(toolbar->children[2].id, ChromeViewId::kToolbarShare);
+    EXPECT_EQ(toolbar->children[3].id, ChromeViewId::kToolbarAgent);
+    ASSERT_NE(address, nullptr);
+    ASSERT_EQ(address->children.size(), 5U);
+    EXPECT_EQ(address->children[1].id, ChromeViewId::kAddress);
+    EXPECT_EQ(address->children[2].id, ChromeViewId::kAddressIdleLabel);
+    EXPECT_NE(static_cast<int>(ChromeViewId::kAddress),
+              static_cast<int>(ChromeViewId::kAddressIdleLabel));
+}
+
+TEST(BrowserWindowTest, GivenNativeLiveTreeWithASplitWhenProjectedThenThePaneJoinsBrowserContent) {
+    const ChromeViewTreeNode tree =
+        BrowserChrome::LiveViewTree({}, {}, LookPreset::kNative, /*split_active=*/true);
+    const ChromeViewTreeNode* toolbar = FindChromeView(tree, ChromeViewId::kToolbar);
+    const ChromeViewTreeNode* content = FindChromeView(tree, ChromeViewId::kBrowserContent);
+
+    ASSERT_NE(toolbar, nullptr);
+    EXPECT_EQ(FindChromeView(*toolbar, ChromeViewId::kSplitDivider), nullptr);
+    ASSERT_NE(content, nullptr);
+    ASSERT_EQ(content->children.size(), 3U);
+    EXPECT_EQ(content->children[1].id, ChromeViewId::kSplitDivider);
+    EXPECT_EQ(content->children[2].id, ChromeViewId::kBrowserView);
+}
+
+TEST(BrowserWindowTest, GivenEachLookWhenTheContractIsWalkedThenNoViewIdRepeats) {
+    for (const LookPreset look : {LookPreset::kArc, LookPreset::kGraphite, LookPreset::kNative}) {
+        std::vector<int> ids;
+        const std::function<void(const ChromeViewTreeNode&)> walk =
+            [&](const ChromeViewTreeNode& node) {
+                ids.push_back(static_cast<int>(node.id));
+                for (const ChromeViewTreeNode& child : node.children) {
+                    walk(child);
+                }
+            };
+        walk(BrowserChrome::ViewTreeContract(look));
+        std::sort(ids.begin(), ids.end());
+        EXPECT_EQ(std::adjacent_find(ids.begin(), ids.end()), ids.end());
+    }
+}
+
+TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAreInTheContract) {
+    const std::vector<TabStripEntrySnapshot> tabs = {
+        {.title = "Pinned", .pinned = true},
+        {.title = "Regular"},
+    };
+
+    const ChromeViewTreeNode tree =
+        BrowserChrome::CollectionCountContract(tabs, {}, LookPreset::kNative);
+    const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
+
+    ASSERT_NE(tab_strip, nullptr);
+    ASSERT_EQ(tab_strip->children.size(), 4U);
+    EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kFavoritesSectionHeader);
+    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabStripEntry);
+    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
+}
+
+TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThenInsetDoes) {
+    ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    tokens.titlebar_band_dip = BrowserChrome::TrafficLightBandDip();
+    const DipRect root = {.x = 0, .y = 0, .width = 1440, .height = 900};
+
+    tokens.sidebar_side = SidebarSide::kRight;
+    const ChromeGeometrySnapshot right = BrowserChrome::LayoutForBounds(root, tokens);
+    EXPECT_EQ(right.toolbar_bounds.x, 0);
+    EXPECT_EQ(right.toolbar_leading_inset_dip, BrowserChrome::TrafficLightClearDip());
+
+    tokens.sidebar_side = SidebarSide::kLeft;
+    const ChromeGeometrySnapshot collapsed =
+        BrowserChrome::LayoutForBounds(root, tokens, /*sidebar_expanded=*/false);
+    EXPECT_EQ(collapsed.toolbar_bounds.x, kCollapsedRailWidthDip);
+    EXPECT_EQ(collapsed.toolbar_leading_inset_dip,
+              BrowserChrome::TrafficLightClearDip() - kCollapsedRailWidthDip);
+}
+
+TEST(BrowserWindowTest, GivenSectionHeaderWhenFormattedThenItUsesTheParsedSemiBoldToken) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const auto ends_with = [](const std::string& text, std::string_view suffix) {
+        return text.size() >= suffix.size() &&
+               text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+    };
+
+    // gfx::FontList::ParseDescription (Chromium 150.0.7871.129) accepts "Semi-Bold" for weight
+    // 600 and rejects "SemiBold", which would drop the whole font list.
+    const std::string header = BrowserChrome::SectionHeaderFontList(tokens);
+    EXPECT_TRUE(ends_with(header, ", Semi-Bold 11px")) << header;
+    EXPECT_EQ(header.find("SemiBold"), std::string::npos);
+
+    // The weight comes from the parameter, never from the size.
+    EXPECT_TRUE(ends_with(BrowserChrome::FontListForTokens(tokens, 13, ChromeFontWeight::kSemiBold),
+                          ", Semi-Bold 13px"));
+    EXPECT_TRUE(ends_with(BrowserChrome::FontListForTokens(tokens, 11, ChromeFontWeight::kMedium),
+                          ", Medium 11px"));
+    EXPECT_TRUE(ends_with(BrowserChrome::FontListForTokens(tokens, 11, ChromeFontWeight::kBold),
+                          ", Bold 11px"));
+    EXPECT_TRUE(ends_with(BrowserChrome::FontListForTokens(tokens, 11, ChromeFontWeight::kRegular),
+                          ", 11px"));
 }
 
 TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColorAccent) {

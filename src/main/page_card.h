@@ -41,6 +41,8 @@ struct CornerPatch {
     int width = 0;
     int height = 0;
     int radius = 8;
+    // Color immediately outside the rounded fill. Zero keeps the caller-provided canvas color.
+    ArgbColor outside;
 
     bool operator==(const CornerPatch&) const = default;
 };

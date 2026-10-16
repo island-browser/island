@@ -280,7 +280,8 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   sidebar. Chrome text uses the interface font (Geist, the system font, or an installed family).
   CEF `cef_views` has no corner-radius API and clips button images to the button's insets, so the
   soft rounded fills are square fills whose four corners a native macOS overlay repaints in the
-  canvas color (`CornerPatch` / `ApplyCornerPatches`, macos/page_card_mac.mm; the chrome pushes
+  canvas color, or in the patch's own `outside` color (the Native toolbar around the address
+  plate) (`CornerPatch` / `ApplyCornerPatches`, macos/page_card_mac.mm; the chrome pushes
   them on selection, hover, relayout and scroll). Elsewhere the fills stay square. CEF resets
   custom view colors on every theme change, so each chrome view reports the reset and the chrome
   repaints from the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`,

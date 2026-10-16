@@ -3,6 +3,8 @@
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 
+#include <cstdint>
+#include <map>
 #include <unordered_map>
 
 // A mouse-transparent view hosting the card's frame: a canvas-colored ring (so the page's square
@@ -223,11 +225,18 @@ void ApplyCornerPatches(const std::vector<void*>& handles, const std::vector<Cor
     g_patch_view.frame = content.bounds;
     g_patch_view.patches.frame = content.bounds;
     const CGFloat height = content.bounds.size.height;
-    CGMutablePathRef path = CGPathCreateMutable();
+    // One path per outside color: the canvas wedges go on the base layer, any other color (the
+    // Native toolbar around the address plate) on a sublayer of its own.
+    std::map<std::uint32_t, CGMutablePathRef> paths;
     for (const CornerPatch& patch : patches) {
         const CGFloat r = MIN(patch.radius, MIN(patch.width, patch.height) / 2);
         if (r <= 0) {
             continue;
+        }
+        const std::uint32_t color = patch.outside.argb != 0 ? patch.outside.argb : canvas.argb;
+        CGMutablePathRef& path = paths[color];
+        if (path == nullptr) {
+            path = CGPathCreateMutable();
         }
         const CGFloat x = patch.x;
         const CGFloat y = height - patch.y - patch.height;
@@ -242,9 +251,27 @@ void ApplyCornerPatches(const std::vector<void*>& handles, const std::vector<Cor
         AddWedge(path, CGPointMake(x, y), CGPointMake(x, y + r), CGPointMake(x + r, y + r), r, M_PI,
                  M_PI + M_PI_2, false);
     }
-    g_patch_view.patches.path = path;
-    g_patch_view.patches.fillColor = ToNSColor(canvas).CGColor;
-    CGPathRelease(path);
+    CAShapeLayer* base = g_patch_view.patches;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (CALayer* layer in [base.sublayers copy]) {
+        [layer removeFromSuperlayer];
+    }
+    base.path = nullptr;
+    base.fillColor = ToNSColor(canvas).CGColor;
+    for (const auto& [color, path] : paths) {
+        if (color == canvas.argb) {
+            base.path = path;
+        } else {
+            CAShapeLayer* layer = [CAShapeLayer layer];
+            layer.frame = base.bounds;
+            layer.path = path;
+            layer.fillColor = ToNSColor({.argb = color}).CGColor;
+            [base addSublayer:layer];
+        }
+        CGPathRelease(path);
+    }
+    [CATransaction commit];
 }
 
 }  // namespace island

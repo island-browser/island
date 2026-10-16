@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -136,6 +137,9 @@ enum class ChromeViewId : int {
     kToolbar = 1068,
     kToolbarShare = 1069,
     kToolbarAgent = 1070,
+    kAddressIdleLabel = 1071,
+    kFavoritesSectionHeader = 1072,
+    kTabsSectionHeader = 1073,
 };
 
 struct ChromeViewTreeNode {
@@ -179,6 +183,8 @@ struct SpaceSwitcherEntrySnapshot {
 struct ChromeGeometrySnapshot {
     DipRect root_bounds;
     DipRect rail_bounds;
+    DipRect toolbar_bounds;
+    int toolbar_leading_inset_dip = 0;
     DipRect browser_content_bounds;
     DipRect browser_view_bounds;
     // Zero width (at the right edge) while the agent panel is closed.
@@ -211,6 +217,22 @@ struct CollapsedRailTabLayout {
     static constexpr std::size_t npos = static_cast<std::size_t>(-1);
     std::vector<std::size_t> order;
     std::size_t separator_before = npos;
+};
+
+enum class ChromeFontWeight : std::uint8_t {
+    kRegular,
+    kMedium,
+    kSemiBold,
+    kBold,
+};
+
+struct AddressPlateStyle {
+    ArgbColor fill;
+    ArgbColor outside;
+    int outline_dip = 0;
+    int radius_dip = 0;
+
+    bool operator==(const AddressPlateStyle&) const = default;
 };
 
 class BrowserChromeHost {
@@ -248,6 +270,11 @@ class BrowserChrome final : public NavigationObserver {
     // The browser views currently in the page card slot (one, or two in split view).
     [[nodiscard]] std::vector<CefRefPtr<CefBrowserView>> visible_browser_views() const;
     [[nodiscard]] ChromeViewTreeNode view_tree_snapshot() const;
+    // The projection view_tree_snapshot() returns: the look's collection contract, plus the
+    // divider and second pane under kBrowserContent while a split is shown.
+    [[nodiscard]] static ChromeViewTreeNode LiveViewTree(
+        const std::vector<TabStripEntrySnapshot>& tabs,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look, bool split_active);
     [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
     [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
 
@@ -289,6 +316,27 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr int NativeAddressHeightDip() { return 30; }
     [[nodiscard]] static constexpr int NativeAddressRadiusDip() { return 8; }
     [[nodiscard]] static constexpr int NativeSectionHeaderHeightDip() { return 20; }
+    // The address field's plate: Native draws a `fill` plate with radius 8 and no hairline on the
+    // toolbar; the other looks keep the hairline-outlined well on the canvas.
+    [[nodiscard]] static AddressPlateStyle AddressPlateStyleFor(const ChromeTokens& tokens);
+    // The color the address row paints around its children: the hairline (accent while focused),
+    // or the plate fill itself in Native so no outline or ring shows.
+    [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
+    // The corner patch that rounds the address plate at `bounds` (window DIP). Native's address
+    // sits in the always-shown toolbar; the other looks' address lives in the expanded sidebar
+    // only, so it has no patch while the sidebar is collapsed.
+    [[nodiscard]] static std::optional<CornerPatch> AddressCornerPatch(const ChromeTokens& tokens,
+                                                                       const DipRect& bounds,
+                                                                       bool sidebar_expanded);
+    // A CEF font list ("Family, [Medium |Semi-Bold |Bold ]13px") for the resolved interface font.
+    // The weight is explicit. The tokens are those gfx::FontList::ParseDescription accepts in
+    // the pinned Chromium (150.0.7871.129); an unknown token ("SemiBold") fails the whole list.
+    [[nodiscard]] static std::string FontListForTokens(const ChromeTokens& tokens, int size_px,
+                                                       ChromeFontWeight weight);
+    // Native's sentence-case section headers ("Favorites", "<Space> · Tabs"): 11 px, weight 600.
+    [[nodiscard]] static std::string SectionHeaderFontList(const ChromeTokens& tokens) {
+        return FontListForTokens(tokens, 11, ChromeFontWeight::kSemiBold);
+    }
 
     // Default gutter around the page card (ChromeTokens::card_inset_dip is the live value): the
     // card floats on the sidebar-colored canvas, inset on its top, outer side and bottom and flush
@@ -473,33 +521,52 @@ class BrowserChrome final : public NavigationObserver {
     // (kTabStrip, kSpaceSwitcher) are present but empty because Phase 3 U3
     // wires no real tab/space data yet. Per-entry structure is asserted
     // through CollectionCountContract below, not by absolute rail index.
-    [[nodiscard]] static ChromeViewTreeNode ViewTreeContract() {
-        return {ChromeViewId::kRoot,
-                {{ChromeViewId::kRail,
-                  {{ChromeViewId::kNavigationRow,
-                    {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
-                   {ChromeViewId::kAddressRow,
-                    {{ChromeViewId::kAddressLocationIcon, {}},
-                     {ChromeViewId::kAddress, {}},
-                     {ChromeViewId::kReload, {}},
-                     {ChromeViewId::kReaderButton, {}}}},
-                   {ChromeViewId::kValidationMessage, {}},
-                   {ChromeViewId::kRailNewTab, {}},
-                   {ChromeViewId::kTabStrip, {}},
-                   {ChromeViewId::kSpacer, {}},
-                   {ChromeViewId::kDivider, {}},
-                   {ChromeViewId::kSpaceSwitcher, {}},
-                   {ChromeViewId::kRailFooter,
-                    {{ChromeViewId::kRailAgentButton, {}},
-                     {ChromeViewId::kRailTabsButton, {}},
-                     {ChromeViewId::kRailSettingsButton, {}},
-                     {ChromeViewId::kRailNewSpaceButton, {}}}},
-                   {ChromeViewId::kActivePage,
-                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
-                     {ChromeViewId::kActiveTab, {}},
-                     {ChromeViewId::kActivePageIndicator, {}}}}}},
-                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
-                 {ChromeViewId::kAgentPanel, {}}}};
+    [[nodiscard]] static ChromeViewTreeNode ViewTreeContract(LookPreset look = LookPreset::kArc) {
+        const ChromeViewTreeNode navigation = {
+            ChromeViewId::kNavigationRow,
+            {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}};
+        ChromeViewTreeNode address = {ChromeViewId::kAddressRow,
+                                      {{ChromeViewId::kAddressLocationIcon, {}},
+                                       {ChromeViewId::kAddress, {}},
+                                       {ChromeViewId::kReload, {}},
+                                       {ChromeViewId::kReaderButton, {}}}};
+        if (look == LookPreset::kNative) {
+            address.children.insert(address.children.begin() + 2,
+                                    {ChromeViewId::kAddressIdleLabel, {}});
+        }
+        std::vector<ChromeViewTreeNode> rail_children;
+        if (look != LookPreset::kNative) {
+            rail_children.push_back(navigation);
+            rail_children.push_back(address);
+        }
+        rail_children.insert(rail_children.end(), {{ChromeViewId::kValidationMessage, {}},
+                                                   {ChromeViewId::kRailNewTab, {}},
+                                                   {ChromeViewId::kTabStrip, {}},
+                                                   {ChromeViewId::kSpacer, {}},
+                                                   {ChromeViewId::kDivider, {}},
+                                                   {ChromeViewId::kSpaceSwitcher, {}},
+                                                   {ChromeViewId::kRailFooter,
+                                                    {{ChromeViewId::kRailAgentButton, {}},
+                                                     {ChromeViewId::kRailTabsButton, {}},
+                                                     {ChromeViewId::kRailSettingsButton, {}},
+                                                     {ChromeViewId::kRailNewSpaceButton, {}}}},
+                                                   {ChromeViewId::kActivePage,
+                                                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
+                                                     {ChromeViewId::kActiveTab, {}},
+                                                     {ChromeViewId::kActivePageIndicator, {}}}}});
+        std::vector<ChromeViewTreeNode> root_children = {
+            {ChromeViewId::kRail, std::move(rail_children)}};
+        if (look == LookPreset::kNative) {
+            root_children.push_back({ChromeViewId::kToolbar,
+                                     {navigation,
+                                      address,
+                                      {ChromeViewId::kToolbarShare, {}},
+                                      {ChromeViewId::kToolbarAgent, {}}}});
+        }
+        root_children.push_back(
+            {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
+        root_children.push_back({ChromeViewId::kAgentPanel, {}});
+        return {ChromeViewId::kRoot, std::move(root_children)};
     }
 
     // Projects the collection regions the way U4/U5 wire them at runtime: one
@@ -511,17 +578,30 @@ class BrowserChrome final : public NavigationObserver {
     // snapshot and the contract tests go through.
     [[nodiscard]] static ChromeViewTreeNode CollectionCountContract(
         const std::vector<TabStripEntrySnapshot>& tabs,
-        const std::vector<SpaceSwitcherEntrySnapshot>& spaces) {
-        ChromeViewTreeNode tree = ViewTreeContract();
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look = LookPreset::kArc) {
+        ChromeViewTreeNode tree = ViewTreeContract(look);
         ChromeViewTreeNode& rail = tree.children[0];
         for (ChromeViewTreeNode& child : rail.children) {
             if (child.id == ChromeViewId::kTabStrip) {
-                child.children.reserve(tabs.size());
+                child.children.reserve(tabs.size() + 2);
+                bool favorites_header_added = false;
+                bool tabs_header_added = false;
                 for (std::size_t i = 0; i < tabs.size(); ++i) {
+                    if (look == LookPreset::kNative && tabs[i].pinned && !favorites_header_added) {
+                        child.children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
+                        favorites_header_added = true;
+                    }
+                    if (look == LookPreset::kNative && !tabs[i].pinned && !tabs_header_added) {
+                        child.children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+                        tabs_header_added = true;
+                    }
                     child.children.push_back({ChromeViewId::kTabStripEntry,
                                               {{ChromeViewId::kTabStripEntryFavicon, {}},
                                                {ChromeViewId::kTabStripEntryTitle, {}},
                                                {ChromeViewId::kTabStripEntryClose, {}}}});
+                }
+                if (look == LookPreset::kNative && !tabs_header_added) {
+                    child.children.push_back({ChromeViewId::kTabsSectionHeader, {}});
                 }
             } else if (child.id == ChromeViewId::kSpaceSwitcher) {
                 child.children.reserve(spaces.size());
@@ -672,8 +752,8 @@ class BrowserChrome final : public NavigationObserver {
     // The row/control heights follow the density token; rebuilds the rows when it changes.
     void ApplyDensity();
     void ApplyLookStructure();
-    // A CEF font list ("Family, [Medium ]13px") for the resolved interface font.
-    [[nodiscard]] std::string FontList(int size_px, bool medium) const;
+    // FontListForTokens for the current tokens.
+    [[nodiscard]] std::string FontList(int size_px, ChromeFontWeight weight) const;
     [[nodiscard]] int RowHeight() const { return tokens_.control_height_dip; }
     [[nodiscard]] int NavigationButtonSize() const {
         return tokens_.look == LookPreset::kNative ? NativeToolbarButtonDip()

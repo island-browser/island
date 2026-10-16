@@ -107,6 +107,15 @@ CefBoxLayoutSettings OutlinedLayout(int outline_dip) {
     return settings;
 }
 
+CefBoxLayoutSettings ToolbarRowLayout(const ChromeTokens& tokens, int leading_inset) {
+    CefBoxLayoutSettings settings;
+    settings.horizontal = static_cast<int>(true);
+    settings.between_child_spacing = tokens.spacing_2_dip;
+    settings.inside_border_insets = CefInsets(0, leading_inset, 0, tokens.spacing_3_dip);
+    settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    return settings;
+}
+
 // The browser_content panel holds the single CefBrowserView with the card insets of
 // BrowserChrome::ContentInsets: the sidebar-colored canvas shows through the gap and the page
 // reads as a raised card. No spacing between the panel and the view beyond the insets.
@@ -353,6 +362,75 @@ std::string AddressErrorMessage(const std::optional<AddressError>& error) {
 
 }  // namespace
 
+AddressPlateStyle BrowserChrome::AddressPlateStyleFor(const ChromeTokens& tokens) {
+    if (tokens.look == LookPreset::kNative) {
+        return {.fill = tokens.fill,
+                .outside = tokens.surface_secondary,
+                .outline_dip = 0,
+                .radius_dip = NativeAddressRadiusDip()};
+    }
+    return {.fill = tokens.well,
+            .outside = tokens.canvas,
+            .outline_dip = kHairlineDip,
+            .radius_dip = kRowFillRadiusDip};
+}
+
+ArgbColor BrowserChrome::AddressOutlineColor(const ChromeTokens& tokens, bool focused) {
+    if (tokens.look == LookPreset::kNative) {
+        return AddressPlateStyleFor(tokens).fill;
+    }
+    return focused ? tokens.accent : tokens.border;
+}
+
+std::optional<CornerPatch> BrowserChrome::AddressCornerPatch(const ChromeTokens& tokens,
+                                                             const DipRect& bounds,
+                                                             bool sidebar_expanded) {
+    if (bounds.width <= 0 || bounds.height <= 0 ||
+        (tokens.look != LookPreset::kNative && !sidebar_expanded)) {
+        return std::nullopt;
+    }
+    const AddressPlateStyle style = AddressPlateStyleFor(tokens);
+    // Only Native's toolbar differs from the canvas the patches are applied with; the other
+    // looks leave `outside` empty so a theme reset repaints them in the current canvas.
+    return CornerPatch{.x = bounds.x,
+                       .y = bounds.y,
+                       .width = bounds.width,
+                       .height = bounds.height,
+                       .radius = style.radius_dip,
+                       .outside = tokens.look == LookPreset::kNative ? style.outside : ArgbColor{}};
+}
+
+std::string BrowserChrome::FontListForTokens(const ChromeTokens& tokens, int size_px,
+                                             ChromeFontWeight weight) {
+    std::string family = tokens.ui_font_family;
+    if (family == "system") {
+#if defined(__APPLE__)
+        family = ".AppleSystemUIFont, Helvetica Neue";
+#elif defined(_WIN32)
+        family = "Segoe UI";
+#else
+        family = "sans-serif";
+#endif
+    } else if (family != "Geist") {
+        family += ", Geist";
+    }
+    std::string style;
+    switch (weight) {
+        case ChromeFontWeight::kRegular:
+            break;
+        case ChromeFontWeight::kMedium:
+            style = "Medium ";
+            break;
+        case ChromeFontWeight::kSemiBold:
+            style = "Semi-Bold ";
+            break;
+        case ChromeFontWeight::kBold:
+            style = "Bold ";
+            break;
+    }
+    return family + ", " + style + std::to_string(size_px) + "px";
+}
+
 namespace {
 
 struct LayoutColumns {
@@ -408,8 +486,22 @@ ChromeGeometrySnapshot BrowserChrome::LayoutForBounds(DipRect root_bounds,
                                                       bool sidebar_expanded,
                                                       bool agent_panel_open) {
     LayoutColumns columns = ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    DipRect toolbar_bounds;
+    int toolbar_leading_inset = 0;
     if (tokens.look == LookPreset::kNative) {
         const int toolbar = std::min(NativeToolbarHeightDip(), columns.content.height);
+        const int toolbar_x = tokens.sidebar_side == SidebarSide::kRight
+                                  ? root_bounds.x
+                                  : columns.rail.x + columns.rail.width;
+        toolbar_bounds = {.x = toolbar_x,
+                          .y = root_bounds.y,
+                          .width = std::max(0, root_bounds.width - columns.rail.width),
+                          .height = toolbar};
+        toolbar_leading_inset = tokens.spacing_3_dip;
+        if (tokens.titlebar_band_dip > 0) {
+            toolbar_leading_inset = std::max(
+                toolbar_leading_inset, TrafficLightClearDip() - (toolbar_bounds.x - root_bounds.x));
+        }
         columns.content.y += toolbar;
         columns.content.height -= toolbar;
         if (columns.agent.width > 0) {
@@ -434,6 +526,8 @@ ChromeGeometrySnapshot BrowserChrome::LayoutForBounds(DipRect root_bounds,
     return {
         .root_bounds = root_bounds,
         .rail_bounds = columns.rail,
+        .toolbar_bounds = toolbar_bounds,
+        .toolbar_leading_inset_dip = toolbar_leading_inset,
         .browser_content_bounds = columns.content,
         .browser_view_bounds = browser_view_bounds,
         .agent_panel_bounds = columns.agent,
@@ -610,11 +704,14 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
 
     void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> collapsed_rail,
-                     CefRefPtr<CefPanel> toolbar, CefRefPtr<CefPanel> browser_content,
+                     CefRefPtr<CefPanel> toolbar, CefRefPtr<CefPanel> toolbar_content,
+                     CefRefPtr<CefPanel> address_row, CefRefPtr<CefPanel> browser_content,
                      CefRefPtr<CefPanel> agent_panel) {
         rail_ = rail;
         collapsed_rail_ = collapsed_rail;
         toolbar_ = toolbar;
+        toolbar_content_ = toolbar_content;
+        address_row_ = address_row;
         browser_content_ = browser_content;
         agent_panel_ = agent_panel;
     }
@@ -643,16 +740,19 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
         shown_rail->Layout();
         browser_content_->Layout();
         if (toolbar_ != nullptr) {
-            const int toolbar_height =
-                tokens_.look == LookPreset::kNative ? BrowserChrome::NativeToolbarHeightDip() : 0;
-            const int toolbar_x = tokens_.sidebar_side == SidebarSide::kRight
-                                      ? new_bounds.x
-                                      : geometry.rail_bounds.x + geometry.rail_bounds.width;
-            const int toolbar_width = std::max(0, new_bounds.width - geometry.rail_bounds.width);
-            ApplyBounds(toolbar_, {.x = toolbar_x,
-                                   .y = new_bounds.y,
-                                   .width = toolbar_width,
-                                   .height = toolbar_height});
+            ApplyBounds(toolbar_, geometry.toolbar_bounds);
+            // The leading inset clears the traffic lights when the sidebar does not (right side,
+            // or the collapsed rail); the row layout is replaced only when its settings change.
+            const ToolbarRowKey key = {geometry.toolbar_leading_inset_dip, tokens_.spacing_2_dip,
+                                       tokens_.spacing_3_dip, tokens_.look};
+            if (toolbar_content_ != nullptr && key != applied_toolbar_row_) {
+                applied_toolbar_row_ = key;
+                CefRefPtr<CefBoxLayout> layout = toolbar_content_->SetToBoxLayout(
+                    ToolbarRowLayout(tokens_, geometry.toolbar_leading_inset_dip));
+                if (address_row_ != nullptr && tokens_.look == LookPreset::kNative) {
+                    layout->SetFlexForView(address_row_, 1);
+                }
+            }
             toolbar_->Layout();
         }
         if (agent_panel_ != nullptr) {
@@ -669,12 +769,24 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
         }
     }
 
+    struct ToolbarRowKey {
+        int leading_inset = -1;
+        int spacing_2 = 0;
+        int spacing_3 = 0;
+        LookPreset look = LookPreset::kArc;
+
+        bool operator==(const ToolbarRowKey&) const = default;
+    };
+
     ChromeTokens tokens_;
     bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool agent_panel_open_ = false;
+    ToolbarRowKey applied_toolbar_row_;
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> collapsed_rail_;
     CefRefPtr<CefPanel> toolbar_;
+    CefRefPtr<CefPanel> toolbar_content_;
+    CefRefPtr<CefPanel> address_row_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefPanel> agent_panel_;
 
@@ -898,7 +1010,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         // CEF 150's CefTextfield has no horizontal-alignment API. Native therefore projects the
         // resting address through a centered label and swaps the real field back in for editing.
         address_idle_label_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
-        address_idle_label_->SetID(static_cast<int>(ChromeViewId::kAddress));
+        address_idle_label_->SetID(static_cast<int>(ChromeViewId::kAddressIdleLabel));
         address_idle_label_->SetAccessibleName("Address");
         address_idle_label_->SetTooltipText("Edit address");
         address_idle_label_->SetFocusable(true);
@@ -1186,12 +1298,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     CefRefPtr<CefBoxLayout> toolbar_stack_layout = toolbar_->SetToBoxLayout(toolbar_stack);
 
     toolbar_content_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
-    CefBoxLayoutSettings toolbar_row;
-    toolbar_row.horizontal = static_cast<int>(true);
-    toolbar_row.between_child_spacing = tokens_.spacing_2_dip;
-    toolbar_row.inside_border_insets =
-        CefInsets(0, tokens_.spacing_3_dip, 0, tokens_.spacing_3_dip);
-    toolbar_row.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    const CefBoxLayoutSettings toolbar_row = ToolbarRowLayout(tokens_, tokens_.spacing_3_dip);
     toolbar_content_->SetToBoxLayout(toolbar_row);
 
     share_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Share");
@@ -1239,8 +1346,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_->AddChildView(toolbar_);
     root_->AddChildView(browser_content_);
     root_->AddChildView(agent_panel_);
-    root_delegate_->SetChildren(sidebar_, collapsed_rail_, toolbar_, browser_content_,
-                                agent_panel_);
+    root_delegate_->SetChildren(sidebar_, collapsed_rail_, toolbar_, toolbar_content_, address_row_,
+                                browser_content_, agent_panel_);
     ApplyLookStructure();
     ApplyControlTheme();
     // Apply the expand state before the first layout so no frame ever shows a rail the
@@ -1274,13 +1381,24 @@ std::vector<CefRefPtr<CefBrowserView>> BrowserChrome::visible_browser_views() co
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
     // The live projection: fixed regions from the contract, collection entries
     // from the snapshots the window last pushed, so the snapshot always matches
-    // the rows actually in the view tree. An active split extends
-    // kBrowserContent with the divider and the second pane after the first.
-    ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract(tab_entries_, space_entries_);
-    if (split_view_ != nullptr) {
-        ChromeViewTreeNode& content = tree.children[1];
-        content.children.push_back({ChromeViewId::kSplitDivider, {}});
-        content.children.push_back({ChromeViewId::kBrowserView, {}});
+    // the rows actually in the view tree.
+    return LiveViewTree(tab_entries_, space_entries_, tokens_.look, split_view_ != nullptr);
+}
+
+ChromeViewTreeNode BrowserChrome::LiveViewTree(
+    const std::vector<TabStripEntrySnapshot>& tabs,
+    const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look, bool split_active) {
+    ChromeViewTreeNode tree = CollectionCountContract(tabs, spaces, look);
+    if (!split_active) {
+        return tree;
+    }
+    // An active split extends kBrowserContent with the divider and the second pane after the
+    // first. Native puts kToolbar before it, so the region is found by id, not by index.
+    for (ChromeViewTreeNode& region : tree.children) {
+        if (region.id == ChromeViewId::kBrowserContent) {
+            region.children.push_back({ChromeViewId::kSplitDivider, {}});
+            region.children.push_back({ChromeViewId::kBrowserView, {}});
+        }
     }
     return tree;
 }
@@ -1438,15 +1556,16 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     tabs_section_header_ = nullptr;
     tab_strip_->RemoveAllChildViews();
 
-    const auto add_section_header = [this](std::string text) {
+    const auto add_section_header = [this](std::string text, ChromeViewId id) {
         CefRefPtr<CefLabelButton> header =
             CefLabelButton::CreateLabelButton(button_delegate_, std::move(text));
+        header->SetID(static_cast<int>(id));
         header->SetFocusable(false);
         header->SetInkDropEnabled(false);
         header->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         header->SetMinimumSize(CefSize(0, NativeSectionHeaderHeightDip()));
         header->SetAccessibleName(header->GetText().ToString() + " section");
-        header->SetFontList(FontList(11, true));
+        header->SetFontList(SectionHeaderFontList(tokens_));
         tab_strip_->AddChildView(header);
         return header;
     };
@@ -1455,7 +1574,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         native &&
         std::any_of(entries.begin(), entries.end(), [](const auto& entry) { return entry.pinned; });
     if (has_favorites) {
-        favorites_section_header_ = add_section_header("Favorites");
+        favorites_section_header_ =
+            add_section_header("Favorites", ChromeViewId::kFavoritesSectionHeader);
     }
     bool tabs_header_added = false;
 
@@ -1469,7 +1589,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const TabStripEntrySnapshot& entry = entries[index];
         if (native && !entry.pinned && !tabs_header_added) {
-            tabs_section_header_ = add_section_header(ActiveSpaceSectionTitle());
+            tabs_section_header_ =
+                add_section_header(ActiveSpaceSectionTitle(), ChromeViewId::kTabsSectionHeader);
             tabs_header_added = true;
         }
         TabEntryViews views;
@@ -1512,7 +1633,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.title->SetFocusable(true);
         views.title->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, slot));
-        views.title->SetFontList(FontList(13, entry.active));
+        views.title->SetFontList(
+            FontList(13, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         views.inner->AddChildView(views.title);
         row_layout->SetFlexForView(views.title, 1);
 
@@ -1548,7 +1670,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         tab_strip_->AddChildView(views.row);
     }
     if (native && !tabs_header_added) {
-        tabs_section_header_ = add_section_header(ActiveSpaceSectionTitle());
+        tabs_section_header_ =
+            add_section_header(ActiveSpaceSectionTitle(), ChromeViewId::kTabsSectionHeader);
     }
     UpdateTabStripPreferredSize();
     RebuildCollapsedTabs();
@@ -1721,7 +1844,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         views.name->SetTooltipText(entry.name);
         views.name->SetFocusable(true);
         views.name->SetInkDropEnabled(true);
-        views.name->SetFontList(FontList(12, entry.active));
+        views.name->SetFontList(
+            FontList(12, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         views.name->SetMinimumSize(
             CefSize(pill_height - 2 * kHairlineDip - 2 * tokens_.spacing_2_dip,
                     pill_height - 2 * kHairlineDip));
@@ -1853,28 +1977,18 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
     ApplyControlTheme();
     rail_delegate_->SetFixedWidth(sidebar_expanded_ ? tokens_.rail_width_dip : 0);
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
+    // Native's address patch carries the toolbar color, so a theme change repaints it now.
+    PushCornerPatches();
 }
 
-std::string BrowserChrome::FontList(int size_px, bool medium) const {
-    std::string family = tokens_.ui_font_family;
-    if (family == "system") {
-#if defined(__APPLE__)
-        family = ".AppleSystemUIFont, Helvetica Neue";
-#elif defined(_WIN32)
-        family = "Segoe UI";
-#else
-        family = "sans-serif";
-#endif
-    } else if (family != "Geist") {
-        family += ", Geist";
-    }
-    const std::string weight = medium ? (size_px == 11 ? "SemiBold " : "Medium ") : "";
-    return family + ", " + weight + std::to_string(size_px) + "px";
+std::string BrowserChrome::FontList(int size_px, ChromeFontWeight weight) const {
+    return FontListForTokens(tokens_, size_px, weight);
 }
 
 void BrowserChrome::ApplyLookStructure() {
     CEF_REQUIRE_UI_THREAD();
     const bool native = tokens_.look == LookPreset::kNative;
+    const AddressPlateStyle address_style = AddressPlateStyleFor(tokens_);
     if (applied_look_ != tokens_.look) {
         if (native) {
             sidebar_->RemoveChildView(navigation_row_);
@@ -1893,19 +2007,21 @@ void BrowserChrome::ApplyLookStructure() {
     const bool native_idle = native && !address_editing_;
     address_idle_label_->SetVisible(native_idle);
     address_field_->SetVisible(!native_idle);
+    address_layout_ = address_row_->SetToBoxLayout(OutlinedLayout(address_style.outline_dip));
+    address_layout_->SetFlexForView(address_field_holder_, 1);
     const int navigation_size = NavigationButtonSize();
     navigation_row_delegate_->SetPreferredSize(
         CefSize(native ? 2 * navigation_size + tokens_.spacing_1_dip : 0, navigation_size));
     address_row_delegate_->SetPreferredSize(CefSize(0, AddressHeight()));
     textfield_delegate_->SetPreferredSize(
-        CefSize(tokens_.spacing_6_dip * 4, AddressHeight() - kHairlineDip * 2));
+        CefSize(tokens_.spacing_6_dip * 4, AddressHeight() - address_style.outline_dip * 2));
     for (const CefRefPtr<CefLabelButton>& button : {back_button_, forward_button_}) {
         button->SetMinimumSize(CefSize(navigation_size, navigation_size));
     }
     for (const CefRefPtr<CefLabelButton>& button :
          {address_location_icon_, reload_button_, reader_button_}) {
-        button->SetMinimumSize(
-            CefSize(AddressHeight() - kHairlineDip * 2, AddressHeight() - kHairlineDip * 2));
+        const int cell = AddressHeight() - address_style.outline_dip * 2;
+        button->SetMinimumSize(CefSize(cell, cell));
     }
     if (native) {
         if (CefRefPtr<CefBoxLayout> layout = toolbar_content_->GetLayout()->AsBoxLayout()) {
@@ -1922,12 +2038,13 @@ void BrowserChrome::ApplyDensity() {
     applied_control_height_ = h;
     navigation_row_delegate_->SetPreferredSize(CefSize(0, h));
     address_row_delegate_->SetPreferredSize(CefSize(0, h));
-    textfield_delegate_->SetPreferredSize(CefSize(tokens_.spacing_6_dip * 4, h - kHairlineDip * 2));
+    const int outline = AddressPlateStyleFor(tokens_).outline_dip;
+    textfield_delegate_->SetPreferredSize(CefSize(tokens_.spacing_6_dip * 4, h - outline * 2));
     for (const CefRefPtr<CefLabelButton>& button : {back_button_, forward_button_}) {
         button->SetMinimumSize(CefSize(h, h));
     }
     for (const CefRefPtr<CefLabelButton>& button : {address_location_icon_, reload_button_}) {
-        button->SetMinimumSize(CefSize(h - kHairlineDip * 2, h - kHairlineDip * 2));
+        button->SetMinimumSize(CefSize(h - outline * 2, h - outline * 2));
     }
     for (const CefRefPtr<CefLabelButton>& button : {new_tab_button_, agent_button_}) {
         button->SetMinimumSize(CefSize(0, h));
@@ -2129,6 +2246,7 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kToggleReaderMode);
             return;
         case ChromeViewId::kAddress:
+        case ChromeViewId::kAddressIdleLabel:
             BeginAddressEditing();
             return;
         case ChromeViewId::kActiveTab:
@@ -2343,7 +2461,7 @@ void BrowserChrome::ApplyControlTheme() {
     const ArgbColor browser_content =
         ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kBrowserContent);
     const ArgbColor hairline = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kHairline);
-    const ArgbColor address_well = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAddressWell);
+    const ArgbColor address_well = AddressPlateStyleFor(tokens_).fill;
     const ArgbColor active_page_fill = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kActivePage);
     const ArgbColor accent = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kAccent);
 
@@ -2392,15 +2510,15 @@ void BrowserChrome::ApplyControlTheme() {
     active_page_->SetBackgroundColor(active_page_fill.argb);
     active_page_indicator_->SetBackgroundColor(accent.argb);
     UpdateAddressFocusLeadingEdge();
-    address_field_->SetFontList(FontList(13, false));
+    address_field_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     address_idle_label_->SetBackgroundColor(address_well.argb);
-    address_idle_label_->SetFontList(FontList(13, false));
+    address_idle_label_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     address_idle_label_->SetEnabledTextColors(tokens_.text.argb);
-    active_tab_->SetFontList(FontList(13, false));
+    active_tab_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
-    reader_button_->SetFontList(FontList(12, true));
+    reader_button_->SetFontList(FontList(12, ChromeFontWeight::kMedium));
     reader_button_->SetEnabledTextColors(
         (reader_active_ ? tokens_.accent : tokens_.text_secondary).argb);
     reader_button_->SetTextColor(CEF_BUTTON_STATE_DISABLED,
@@ -2409,9 +2527,9 @@ void BrowserChrome::ApplyControlTheme() {
     active_page_fallback_favicon_->SetEnabledTextColors(tokens_.text_secondary.argb);
     active_tab_->SetEnabledTextColors(tokens_.text.argb);
     validation_message_->SetEnabledTextColors(tokens_.accent.argb);
-    share_button_->SetFontList(FontList(13, false));
+    share_button_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     share_button_->SetEnabledTextColors(tokens_.text_secondary.argb);
-    toolbar_agent_button_->SetFontList(FontList(13, false));
+    toolbar_agent_button_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     toolbar_agent_button_->SetEnabledTextColors(
         (agent_panel_open_ ? tokens_.accent_text : tokens_.text_secondary).argb);
 
@@ -2470,7 +2588,7 @@ void BrowserChrome::ApplyRailButtonTheme() {
     for (const CefRefPtr<CefLabelButton>& button :
          {new_tab_button_, agent_button_, new_space_button_, tabs_button_, settings_button_}) {
         button->SetInkDropEnabled(true);
-        button->SetFontList(FontList(13, false));
+        button->SetFontList(FontList(13, ChromeFontWeight::kRegular));
         button->SetEnabledTextColors(tokens_.text_secondary.argb);
         button->SetBackgroundColor(rail.argb);
     }
@@ -2512,7 +2630,7 @@ void BrowserChrome::ApplyCollectionTheme() {
         if (header != nullptr) {
             header->SetBackgroundColor(tokens_.canvas.argb);
             header->SetEnabledTextColors(tokens_.text_secondary.argb);
-            header->SetFontList(FontList(11, true));
+            header->SetFontList(SectionHeaderFontList(tokens_));
         }
     }
     for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
@@ -2653,8 +2771,14 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
     const auto filled = [this](const TabStripEntrySnapshot& entry, bool hovered) {
         return RowFill(tokens_, entry.active, entry.pinned, hovered).has_value();
     };
+    const WindowRect address = InWindow(address_row_);
+    if (const std::optional<CornerPatch> patch = AddressCornerPatch(
+            tokens_,
+            {.x = address.x, .y = address.y, .width = address.width, .height = address.height},
+            sidebar_expanded_)) {
+        patches.push_back(*patch);
+    }
     if (sidebar_expanded_) {
-        add(InWindow(address_row_));
         const WindowRect viewport = InWindow(tab_list_scroll_);
         for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
              ++index) {
@@ -2795,7 +2919,8 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
                 SpacePillLabel({.color = entry.color, .name = entry.name, .active = false}));
             views.button->SetEnabledTextColors(
                 (entry.active ? tokens_.text : tokens_.text_secondary).argb);
-            views.button->SetFontList(FontList(12, entry.active));
+            views.button->SetFontList(FontList(
+                12, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         } else {
             views.button->SetText("");
             views.button->SetBackgroundColor(rail.argb);
@@ -2818,9 +2943,9 @@ void BrowserChrome::UpdateAddressFocusLeadingEdge() {
 }
 
 ArgbColor BrowserChrome::ResolveSurfaceColor(SurfaceSlot slot) const {
-    if (slot == SurfaceSlot::kAddressOutline && address_field_ != nullptr &&
-        address_field_->HasFocus()) {
-        return tokens_.accent;
+    if (slot == SurfaceSlot::kAddressOutline) {
+        return AddressOutlineColor(tokens_,
+                                   address_field_ != nullptr && address_field_->HasFocus());
     }
     return ChromeSurfaceRoleForResolvedTokens(slot);
 }
