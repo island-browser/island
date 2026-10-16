@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "plan_graph.h"
+
 namespace island {
 namespace {
 
@@ -64,6 +66,20 @@ TEST(BuildResearchPromptTest, CarriesTheQuestionTheSpaceAndTheReportContract) {
     EXPECT_NE(prompt.find(std::string(kReportEndMarker)), std::string::npos);
     EXPECT_LT(prompt.find(std::string(kReportBeginMarker)),
               prompt.find(std::string(kReportEndMarker)));
+}
+
+TEST(BuildResearchPromptTest, AsksForABranchingPlanWithIslandMetadata) {
+    const std::string prompt = BuildResearchPrompt("q");
+    EXPECT_NE(prompt.find("_meta.island"), std::string::npos);
+    for (const char* key : {"\"id\"", "\"after\"", "\"branch\"", "\"kind\""}) {
+        EXPECT_NE(prompt.find(key), std::string::npos) << key;
+    }
+    EXPECT_NE(
+        prompt.find("at most " + std::to_string(agent::kMaxBranchDepth) + " levels of branching"),
+        std::string::npos);
+    EXPECT_NE(prompt.find("wait for approval before running"), std::string::npos);
+    // The plan comes before any browser work, so approval gates the steps.
+    EXPECT_LT(prompt.find("wait for approval before running"), prompt.find("How to work:"));
 }
 
 TEST(BuildResearchPromptTest, ClipsAnOversizedQuestion) {
