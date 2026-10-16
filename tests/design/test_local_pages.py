@@ -331,6 +331,9 @@ class PlanPage(unittest.TestCase):
         self.assertIn('setAttribute("aria-label", "Add a branch after " + selected.title)', self.html)
         self.assertIn('post({ type: "branch_from", id: selected.id })', self.html)
         self.assertIn("selected.depth >= state.depth_limit", self.html)
+        ghost = self.html[self.html.index("function addBranchButton(selected, position)") :]
+        ghost = ghost[: ghost.index("function renderList()")]
+        self.assertNotIn('setAttribute("role", "treeitem")', ghost)
 
     def test_drag_offsets_are_page_state_and_tidy_clears_them(self) -> None:
         self.assertIn("var movedPositions = {}", self.html)
@@ -341,6 +344,18 @@ class PlanPage(unittest.TestCase):
         tidy = tidy[: tidy.index("function zoomBy")]
         self.assertIn("movedPositions = {}", tidy)
         self.assertIn("zoomLevel = 1", tidy)
+
+    def test_pointerup_only_rebuilds_the_canvas_after_a_drag(self) -> None:
+        finish = self.html[self.html.index("function finishDrag(event)") :]
+        finish = finish[: finish.index('button.addEventListener("pointerup"')]
+        self.assertIn("var dragged = activeDrag.dragged", finish)
+        self.assertRegex(finish, r"if \(dragged\)\s+renderCanvas\(\);")
+
+    def test_select_updates_the_existing_nodes_for_reliable_double_click(self) -> None:
+        select = self.html[self.html.index("function select(id)") :]
+        select = select[: select.index("function neighbourOf(key)")]
+        self.assertNotIn("render();", select)
+        self.assertIn('setAttribute("aria-selected"', select)
 
     def test_narrow_layout_stacks_result_below_join_with_a_vertical_edge(self) -> None:
         self.assertIn("function layoutForCanvas(nodes)", self.html)

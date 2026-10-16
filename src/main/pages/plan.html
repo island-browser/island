@@ -320,7 +320,18 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
   function select(id) {
     state.selected = id;
     post({ type: "select", id: id });
-    render();
+    document.querySelectorAll("[data-plan-node-id]").forEach(function (button) {
+      button.setAttribute("aria-selected",
+        button.getAttribute("data-plan-node-id") === id ? "true" : "false");
+    });
+    renderToolbar();
+    renderInspector();
+    if (state.view === "graph") renderCanvasSelection();
+    lastSelected = id;
+    var current = $("node-" + id);
+    if (current && current.scrollIntoView && state.view === "graph") {
+      current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
   }
 
   // Arrow keys: right/left follow the edges, up/down move among the nodes of one column.
@@ -503,8 +514,12 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     layout.edges.forEach(function (edge) { addEdge(svg, svgNS, edge, layout, false); });
     if (ghost && selected) {
       layout.positions.__add_branch__ = ghost;
-      addEdge(svg, svgNS, { from: selected, to: { id: "__add_branch__", branch: selected.branch },
-        vertical: ghost.x === layout.positions[selected.id].x }, layout, true);
+      var ghostEdge = document.createElementNS(svgNS, "g");
+      ghostEdge.id = "ghost-edge";
+      addEdge(ghostEdge, svgNS,
+        { from: selected, to: { id: "__add_branch__", branch: selected.branch },
+          vertical: ghost.x === layout.positions[selected.id].x }, layout, true);
+      svg.appendChild(ghostEdge);
     }
     stage.appendChild(svg);
 
@@ -525,6 +540,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     button.setAttribute("aria-selected", node.id === state.selected ? "true" : "false");
     button.setAttribute("aria-label", kickerOf(node) + ": " + node.title +
       (nodeState === "skipped" ? ", skipped" : ""));
+    button.setAttribute("data-plan-node-id", node.id);
     button.setAttribute("data-kind", kind);
     button.setAttribute("data-state", waiting ? "waiting" : nodeState);
     button.id = "node-" + node.id;
@@ -578,10 +594,11 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     });
     function finishDrag(event) {
       if (!activeDrag || activeDrag.id !== node.id || activeDrag.pointer !== event.pointerId) return;
-      if (activeDrag.dragged) suppressClickId = node.id;
+      var dragged = activeDrag.dragged;
+      if (dragged) suppressClickId = node.id;
       if (button.hasPointerCapture(event.pointerId)) button.releasePointerCapture(event.pointerId);
       activeDrag = null;
-      renderCanvas();
+      if (dragged) renderCanvas();
     }
     button.addEventListener("pointerup", finishDrag);
     button.addEventListener("pointercancel", finishDrag);
@@ -592,7 +609,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     var button = el("button", "node add", "\u002b Add a branch");
     var depthLocked = selected.depth >= state.depth_limit;
     button.type = "button";
-    button.setAttribute("role", "treeitem");
+    button.id = "add-branch-ghost";
     button.setAttribute("aria-label", "Add a branch after " + selected.title);
     button.style.left = position.x + "px";
     button.style.top = position.y + "px";
@@ -602,6 +619,45 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       post({ type: "branch_from", id: selected.id });
     });
     return button;
+  }
+
+  function renderCanvasSelection() {
+    var stage = $("stage");
+    var svg = stage.querySelector("svg");
+    if (!svg) return;
+    var oldEdge = $("ghost-edge");
+    if (oldEdge) oldEdge.remove();
+    var oldButton = $("add-branch-ghost");
+    if (oldButton) oldButton.remove();
+
+    var selected = nodeById(state.selected);
+    if (!selected) return;
+    var layout = layoutForCanvas(state.graph.nodes);
+    var ghost = ghostPosition(selected, layout);
+    layout.positions.__add_branch__ = ghost;
+    var width = layout.canvasWidth;
+    var height = PAD * 2 + NODE_H;
+    state.graph.nodes.forEach(function (node) {
+      var position = layout.positions[node.id];
+      width = Math.max(width, position.x + NODE_W + PAD);
+      height = Math.max(height, position.y + NODE_H + PAD);
+    });
+    width = Math.max(width, ghost.x + NODE_W + PAD);
+    height = Math.max(height, ghost.y + NODE_H + PAD);
+    stage.style.width = width + "px";
+    stage.style.height = height + "px";
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    var ghostEdge = document.createElementNS(svgNS, "g");
+    ghostEdge.id = "ghost-edge";
+    addEdge(ghostEdge, svgNS,
+      { from: selected, to: { id: "__add_branch__", branch: selected.branch },
+        vertical: ghost.x === layout.positions[selected.id].x }, layout, true);
+    svg.appendChild(ghostEdge);
+    stage.appendChild(addBranchButton(selected, ghost));
   }
 
   function renderList() {
@@ -638,6 +694,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
         row.setAttribute("role", "treeitem");
         row.setAttribute("aria-selected", node.id === state.selected ? "true" : "false");
         row.setAttribute("aria-label", kickerOf(node) + ": " + node.title + ", " + stateOf(node));
+        row.setAttribute("data-plan-node-id", node.id);
         row.appendChild(el("span", "kicker", kickerOf(node)));
         row.appendChild(el("span", "row-title", node.title));
         row.appendChild(el("span", "chip", stateOf(node)));

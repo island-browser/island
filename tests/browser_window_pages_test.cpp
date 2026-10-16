@@ -1114,11 +1114,16 @@ TEST(BrowserWindowPagesTest, PlanStateCarriesTheThemeGraphAndStatus) {
     EXPECT_EQ(state->StringOr("view", ""), "graph");
 }
 
-// The Plan tabs of the first space, by their startup URL.
+std::string CurrentTabUrl(const Tab& tab) {
+    const std::string& current = tab.navigation_state().snapshot().url;
+    return current.empty() ? tab.startup_url() : current;
+}
+
+// The Plan tabs of the first space, by the URL they currently show.
 std::size_t PlanTabCount(const BrowserWindow& window) {
     std::size_t count = 0;
     for (const Tab& tab : SpaceAt(window, 0).tabs()) {
-        count += tab.startup_url() == std::string(kPlanUrl) ? 1 : 0;
+        count += CurrentTabUrl(tab) == std::string(kPlanUrl) ? 1 : 0;
     }
     return count;
 }
@@ -1192,6 +1197,41 @@ TEST(BrowserWindowPagesTest, ConsecutiveResearchReusesThePlanTab) {
     EXPECT_EQ(PlanTabCount(*window), 1U);
     EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), std::string(kPlanUrl));
     EXPECT_TRUE(SpaceAt(*window, 0).tabs()[0].pinned());
+}
+
+TEST(BrowserWindowPagesTest, StalePlanCleanupKeepsItsSpaceAndClosedTabHistory) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    ASSERT_TRUE(window->CreateSpace("Stale plan"));
+    ASSERT_TRUE(window->NavigateTab(std::nullopt, kPlanUrl));
+    ASSERT_TRUE(window->SelectSpaceIndex(0));
+    const std::size_t closed_tabs = window->closed_tab_count();
+
+    window->OpenPlanFixtureTab();
+
+    ASSERT_EQ(window->space_count(), 2U);
+    ASSERT_EQ(SpaceAt(*window, 1).tab_count(), 1U);
+    EXPECT_NE(CurrentTabUrl(SpaceAt(*window, 1).tabs()[0]), std::string(kPlanUrl));
+    EXPECT_EQ(window->closed_tab_count(), closed_tabs);
+}
+
+TEST(BrowserWindowPagesTest, PlanTabNavigatedAwayIsLeftAlone) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    const std::size_t tabs_before = SpaceAt(*window, 0).tab_count();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://away.test/"));
+
+    window->OpenPlanFixtureTab();
+
+    ASSERT_EQ(SpaceAt(*window, 0).tab_count(), tabs_before + 1);
+    EXPECT_EQ(PlanTabCount(*window), 1U);
+    bool kept_navigated_tab = false;
+    for (const Tab& tab : SpaceAt(*window, 0).tabs()) {
+        kept_navigated_tab |= CurrentTabUrl(tab) == "https://away.test/";
+    }
+    EXPECT_TRUE(kept_navigated_tab);
 }
 
 TEST(BrowserWindowPagesTest, PlanDevFixtureIsTheSpecPlan) {

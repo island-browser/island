@@ -267,6 +267,13 @@ class BrowserWindow : public CefClient,
     void SetPlanEntriesForTest(std::vector<agent::AcpPlanEntry> entries) {
         plan_entries_ = std::move(entries);
     }
+    bool SetTabAddressForTest(std::size_t space, std::size_t tab, std::string url) {
+        if (space >= spaces_.size() || tab >= spaces_[space].tab_count()) {
+            return false;
+        }
+        spaces_[space].tabs()[tab].navigation_state().SetAddress(std::move(url));
+        return true;
+    }
     // Marks a research task as running without sending anything, as if the
     // prompt had gone out after `turns_ended_before` turns.
     void SetResearchTaskForTest(std::string question, std::uint64_t turns_ended_before = 0) {
@@ -732,6 +739,9 @@ class BrowserWindow : public CefClient,
     // Shows the research's Plan tab: reuses it (and closes other Plan tabs) or opens it in the
     // active space, pinned and first.
     void OpenPlanTab();
+    // Drops a duplicate Plan document without adding it to Reopen Closed Tab. A one-tab space
+    // receives a fresh start tab instead of disappearing.
+    void RemoveStalePlanTabAt(std::size_t space, std::size_t tab);
     // The space and tab index of `id`, when a tab still has it.
     [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> TabLocation(TabId id) const;
     // The view Plan mode shows: the person's choice, else Graph when some entry carries

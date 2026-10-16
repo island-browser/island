@@ -453,7 +453,9 @@ void BrowserWindow::OpenPlanTab() {
     std::vector<TabId> plan_tabs;
     for (const Space& space : spaces_) {
         for (const Tab& tab : space.tabs()) {
-            if (tab.startup_url() == PlanPageUrl()) plan_tabs.push_back(tab.id());
+            const std::string& current = tab.navigation_state().snapshot().url;
+            const std::string_view shown = current.empty() ? tab.startup_url() : current;
+            if (shown == PlanPageUrl()) plan_tabs.push_back(tab.id());
         }
     }
     std::optional<TabId> keep;
@@ -466,7 +468,7 @@ void BrowserWindow::OpenPlanTab() {
     for (const TabId stale : plan_tabs) {
         if (keep.has_value() && stale == *keep) continue;
         if (const auto location = TabLocation(stale)) {
-            static_cast<void>(CloseTabAt(location->first, location->second));
+            RemoveStalePlanTabAt(location->first, location->second);
         }
     }
     if (keep.has_value()) {
@@ -494,6 +496,32 @@ void BrowserWindow::OpenPlanTab() {
     }
     RenderPlanPages();
     HideInternalPage();
+}
+
+void BrowserWindow::RemoveStalePlanTabAt(std::size_t space_index, std::size_t tab_index) {
+    if (space_index >= spaces_.size() || tab_index >= spaces_[space_index].tab_count()) {
+        return;
+    }
+    Space& space = spaces_[space_index];
+    const TabId stale = space.tabs()[tab_index].id();
+    const bool active_space = space_index == active_space_index_;
+    const bool active_tab = active_space && space.active_tab_id() == stale;
+    if (active_tab) {
+        DetachActiveTabObservers();
+    }
+    if (space.tab_count() == 1) {
+        // Session restore can leave a duplicate Plan document as the only tab of an inactive
+        // space. Keep the user's space and replace only that internal document.
+        space.AppendTab(Tab{NextTabId()});
+    }
+    std::optional<Tab> removed = space.RemoveTab(stale);
+    if (active_tab) {
+        AttachActiveTabObservers();
+    }
+    if (removed.has_value() && removed->browser() != nullptr) {
+        removed->browser()->GetHost()->CloseBrowser(true);
+    }
+    UpdateChromeCollections();
 }
 
 void BrowserWindow::OpenPlanFixtureTab() {
@@ -574,6 +602,10 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
     }
     if (type == "select") {
         plan_selected_ = id;
+        // plan.html applies selection and inspector state in place so the pressed button
+        // survives long enough to receive a second click. No native state changed that another
+        // Plan page needs to render.
+        return;
     } else if (type == "skip") {
         plan_edits_.skipped.insert(id);
     } else if (type == "restore") {
