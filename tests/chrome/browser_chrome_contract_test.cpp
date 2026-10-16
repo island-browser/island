@@ -367,10 +367,6 @@ TEST(BrowserChromeContractTest,
 
 // Native (2026-10-16 owner request): one Agent entry at the sidebar bottom, no toolbar Agent,
 // New Tab as the last row of the tab list, and a switcher row with the space segments.
-const ChromeViewTreeNode* FindNative(const ChromeViewTreeNode& tree, ChromeViewId id) {
-    return FindChild(tree, id);
-}
-
 std::vector<ChromeViewId> ChildIds(const ChromeViewTreeNode& node) {
     std::vector<ChromeViewId> ids;
     for (const ChromeViewTreeNode& child : node.children) {
@@ -381,31 +377,31 @@ std::vector<ChromeViewId> ChildIds(const ChromeViewTreeNode& node) {
 
 TEST(BrowserChromeNativeContractTest, GivenNativeLookWhenInspectedThenTheToolbarHasNoAgentButton) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
-    const ChromeViewTreeNode* toolbar = FindNative(tree, ChromeViewId::kToolbar);
+    const ChromeViewTreeNode* toolbar = FindChild(tree, ChromeViewId::kToolbar);
     ASSERT_NE(toolbar, nullptr);
     EXPECT_EQ(ChildIds(*toolbar),
               (std::vector<ChromeViewId>{ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
                                          ChromeViewId::kToolbarShare}));
-    EXPECT_EQ(FindNative(tree, ChromeViewId::kToolbarAgent), nullptr);
+    EXPECT_EQ(FindChild(tree, ChromeViewId::kToolbarAgent), nullptr);
 }
 
 TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHoldsAgentAndSwitcher) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
-    const ChromeViewTreeNode* rail = FindNative(tree, ChromeViewId::kRail);
+    const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
     ASSERT_NE(rail, nullptr);
     // New Tab is no longer a rail row above the list; it lives in the tab list (below).
     EXPECT_EQ(ChildIds(*rail),
               (std::vector<ChromeViewId>{ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
                                          ChromeViewId::kSpacer, ChromeViewId::kDivider,
                                          ChromeViewId::kRailFooter, ChromeViewId::kActivePage}));
-    const ChromeViewTreeNode* footer = FindNative(*rail, ChromeViewId::kRailFooter);
+    const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
     ASSERT_NE(footer, nullptr);
     // Top to bottom: the switcher row, then the full-width Agent button at the very bottom
     // (the brief's bottom-up order: Agent first, then the switcher row above it).
     EXPECT_EQ(ChildIds(*footer),
               (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
                                          ChromeViewId::kRailAgentButton}));
-    const ChromeViewTreeNode* switcher_row = FindNative(*footer, ChromeViewId::kRailSwitcherRow);
+    const ChromeViewTreeNode* switcher_row = FindChild(*footer, ChromeViewId::kRailSwitcherRow);
     ASSERT_NE(switcher_row, nullptr);
     EXPECT_EQ(ChildIds(*switcher_row),
               (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcher,
@@ -421,7 +417,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFoll
         std::vector<TabStripEntrySnapshot> tabs(count, TabStripEntrySnapshot{.title = "Island"});
         const ChromeViewTreeNode tree =
             BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
-        const ChromeViewTreeNode* tab_strip = FindNative(tree, ChromeViewId::kTabStrip);
+        const ChromeViewTreeNode* tab_strip = FindChild(tree, ChromeViewId::kTabStrip);
         ASSERT_NE(tab_strip, nullptr);
         ASSERT_FALSE(tab_strip->children.empty());
         EXPECT_EQ(tab_strip->children.back().id, ChromeViewId::kRailNewTab);
@@ -431,7 +427,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFoll
             new_tab_rows += child.id == ChromeViewId::kRailNewTab ? 1 : 0;
         }
         EXPECT_EQ(new_tab_rows, 1U);
-        const ChromeViewTreeNode* rail = FindNative(tree, ChromeViewId::kRail);
+        const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
         ASSERT_NE(rail, nullptr);
         EXPECT_EQ(std::count_if(rail->children.begin(), rail->children.end(),
                                 [](const ChromeViewTreeNode& child) {
@@ -447,7 +443,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSpacesWhenProjectedThenEachSegm
         {.name = "Default", .active = true}, {.name = "Work"}};
     const ChromeViewTreeNode tree =
         BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
-    const ChromeViewTreeNode* switcher = FindNative(tree, ChromeViewId::kSpaceSwitcher);
+    const ChromeViewTreeNode* switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
     ASSERT_NE(switcher, nullptr);
     ASSERT_EQ(switcher->children.size(), spaces.size());
     for (const ChromeViewTreeNode& segment : switcher->children) {
@@ -470,6 +466,16 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
     const auto hover =
         BrowserChrome::NativeAgentEntryColors(dark, /*open=*/false, /*hovered=*/true);
     EXPECT_EQ(hover.fill, dark.hover);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeSwitcherWhenSizedThenSegmentsFitTheTrack) {
+    const BrowserChrome::NativeSwitcherMetrics sizes = BrowserChrome::NativeSwitcherSizes();
+    // Spec §3: a 24 DIP track and 24 DIP icon buttons; the segments sit inside its 2 DIP inset.
+    EXPECT_EQ(sizes.row_dip, 24);
+    EXPECT_EQ(sizes.button_dip, 24);
+    EXPECT_EQ(sizes.track_inset_dip, 2);
+    EXPECT_EQ(sizes.segment_dip, 20);
+    EXPECT_EQ(sizes.segment_dip + 2 * sizes.track_inset_dip, sizes.row_dip);
 }
 
 TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelectedOneIsSurface) {

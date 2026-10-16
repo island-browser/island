@@ -356,12 +356,9 @@ struct RowImageSpec {
 };
 
 constexpr int kFaviconPlateDip = 22;
-// Native's bottom controls (2026-10-16 owner request): the Agent entry is 30-36 DIP tall, the
-// segmented track and its buttons 24 DIP.
+// Native's bottom controls (2026-10-16 owner request): the Agent entry is 30-36 DIP tall. The
+// switcher row's sizes come from BrowserChrome::NativeSwitcherSizes().
 constexpr int kNativeAgentHeightDip = 32;
-constexpr int kNativeSwitcherSizeDip = 24;
-// The switcher row: the 24 DIP track and buttons plus the track's 2 DIP inset on each side.
-constexpr int kNativeSwitcherRowDip = 32;
 constexpr int kNativeSegmentRadiusDip = 6;
 constexpr int kFaviconPlateRadiusDip = 6;
 constexpr int kRowFillRadiusDip = 8;
@@ -1966,7 +1963,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     space_switcher_->RemoveAllChildViews();
 
     const bool native = tokens_.look == LookPreset::kNative;
-    const int pill_height = native ? kNativeSwitcherSizeDip : RowHeight();
+    const BrowserChrome::NativeSwitcherMetrics switcher = BrowserChrome::NativeSwitcherSizes();
+    const int pill_height = native ? switcher.segment_dip : RowHeight();
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         SpaceEntryViews views;
@@ -2163,6 +2161,7 @@ void BrowserChrome::ApplyLookStructure() {
     const AddressPlateStyle address_style = AddressPlateStyleFor(tokens_);
     if (applied_look_ != tokens_.look) {
         // Index of `child` among `parent`'s children, for putting a view back in its Arc place.
+        // A missing child is a broken view tree: fail here rather than re-parent at index 0.
         const auto index_of = [](const CefRefPtr<CefPanel>& parent,
                                  const CefRefPtr<CefView>& child) {
             for (std::size_t i = 0; i < parent->GetChildViewCount(); ++i) {
@@ -2170,7 +2169,8 @@ void BrowserChrome::ApplyLookStructure() {
                     return static_cast<int>(i);
                 }
             }
-            return 0;
+            CHECK(false) << "view is not a child of the parent it is restored to";
+            return -1;
         };
         if (native) {
             sidebar_->RemoveChildView(navigation_row_);
@@ -2208,8 +2208,8 @@ void BrowserChrome::ApplyLookStructure() {
             CefBoxLayoutSettings track_settings;
             track_settings.horizontal = static_cast<int>(true);
             track_settings.between_child_spacing = 0;
-            track_settings.inside_border_insets = CefInsets(
-                kHairlineDip * 2, kHairlineDip * 2, kHairlineDip * 2, kHairlineDip * 2);
+            const int inset = NativeSwitcherSizes().track_inset_dip;
+            track_settings.inside_border_insets = CefInsets(inset, inset, inset, inset);
             space_switcher_->SetToBoxLayout(track_settings);
         } else if (applied_look_ == LookPreset::kNative) {
             toolbar_content_->RemoveChildView(navigation_row_);
@@ -2228,6 +2228,8 @@ void BrowserChrome::ApplyLookStructure() {
             if (CefRefPtr<CefBoxLayout> rail = sidebar_->GetLayout()->AsBoxLayout()) {
                 rail->SetFlexForView(space_switcher_, 0);
             }
+            // New Tab sits in the tab strip under Native; detach it before restoring it.
+            tab_strip_->RemoveChildView(new_tab_button_);
             sidebar_->AddChildViewAt(new_tab_button_, index_of(sidebar_, tab_list_scroll_));
             rail_footer_->AddChildView(tabs_button_);
             rail_footer_->AddChildView(settings_button_);
@@ -2275,13 +2277,14 @@ void BrowserChrome::ApplyLookStructure() {
     if (native) {
         // The footer's fixed height (Agent entry, gap, switcher row) keeps the box layout from
         // stretching the Agent entry down the rail.
-        const int footer_height =
-            kNativeSwitcherRowDip + tokens_.spacing_1_dip + kNativeAgentHeightDip;
+        const int footer_height = BrowserChrome::NativeSwitcherSizes().row_dip +
+                                  tokens_.spacing_1_dip + kNativeAgentHeightDip;
         rail_footer_delegate_->SetPreferredSize(CefSize(0, footer_height));
         agent_button_->SetMinimumSize(CefSize(0, kNativeAgentHeightDip));
         for (const CefRefPtr<CefLabelButton>& button :
              {tabs_button_, settings_button_, new_space_button_}) {
-            button->SetMinimumSize(CefSize(kNativeSwitcherSizeDip, kNativeSwitcherSizeDip));
+            const int size = BrowserChrome::NativeSwitcherSizes().button_dip;
+            button->SetMinimumSize(CefSize(size, size));
         }
     } else {
         rail_footer_delegate_->SetPreferredSize(CefSize());
@@ -2539,7 +2542,6 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
             return;
         case ChromeViewId::kRailAgentButton:
-        case ChromeViewId::kToolbarAgent:
             host_->ToggleAgentPanel();
             return;
         case ChromeViewId::kToolbarShare:
@@ -3060,8 +3062,8 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
             patches.push_back({track.x, track.y, track.width, track.height, kRowFillRadiusDip});
         }
         // The selected segment sits on the track, so its corners are repainted in the track fill.
-        for (std::size_t index = 0; index < space_entry_views_.size() && index < space_entries_.size();
-             ++index) {
+        for (std::size_t index = 0;
+             index < space_entry_views_.size() && index < space_entries_.size(); ++index) {
             if (!space_entries_[index].active) {
                 continue;
             }

@@ -484,6 +484,17 @@ class BrowserChrome final : public NavigationObserver {
                 .fill = active ? tokens.surface : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
+    // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP
+    // icon buttons share one row; the segments sit inside the track's 2 DIP inset.
+    struct NativeSwitcherMetrics {
+        int row_dip;
+        int button_dip;
+        int track_inset_dip;
+        int segment_dip;
+    };
+    [[nodiscard]] static constexpr NativeSwitcherMetrics NativeSwitcherSizes() {
+        return {.row_dip = 24, .button_dip = 24, .track_inset_dip = 2, .segment_dip = 20};
+    }
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
     // active chip, carry the state); the active chip's label takes --text. Native segments
     // use NativeSegmentColors instead.
