@@ -68,6 +68,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
   until you approve the plan.
 
+### Fixed
+
+- A research plan from an agent that sends no Island metadata opens in List view, and you can
+  skip, restore, select and instruct its steps (they are numbered p1, p2, ... in plan order).
+- A plan the agent sends with explanatory text waits for your approval instead of opening that
+  text as a report. After you approve a Run, its unmarked final text is the report.
+- Each research has one Plan tab: starting another research reuses it instead of adding a
+  pinned copy.
+
 ## [0.6.2] - 2026-10-15
 
 ### Fixed

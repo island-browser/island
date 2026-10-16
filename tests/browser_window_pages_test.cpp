@@ -1114,6 +1114,86 @@ TEST(BrowserWindowPagesTest, PlanStateCarriesTheThemeGraphAndStatus) {
     EXPECT_EQ(state->StringOr("view", ""), "graph");
 }
 
+// The Plan tabs of the first space, by their startup URL.
+std::size_t PlanTabCount(const BrowserWindow& window) {
+    std::size_t count = 0;
+    for (const Tab& tab : SpaceAt(window, 0).tabs()) {
+        count += tab.startup_url() == std::string(kPlanUrl) ? 1 : 0;
+    }
+    return count;
+}
+
+TEST(BrowserWindowPagesTest, APlainPlanOpensInListViewAndTakesEdits) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetPlanEntriesForTest(agent::PlainPlan());
+    window->SetResearchTaskForTest("q");
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+
+    // Without _meta.island the plan opens in List view, and Graph stays available.
+    const std::optional<Value> listed = json::Parse(window->PlanStateJson());
+    ASSERT_TRUE(listed.has_value());
+    EXPECT_EQ(listed->StringOr("view", ""), "list");
+    SendPlanMessage(*window, R"({"type":"view","mode":"graph"})");
+    EXPECT_EQ(json::Parse(window->PlanStateJson())->StringOr("view", ""), "graph");
+    SendPlanMessage(*window, R"({"type":"view","mode":"list"})");
+
+    // The generated ids are real: select, skip and instruction reach the plan.
+    SendPlanMessage(*window, R"({"type":"select","id":"p2"})");
+    SendPlanMessage(*window, R"({"type":"skip","id":"p1"})");
+    SendPlanMessage(*window, R"({"type":"instruction","id":"p0","text":"Use the forum"})");
+    const std::optional<Value> state = json::Parse(window->PlanStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->StringOr("selected", ""), "p2");
+    const Value* skipped = state->FindMember("edits")->FindMember("skipped");
+    ASSERT_EQ(skipped->array_val.size(), 1U);
+    EXPECT_EQ(skipped->array_val[0].string_val, "p1");
+    EXPECT_EQ(state->FindMember("edits")->FindMember("instructions")->StringOr("p0", ""),
+              "Use the forum");
+
+    SendPlanMessage(*window, R"({"type":"run"})");
+    ASSERT_EQ(sent.size(), 1U);
+    EXPECT_NE(sent[0].find("Skip: p1"), std::string::npos) << sent[0];
+    EXPECT_NE(sent[0].find("Instruction for p0: Use the forum"), std::string::npos) << sent[0];
+}
+
+TEST(BrowserWindowPagesTest, OneResearchKeepsOneSpacePinnedPlanTab) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    window->OpenPlanFixtureTab();
+    EXPECT_EQ(PlanTabCount(*window), 1U);
+    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(SpaceAt(*window, 0).tabs()[0].pinned());
+}
+
+TEST(BrowserWindowPagesTest, ConsecutiveResearchReusesThePlanTab) {
+    const ScopedAgentCommand command("true");  // pins the command; nothing is launched
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+
+    ASSERT_EQ(window->StartResearch("first question").code, BrowserWindow::ResearchStart::kStarted);
+    ResearchOutcome cancelled;
+    cancelled.kind = ResearchOutcome::Kind::kCancelled;
+    window->CompleteResearch(cancelled);
+    ASSERT_FALSE(window->research_running());
+    ASSERT_EQ(window->StartResearch("second question").code,
+              BrowserWindow::ResearchStart::kStarted);
+
+    EXPECT_EQ(PlanTabCount(*window), 1U);
+    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(SpaceAt(*window, 0).tabs()[0].pinned());
+}
+
 TEST(BrowserWindowPagesTest, PlanDevFixtureIsTheSpecPlan) {
     EXPECT_EQ(DevPlanFixture(), agent::SpecPlan());
 }

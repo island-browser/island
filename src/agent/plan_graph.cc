@@ -67,12 +67,24 @@ const char* StateName(PlanNodeState state) {
 
 }  // namespace
 
+std::vector<std::string> PlanEntryIds(const std::vector<AcpPlanEntry>& entries) {
+    std::vector<std::string> ids;
+    ids.reserve(entries.size());
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        const AcpPlanEntry& entry = entries[i];
+        const bool has_id = entry.island.has_value() && !entry.island->id.empty();
+        ids.push_back(has_id ? entry.island->id : "p" + std::to_string(i));
+    }
+    return ids;
+}
+
 PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
                          const std::set<std::string>& skipped_ids) {
     PlanGraph graph;
 
     // 1. Entries to drafts: synthesized ids and chain edges for plain ACP entries, the
     //    first entry wins for a repeated id.
+    const std::vector<std::string> ids = PlanEntryIds(entries);
     std::vector<Draft> drafts;
     std::vector<std::vector<std::string>> wanted;  // raw `after` ids per draft
     std::unordered_map<std::string, int> index_of;
@@ -81,18 +93,17 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
         const AcpPlanEntry& entry = entries[i];
         Draft draft;
         std::vector<std::string> after;
+        draft.node.id = ids[i];
         if (entry.island.has_value()) {
             const IslandPlanMeta& meta = *entry.island;
-            draft.node.id = meta.id.empty() ? "p" + std::to_string(i) : meta.id;
             draft.node.kind = KindFromMeta(meta.kind);
             draft.node.branch = meta.branch;
             draft.node.tool = meta.tool;
             draft.node.site = meta.site;
             draft.node.needs_you = meta.needs_you;
             after = meta.after;
-        } else {
-            draft.node.id = "p" + std::to_string(i);
-            if (i > 0) after.push_back(previous_id);
+        } else if (i > 0) {
+            after.push_back(previous_id);
         }
         previous_id = draft.node.id;
         if (index_of.count(draft.node.id) != 0) {

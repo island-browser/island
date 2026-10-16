@@ -14,9 +14,9 @@
 namespace island {
 
 inline agent::AcpPlanEntry DevPlanEntry(std::string id, std::vector<std::string> after,
-                                        std::string branch, std::string kind = "step") {
+                                        std::string branch, std::string kind, std::string content) {
     agent::AcpPlanEntry entry;
-    entry.content = id;
+    entry.content = std::move(content);
     entry.status = "pending";
     agent::IslandPlanMeta meta;
     meta.id = std::move(id);
@@ -27,14 +27,19 @@ inline agent::AcpPlanEntry DevPlanEntry(std::string id, std::vector<std::string>
     return entry;
 }
 
+// The same titles as SpecPlan() in tests/agent/plan_fixture.h.
 inline std::vector<agent::AcpPlanEntry> DevPlanFixture() {
-    using agent::AcpPlanEntry;
-    return {DevPlanEntry("q", {}, "", "question"), DevPlanEntry("s", {"q"}, ""),
-            DevPlanEntry("a", {"s"}, "A"),         DevPlanEntry("b", {"s"}, "B"),
-            DevPlanEntry("c", {"s"}, "C"),         DevPlanEntry("a1", {"a"}, "A"),
-            DevPlanEntry("a2", {"a"}, "A"),        DevPlanEntry("b1", {"b"}, "B"),
-            DevPlanEntry("m", {"a1", "a2", "b1"}, "", "join"),
-            DevPlanEntry("r", {"m"}, "", "result")};
+    return {DevPlanEntry("q", {}, "", "question", "Which laptop fits my budget and work?"),
+            DevPlanEntry("s", {"q"}, "", "step", "Shortlist current laptops for development"),
+            DevPlanEntry("a", {"s"}, "A", "step", "Read professional reviews"),
+            DevPlanEntry("b", {"s"}, "B", "step", "Compare prices at retailers"),
+            DevPlanEntry("c", {"s"}, "C", "step", "Read owner forums"),
+            DevPlanEntry("a1", {"a"}, "A", "step", "Collect battery and keyboard tests"),
+            DevPlanEntry("a2", {"a"}, "A", "step", "Known problems in open issues"),
+            DevPlanEntry("b1", {"b"}, "B", "step", "Check stock and return policies"),
+            DevPlanEntry("m", {"a1", "a2", "b1"}, "", "join",
+                         "Weigh reviews, prices and owner reports"),
+            DevPlanEntry("r", {"m"}, "", "result", "Write the recommendation")};
 }
 
 }  // namespace island

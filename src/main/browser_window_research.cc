@@ -73,10 +73,10 @@ std::string ClipPlanText(std::string text, std::size_t limit) {
     return text;
 }
 
+// Whether the plan has a node `id`, with the ids the graph and the edits use.
 bool HasPlanId(const std::vector<agent::AcpPlanEntry>& plan, std::string_view id) {
-    return std::any_of(plan.begin(), plan.end(), [id](const agent::AcpPlanEntry& entry) {
-        return entry.island.has_value() && entry.island->id == id;
-    });
+    const std::vector<std::string> ids = agent::PlanEntryIds(plan);
+    return std::find(ids.begin(), ids.end(), std::string(id)) != ids.end();
 }
 
 // The plan node's depth (branch points it is nested in), or -1 when it is not in the graph.
@@ -202,6 +202,7 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     plan_entries_.clear();
     plan_edits_ = {};
     plan_selected_.clear();
+    plan_view_.reset();
     plan_notice_.clear();
     SetResearchStatus("running", {});
     OpenPlanTab();
@@ -254,8 +255,8 @@ void BrowserWindow::FinishResearch() {
         return;
     }
     CompleteResearch(ClassifyResearchTurn(agent_session_->transcript(),
-                                          research_->turns_ended_before,
-                                          agent_session_->error()));
+                                          research_->turns_ended_before, agent_session_->error(),
+                                          research_->plan_approved));
 }
 
 void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
@@ -267,6 +268,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
         // The research stays in flight: the plan is shown and the next turn, started by
         // Run, is the one that may report.
         research_->awaiting_approval = true;
+        research_->plan_approved = false;
         research_->turns_ended_before = TurnsEnded();
         research_finish_posted_ = false;
         SetResearchStatus("awaiting_approval", outcome.message);
@@ -324,7 +326,7 @@ std::uint64_t BrowserWindow::TurnsEnded() const {
     return agent_session_ != nullptr ? agent_session_->transcript().turns_ended() : 0;
 }
 
-void BrowserWindow::SendPlanTurn(std::string text) {
+void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan) {
     CEF_REQUIRE_UI_THREAD();
     if (!research_.has_value() || !research_->awaiting_approval) {
         plan_notice_ = "The agent can change the plan only while it waits for your approval.";
@@ -338,10 +340,12 @@ void BrowserWindow::SendPlanTurn(std::string text) {
     }
     // The turn this sends is the one the research waits for.
     research_->awaiting_approval = false;
+    research_->plan_approved = approves_plan;
     research_->turns_ended_before = TurnsEnded();
     if (!SendToAgent(std::move(text))) {
         // Refused (the session is busy or cannot start): the plan keeps waiting.
         research_->awaiting_approval = true;
+        research_->plan_approved = false;
         plan_notice_ = agent_session_ != nullptr && !agent_session_->error().empty()
                            ? agent_session_->error()
                            : "The agent could not take the plan.";
@@ -351,6 +355,16 @@ void BrowserWindow::SendPlanTurn(std::string text) {
     plan_notice_.clear();
     SetResearchStatus("running", {});
     RenderPlanPages();
+}
+
+std::string BrowserWindow::PlanView() const {
+    if (plan_view_.has_value()) {
+        return *plan_view_;
+    }
+    const bool any_island =
+        std::any_of(plan_entries_.begin(), plan_entries_.end(),
+                    [](const agent::AcpPlanEntry& entry) { return entry.island.has_value(); });
+    return any_island ? "graph" : "list";
 }
 
 const std::string& BrowserWindow::PlanPageUrl() const {
@@ -389,7 +403,7 @@ std::string BrowserWindow::PlanStateJson() const {
             .Set("awaiting", Value::Bool(awaiting))
             .Set("running", Value::Bool(research_.has_value() && !awaiting))
             .Set("selected", Value::String(plan_selected_))
-            .Set("view", Value::String(plan_view_))
+            .Set("view", Value::String(PlanView()))
             .Set("notice", Value::String(plan_notice_))
             .Set("depth_limit", Value::Int(agent::kMaxBranchDepth))
             .Set("question", Value::String(research_status_.question)));
@@ -419,14 +433,52 @@ void BrowserWindow::RenderPlanPages() {
     }
 }
 
+std::optional<std::pair<std::size_t, std::size_t>> BrowserWindow::TabLocation(TabId id) const {
+    for (std::size_t space_index = 0; space_index < spaces_.size(); ++space_index) {
+        const Space& space = spaces_[space_index];
+        for (std::size_t tab_index = 0; tab_index < space.tab_count(); ++tab_index) {
+            if (space.tabs()[tab_index].id() == id) return std::pair{space_index, tab_index};
+        }
+    }
+    return std::nullopt;
+}
+
 void BrowserWindow::OpenPlanTab() {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return;
     }
-    AppendTabToActiveSpace(PlanPageUrl());
-    // Find the new tab by its id: pinning may move it within the space.
-    const TabId id = active_tab()->id();
+    // One Plan tab at a time: the tracked one stays (a restored session may hold others),
+    // and the other Plan tabs are closed as stale.
+    std::vector<TabId> plan_tabs;
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            if (tab.startup_url() == PlanPageUrl()) plan_tabs.push_back(tab.id());
+        }
+    }
+    std::optional<TabId> keep;
+    if (plan_tab_.has_value() &&
+        std::find(plan_tabs.begin(), plan_tabs.end(), *plan_tab_) != plan_tabs.end()) {
+        keep = plan_tab_;
+    } else if (!plan_tabs.empty()) {
+        keep = plan_tabs.front();
+    }
+    for (const TabId stale : plan_tabs) {
+        if (keep.has_value() && stale == *keep) continue;
+        if (const auto location = TabLocation(stale)) {
+            static_cast<void>(CloseTabAt(location->first, location->second));
+        }
+    }
+    if (keep.has_value()) {
+        if (const auto location = TabLocation(*keep)) {
+            static_cast<void>(ActivateTabAt(location->first, location->second));
+        }
+    } else {
+        AppendTabToActiveSpace(PlanPageUrl());
+    }
+    // Pinning and moving may reorder the active space, so the tab is found by its id.
+    const TabId id = keep.has_value() ? *keep : active_tab()->id();
+    plan_tab_ = id;
     const auto index_of_plan = [this, id]() -> std::optional<std::size_t> {
         const Space& space = active_space();
         for (std::size_t index = 0; index < space.tab_count(); ++index) {
@@ -440,6 +492,7 @@ void BrowserWindow::OpenPlanTab() {
     if (const std::optional<std::size_t> index = index_of_plan()) {
         static_cast<void>(MoveTabWithinSpace(active_space_index(), *index, 0));
     }
+    RenderPlanPages();
     HideInternalPage();
 }
 
@@ -451,6 +504,7 @@ void BrowserWindow::OpenPlanFixtureTab() {
     plan_entries_ = DevPlanFixture();
     plan_edits_ = {};
     plan_selected_.clear();
+    plan_view_.reset();
     plan_notice_.clear();
     if (!research_.has_value()) {
         research_ = ResearchTask{.question = "Sample plan",
@@ -509,9 +563,9 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
         if (type == "run_branch") {
             branch = std::string(message.StringOr("branch", ""));
         }
-        SendPlanTurn(agent::BuildPlanRunMessage(plan_entries_,
-                                                agent::CarryEditsOver(plan_edits_, plan_entries_),
-                                                branch));
+        SendPlanTurn(agent::BuildPlanRunMessage(
+                         plan_entries_, agent::CarryEditsOver(plan_edits_, plan_entries_), branch),
+                     /*approves_plan=*/true);
         return;
     }
     // Every other message names one node of the plan; an id the plan does not have is ignored.

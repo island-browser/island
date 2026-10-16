@@ -71,6 +71,31 @@ bool TurnHasPlan(const std::vector<agent::TranscriptItem>& items) {
     return false;
 }
 
+std::optional<std::string> ExtractReport(const std::vector<agent::TranscriptItem>& items,
+                                         bool allow_unmarked) {
+    using Kind = agent::TranscriptItem::Kind;
+    std::optional<std::string> fallback;
+    for (auto it = items.rbegin(); it != items.rend(); ++it) {
+        if (it->kind == Kind::kUser) break;
+        if (it->kind != Kind::kAgent) continue;
+        const std::string& text = it->text;
+        const std::size_t begin = text.rfind(kReportBeginMarker);
+        if (begin != std::string::npos) {
+            const std::size_t body_begin = begin + kReportBeginMarker.size();
+            const std::size_t end = text.find(kReportEndMarker, body_begin);
+            const std::string_view body = std::string_view(text).substr(
+                body_begin, end == std::string::npos ? std::string::npos : end - body_begin);
+            std::string report = StripOuterFence(Trim(body));
+            if (!report.empty()) return report;
+        }
+        if (allow_unmarked && !fallback.has_value()) {
+            std::string trimmed = Trim(text);
+            if (!trimmed.empty()) fallback = std::move(trimmed);
+        }
+    }
+    return allow_unmarked ? fallback : std::nullopt;
+}
+
 }  // namespace
 
 std::string ResearchSpaceName(std::string_view question) {
@@ -142,34 +167,12 @@ std::string BuildResearchPrompt(std::string_view question) {
 
 std::optional<std::string> ExtractResearchReport(
     const std::vector<agent::TranscriptItem>& items) {
-    using Kind = agent::TranscriptItem::Kind;
-    std::optional<std::string> fallback;
-    for (auto it = items.rbegin(); it != items.rend(); ++it) {
-        if (it->kind == Kind::kUser) break;
-        if (it->kind != Kind::kAgent) continue;
-        const std::string& text = it->text;
-        const std::size_t begin = text.rfind(kReportBeginMarker);
-        if (begin != std::string::npos) {
-            const std::size_t body_begin = begin + kReportBeginMarker.size();
-            const std::size_t end = text.find(kReportEndMarker, body_begin);
-            const std::string_view body =
-                std::string_view(text).substr(body_begin, end == std::string::npos
-                                                              ? std::string::npos
-                                                              : end - body_begin);
-            std::string report = StripOuterFence(Trim(body));
-            if (!report.empty()) return report;
-        }
-        if (!fallback.has_value()) {
-            std::string trimmed = Trim(text);
-            if (!trimmed.empty()) fallback = std::move(trimmed);
-        }
-    }
-    return fallback;
+    return ExtractReport(items, /*allow_unmarked=*/true);
 }
 
 ResearchOutcome ClassifyResearchTurn(const agent::AgentTranscript& transcript,
                                      std::uint64_t turns_ended_before,
-                                     std::string_view session_error) {
+                                     std::string_view session_error, bool plan_approved) {
     ResearchOutcome outcome;
     if (transcript.turns_ended() <= turns_ended_before) {
         outcome.message = session_error.empty()
@@ -189,9 +192,13 @@ ResearchOutcome ClassifyResearchTurn(const agent::AgentTranscript& transcript,
                               : "The agent stopped early (" + reason + ").";
         return outcome;
     }
-    std::optional<std::string> report = ExtractResearchReport(transcript.items());
+    // A plan that is not approved yet means the agent is waiting: only a marked report can
+    // end the research then. Once approved, the run's text is the report even without markers.
+    const bool awaiting_candidate = TurnHasPlan(transcript.items()) && !plan_approved;
+    std::optional<std::string> report =
+        ExtractReport(transcript.items(), /*allow_unmarked=*/!awaiting_candidate);
     if (!report.has_value()) {
-        if (TurnHasPlan(transcript.items())) {
+        if (awaiting_candidate) {
             outcome.kind = ResearchOutcome::Kind::kAwaitingApproval;
             outcome.message = "Waiting for approval";
             return outcome;

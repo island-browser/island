@@ -11,6 +11,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "active_tab_provider.h"
@@ -19,8 +20,6 @@
 #include "agent_navigation.h"
 #include "agent_providers.h"
 #include "agent_session.h"
-#include "plan_edits.h"
-#include "plan_graph.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
 #include "browser_chrome.h"
@@ -45,6 +44,8 @@
 #include "local_page.h"
 #include "navigation_state.h"
 #include "peek_overlay.h"
+#include "plan_edits.h"
+#include "plan_graph.h"
 #include "prefs_store.h"
 #include "reader_mode.h"
 #include "report_store.h"
@@ -728,15 +729,22 @@ class BrowserWindow : public CefClient,
     void RenderPlanFrame(CefRefPtr<CefFrame> frame) const;
     // Pushes the plan state to every open Plan tab.
     void RenderPlanPages();
-    // Opens the Plan tab in the active space, pinned and first.
+    // Shows the research's Plan tab: reuses it (and closes other Plan tabs) or opens it in the
+    // active space, pinned and first.
     void OpenPlanTab();
+    // The space and tab index of `id`, when a tab still has it.
+    [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> TabLocation(TabId id) const;
+    // The view Plan mode shows: the person's choice, else Graph when some entry carries
+    // `_meta.island` and List for a plain ACP plan.
+    [[nodiscard]] std::string PlanView() const;
     // Takes the newest plan from the agent transcript (when it has one) and keeps the edits.
     void RefreshPlanFromTranscript();
     // Sends one user turn to the research agent (through the test seam when set).
     bool SendToAgent(std::string text);
     // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
-    // approval, and it becomes the turn the research classifies next.
-    void SendPlanTurn(std::string text);
+    // approval, and it becomes the turn the research classifies next. `approves_plan` is true
+    // for a Run, whose turn may end with a plain report.
+    void SendPlanTurn(std::string text, bool approves_plan = false);
     // Turns the agent session has ended so far (0 without a session).
     [[nodiscard]] std::uint64_t TurnsEnded() const;
     void SetResearchStatus(std::string state, std::string message);
@@ -850,8 +858,11 @@ class BrowserWindow : public CefClient,
     // (graph | list) and selected node the Plan tab shows.
     std::vector<agent::AcpPlanEntry> plan_entries_;
     agent::PlanEdits plan_edits_;
-    std::string plan_view_ = "graph";
+    // The view the person picked (graph | list); unset means PlanView() decides.
+    std::optional<std::string> plan_view_;
     std::string plan_selected_;
+    // The Plan tab of the current research (one per research).
+    std::optional<TabId> plan_tab_;
     // Why the last plan action was refused (depth limit, agent busy); empty when none.
     std::string plan_notice_;
     std::function<bool(std::string)> agent_send_for_test_;
@@ -864,6 +875,8 @@ class BrowserWindow : public CefClient,
         // The plan was proposed and nothing runs until the person approves it. The next turn
         // is the one a Run starts, so turns_ended_before is reset to the current count.
         bool awaiting_approval = false;
+        // The turn in flight is a Run of the approved plan (see SendPlanTurn).
+        bool plan_approved = false;
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;

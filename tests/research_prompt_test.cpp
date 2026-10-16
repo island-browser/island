@@ -244,6 +244,36 @@ TEST(ClassifyResearchTurnTest, AReportWinsOverAPlanInTheSameTurn) {
     EXPECT_EQ(ClassifyResearchTurn(transcript, 0, "").kind, ResearchOutcome::Kind::kReport);
 }
 
+TEST(ClassifyResearchTurnTest, APlanWithAgentChatterStillAwaitsApproval) {
+    agent::AgentTranscript transcript;
+    transcript.AddUserPrompt("research");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    plan.plan.push_back(agent::AcpPlanEntry{.content = "Open the sources"});
+    transcript.Apply(plan);
+    // Plain explanatory text next to the plan is not a report.
+    transcript.Apply(Chunk("Here is my plan. I will check the sources first."));
+    transcript.Apply(Ended("end_turn"));
+    const ResearchOutcome outcome = ClassifyResearchTurn(transcript, 0, "");
+    EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kAwaitingApproval);
+    EXPECT_TRUE(outcome.markdown.empty());
+}
+
+TEST(ClassifyResearchTurnTest, AnApprovedRunWithoutMarkersStillReportsItsText) {
+    agent::AgentTranscript transcript;
+    transcript.AddUserPrompt("the plan was approved");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    plan.plan.push_back(agent::AcpPlanEntry{.content = "Open the sources", .status = "completed"});
+    transcript.Apply(plan);
+    transcript.Apply(Chunk("# Answer\nThe unmarked report."));
+    transcript.Apply(Ended("end_turn"));
+    const ResearchOutcome outcome =
+        ClassifyResearchTurn(transcript, 0, "", /*plan_approved=*/true);
+    EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kReport);
+    EXPECT_EQ(outcome.markdown, "# Answer\nThe unmarked report.");
+}
+
 TEST(ClassifyResearchTurnTest, ATurnThatNeverEndedIsAFailure) {
     agent::AgentTranscript transcript;
     transcript.Apply(Ended("end_turn"));
