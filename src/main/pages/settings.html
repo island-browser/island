@@ -59,7 +59,7 @@ button { cursor: pointer; }
 .nav-item { display: flex; align-items: center; height: 30px; padding: 0 10px; border: 0; border-radius: 6px;
   background: transparent; color: var(--text); text-align: left; font-size: 13px; }
 .nav-item:hover { background: color-mix(in srgb, var(--fill) 60%, transparent); }
-.nav-item[aria-current="page"] { background: var(--selection); color: #FFFFFF; font-weight: 600; }
+.nav-item[aria-current="page"] { background: var(--fill); color: var(--text); font-weight: 600; }
 .sb-foot { margin-top: auto; padding: 8px 10px 0; color: var(--text-2); font-size: 12px; }
 
 .content { flex: 1; min-width: 0; overflow-y: auto; padding: 28px 40px 64px; }
@@ -131,6 +131,7 @@ pre.code { margin: 10px 0 0; background: var(--fill); border-radius: 6px; paddin
 .shortcuts-top { display: flex; align-items: center; gap: 10px; }
 .shortcuts-top .filter { flex: 1; margin-bottom: 0; }
 .filter { margin-bottom: 0; }
+input.field.filter { font: inherit; }
 .key-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; align-items: start; }
 @media (max-width: 900px) { .key-grid { grid-template-columns: minmax(0, 1fr); } }
 .key-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
@@ -585,7 +586,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   var recording = null;
   var toastTimer = 0;
   var currentPane = "appearance";
-  var lastFocus = "";
+  var lastFocusSeq = 0;
   function post(message) { console.log(PREFIX + JSON.stringify(message)); }
   function $(id) { return document.getElementById(id); }
   function el(tag, className, text) {
@@ -701,25 +702,43 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   // ---- Search: filters the section list and the rows of every pane ----------------------
 
   function rowText(row) { return (row.getAttribute("data-label") || row.textContent || "").toLowerCase(); }
+  // The nav label and the pane title, lowercased: a query that names a section finds it.
+  function paneLabel(name) {
+    var item = document.querySelector('.nav-item[data-pane="' + name + '"]');
+    var title = $(name).querySelector(".pane-title");
+    return ((item ? item.textContent : "") + " " + (title ? title.textContent : "")).toLowerCase();
+  }
   function applySearch() {
     var query = $("settings-search").value.trim().toLowerCase();
     var hits = {};
     var total = 0;
     PANES.forEach(function (name) {
+      // A pane whose label matches is shown whole: every group and row stays visible.
+      var paneMatch = !!query && paneLabel(name).indexOf(query) >= 0;
       var count = 0;
       Array.prototype.forEach.call($(name).querySelectorAll(".group"), function (group) {
         if (group.hidden) return;
         var rows = Array.prototype.slice.call(group.querySelectorAll(".row, .key-row"));
         var title = (group.querySelector(".group-title") || { textContent: "" }).textContent.toLowerCase();
+        if (rows.length === 0) {
+          // A group without rows (the Import sources, the About list) is one searchable unit.
+          var unitMatch = !query || paneMatch || group.textContent.toLowerCase().indexOf(query) >= 0;
+          group.toggleAttribute("data-search-hidden", !unitMatch);
+          count += unitMatch ? 1 : 0;
+          return;
+        }
         var visible = 0;
         rows.forEach(function (row) {
-          var match = !query || rowText(row).indexOf(query) >= 0 || title.indexOf(query) >= 0;
+          var match = !query || paneMatch || rowText(row).indexOf(query) >= 0 || title.indexOf(query) >= 0;
           row.toggleAttribute("data-search-hidden", !match);
-          if (match) visible += 1;
+          // Rows the layout hides (the Color rows under Native) never count as hits.
+          if (match && !row.hidden) visible += 1;
         });
-        group.toggleAttribute("data-search-hidden", !!query && visible === 0);
+        group.toggleAttribute("data-search-hidden", !!query && !paneMatch && visible === 0);
         count += visible;
       });
+      // A pane that matched by name counts as a hit even when its rows are empty or hidden.
+      if (paneMatch) count = Math.max(count, 1);
       hits[name] = count;
       total += count;
     });
@@ -1174,12 +1193,13 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       about.appendChild(el("dd", "", row[1]));
     });
     if (s.message) toast(s.message);
-    // A focus request opens its pane once; the native side sends it again only for a new request.
-    if (s.focus && s.focus !== lastFocus) {
-      lastFocus = s.focus;
+    // A focus request opens its pane once per sequence number, so a section that is already
+    // selected still moves when it is asked for again. An explicit request also clears the search,
+    // which would otherwise hide or redirect the section it names.
+    if (s.focus && s.focus_seq !== lastFocusSeq) {
+      lastFocusSeq = s.focus_seq;
+      $("settings-search").value = "";
       showPane(s.focus);
-    } else if (!s.focus) {
-      lastFocus = "";
     }
     applySearch();
   }

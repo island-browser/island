@@ -49,6 +49,7 @@
 #include "research_prompt.h"
 #include "search_engine.h"
 #include "search_palette.h"
+#include "settings_focus.h"
 #include "sidebar_state.h"
 #include "space.h"
 #include "space_rename_overlay.h"
@@ -910,8 +911,9 @@ class BrowserWindow : public CefClient,
     mutable std::optional<std::vector<agent::AgentProviderStatus>> provider_statuses_;
     mutable std::chrono::steady_clock::time_point provider_statuses_at_;
     std::optional<std::vector<std::filesystem::path>> agent_search_dirs_for_test_;
-    // A one-shot Settings section to scroll to on the next render.
-    std::string settings_focus_;
+    // The Settings section requested by ShowSettingsSection; its sequence tells the page a
+    // request is new even when the section name repeats.
+    SettingsFocus settings_focus_;
     std::unique_ptr<update::Updater> updater_;
     CefRefPtr<CefContentBlocker> content_blocker_;
     // Most recent closed tabs, newest last (reopenable URLs), capped at

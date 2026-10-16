@@ -356,6 +356,46 @@ class SettingsPage(unittest.TestCase):
         self.assertIn("var(--border-2", html)
         self.assertIn("var(--accent-soft", html)
 
+    def test_a_focus_request_is_deduplicated_by_its_sequence_number(self) -> None:
+        # The same section can be requested twice in a row (privacy shield, click, shield again),
+        # so the page compares the native sequence number, not the section name.
+        html = page("settings.html")
+        self.assertIn("s.focus_seq", html)
+        self.assertIn("lastFocusSeq", html)
+        self.assertNotIn("s.focus !== lastFocus", html)
+
+    def test_search_matches_section_names_and_keeps_the_whole_pane(self) -> None:
+        html = page("settings.html")
+        search = html[html.index("function paneLabel("):html.index("// ---- Settings rows")]
+        # A pane whose nav label or title matches is shown whole.
+        self.assertIn('.pane-title', search)
+        self.assertIn('data-pane', search)
+        self.assertIn("paneMatch", search)
+
+    def test_search_treats_row_less_groups_as_one_searchable_unit(self) -> None:
+        # The Import source cards and the About list have no .row, so they match as a group.
+        html = page("settings.html")
+        search = html[html.index("function paneLabel("):html.index("// ---- Settings rows")]
+        self.assertIn("rows.length === 0", search)
+        self.assertIn("group.textContent", search)
+        self.assertIn('id="sources"', html)
+        self.assertIn('id="about-list"', html)
+
+    def test_selected_section_is_filled_with_semibold_text(self) -> None:
+        html = page("settings.html")
+        rule = re.search(r'\.nav-item\[aria-current="page"\]\s*\{([^}]*)\}', html)
+        self.assertIsNotNone(rule)
+        self.assertIn("var(--fill)", rule.group(1))
+        self.assertIn("font-weight: 600", rule.group(1))
+        self.assertNotIn("var(--selection)", rule.group(1))
+
+    def test_search_fields_use_the_interface_font_not_monospace(self) -> None:
+        html = page("settings.html")
+        rule = re.search(r"input\.field\.filter\s*\{([^}]*)\}", html)
+        self.assertIsNotNone(rule)
+        self.assertIn("font: inherit", rule.group(1))
+        self.assertIn('id="settings-search" type="search"', html)
+
     def test_shortcuts_are_two_columns_of_grouped_cards(self) -> None:
         html = page("settings.html")
         self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", html)

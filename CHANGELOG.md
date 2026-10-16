@@ -69,6 +69,16 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   family), the page card's shadow and "full bleed" (no inset, no rounding, no shadow). Theme stays
   System/Light/Dark.
 
+### Fixed
+
+- Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
+  for them, and it finds the Import sources and the About list, which were hidden for every
+  query. A Settings section that is already selected opens again when it is requested again
+  (for example, the privacy shield after a click on another section), and an explicit request
+  clears the search first.
+- Settings > Appearance and Shortcuts use the interface font in their search fields, and the
+  selected section in the Settings list is filled with a semibold label instead of the accent.
+
 ## [0.6.2] - 2026-10-15
 
 ### Fixed

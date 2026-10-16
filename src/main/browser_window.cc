@@ -808,7 +808,7 @@ void BrowserWindow::OpenSettingsSection(std::string section) {
 }
 
 void BrowserWindow::ShowSettingsSection(std::string section) {
-    settings_focus_ = std::move(section);
+    settings_focus_.Request(std::move(section));
     if (internal_page_ == LocalPageKind::kSettings) {
         ScheduleLocalPagesRender();
     } else {
@@ -941,7 +941,7 @@ void BrowserWindow::FlushLocalPagesRender() {
         // A focus request waits until the page has loaded; a render queued before that
         // would otherwise replace it with a state that has no focus.
         if (settings_page_->loaded()) {
-            settings_focus_.clear();
+            settings_focus_.Clear();
         }
     } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
@@ -1194,7 +1194,8 @@ std::string BrowserWindow::SettingsStateJson() const {
             .Set("privacy", ContentBlockerStateJson())
             .Set("update", UpdateStateJson())
             .Set("message", Value::String(settings_message_))
-            .Set("focus", Value::String(settings_focus_));
+            .Set("focus", Value::String(settings_focus_.section()))
+            .Set("focus_seq", Value::Int(static_cast<std::int64_t>(settings_focus_.sequence())));
     if (shortcut_conflict_.has_value()) {
         settings.Set(
             "shortcut_conflict",
