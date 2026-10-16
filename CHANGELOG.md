@@ -15,6 +15,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- The Native look now uses a 248 DIP source-list sidebar and a 52 DIP page toolbar with 28 DIP
+  navigation buttons, a centered idle address field, Share and Agent actions, sentence-case
+  section labels, system-blue selected rows with white text, and space switchers without space
+  colors. Arc and Graphite keep their existing chrome.
 - Local pages now receive every Native look color slot, including selection, warning, status,
   and plan-branch colors, as live CSS variables in light and dark themes.
 - Settings > Appearance now starts with a Look preset menu for Native, Arc, and Graphite. Native

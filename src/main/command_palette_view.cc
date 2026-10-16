@@ -372,7 +372,8 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
                               std::vector<PaletteSpaceEntry> spaces,
                               std::vector<PaletteBookmarkEntry> bookmarks,
                               std::vector<PaletteCommandEntry> commands,
-                              std::vector<PaletteReportEntry> reports) {    CEF_REQUIRE_UI_THREAD();
+                              std::vector<PaletteReportEntry> reports) {
+    CEF_REQUIRE_UI_THREAD();
     if (detached_ || window_ == nullptr) {
         return;
     }
@@ -383,8 +384,8 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
         return;
     }
     constexpr std::size_t kHistoryRowLimit = 8;
-    const std::size_t pool_size =
-        tabs.size() + spaces.size() + commands.size() + reports.size() + bookmarks.size() + kHistoryRowLimit + 1;
+    const std::size_t pool_size = tabs.size() + spaces.size() + commands.size() + reports.size() +
+                                  bookmarks.size() + kHistoryRowLimit + 1;
     model_.SetTabs(std::move(tabs));
     model_.SetSpaces(std::move(spaces));
     model_.SetBookmarks(std::move(bookmarks));
@@ -566,17 +567,25 @@ void CommandPaletteView::ProjectResults() {
         const PaletteSurfaceSlot slot =
             highlighted ? PaletteSurfaceSlot::kHighlightedRow : PaletteSurfaceSlot::kRow;
         const ArgbColor fill = ResolvePaletteColor(slot);
+        const RowColors row_colors =
+            ResolveRowColors(tokens_, highlighted, /*hovered=*/false, /*slept=*/false);
         result_rows_[index]->SetBackgroundColor(fill.argb);
         // The row delegate remembers the slot so the theme-change re-assertion
         // restores the highlight rather than flattening every row.
         row_delegates_[index]->SetSlot(slot);
         result_labels_[index]->SetText(PaletteRowDisplayText(results[index]));
         result_labels_[index]->SetBackgroundColor(fill.argb);
+        result_labels_[index]->SetEnabledTextColors(
+            (tokens_.look == LookPreset::kNative ? row_colors.title : tokens_.text).argb);
         result_labels_[index]->SetFontList(highlighted ? "Geist, Medium 14px" : "Geist, 14px");
         result_labels_[index]->SetTooltipText(PaletteRowTooltipText(results[index]));
         result_labels_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
         result_kinds_[index]->SetText(PaletteKindLabel(results[index]));
         result_kinds_[index]->SetBackgroundColor(fill.argb);
+        result_kinds_[index]->SetEnabledTextColors(
+            (tokens_.look == LookPreset::kNative && highlighted ? row_colors.title
+                                                                : tokens_.text_secondary)
+                .argb);
         result_kinds_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
     }
     if (divider_ != nullptr) {
@@ -604,6 +613,10 @@ void CommandPaletteView::ApplySurfaceColors() {
 }
 
 ArgbColor CommandPaletteView::ResolvePaletteColor(PaletteSurfaceSlot slot) const {
+    if (tokens_.look == LookPreset::kNative && slot == PaletteSurfaceSlot::kHighlightedRow) {
+        return ResolveRowColors(tokens_, /*selected=*/true, /*hovered=*/false, /*slept=*/false)
+            .fill;
+    }
     return PaletteSurfaceRoleForTokens(slot, tokens_);
 }
 

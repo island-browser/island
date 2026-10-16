@@ -132,6 +132,10 @@ enum class ChromeViewId : int {
     kFindBarMatchCase = 1065,
     kFindBarClose = 1066,
     kReaderButton = 1067,
+    // Native-look toolbar. Existing IDs remain fixed; these append after the current range.
+    kToolbar = 1068,
+    kToolbarShare = 1069,
+    kToolbarAgent = 1070,
 };
 
 struct ChromeViewTreeNode {
@@ -280,6 +284,11 @@ class BrowserChrome final : public NavigationObserver {
     // Vertical cadence between rail sections: one spacing_2 (8) step, so the
     // controls read as one dense, even column (Graphite, "Linear-calm").
     [[nodiscard]] static constexpr int RailSectionSpacingDip() { return 8; }
+    [[nodiscard]] static constexpr int NativeToolbarHeightDip() { return 52; }
+    [[nodiscard]] static constexpr int NativeToolbarButtonDip() { return 28; }
+    [[nodiscard]] static constexpr int NativeAddressHeightDip() { return 30; }
+    [[nodiscard]] static constexpr int NativeAddressRadiusDip() { return 8; }
+    [[nodiscard]] static constexpr int NativeSectionHeaderHeightDip() { return 20; }
 
     // Default gutter around the page card (ChromeTokens::card_inset_dip is the live value): the
     // card floats on the sidebar-colored canvas, inset on its top, outer side and bottom and flush
@@ -296,6 +305,7 @@ class BrowserChrome final : public NavigationObserver {
         kRoot,
         kRail,
         kBrowserContent,
+        kToolbar,
         kHairline,
         kAddressWell,
         // The hairline (accent while focused) the address pill paints around its
@@ -314,6 +324,8 @@ class BrowserChrome final : public NavigationObserver {
                 // One surface: the sidebar and the window margin around the page card share
                 // the canvas, so the card floats on it (Arc).
                 return tokens.canvas;
+            case SurfaceSlot::kToolbar:
+                return tokens.surface_secondary;
             case SurfaceSlot::kHairline:
             case SurfaceSlot::kAddressOutline:
                 return tokens.border;
@@ -335,6 +347,8 @@ class BrowserChrome final : public NavigationObserver {
             case SurfaceSlot::kBrowserContent:
             case SurfaceSlot::kRail:
                 return tokens_.canvas;
+            case SurfaceSlot::kToolbar:
+                return tokens_.surface_secondary;
             case SurfaceSlot::kHairline:
             case SurfaceSlot::kAddressOutline:
                 return tokens_.border;
@@ -365,19 +379,31 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static EntryColors TabRowColors(const ChromeTokens& tokens, bool active,
                                                   bool pinned) {
         const ArgbColor rail = tokens.canvas;
-        const ArgbColor fill =
-            active ? tokens.selected : (pinned ? MixColor(rail, tokens.selected, 0.5) : rail);
+        RowColors row = ResolveRowColors(tokens, active, /*hovered=*/false, /*slept=*/false);
+        if (tokens.look != LookPreset::kNative && pinned && !active) {
+            row.fill = MixColor(rail, tokens.selected, 0.5);
+        }
         return {
-            .outline = fill,
-            .fill = fill,
-            .title = active ? tokens.text : tokens.text_secondary,
-            .trailing = tokens.text_secondary,
+            .outline = row.fill,
+            .fill = row.fill,
+            .title = row.title,
+            .trailing =
+                tokens.look == LookPreset::kNative && active ? row.title : tokens.text_secondary,
         };
     }
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
     // active chip, carry the state); the active chip's label takes --text.
     [[nodiscard]] static EntryColors SpaceChipColors(const ChromeTokens& tokens, bool active) {
         const ArgbColor rail = tokens.canvas;
+        if (tokens.look == LookPreset::kNative) {
+            const ArgbColor fill = active ? tokens.fill : rail;
+            return {
+                .outline = fill,
+                .fill = fill,
+                .title = tokens.text,
+                .trailing = tokens.text_secondary,
+            };
+        }
         return {
             .outline = rail,
             .fill = rail,
@@ -645,9 +671,19 @@ class BrowserChrome final : public NavigationObserver {
     void ApplyLayoutTokens();
     // The row/control heights follow the density token; rebuilds the rows when it changes.
     void ApplyDensity();
+    void ApplyLookStructure();
     // A CEF font list ("Family, [Medium ]13px") for the resolved interface font.
     [[nodiscard]] std::string FontList(int size_px, bool medium) const;
     [[nodiscard]] int RowHeight() const { return tokens_.control_height_dip; }
+    [[nodiscard]] int NavigationButtonSize() const {
+        return tokens_.look == LookPreset::kNative ? NativeToolbarButtonDip()
+                                                   : tokens_.control_height_dip;
+    }
+    [[nodiscard]] int AddressHeight() const {
+        return tokens_.look == LookPreset::kNative ? NativeAddressHeightDip()
+                                                   : tokens_.control_height_dip;
+    }
+    [[nodiscard]] std::string ActiveSpaceSectionTitle() const;
     void ApplyCollectionTheme();
     // Re-renders the soft rounded fill (selected / hovered / none) of one row's edge buttons.
     void ApplyTabRowVisual(std::size_t index);
@@ -669,6 +705,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> root_;
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<CefPanel> toolbar_;
+    CefRefPtr<CefPanel> toolbar_content_;
+    CefRefPtr<CefPanel> toolbar_hairline_;
     CefRefPtr<CefBoxLayout> browser_content_layout_;
     CefRefPtr<CefBoxLayout> agent_panel_layout_;
     CefRefPtr<CefBoxLayout> navigation_row_layout_;
@@ -688,19 +727,25 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> spacer_;
     CefRefPtr<CefBoxLayout> address_layout_;
     CefRefPtr<CefPanel> address_field_holder_;
+    CefRefPtr<CefLabelButton> address_idle_label_;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;
     CefRefPtr<CefLabelButton> reader_button_;
+    CefRefPtr<CefLabelButton> share_button_;
+    CefRefPtr<CefLabelButton> toolbar_agent_button_;
     bool reader_available_ = false;
     bool reader_active_ = false;
     CefRefPtr<CefLabelButton> address_location_icon_;
     CefRefPtr<CefImage> location_icon_source_;
     CefRefPtr<CefImage> reload_icon_source_;
     CefRefPtr<CefTextfield> address_field_;
+    bool address_editing_ = false;
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
+    CefRefPtr<CefLabelButton> favorites_section_header_;
+    CefRefPtr<CefLabelButton> tabs_section_header_;
     // The collapsed icon rail. `collapsed_rail_` is the panel shown instead of `sidebar_`;
     // the tab list scrolls inside `collapsed_tab_scroll_`, the "+" button and the space
     // dots sit in the bottom group.
@@ -781,6 +826,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<SurfacePanelDelegate> navigation_row_delegate_;
     CefRefPtr<SurfacePanelDelegate> address_row_delegate_;
     int applied_control_height_ = 0;
+    LookPreset applied_look_ = LookPreset::kGraphite;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;

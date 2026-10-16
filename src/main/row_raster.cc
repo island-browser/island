@@ -34,6 +34,21 @@ bool Inside(double sx, double sy, double w, double h, double tl, double tr, doub
 
 }  // namespace
 
+RowColors ResolveRowColors(const ChromeTokens& tokens, bool selected, bool hovered,
+                           bool slept) noexcept {
+    const bool native = tokens.look == LookPreset::kNative;
+    const ArgbColor fill = selected ? (native ? tokens.selection : tokens.selected)
+                                    : (hovered ? tokens.hover : tokens.canvas);
+    ArgbColor title = native ? tokens.text : (selected ? tokens.text : tokens.text_secondary);
+    if (native && selected) {
+        title = {.argb = 0xFFFFFFFFU};
+    }
+    if (slept) {
+        title = tokens.text_tertiary;
+    }
+    return {.fill = fill, .title = title};
+}
+
 double RoundedRectCoverage(int px, int py, int w_px, int h_px, int tl_px, int tr_px, int br_px,
                            int bl_px) {
     constexpr int kSamples = 4;

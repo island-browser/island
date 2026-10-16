@@ -20,6 +20,7 @@
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
 #include "navigation_state.h"
+#include "row_raster.h"
 #include "runtime_style.h"
 #include "space.h"
 #include "tab.h"
@@ -99,6 +100,65 @@ class RecordingNavigationObserver final : public NavigationObserver {
   private:
     std::vector<NavigationSnapshot> snapshots_;
 };
+
+TEST(BrowserWindowTest, GivenNativeTokensWhenTabRowsResolveThenSelectionUsesWhiteOnSelection) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+
+    const RowColors selected =
+        ResolveRowColors(tokens, /*selected=*/true, /*hovered=*/false, /*slept=*/false);
+    const RowColors unselected =
+        ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/false, /*slept=*/false);
+
+    EXPECT_EQ(selected.fill, tokens.selection);
+    EXPECT_EQ(selected.title, (ArgbColor{.argb = 0xFFFFFFFFU}));
+    EXPECT_EQ(unselected.title, tokens.text);
+}
+
+TEST(BrowserWindowTest, GivenNativeRowStatesWhenResolvedThenHoverAndSleepUseTheirSlots) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+
+    const RowColors hovered =
+        ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/true, /*slept=*/false);
+    const RowColors slept =
+        ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/false, /*slept=*/true);
+
+    EXPECT_EQ(tokens.look, LookPreset::kNative);
+    EXPECT_EQ(hovered.fill, tokens.hover);
+    EXPECT_EQ(hovered.title, tokens.text);
+    EXPECT_EQ(slept.title, tokens.text_tertiary);
+}
+
+TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAndToolbarMetrics) {
+    const ChromeTokens tokens =
+        ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight)
+            .Customized(kDefaultSpaceColor, ChromeTheme::kLight, AppearanceSettings{});
+    const ChromeGeometrySnapshot geometry =
+        BrowserChrome::LayoutForBounds({.x = 0, .y = 0, .width = 1440, .height = 900}, tokens);
+
+    EXPECT_EQ(tokens.rail_width_dip, 248);
+    EXPECT_EQ(tokens.control_height_dip, 34);
+    EXPECT_EQ(BrowserChrome::NativeToolbarHeightDip(), 52);
+    EXPECT_EQ(BrowserChrome::NativeToolbarButtonDip(), 28);
+    EXPECT_EQ(BrowserChrome::NativeAddressHeightDip(), 30);
+    EXPECT_EQ(BrowserChrome::NativeAddressRadiusDip(), 8);
+    EXPECT_EQ(geometry.rail_bounds, (DipRect{.x = 0, .y = 0, .width = 248, .height = 900}));
+    EXPECT_EQ(geometry.browser_content_bounds,
+              (DipRect{.x = 248, .y = 52, .width = 1192, .height = 848}));
+    EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
+}
+
+TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColorAccent) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);
+    const BrowserChrome::EntryColors idle = BrowserChrome::SpaceChipColors(tokens, false);
+
+    EXPECT_EQ(active.fill, tokens.fill);
+    EXPECT_EQ(active.outline, tokens.fill);
+    EXPECT_EQ(active.title, tokens.text);
+    EXPECT_EQ(idle.fill, tokens.canvas);
+    EXPECT_NE(active.fill, tokens.selection);
+    EXPECT_NE(active.fill, tokens.accent);
+}
 
 TEST(BrowserWindowTest, GivenAHeadlessWindowWhenInspectedThenItStartsWithOneDefaultSpaceAndOneTab) {
     const CefRefPtr<BrowserWindow> window = MakeWindow();

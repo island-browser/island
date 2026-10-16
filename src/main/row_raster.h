@@ -28,6 +28,16 @@ struct CornerRadii {
     int bottom_left = 0;
 };
 
+struct RowColors {
+    ArgbColor fill;
+    ArgbColor title;
+};
+
+// Resolves the two colors shared by Native tab and palette rows. Other looks keep the existing
+// soft selected surface and secondary idle title. Sleeping rows always use the disabled-text slot.
+[[nodiscard]] RowColors ResolveRowColors(const ChromeTokens& tokens, bool selected, bool hovered,
+                                         bool slept) noexcept;
+
 // A transparent bitmap of `width_dip` x `height_dip`.
 [[nodiscard]] RasterBitmap NewRasterBitmap(int width_dip, int height_dip, int scale);
 

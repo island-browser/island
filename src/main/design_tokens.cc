@@ -118,6 +118,7 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
             tokens.well = tokens.fill;
             tokens.plate = tokens.surface;
             tokens.ui_font_family = "system";
+            tokens.look = LookPreset::kNative;
             return tokens;
         }
 
@@ -151,11 +152,12 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
         tokens.well = tokens.fill;
         tokens.plate = tokens.surface;
         tokens.ui_font_family = "system";
+        tokens.look = LookPreset::kNative;
         return tokens;
     }
 
     if (theme == ChromeTheme::kDark) {
-        return {
+        ChromeTokens tokens{
             .background = {.argb = 0xFF0A0A0AU},
             .surface = {.argb = 0xFF111111U},
             .surface_secondary = {.argb = 0xFF1A1A1AU},
@@ -184,9 +186,11 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
             .well = {.argb = 0xFF242424U},
             .plate = {.argb = 0xFFEDEDEDU},
         };
+        tokens.look = look;
+        return tokens;
     }
 
-    return {
+    ChromeTokens tokens{
         .background = {.argb = 0xFFFAFAFAU},
         .surface = {.argb = 0xFFFFFFFFU},
         .surface_secondary = {.argb = 0xFFF2F2F2U},
@@ -215,6 +219,8 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
         .well = {.argb = 0xFFFAFAFAU},
         .plate = {.argb = 0xFFFFFFFFU},
     };
+    tokens.look = look;
+    return tokens;
 }
 
 namespace {
@@ -370,13 +376,16 @@ ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
         appearance.look == LookPreset::kNative
             ? *this
             : Tint(*this, space_color, theme, appearance.sidebar_tint_percent / 100.0);
+    tokens.look = appearance.look;
     tokens.sidebar_side = appearance.sidebar_side;
     const bool bleed = appearance.full_bleed;
     tokens.card_radius_dip = bleed ? 0 : appearance.card_radius_dip;
     tokens.card_inset_dip = bleed ? 0 : 8;
     tokens.card_shadow = !bleed && appearance.card_shadow;
     const bool compact = appearance.density == Density::kCompact;
-    tokens.control_height_dip = compact ? 26 : 32;
+    tokens.rail_width_dip = appearance.look == LookPreset::kNative ? (compact ? 200 : 248) : 286;
+    tokens.control_height_dip =
+        appearance.look == LookPreset::kNative ? (compact ? 28 : 34) : (compact ? 26 : 32);
     tokens.row_gap_dip = compact ? 0 : 2;
     const std::string& family = appearance.font_family;
     if (family == "geist") {

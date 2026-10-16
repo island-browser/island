@@ -122,6 +122,9 @@ struct ChromeTokens {
     int spacing_6_dip = 24;
     ChromeFont ui_font = ChromeFont::kGeist;
     ChromeFont mono_font = ChromeFont::kGeistMono;
+    // The resolved look travels with the palette so CEF-free painters can keep Native-only
+    // selection semantics without inferring the preset from color values.
+    LookPreset look = LookPreset::kGraphite;
 
     [[nodiscard]] static ChromeTokens ForTheme(ChromeTheme theme) noexcept;
     [[nodiscard]] static ChromeTokens ForLook(LookPreset look, ChromeTheme theme) noexcept;

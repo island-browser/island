@@ -89,7 +89,8 @@ CefBoxLayoutSettings HorizontalLayout(const ChromeTokens& tokens) {
 // window puts them over the left sidebar.
 CefBoxLayoutSettings NavigationRowLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings = HorizontalLayout(tokens);
-    if (tokens.titlebar_band_dip > 0 && tokens.sidebar_side == SidebarSide::kLeft) {
+    if (tokens.look != LookPreset::kNative && tokens.titlebar_band_dip > 0 &&
+        tokens.sidebar_side == SidebarSide::kLeft) {
         settings.inside_border_insets = CefInsets(0, BrowserChrome::NavigationLeadDip(), 0, 0);
     }
     return settings;
@@ -124,9 +125,11 @@ CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
     settings.horizontal = static_cast<int>(false);
     settings.between_child_spacing = BrowserChrome::RailSectionSpacingDip();
+    const int top = tokens.look == LookPreset::kNative && tokens.titlebar_band_dip > 0
+                        ? tokens.titlebar_band_dip
+                        : BrowserChrome::RailTopInsetDip(tokens);
     settings.inside_border_insets =
-        CefInsets(BrowserChrome::RailTopInsetDip(tokens), tokens.spacing_3_dip,
-                  tokens.spacing_3_dip, tokens.spacing_3_dip);
+        CefInsets(top, tokens.spacing_3_dip, tokens.spacing_3_dip, tokens.spacing_3_dip);
     return settings;
 }
 
@@ -404,8 +407,16 @@ ChromeGeometrySnapshot BrowserChrome::LayoutForBounds(DipRect root_bounds,
                                                       const ChromeTokens& tokens,
                                                       bool sidebar_expanded,
                                                       bool agent_panel_open) {
-    const LayoutColumns columns =
-        ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    LayoutColumns columns = ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
+    if (tokens.look == LookPreset::kNative) {
+        const int toolbar = std::min(NativeToolbarHeightDip(), columns.content.height);
+        columns.content.y += toolbar;
+        columns.content.height -= toolbar;
+        if (columns.agent.width > 0) {
+            columns.agent.y += toolbar;
+            columns.agent.height = std::max(0, columns.agent.height - toolbar);
+        }
+    }
     const CardInsets insets =
         ContentInsets(root_bounds, tokens, sidebar_expanded, agent_panel_open);
     // The insets shrink the content region and are clamped so the card never inverts on very
@@ -433,6 +444,9 @@ BrowserChrome::CardInsets BrowserChrome::ContentInsets(DipRect root_bounds,
                                                        const ChromeTokens& tokens,
                                                        bool sidebar_expanded,
                                                        bool agent_panel_open) {
+    if (tokens.look == LookPreset::kNative) {
+        return {};
+    }
     const LayoutColumns columns =
         ComputeColumns(root_bounds, tokens, sidebar_expanded, agent_panel_open);
     const int inset = tokens.card_inset_dip;
@@ -452,6 +466,9 @@ BrowserChrome::CardInsets BrowserChrome::ContentInsets(DipRect root_bounds,
 BrowserChrome::CardInsets BrowserChrome::AgentPanelInsets(DipRect root_bounds,
                                                           const ChromeTokens& tokens,
                                                           bool sidebar_expanded) {
+    if (tokens.look == LookPreset::kNative) {
+        return {};
+    }
     const LayoutColumns columns = ComputeColumns(root_bounds, tokens, sidebar_expanded, true);
     const int inset = tokens.card_inset_dip;
     // The panel keeps an inset on the window edge only; the page card's own inset separates the
@@ -593,9 +610,11 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
 
     void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> collapsed_rail,
-                     CefRefPtr<CefPanel> browser_content, CefRefPtr<CefPanel> agent_panel) {
+                     CefRefPtr<CefPanel> toolbar, CefRefPtr<CefPanel> browser_content,
+                     CefRefPtr<CefPanel> agent_panel) {
         rail_ = rail;
         collapsed_rail_ = collapsed_rail;
+        toolbar_ = toolbar;
         browser_content_ = browser_content;
         agent_panel_ = agent_panel;
     }
@@ -623,6 +642,19 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
         ApplyBounds(browser_content_, geometry.browser_content_bounds);
         shown_rail->Layout();
         browser_content_->Layout();
+        if (toolbar_ != nullptr) {
+            const int toolbar_height =
+                tokens_.look == LookPreset::kNative ? BrowserChrome::NativeToolbarHeightDip() : 0;
+            const int toolbar_x = tokens_.sidebar_side == SidebarSide::kRight
+                                      ? new_bounds.x
+                                      : geometry.rail_bounds.x + geometry.rail_bounds.width;
+            const int toolbar_width = std::max(0, new_bounds.width - geometry.rail_bounds.width);
+            ApplyBounds(toolbar_, {.x = toolbar_x,
+                                   .y = new_bounds.y,
+                                   .width = toolbar_width,
+                                   .height = toolbar_height});
+            toolbar_->Layout();
+        }
         if (agent_panel_ != nullptr) {
             ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
             agent_panel_->Layout();
@@ -642,6 +674,7 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     bool agent_panel_open_ = false;
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> collapsed_rail_;
+    CefRefPtr<CefPanel> toolbar_;
     CefRefPtr<CefPanel> browser_content_;
     CefRefPtr<CefPanel> agent_panel_;
 
@@ -862,6 +895,17 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
             address_field_holder_->SetToBoxLayout(holder_settings);
         address_field_holder_->AddChildView(address_field_);
         holder_layout->SetFlexForView(address_field_, 1);
+        // CEF 150's CefTextfield has no horizontal-alignment API. Native therefore projects the
+        // resting address through a centered label and swaps the real field back in for editing.
+        address_idle_label_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        address_idle_label_->SetID(static_cast<int>(ChromeViewId::kAddress));
+        address_idle_label_->SetAccessibleName("Address");
+        address_idle_label_->SetTooltipText("Edit address");
+        address_idle_label_->SetFocusable(true);
+        address_idle_label_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+        address_idle_label_->SetVisible(false);
+        address_field_holder_->AddChildView(address_idle_label_);
+        holder_layout->SetFlexForView(address_idle_label_, 1);
     }
     address_row->AddChildView(address_field_holder_);
     address_layout->SetFlexForView(address_field_holder_, 1);
@@ -1128,6 +1172,54 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     }
     agent_panel_->SetVisible(false);
 
+    // Native puts navigation in a 52 DIP toolbar above the page. Arc and Graphite keep the
+    // controls in the sidebar; ApplyLookStructure reparents the same views when the preset
+    // changes so their state, delegates and stable IDs are never duplicated.
+    CefRefPtr<SurfacePanelDelegate> toolbar_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kToolbar, CefSize(0, NativeToolbarHeightDip()));
+    surface_delegates_.push_back(toolbar_delegate);
+    toolbar_ = CefPanel::CreatePanel(toolbar_delegate);
+    toolbar_->SetID(static_cast<int>(ChromeViewId::kToolbar));
+    CefBoxLayoutSettings toolbar_stack;
+    toolbar_stack.horizontal = static_cast<int>(false);
+    toolbar_stack.between_child_spacing = 0;
+    CefRefPtr<CefBoxLayout> toolbar_stack_layout = toolbar_->SetToBoxLayout(toolbar_stack);
+
+    toolbar_content_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    CefBoxLayoutSettings toolbar_row;
+    toolbar_row.horizontal = static_cast<int>(true);
+    toolbar_row.between_child_spacing = tokens_.spacing_2_dip;
+    toolbar_row.inside_border_insets =
+        CefInsets(0, tokens_.spacing_3_dip, 0, tokens_.spacing_3_dip);
+    toolbar_row.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+    toolbar_content_->SetToBoxLayout(toolbar_row);
+
+    share_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Share");
+    share_button_->SetID(static_cast<int>(ChromeViewId::kToolbarShare));
+    share_button_->SetAccessibleName("Copy tab URL");
+    share_button_->SetTooltipText("Copy tab URL");
+    share_button_->SetFocusable(true);
+    share_button_->SetMinimumSize(CefSize(52, NativeToolbarButtonDip()));
+    toolbar_content_->AddChildView(share_button_);
+
+    toolbar_agent_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "Agent");
+    toolbar_agent_button_->SetID(static_cast<int>(ChromeViewId::kToolbarAgent));
+    toolbar_agent_button_->SetAccessibleName("Agent panel");
+    toolbar_agent_button_->SetTooltipText("Ask the agent (Ctrl/Cmd+J)");
+    toolbar_agent_button_->SetFocusable(true);
+    toolbar_agent_button_->SetMinimumSize(CefSize(56, NativeToolbarButtonDip()));
+    toolbar_content_->AddChildView(toolbar_agent_button_);
+    toolbar_->AddChildView(toolbar_content_);
+    toolbar_stack_layout->SetFlexForView(toolbar_content_, 1);
+
+    CefRefPtr<SurfacePanelDelegate> toolbar_hairline_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kHairline, CefSize(0, kHairlineDip),
+                                 CefSize(0, kHairlineDip), CefSize(0, kHairlineDip));
+    surface_delegates_.push_back(toolbar_hairline_delegate);
+    toolbar_hairline_ = CefPanel::CreatePanel(toolbar_hairline_delegate);
+    toolbar_->AddChildView(toolbar_hairline_);
+    toolbar_->SetVisible(false);
+
     // CEF's default panel layout stretches every child to the panel's whole size. The
     // root therefore laid the rail out window-wide on each pass before RootPanelDelegate
     // narrowed it again, and a CefScrollView inside it grew (and kept) a window-wide content
@@ -1144,9 +1236,12 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     rail_host->AddChildView(sidebar_);
     rail_host->AddChildView(collapsed_rail_);
     root_->AddChildView(rail_host);
+    root_->AddChildView(toolbar_);
     root_->AddChildView(browser_content_);
     root_->AddChildView(agent_panel_);
-    root_delegate_->SetChildren(sidebar_, collapsed_rail_, browser_content_, agent_panel_);
+    root_delegate_->SetChildren(sidebar_, collapsed_rail_, toolbar_, browser_content_,
+                                agent_panel_);
+    ApplyLookStructure();
     ApplyControlTheme();
     // Apply the expand state before the first layout so no frame ever shows a rail the
     // sidebar state says is not on screen.
@@ -1300,10 +1395,23 @@ std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entr
     return initial;
 }
 
+std::string BrowserChrome::ActiveSpaceSectionTitle() const {
+    for (const SpaceSwitcherEntrySnapshot& entry : space_entries_) {
+        if (entry.active && !entry.name.empty()) {
+            return TruncateCollectionTitle(entry.name) + " \xC2\xB7 Tabs";
+        }
+    }
+    return "Tabs";
+}
+
 void BrowserChrome::UpdateTabStripPreferredSize() {
     const int count = static_cast<int>(tab_entries_.size());
+    const int headers =
+        (favorites_section_header_ != nullptr ? 1 : 0) + (tabs_section_header_ != nullptr ? 1 : 0);
     const int spacing = TabListLayout(tokens_).between_child_spacing;
-    const int height = count == 0 ? 0 : count * RowHeight() + (count - 1) * spacing;
+    const int children = count + headers;
+    const int height = count * RowHeight() + headers * NativeSectionHeaderHeightDip() +
+                       std::max(0, children - 1) * spacing;
     const int width =
         std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
     if (tab_strip_delegate_ != nullptr) {
@@ -1326,7 +1434,30 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     tab_button_delegates_.clear();
     tab_entry_views_.clear();
     tab_entries_ = entries;
+    favorites_section_header_ = nullptr;
+    tabs_section_header_ = nullptr;
     tab_strip_->RemoveAllChildViews();
+
+    const auto add_section_header = [this](std::string text) {
+        CefRefPtr<CefLabelButton> header =
+            CefLabelButton::CreateLabelButton(button_delegate_, std::move(text));
+        header->SetFocusable(false);
+        header->SetInkDropEnabled(false);
+        header->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+        header->SetMinimumSize(CefSize(0, NativeSectionHeaderHeightDip()));
+        header->SetAccessibleName(header->GetText().ToString() + " section");
+        header->SetFontList(FontList(11, true));
+        tab_strip_->AddChildView(header);
+        return header;
+    };
+    const bool native = tokens_.look == LookPreset::kNative;
+    const bool has_favorites =
+        native &&
+        std::any_of(entries.begin(), entries.end(), [](const auto& entry) { return entry.pinned; });
+    if (has_favorites) {
+        favorites_section_header_ = add_section_header("Favorites");
+    }
+    bool tabs_header_added = false;
 
     const int row_height = RowHeight();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
@@ -1337,6 +1468,10 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         icon_catalog_.Load(ChromeIcon::kPin, ChromeIconTone::kSecondary, ChromeIconSize::k13);
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const TabStripEntrySnapshot& entry = entries[index];
+        if (native && !entry.pinned && !tabs_header_added) {
+            tabs_section_header_ = add_section_header(ActiveSpaceSectionTitle());
+            tabs_header_added = true;
+        }
         TabEntryViews views;
         // The row is the outline (hairline when selected, rail otherwise); the inner
         // panel is the fill that carries the favicon, title, and trailing control.
@@ -1411,6 +1546,9 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
 
         tab_entry_views_.push_back(views);
         tab_strip_->AddChildView(views.row);
+    }
+    if (native && !tabs_header_added) {
+        tabs_section_header_ = add_section_header(ActiveSpaceSectionTitle());
     }
     UpdateTabStripPreferredSize();
     RebuildCollapsedTabs();
@@ -1569,12 +1707,15 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         const int dot = tokens_.spacing_2_dip;
         views.color_mark = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(dot, dot)));
         views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
+        views.color_mark->SetVisible(tokens_.look != LookPreset::kNative);
         views.inner->AddChildView(views.color_mark);
 
         CefRefPtr<CollectionButtonDelegate> name_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
         space_button_delegates_.push_back(name_delegate);
-        views.name = CefLabelButton::CreateLabelButton(name_delegate, SpacePillLabel(entry));
+        views.name = CefLabelButton::CreateLabelButton(
+            name_delegate, tokens_.look == LookPreset::kNative ? TruncateCollectionTitle(entry.name)
+                                                               : SpacePillLabel(entry));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
@@ -1588,6 +1729,11 @@ void BrowserChrome::SetSpaceSwitcherEntries(
 
         space_entry_views_.push_back(views);
         space_switcher_->AddChildView(views.row);
+    }
+    if (tabs_section_header_ != nullptr) {
+        const std::string title = ActiveSpaceSectionTitle();
+        tabs_section_header_->SetText(title);
+        tabs_section_header_->SetAccessibleName(title + " section");
     }
     RebuildCollapsedSpaces();
     ApplyCollectionTheme();
@@ -1701,6 +1847,7 @@ void BrowserChrome::ApplyTheme(ChromeTokens tokens) {
     }
     tokens_ = tokens;
     root_delegate_->SetTokens(tokens_);
+    ApplyLookStructure();
     ApplyDensity();
     ApplyLayoutTokens();
     ApplyControlTheme();
@@ -1721,7 +1868,50 @@ std::string BrowserChrome::FontList(int size_px, bool medium) const {
     } else if (family != "Geist") {
         family += ", Geist";
     }
-    return family + ", " + (medium ? "Medium " : "") + std::to_string(size_px) + "px";
+    const std::string weight = medium ? (size_px == 11 ? "SemiBold " : "Medium ") : "";
+    return family + ", " + weight + std::to_string(size_px) + "px";
+}
+
+void BrowserChrome::ApplyLookStructure() {
+    CEF_REQUIRE_UI_THREAD();
+    const bool native = tokens_.look == LookPreset::kNative;
+    if (applied_look_ != tokens_.look) {
+        if (native) {
+            sidebar_->RemoveChildView(navigation_row_);
+            sidebar_->RemoveChildView(address_row_);
+            toolbar_content_->AddChildViewAt(navigation_row_, 0);
+            toolbar_content_->AddChildViewAt(address_row_, 1);
+        } else if (applied_look_ == LookPreset::kNative) {
+            toolbar_content_->RemoveChildView(navigation_row_);
+            toolbar_content_->RemoveChildView(address_row_);
+            sidebar_->AddChildViewAt(navigation_row_, 0);
+            sidebar_->AddChildViewAt(address_row_, 1);
+        }
+        applied_look_ = tokens_.look;
+    }
+    toolbar_->SetVisible(native);
+    const bool native_idle = native && !address_editing_;
+    address_idle_label_->SetVisible(native_idle);
+    address_field_->SetVisible(!native_idle);
+    const int navigation_size = NavigationButtonSize();
+    navigation_row_delegate_->SetPreferredSize(
+        CefSize(native ? 2 * navigation_size + tokens_.spacing_1_dip : 0, navigation_size));
+    address_row_delegate_->SetPreferredSize(CefSize(0, AddressHeight()));
+    textfield_delegate_->SetPreferredSize(
+        CefSize(tokens_.spacing_6_dip * 4, AddressHeight() - kHairlineDip * 2));
+    for (const CefRefPtr<CefLabelButton>& button : {back_button_, forward_button_}) {
+        button->SetMinimumSize(CefSize(navigation_size, navigation_size));
+    }
+    for (const CefRefPtr<CefLabelButton>& button :
+         {address_location_icon_, reload_button_, reader_button_}) {
+        button->SetMinimumSize(
+            CefSize(AddressHeight() - kHairlineDip * 2, AddressHeight() - kHairlineDip * 2));
+    }
+    if (native) {
+        if (CefRefPtr<CefBoxLayout> layout = toolbar_content_->GetLayout()->AsBoxLayout()) {
+            layout->SetFlexForView(address_row_, 1);
+        }
+    }
 }
 
 void BrowserChrome::ApplyDensity() {
@@ -1746,6 +1936,7 @@ void BrowserChrome::ApplyDensity() {
          {tabs_button_, settings_button_, new_space_button_}) {
         button->SetMinimumSize(CefSize(h, h));
     }
+    ApplyLookStructure();
     // Rows and pills take their height at construction: rebuild them from the snapshots.
     const std::vector<TabStripEntrySnapshot> tabs = tab_entries_;
     const std::vector<SpaceSwitcherEntrySnapshot> spaces = space_entries_;
@@ -1870,6 +2061,11 @@ void BrowserChrome::BeginAddressEditing() {
     if (detached_) {
         return;
     }
+    if (tokens_.look == LookPreset::kNative) {
+        address_editing_ = true;
+        address_idle_label_->SetVisible(false);
+        address_field_->SetVisible(true);
+    }
     host_->BeginAddressEditing();
     address_field_->RequestFocus();
     ScheduleAddressSelection();
@@ -1932,6 +2128,9 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
         case ChromeViewId::kReaderButton:
             host_->ExecuteBrowserCommand(BrowserCommand::kToggleReaderMode);
             return;
+        case ChromeViewId::kAddress:
+            BeginAddressEditing();
+            return;
         case ChromeViewId::kActiveTab:
             host_->FocusBrowserView();
             return;
@@ -1946,7 +2145,12 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
             return;
         case ChromeViewId::kRailAgentButton:
+        case ChromeViewId::kToolbarAgent:
             host_->ToggleAgentPanel();
+            return;
+        case ChromeViewId::kToolbarShare:
+            host_->ExecuteBrowserCommand(BrowserCommand::kCopyTabUrl);
+            host_->FocusBrowserView();
             return;
         case ChromeViewId::kRailNewSpaceButton:
             host_->ExecuteBrowserCommand(BrowserCommand::kNewSpace);
@@ -2066,7 +2270,12 @@ void BrowserChrome::ProjectNavigation(const NavigationSnapshot& snapshot) {
 
 void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     const bool editing = snapshot.mode != AddressBarMode::kResting;
+    address_editing_ = editing;
+    const bool native_idle = tokens_.look == LookPreset::kNative && !editing;
     const std::string& text = editing ? snapshot.edit_text : snapshot.display_text;
+    address_idle_label_->SetText(snapshot.display_text);
+    address_idle_label_->SetVisible(native_idle);
+    address_field_->SetVisible(!native_idle);
     address_field_->SetReadOnly(!editing);
     if (address_field_->GetText().ToString() != text) {
         address_field_->SetText(text);
@@ -2141,6 +2350,9 @@ void BrowserChrome::ApplyControlTheme() {
     root_->SetBackgroundColor(background.argb);
     sidebar_->SetBackgroundColor(rail.argb);
     browser_content_->SetBackgroundColor(browser_content.argb);
+    toolbar_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    toolbar_content_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    toolbar_hairline_->SetBackgroundColor(tokens_.border.argb);
     // The page card's rounded corners (macOS) show whatever the browser view paints behind them:
     // the canvas, not the toolkit's default.
     for (const CefRefPtr<CefBrowserView>& view : visible_browser_views()) {
@@ -2169,16 +2381,26 @@ void BrowserChrome::ApplyControlTheme() {
     // native hover/pressed ink shows when targeted.
     back_button_->SetBackgroundColor(rail.argb);
     forward_button_->SetBackgroundColor(rail.argb);
+    if (tokens_.look == LookPreset::kNative) {
+        back_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
+        forward_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    }
+    share_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    toolbar_agent_button_->SetBackgroundColor(
+        (agent_panel_open_ ? tokens_.accent_soft : tokens_.surface_secondary).argb);
     // The active-page card lifts to the primary surface against the tinted rail.
     active_page_->SetBackgroundColor(active_page_fill.argb);
     active_page_indicator_->SetBackgroundColor(accent.argb);
     UpdateAddressFocusLeadingEdge();
     address_field_->SetFontList(FontList(13, false));
+    address_idle_label_->SetBackgroundColor(address_well.argb);
+    address_idle_label_->SetFontList(FontList(13, false));
+    address_idle_label_->SetEnabledTextColors(tokens_.text.argb);
     active_tab_->SetFontList(FontList(13, false));
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
     reload_button_->SetEnabledTextColors(tokens_.text.argb);
-    reader_button_->SetFontList("Geist, Medium 12px");
+    reader_button_->SetFontList(FontList(12, true));
     reader_button_->SetEnabledTextColors(
         (reader_active_ ? tokens_.accent : tokens_.text_secondary).argb);
     reader_button_->SetTextColor(CEF_BUTTON_STATE_DISABLED,
@@ -2187,6 +2409,11 @@ void BrowserChrome::ApplyControlTheme() {
     active_page_fallback_favicon_->SetEnabledTextColors(tokens_.text_secondary.argb);
     active_tab_->SetEnabledTextColors(tokens_.text.argb);
     validation_message_->SetEnabledTextColors(tokens_.accent.argb);
+    share_button_->SetFontList(FontList(13, false));
+    share_button_->SetEnabledTextColors(tokens_.text_secondary.argb);
+    toolbar_agent_button_->SetFontList(FontList(13, false));
+    toolbar_agent_button_->SetEnabledTextColors(
+        (agent_panel_open_ ? tokens_.accent_text : tokens_.text_secondary).argb);
 
     const std::optional<CefRefPtr<CefImage>> back =
         icon_catalog_.Load(ChromeIcon::kBack, NavigationIconTone(), ChromeIconSize::k16);
@@ -2210,7 +2437,8 @@ void BrowserChrome::ApplyControlTheme() {
         active_page_fallback_favicon_->SetImage(CEF_BUTTON_STATE_NORMAL, *location);
     }
     for (const CefRefPtr<CefLabelButton>& button :
-         {back_button_, forward_button_, reload_button_, reader_button_}) {
+         {back_button_, forward_button_, reload_button_, reader_button_, share_button_,
+          toolbar_agent_button_}) {
         button->SetInkDropEnabled(true);
     }
     ApplyRailButtonTheme();
@@ -2253,11 +2481,23 @@ void BrowserChrome::ApplyRailButtonTheme() {
     if (sparkles.has_value()) {
         agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *sparkles);
     }
-    // The agent toggle lifts to the surface (and takes the accent) while the
-    // panel is open, like an active tab.
-    agent_button_->SetBackgroundColor(agent_panel_open_ ? surface.argb : rail.argb);
-    agent_button_->SetEnabledTextColors(agent_panel_open_ ? tokens_.accent.argb
-                                                          : tokens_.text_secondary.argb);
+    if (tokens_.look == LookPreset::kNative) {
+        agent_button_->SetBackgroundColor(tokens_.accent_soft.argb);
+        agent_button_->SetEnabledTextColors(tokens_.accent_text.argb);
+    } else {
+        // The agent toggle lifts to the surface (and takes the accent) while the
+        // panel is open, like an active tab.
+        agent_button_->SetBackgroundColor(agent_panel_open_ ? surface.argb : rail.argb);
+        agent_button_->SetEnabledTextColors(agent_panel_open_ ? tokens_.accent.argb
+                                                              : tokens_.text_secondary.argb);
+    }
+    if (sparkles.has_value()) {
+        toolbar_agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *sparkles);
+    }
+    toolbar_agent_button_->SetBackgroundColor(
+        (agent_panel_open_ ? tokens_.accent_soft : tokens_.surface_secondary).argb);
+    toolbar_agent_button_->SetEnabledTextColors(
+        (agent_panel_open_ ? tokens_.accent_text : tokens_.text_secondary).argb);
 }
 
 // Entry rows sit on the rail when inactive; the active tab and space take the
@@ -2267,6 +2507,14 @@ void BrowserChrome::ApplyRailButtonTheme() {
 void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
     ApplyCollapsedRailTheme();
+    for (const CefRefPtr<CefLabelButton>& header :
+         {favorites_section_header_, tabs_section_header_}) {
+        if (header != nullptr) {
+            header->SetBackgroundColor(tokens_.canvas.argb);
+            header->SetEnabledTextColors(tokens_.text_secondary.argb);
+            header->SetFontList(FontList(11, true));
+        }
+    }
     for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
          ++index) {
         ApplyTabRowVisual(index);
@@ -2279,7 +2527,9 @@ void BrowserChrome::ApplyCollectionTheme() {
         views.row->SetBackgroundColor(colors.outline.argb);
         views.inner->SetBackgroundColor(colors.fill.argb);
         views.name->SetBackgroundColor(colors.fill.argb);
-        views.color_mark->SetBackgroundColor(entry.color.argb);
+        views.color_mark->SetBackgroundColor(
+            (tokens_.look == LookPreset::kNative ? colors.fill : entry.color).argb);
+        views.color_mark->SetVisible(tokens_.look != LookPreset::kNative);
         views.name->SetEnabledTextColors(colors.title.argb);
     }
 }
@@ -2289,12 +2539,12 @@ namespace {
 std::optional<ArgbColor> RowFill(const ChromeTokens& tokens, bool active, bool pinned,
                                  bool hovered) {
     if (active) {
-        return tokens.selected;
+        return ResolveRowColors(tokens, /*selected=*/true, hovered, /*slept=*/false).fill;
     }
     if (hovered) {
-        return tokens.hover;
+        return ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/true, /*slept=*/false).fill;
     }
-    if (pinned) {
+    if (pinned && tokens.look != LookPreset::kNative) {
         return MixColor(tokens.canvas, tokens.selected, 0.5);
     }
     return std::nullopt;
@@ -2310,13 +2560,18 @@ void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
     const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
     const ArgbColor bg =
         RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+    const RowColors row_colors =
+        ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
     views.favicon->SetBackgroundColor(bg.argb);
     views.title->SetBackgroundColor(bg.argb);
     views.close->SetBackgroundColor(bg.argb);
     views.title->SetEnabledTextColors(
-        (entry.sleeping ? SleepingTitleColor(colors.title, bg) : colors.title).argb);
+        (tokens_.look == LookPreset::kNative
+             ? row_colors.title
+             : (entry.sleeping ? SleepingTitleColor(colors.title, bg) : colors.title))
+            .argb);
     views.close->SetEnabledTextColors(colors.trailing.argb);
     if (views.favicon_source != nullptr) {
         const CefRefPtr<CefImage> source =
@@ -2345,8 +2600,13 @@ void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
     views.button->SetBackgroundColor(bg.argb);
+    const RowColors row_colors =
+        ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
     views.button->SetEnabledTextColors(
-        (entry.sleeping ? SleepingTitleColor(colors.title, bg) : colors.title).argb);
+        (tokens_.look == LookPreset::kNative
+             ? row_colors.title
+             : (entry.sleeping ? SleepingTitleColor(colors.title, bg) : colors.title))
+            .argb);
     if (views.favicon_source != nullptr) {
         const CefRefPtr<CefImage> source =
             entry.sleeping ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
@@ -2527,11 +2787,23 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
             continue;
         }
         const SpaceSwitcherEntrySnapshot& entry = space_entries_[views.source_index];
-        views.button->SetBackgroundColor(rail.argb);
-        views.button->SetImage(
-            CEF_BUTTON_STATE_NORMAL,
-            MakeSpaceDotImage(entry.color, entry.active ? tokens_.text : tokens_.text_secondary,
-                              entry.active));
+        if (tokens_.look == LookPreset::kNative) {
+            const ArgbColor fill = entry.active ? tokens_.fill : rail;
+            views.button->SetBackgroundColor(fill.argb);
+            SetAllStateImages(views.button, nullptr);
+            views.button->SetText(
+                SpacePillLabel({.color = entry.color, .name = entry.name, .active = false}));
+            views.button->SetEnabledTextColors(
+                (entry.active ? tokens_.text : tokens_.text_secondary).argb);
+            views.button->SetFontList(FontList(12, entry.active));
+        } else {
+            views.button->SetText("");
+            views.button->SetBackgroundColor(rail.argb);
+            views.button->SetImage(
+                CEF_BUTTON_STATE_NORMAL,
+                MakeSpaceDotImage(entry.color, entry.active ? tokens_.text : tokens_.text_secondary,
+                                  entry.active));
+        }
     }
 }
 

@@ -184,7 +184,8 @@ std::vector<ChromeTokens> AllTokenSets() {
             sets.push_back(base.TintedForSpace({.argb = space}, theme));
             for (const int tint : {0, 35, 100}) {
                 sets.push_back(
-                    base.Customized({.argb = space}, theme, {.sidebar_tint_percent = tint}));
+                    base.Customized({.argb = space}, theme,
+                                    {.look = LookPreset::kGraphite, .sidebar_tint_percent = tint}));
             }
         }
     }
