@@ -15,6 +15,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- The Native sidebar bottom is redesigned: one full-width Agent button (sparkle, 32 DIP)
+  sits at the very bottom of the sidebar and is tinted while the agent panel is open; the toolbar
+  Agent button is gone under Native (the address-field agent dot shows agent state).
+- Native spaces are a segmented control: a 24 DIP track with one segment per space (name only,
+  no color dot), a "+" button for a new space, and overview and settings icon buttons at its
+  right end. With more than four spaces the inactive segments show only their initial.
+- Native's "New Tab" row moves below the last tab. Arc and Graphite keep their sidebar.
+
 - ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,

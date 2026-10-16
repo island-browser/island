@@ -1979,7 +1979,7 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         pill_settings.between_child_spacing = tokens_.spacing_1_dip;
         pill_settings.inside_border_horizontal_spacing = tokens_.spacing_2_dip;
         pill_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
-        views.inner->SetToBoxLayout(pill_settings);
+        CefRefPtr<CefBoxLayout> pill_layout = views.inner->SetToBoxLayout(pill_settings);
         views.row->AddChildView(views.inner);
 
         // The color mark is the space's dot: the same size for every chip, so the
@@ -2012,9 +2012,19 @@ void BrowserChrome::SetSpaceSwitcherEntries(
             CefSize(pill_height - 2 * kHairlineDip - 2 * tokens_.spacing_2_dip,
                     pill_height - 2 * kHairlineDip));
         views.inner->AddChildView(views.name);
+        // Native segments share the track: each segment and its label take an equal flex
+        // share so the selected surface covers the whole segment, not the label's minimum.
+        if (native) {
+            pill_layout->SetFlexForView(views.name, 1);
+        }
 
         space_entry_views_.push_back(views);
         space_switcher_->AddChildView(views.row);
+        if (native) {
+            if (CefRefPtr<CefBoxLayout> track = space_switcher_->GetLayout()->AsBoxLayout()) {
+                track->SetFlexForView(views.row, 1);
+            }
+        }
     }
     if (tabs_section_header_ != nullptr) {
         const std::string title = ActiveSpaceSectionTitle();
@@ -2265,7 +2275,8 @@ void BrowserChrome::ApplyLookStructure() {
     if (native) {
         // The footer's fixed height (Agent entry, gap, switcher row) keeps the box layout from
         // stretching the Agent entry down the rail.
-        const int footer_height = kNativeSwitcherRowDip + tokens_.spacing_1_dip + kNativeAgentHeightDip;
+        const int footer_height =
+            kNativeSwitcherRowDip + tokens_.spacing_1_dip + kNativeAgentHeightDip;
         rail_footer_delegate_->SetPreferredSize(CefSize(0, footer_height));
         agent_button_->SetMinimumSize(CefSize(0, kNativeAgentHeightDip));
         for (const CefRefPtr<CefLabelButton>& button :
