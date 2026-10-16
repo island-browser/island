@@ -88,6 +88,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/history_recorder.cc"
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/find_bar_model.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/cheatsheet_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/find_bar_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/reader_mode.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window_find_reader.cc"

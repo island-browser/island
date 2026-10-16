@@ -31,6 +31,7 @@ add_library(island_browser_core STATIC
     island_app.cc
     keymap.cc
     find_bar_model.cc
+    cheatsheet_overlay.cc
     find_bar_overlay.cc
     reader_mode.cc
     browser_window_find_reader.cc

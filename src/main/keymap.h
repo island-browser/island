@@ -54,9 +54,10 @@ enum class KeyAction : std::uint8_t {
     kFindNext,
     kFindPrevious,
     kReaderMode,
+    kShowCheatsheet,
 };
 
-inline constexpr std::size_t kKeyActionCount = 36;
+inline constexpr std::size_t kKeyActionCount = 37;
 
 struct KeyBinding {
     // Windows virtual-key code (CEF's key_code convention).
@@ -92,6 +93,10 @@ struct KeyActionInfo {
 // Control is always spelled "Control" so the text parses back to the same
 // binding.
 [[nodiscard]] std::string FormatKeyBinding(const KeyBinding& binding, bool mac = false);
+// The keycap text the cheatsheet shows, matching Settings > Shortcuts: "⌥⇧⌘K" on macOS
+// (Control, Option, Shift, Command, then the key; arrows, Tab, Enter and Backspace as
+// symbols, Escape as "esc"), "Ctrl+Alt+Shift+K" elsewhere.
+[[nodiscard]] std::string FormatKeyGlyphs(const KeyBinding& binding, bool mac);
 
 // What NSMenuItem needs: the key equivalent (lowercase letter, punctuation,
 // or a function-key character as UTF-8) and its modifier mask flags.
@@ -132,6 +137,20 @@ class Keymap {
   private:
     std::array<std::optional<KeyBinding>, kKeyActionCount> bindings_{};
 };
+
+// One row of the ⌘/ cheatsheet: what it does and its current keys ("" when unbound).
+struct CheatsheetRow {
+    std::string label;
+    std::string keys;
+
+    bool operator==(const CheatsheetRow&) const = default;
+};
+
+// The ten most-used bindings in the spec's order (Command palette, Ask agent, Toggle sidebar,
+// Split view, New tab, Close tab, Find in page, Reader view, Settings, Cheatsheet), each with
+// its binding in `keymap`. The one-argument form spells the keys for this platform.
+[[nodiscard]] std::vector<CheatsheetRow> CheatsheetRows(const Keymap& keymap, bool mac);
+[[nodiscard]] std::vector<CheatsheetRow> CheatsheetRows(const Keymap& keymap);
 
 }  // namespace island
 

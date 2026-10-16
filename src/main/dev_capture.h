@@ -12,7 +12,8 @@
 //       opens the peek card, `sleep_tabs` puts eligible inactive tabs to sleep and
 //       `sleep_report` logs the sleeping-tab count, `wait:<seconds>` pauses the sequence,
 //       `research:<question>` starts a Research task and `open_report` opens the newest stored
-//       report in a new tab. `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
+//       report in a new tab, and `cheatsheet` opens the shortcut cheatsheet.
+//       `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
 //       density, font,
 //       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the
 //       Settings > Appearance path.
@@ -44,6 +45,10 @@ struct DevCaptureOptions {
     // kept), never fatal: these flags must not be able to break a normal run.
     [[nodiscard]] static DevCaptureOptions Parse(std::span<const std::string_view> arguments);
 };
+
+// The menu selector a menu-backed action name runs ("cheatsheet" -> "showCheatsheet:"), or ""
+// for parameterized and unknown actions.
+[[nodiscard]] std::string_view DevActionSelectorName(std::string_view action);
 
 }  // namespace island
 

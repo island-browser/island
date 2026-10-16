@@ -52,6 +52,7 @@ constexpr std::array<KeyActionInfo, kKeyActionCount> kActions = {{
     {KeyAction::kFindPrevious, "find_previous", "Find previous match", "Mod+Shift+G"},
     // Mod+Shift+R is Reload ignoring cache, so Reader mode takes Mod+Alt+R.
     {KeyAction::kReaderMode, "reader_mode", "Reader mode", "Mod+Alt+R"},
+    {KeyAction::kShowCheatsheet, "cheatsheet", "Show shortcut cheatsheet", "Mod+/"},
 }};
 
 struct NamedKey {
@@ -228,6 +229,46 @@ std::string FormatKeyBinding(const KeyBinding& binding, bool mac) {
     return text;
 }
 
+std::string FormatKeyGlyphs(const KeyBinding& binding, bool mac) {
+    if (!mac) {
+        std::string text;
+        if (binding.primary || binding.control) text += "Ctrl+";
+        if (binding.alt) text += "Alt+";
+        if (binding.shift) text += "Shift+";
+        return text + KeyName(binding.key_code);
+    }
+    // Separate constants: a hex escape followed by a letter would swallow the letter.
+    constexpr std::string_view kControl = "\u2303";
+    constexpr std::string_view kOption = "\u2325";
+    constexpr std::string_view kShift = "\u21E7";
+    constexpr std::string_view kCommand = "\u2318";
+    std::string text;
+    if (binding.control) text += kControl;
+    if (binding.alt) text += kOption;
+    if (binding.shift) text += kShift;
+    if (binding.primary) text += kCommand;
+    switch (binding.key_code) {
+        case 0x25:
+            return text + "\u2190";
+        case 0x26:
+            return text + "\u2191";
+        case 0x27:
+            return text + "\u2192";
+        case 0x28:
+            return text + "\u2193";
+        case 0x09:
+            return text + "\u21E5";
+        case 0x0D:
+            return text + "\u21A9";
+        case 0x08:
+            return text + "\u232B";
+        case 0x1B:
+            return text + "esc";
+        default:
+            return text + KeyName(binding.key_code);
+    }
+}
+
 std::optional<MacKeyEquivalent> ToMacKeyEquivalent(const KeyBinding& binding) {
     MacKeyEquivalent equivalent{.key = {},
                                 .command = binding.primary,
@@ -338,6 +379,37 @@ std::vector<std::pair<std::string, std::string>> Keymap::Overrides() const {
                                current ? FormatKeyBinding(*current) : std::string());
     }
     return overrides;
+}
+
+std::vector<CheatsheetRow> CheatsheetRows(const Keymap& keymap, bool mac) {
+    static constexpr std::array<std::pair<std::string_view, KeyAction>, 10> kRows = {{
+        {"Command palette", KeyAction::kCommandPalette},
+        {"Ask agent", KeyAction::kToggleAgentPanel},
+        {"Toggle sidebar", KeyAction::kToggleSidebar},
+        {"Split view", KeyAction::kToggleSplit},
+        {"New tab", KeyAction::kNewTab},
+        {"Close tab", KeyAction::kCloseTab},
+        {"Find in page", KeyAction::kFindInPage},
+        {"Reader view", KeyAction::kReaderMode},
+        {"Settings", KeyAction::kSettings},
+        {"Cheatsheet", KeyAction::kShowCheatsheet},
+    }};
+    std::vector<CheatsheetRow> rows;
+    rows.reserve(kRows.size());
+    for (const auto& [label, action] : kRows) {
+        const std::optional<KeyBinding> binding = keymap.Binding(action);
+        rows.push_back({.label = std::string(label),
+                        .keys = binding ? FormatKeyGlyphs(*binding, mac) : std::string()});
+    }
+    return rows;
+}
+
+std::vector<CheatsheetRow> CheatsheetRows(const Keymap& keymap) {
+#if defined(__APPLE__)
+    return CheatsheetRows(keymap, /*mac=*/true);
+#else
+    return CheatsheetRows(keymap, /*mac=*/false);
+#endif
 }
 
 }  // namespace island

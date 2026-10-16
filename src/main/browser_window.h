@@ -25,13 +25,14 @@
 #include "browser_command.h"
 #include "browser_import.h"
 #include "cef_content_blocker.h"
+#include "cheatsheet_overlay.h"
 #include "chrome_snapshot.h"
 #include "clipboard.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
-#include "history_recorder.h"
 #include "find_bar_model.h"
 #include "find_bar_overlay.h"
+#include "history_recorder.h"
 #include "include/cef_client.h"
 #include "include/cef_request_handler.h"
 #include "include/cef_resource_request_handler.h"
@@ -98,6 +99,7 @@ class BrowserWindow : public CefClient,
                       public SpaceRenameOverlayHost,
                       public PeekOverlayHost,
                       public FindBarOverlayHost,
+                      public CheatsheetOverlayHost,
                       public WelcomeFlowHost,
                       public LocalPageDelegate,
                       public NavigationObserver {
@@ -385,6 +387,11 @@ class BrowserWindow : public CefClient,
     bool OpenPeek(std::string_view url);
     void ClosePeek();
     [[nodiscard]] bool peek_open() const noexcept { return peek_ != nullptr && peek_->open(); }
+    // The ⌘/ shortcut cheatsheet. While it is open it owns Escape, ahead of a peek and of
+    // stop-loading.
+    [[nodiscard]] bool cheatsheet_open() const noexcept {
+        return cheatsheet_ != nullptr && cheatsheet_->visible();
+    }
     [[nodiscard]] const PeekOverlay* peek() const noexcept { return peek_.get(); }
 
     void ShowWelcomeFlow();
@@ -477,6 +484,7 @@ class BrowserWindow : public CefClient,
     void OnFindStep(bool forward) override;
     void OnFindMatchCaseChanged(bool match_case) override;
     void OnFindCloseRequested() override;
+    void OnCheatsheetCloseRequested(bool refocus_page) override;
 
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
@@ -654,8 +662,13 @@ class BrowserWindow : public CefClient,
     void CloseFindBar(bool refocus_page);
     void RefreshFindCount(bool final_update);
     [[nodiscard]] CefRect FindAnchorBounds() const;
-    void UpdateFindBarBounds();
-    void ScheduleFindBarBounds();
+    // Re-anchors the overlays pinned to the page card (the find bar and the cheatsheet).
+    void UpdateAnchoredOverlayBounds();
+    void ScheduleAnchoredOverlayBounds();
+    void ToggleCheatsheet();
+    // Escape, the close button and ⌘/ hand the keyboard back to the page; a click elsewhere
+    // (a palette opening, a click in the page) keeps the focus it moved.
+    void CloseCheatsheet(bool refocus_page);
     void StepFind(bool forward);
     [[nodiscard]] bool ReaderActiveFor(const Tab& tab) const;
     // The page address a tab should show and persist: the original page while its reader view
@@ -824,6 +837,8 @@ class BrowserWindow : public CefClient,
     FindBarModel find_model_;
     std::unique_ptr<FindBarOverlay> find_overlay_;
     std::optional<TabId> find_tab_;
+    // The ⌘/ cheatsheet card; its overlay exists only while it is shown.
+    std::unique_ptr<CheatsheetOverlay> cheatsheet_;
     std::filesystem::path icon_resource_root_;
     // Reader view, per tab. The session records where the reader document came from and which
     // data: URL it is, so the window can tell when the tab is showing it (also after Back and

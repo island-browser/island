@@ -15,6 +15,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
+  a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
+  (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,
+  Reader view, Settings, Cheatsheet) with their current keys. ⌘/ again, Esc, its close button
+  or a click outside closes it, and the shortcut is configurable in Settings like the others.
 - Settings > Keyboard shortcuts records a new shortcut when you click a row: the row shows an
   accent outline and "Press keys…", and Esc cancels. A chord another action already uses is not
   taken silently: an amber banner says "⌘B is already used by Toggle sidebar." with Replace

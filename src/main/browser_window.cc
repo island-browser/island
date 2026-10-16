@@ -532,6 +532,11 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             return;
         }
         case BrowserCommand::kStopLoading: {
+            // Escape closes the cheatsheet first, then a peek, and only then stops loading.
+            if (cheatsheet_open()) {
+                CloseCheatsheet(/*refocus_page=*/true);
+                return;
+            }
             if (peek_open() && !OverlayShown()) {
                 ClosePeek();
                 return;
@@ -565,6 +570,9 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             return;
         case BrowserCommand::kToggleReaderMode:
             ToggleReaderMode();
+            return;
+        case BrowserCommand::kShowCheatsheet:
+            ToggleCheatsheet();
             return;
         case BrowserCommand::kCopyTabUrl: {
             const Tab* tab = active_tab();
@@ -1908,7 +1916,11 @@ bool BrowserWindow::CanStopLoading() const {
 }
 
 bool BrowserWindow::CanStopLoadingWithEscape() const {
-    // An open peek owns Escape (it closes the card) unless a palette or dialog sits above it.
+    // An open cheatsheet owns Escape (it closes the sheet). An open peek owns it next (it
+    // closes the card) unless a palette or dialog sits above it.
+    if (cheatsheet_open()) {
+        return true;
+    }
     if (peek_open() && !OverlayShown()) {
         return true;
     }
@@ -3071,7 +3083,7 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->UpdateBounds();
     }
-    ScheduleFindBarBounds();
+    ScheduleAnchoredOverlayBounds();
     if (welcome_ != nullptr && welcome_->visible()) {
         welcome_->UpdateBounds();
     }
@@ -3334,6 +3346,9 @@ void BrowserWindow::RunKeyAction(KeyAction action) {
         case KeyAction::kReaderMode:
             ExecuteCommand(BrowserCommand::kToggleReaderMode);
             return;
+        case KeyAction::kShowCheatsheet:
+            ExecuteCommand(BrowserCommand::kShowCheatsheet);
+            return;
         case KeyAction::kNextTabAlternate:
             ExecuteCommand(BrowserCommand::kNextTab);
             return;
@@ -3401,6 +3416,8 @@ void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
     if (!closing_ && tab != nullptr && tab->browser_view() != nullptr && view != nullptr &&
         view->IsSame(tab->browser_view())) {
         CancelAddressEditing();
+        // A click in the page is a click outside the cheatsheet.
+        CloseCheatsheet(/*refocus_page=*/false);
     }
 }
 
@@ -3649,6 +3666,9 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     if (space_rename_overlay_ != nullptr) {
         space_rename_overlay_->ApplyTheme(tokens);
     }
+    if (cheatsheet_ != nullptr) {
+        cheatsheet_->ApplyTheme(tokens);
+    }
     if (find_overlay_ != nullptr) {
         find_overlay_->ApplyTheme(tokens);
     }
@@ -3689,6 +3709,10 @@ void BrowserWindow::DetachChromeAndObservers() {
     if (peek_ != nullptr) {
         peek_->Detach();
         peek_.reset();
+    }
+    if (cheatsheet_ != nullptr) {
+        cheatsheet_->Detach();
+        cheatsheet_.reset();
     }
     if (find_overlay_ != nullptr) {
         find_overlay_->Detach();
@@ -3982,6 +4006,7 @@ void BrowserWindow::ShowSearchPalette() {
     if (closing_ || window_ == nullptr) {
         return;
     }
+    CloseCheatsheet(/*refocus_page=*/false);
     if (search_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+Shift+K, then only shown and hidden.
         search_palette_ =
@@ -3995,6 +4020,7 @@ void BrowserWindow::ShowCommandPalette() {
     if (closing_ || window_ == nullptr) {
         return;
     }
+    CloseCheatsheet(/*refocus_page=*/false);
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
@@ -4490,7 +4516,7 @@ void BrowserWindow::ApplySidebarState() {
     chrome_snapshot_.rail_bounds.x = sidebar_right ? std::max(0, window_width - rail_width) : 0;
     chrome_snapshot_.content_bounds.x = sidebar_right ? panel_width : rail_width;
     chrome_snapshot_.content_bounds.width = std::max(0, window_width - rail_width - panel_width);
-    ScheduleFindBarBounds();
+    ScheduleAnchoredOverlayBounds();
     ApplyDragRegions();
     SchedulePageCardRefresh();
 }

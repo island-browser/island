@@ -75,6 +75,7 @@
 - (void)togglePinTab:(id)sender;
 - (void)openSettings:(id)sender;
 - (void)openTabOverview:(id)sender;
+- (void)showCheatsheet:(id)sender;
 - (void)newTab:(id)sender;
 - (void)closeTab:(id)sender;
 - (void)selectNextTab:(id)sender;
@@ -224,6 +225,13 @@
     }
 }
 
+// The shortcut cheatsheet; the dev `cheatsheet` action uses it too.
+- (void)showCheatsheet:(id)sender {
+    if (app_ != nullptr) {
+        app_->RunKeyAction(island::KeyAction::kShowCheatsheet);
+    }
+}
+
 - (void)openTabOverview:(id)sender {
     if (app_ != nullptr) {
         app_->ToggleTabOverview();
@@ -331,31 +339,11 @@ class MenuActionsReleaseObserver final : public island::IslandAppReleaseObserver
 // Maps a dev action name to the menu selector that performs it, so a capture
 // exercises exactly the path a user's menu or key equivalent takes.
 SEL DevActionSelector(const std::string& action) {
-    static const std::pair<const char*, const char*> kActions[] = {
-        {"welcome", "showWelcome:"},
-        {"theme:system", "useSystemTheme:"},
-        {"theme:light", "useLightTheme:"},
-        {"theme:dark", "useDarkTheme:"},
-        {"command_palette", "openCommandPalette:"},
-        {"search_palette", "openSearchPalette:"},
-        {"focus_address", "focusAddress:"},
-        {"toggle_sidebar", "toggleSidebar:"},
-        {"toggle_agent", "toggleAgentPanel:"},
-        {"settings", "openSettings:"},
-        {"tab_overview", "openTabOverview:"},
-        {"new_tab", "newTab:"},
-        {"next_tab", "selectNextTab:"},
-        {"previous_tab", "selectPreviousTab:"},
-        {"toggle_split", "toggleSplit:"},
-        {"new_space", "newSpace:"},
-        {"rename_space", "beginSpaceRenaming:"},
-    };
-    for (const auto& [name, selector] : kActions) {
-        if (action == name) {
-            return NSSelectorFromString([NSString stringWithUTF8String:selector]);
-        }
+    const std::string_view selector = island::DevActionSelectorName(action);
+    if (selector.empty()) {
+        return nullptr;
     }
-    return nullptr;
+    return NSSelectorFromString([NSString stringWithUTF8String:std::string(selector).c_str()]);
 }
 
 // Composites every visible window of this process (the browser window plus
@@ -841,6 +829,18 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
+    // Help: the shortcut cheatsheet (Cmd+/ by default), following the keymap like the
+    // Browser-menu items above.
+    NSMenuItem* help_menu_item = [[NSMenuItem alloc] initWithTitle:@"Help"
+                                                            action:nil
+                                                     keyEquivalent:@""];
+    NSMenu* help_menu = [[NSMenu alloc] initWithTitle:@"Help"];
+    NSMenuItem* cheatsheet_menu_item = AddKeyActionMenuItem(
+        help_menu, menu_actions, @"Keyboard Shortcuts", island::KeyAction::kShowCheatsheet, keymap);
+    [help_menu_item setSubmenu:help_menu];
+    [main_menu addItem:help_menu_item];
+    [NSApp setHelpMenu:help_menu];
+
     // Every configurable shortcut follows the keymap.
     ApplyKeyBinding(back_menu_item, island::KeyAction::kBack, keymap);
     ApplyKeyBinding(forward_menu_item, island::KeyAction::kForward, keymap);
@@ -865,6 +865,9 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
 
     [NSApp setMainMenu:main_menu];
 
+    [cheatsheet_menu_item release];
+    [help_menu release];
+    [help_menu_item release];
     [settings_menu_item release];
     [toggle_agent_menu_item release];
     [pin_tab_menu_item release];
