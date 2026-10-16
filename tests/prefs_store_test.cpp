@@ -77,6 +77,7 @@ TEST(PrefsStoreTest, GivenAnUnknownLookWhenLoadedThenStoredKnobsStayCustom) {
         R"({"version":1,"onboarding_completed":true,"theme":"dark","appearance":{"look":"future","sidebar_tint_percent":37,"card_radius":6,"font":"system","card_shadow":false,"full_bleed":false}})");
     const PrefsLoadResult loaded = PrefsStore::Load(path);
     ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.appearance.look, LookPreset::kArc);
     EXPECT_EQ(loaded.state.appearance.sidebar_tint_percent, 37);
     EXPECT_EQ(loaded.state.appearance.card_radius_dip, 6);
     EXPECT_EQ(loaded.state.appearance.font_family, "system");

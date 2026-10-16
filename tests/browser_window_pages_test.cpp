@@ -108,13 +108,29 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     ASSERT_TRUE(state.has_value());
     const Value* theme = state->FindMember("theme");
     ASSERT_NE(theme, nullptr);
-    EXPECT_EQ(theme->StringOr("selection", ""), "#0a64d8");
+    const std::pair<std::string_view, std::string_view> expected[] = {
+        {"bg", "#ebebef"},          {"surface", "#ffffff"},   {"surface_2", "#f6f6f8"},
+        {"fill", "#e8e8ed"},        {"text", "#1d1d1f"},      {"text_2", "#636366"},
+        {"text_3", "#8e8e93"},      {"border", "#e5e5ea"},    {"border_2", "#d2d2d7"},
+        {"accent", "#0a64d8"},      {"selection", "#0a64d8"}, {"accent_soft", "#dfe9f8"},
+        {"accent_text", "#0a4fa8"}, {"warn_bg", "#fff8e6"},   {"warn_border", "#f5d38a"},
+        {"warn_text", "#6a4a00"},   {"success", "#248a3d"},   {"danger", "#d70015"},
+        {"canvas", "#ebebef"},
+    };
+    for (const auto& [key, value] : expected) {
+        EXPECT_EQ(theme->StringOr(key, ""), value) << key;
+    }
+    EXPECT_EQ(theme->StringOr("font", ""),
+              "ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif");
+    EXPECT_FALSE(theme->BoolOr("dark", true));
     const Value* branch = theme->FindMember("branch");
     ASSERT_NE(branch, nullptr);
     ASSERT_TRUE(branch->IsArray());
     ASSERT_EQ(branch->array_val.size(), 4U);
-    for (const Value& color : branch->array_val) {
-        EXPECT_TRUE(color.IsString());
+    const std::string_view expected_branches[] = {"#0a64d8", "#8e44ad", "#c25400", "#1f8a70"};
+    for (std::size_t i = 0; i < branch->array_val.size(); ++i) {
+        ASSERT_TRUE(branch->array_val[i].IsString());
+        EXPECT_EQ(branch->array_val[i].string_val, expected_branches[i]);
     }
 }
 

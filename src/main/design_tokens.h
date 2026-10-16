@@ -37,6 +37,8 @@ enum class LookPreset : std::uint8_t { kNative, kArc, kGraphite };
 // The user-customizable look layered on the theme tokens (Settings > Appearance, persisted in
 // prefs). CEF-free; every field is clamped/normalized by NormalizeAppearance before use.
 struct AppearanceSettings {
+    // The token base these knobs were derived from. Settings displays MatchingLook(), not this
+    // stored identity, so changing any knob makes its label read Custom.
     LookPreset look = LookPreset::kNative;
     // How strongly the active space's color tints the sidebar and canvas, 0 (neutral graphite)
     // to 100 (vivid).

@@ -15,7 +15,6 @@ CONTRACT_FENCE = re.compile(
     r"```design-tokens-native[ \t]*\n(?P<json>.*?)\n```", re.DOTALL
 )
 HEX_COLOR = re.compile(r"^#[0-9A-F]{6}$")
-NATIVE_HEX = re.compile(r"0xFF([0-9A-F]{6})U")
 COLOR_SLOTS = {
     "background",
     "surface",
@@ -40,6 +39,31 @@ COLOR_SLOTS = {
     "branch_c",
     "branch_d",
 }
+BRANCH_SLOTS = ("branch_a", "branch_b", "branch_c", "branch_d")
+
+
+def load_pinned_colors(theme: str) -> dict[str, str]:
+    native_test = NATIVE_TOKEN_TEST.read_text(encoding="utf-8")
+    test_name = f"{theme.title()}MatchesTheSpec"
+    block = re.search(
+        rf"TEST\(NativeLookTokensTest, {test_name}\) \{{(?P<body>.*?)(?=\nTEST\()",
+        native_test,
+        re.DOTALL,
+    )
+    if block is None:
+        raise ValueError(f"missing NativeLookTokensTest.{test_name}")
+    pinned = {
+        slot: f"#{rgb}"
+        for slot, rgb in re.findall(
+            r"EXPECT_EQ\(t\.(\w+)\.argb, 0xFF([0-9A-F]{6})U\);", block.group("body")
+        )
+    }
+    for index, rgb in re.findall(
+        r"EXPECT_EQ\(t\.branch\[(\d)\]\.argb, 0xFF([0-9A-F]{6})U\);",
+        block.group("body"),
+    ):
+        pinned[BRANCH_SLOTS[int(index)]] = f"#{rgb}"
+    return pinned
 
 
 def load_contract() -> dict:
@@ -74,13 +98,10 @@ class NativeLookContractTest(unittest.TestCase):
                 with self.subTest(theme=theme, slot=slot):
                     self.assertRegex(value, HEX_COLOR)
 
-    def test_every_contract_color_is_pinned_in_the_native_tests(self) -> None:
-        native_test = NATIVE_TOKEN_TEST.read_text(encoding="utf-8")
-        asserted_colors = {f"#{rgb}" for rgb in NATIVE_HEX.findall(native_test)}
+    def test_every_contract_slot_is_pinned_to_its_value_in_the_native_tests(self) -> None:
         for theme in ("light", "dark"):
-            for slot, value in self.contract["colors"][theme].items():
-                with self.subTest(theme=theme, slot=slot):
-                    self.assertIn(value, asserted_colors)
+            with self.subTest(theme=theme):
+                self.assertEqual(load_pinned_colors(theme), self.contract["colors"][theme])
 
 
 if __name__ == "__main__":
