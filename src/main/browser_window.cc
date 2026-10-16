@@ -533,17 +533,24 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
         }
         case BrowserCommand::kStopLoading: {
             // Escape closes the cheatsheet first, then a peek, and only then stops loading.
-            if (cheatsheet_open()) {
-                CloseCheatsheet(/*refocus_page=*/true);
-                return;
-            }
-            if (peek_open() && !OverlayShown()) {
-                ClosePeek();
-                return;
-            }
-            Tab* tab = active_tab();
-            if (tab != nullptr && tab->browser() != nullptr) {
-                tab->browser()->StopLoad();
+            // The palettes do not block this command, only the Escape route (see below).
+            switch (ResolveStopLoading(cheatsheet_open(), peek_open() && !OverlayShown(),
+                                       CanStopLoading())) {
+                case StopLoadingTarget::kCloseCheatsheet:
+                    CloseCheatsheet(/*refocus_page=*/true);
+                    return;
+                case StopLoadingTarget::kClosePeek:
+                    ClosePeek();
+                    return;
+                case StopLoadingTarget::kStopLoad: {
+                    Tab* tab = active_tab();
+                    if (tab != nullptr && tab->browser() != nullptr) {
+                        tab->browser()->StopLoad();
+                    }
+                    return;
+                }
+                case StopLoadingTarget::kNone:
+                    return;
             }
             return;
         }
@@ -1917,14 +1924,10 @@ bool BrowserWindow::CanStopLoading() const {
 
 bool BrowserWindow::CanStopLoadingWithEscape() const {
     // An open cheatsheet owns Escape (it closes the sheet). An open peek owns it next (it
-    // closes the card) unless a palette or dialog sits above it.
-    if (cheatsheet_open()) {
-        return true;
-    }
-    if (peek_open() && !OverlayShown()) {
-        return true;
-    }
-    return CanStopLoading() && !OverlayShown();
+    // closes the card) unless a palette or dialog sits above it, and only then does Escape
+    // stop a loading page.
+    return ResolveStopLoading(cheatsheet_open(), peek_open() && !OverlayShown(),
+                              CanStopLoading() && !OverlayShown()) != StopLoadingTarget::kNone;
 }
 
 bool BrowserWindow::OverlayShown() const noexcept {

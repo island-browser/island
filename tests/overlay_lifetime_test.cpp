@@ -67,32 +67,37 @@ TEST(OverlayLifetimeTest, GivenAHiddenSurfaceWhenDetachedThenNoDestroyIsNeeded) 
 
 // The ⌘/ cheatsheet: no live overlay may be left behind once it closes, whichever way it
 // closes (the macOS mouse-input regression).
-TEST(CheatsheetLifetimeTest, EscapeDestroysTheOverlayOnce) {
-    CheatsheetLifetime cheatsheet;
-    ASSERT_EQ(cheatsheet.Toggle(), OverlayStep::kCreate);
-    ASSERT_TRUE(cheatsheet.overlay_expected());
-
-    EXPECT_EQ(cheatsheet.HandleKey(kCheatsheetEscapeKeyCode), OverlayStep::kDestroy);
-    EXPECT_FALSE(cheatsheet.overlay_expected());
-    EXPECT_FALSE(cheatsheet.visible());
-    EXPECT_EQ(cheatsheet.HandleKey(kCheatsheetEscapeKeyCode), OverlayStep::kNone);
+// Escape is routed by the window, not by the sheet: the cheatsheet comes first, then a peek,
+// then stop-loading. The window feeds both the Escape predicate and the stop-loading command
+// through this one function, so the two cannot disagree.
+TEST(StopLoadingPriorityTest, GivenAnOpenCheatsheetWhenResolvedThenItWinsOverAPeekAndStop) {
+    EXPECT_EQ(ResolveStopLoading(/*cheatsheet_open=*/true, /*peek_claims=*/true,
+                                 /*can_stop_load=*/true),
+              StopLoadingTarget::kCloseCheatsheet);
 }
 
-TEST(CheatsheetLifetimeTest, OtherKeysLeaveItOpen) {
-    CheatsheetLifetime cheatsheet;
-    ASSERT_EQ(cheatsheet.Toggle(), OverlayStep::kCreate);
-
-    EXPECT_EQ(cheatsheet.HandleKey('K'), OverlayStep::kNone);
-    EXPECT_TRUE(cheatsheet.overlay_expected());
+TEST(StopLoadingPriorityTest, GivenAnOpenCheatsheetWhenNotLoadingThenItStillWins) {
+    EXPECT_EQ(ResolveStopLoading(/*cheatsheet_open=*/true, /*peek_claims=*/false,
+                                 /*can_stop_load=*/false),
+              StopLoadingTarget::kCloseCheatsheet);
 }
 
-TEST(CheatsheetLifetimeTest, AClickOutsideDestroysTheOverlay) {
-    CheatsheetLifetime cheatsheet;
-    ASSERT_EQ(cheatsheet.Toggle(), OverlayStep::kCreate);
+TEST(StopLoadingPriorityTest, GivenAnOpenPeekWhenResolvedThenItWinsOverStop) {
+    EXPECT_EQ(ResolveStopLoading(/*cheatsheet_open=*/false, /*peek_claims=*/true,
+                                 /*can_stop_load=*/true),
+              StopLoadingTarget::kClosePeek);
+}
 
-    EXPECT_EQ(cheatsheet.ClickOutside(), OverlayStep::kDestroy);
-    EXPECT_FALSE(cheatsheet.overlay_expected());
-    EXPECT_EQ(cheatsheet.ClickOutside(), OverlayStep::kNone);
+TEST(StopLoadingPriorityTest, GivenNothingOpenWhenLoadingThenItStopsLoading) {
+    EXPECT_EQ(ResolveStopLoading(/*cheatsheet_open=*/false, /*peek_claims=*/false,
+                                 /*can_stop_load=*/true),
+              StopLoadingTarget::kStopLoad);
+}
+
+TEST(StopLoadingPriorityTest, GivenNothingOpenWhenNotLoadingThenNothingHappens) {
+    EXPECT_EQ(ResolveStopLoading(/*cheatsheet_open=*/false, /*peek_claims=*/false,
+                                 /*can_stop_load=*/false),
+              StopLoadingTarget::kNone);
 }
 
 TEST(CheatsheetLifetimeTest, TheShortcutTogglesItClosedAndOpenAgain) {

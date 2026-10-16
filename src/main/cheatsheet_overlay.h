@@ -18,23 +18,17 @@ class CefWindow;
 
 namespace island {
 
-constexpr int kCheatsheetEscapeKeyCode = 0x1B;
-
 // The CEF-free open/close decisions of the shortcut cheatsheet. Every way the sheet closes
-// (its shortcut again, Escape, a click outside, the window going away) returns the one
-// OverlayStep that keeps "an overlay exists only while the sheet is shown" true, so no live
-// overlay is left behind to swallow mouse input on macOS (see overlay_lifetime.h).
+// (its shortcut again, Escape through the stop-loading route, a click outside, the window going
+// away) ends in the one OverlayStep that keeps "an overlay exists only while the sheet is
+// shown" true, so no live overlay is left behind to swallow mouse input on macOS (see
+// overlay_lifetime.h).
 class CheatsheetLifetime {
   public:
     // ⌘/ (Ctrl+/ elsewhere): opens a closed sheet and closes an open one.
     OverlayStep Toggle() { return lifetime_.overlay_expected() ? Hide() : Show(); }
     OverlayStep Show() { return lifetime_.Show(); }
     OverlayStep Hide() { return lifetime_.Hide(); }
-    // Escape closes the sheet; every other key leaves it as it is.
-    OverlayStep HandleKey(int virtual_key) {
-        return virtual_key == kCheatsheetEscapeKeyCode ? Hide() : OverlayStep::kNone;
-    }
-    OverlayStep ClickOutside() { return Hide(); }
     OverlayStep Detach() { return lifetime_.Detach(); }
 
     [[nodiscard]] bool visible() const noexcept { return lifetime_.overlay_expected(); }

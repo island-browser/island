@@ -54,6 +54,28 @@ class OverlayLifetime {
     bool detached_ = false;
 };
 
+// What stop-loading (Escape, ⌘., the Stop Loading menu item) does, in priority order: an open
+// cheatsheet closes first, then an open peek, and only then is the page's load stopped. Both
+// the Escape predicate and the stop-loading command resolve through this one function, so the
+// two cannot disagree about which surface owns the key.
+enum class StopLoadingTarget { kNone, kCloseCheatsheet, kClosePeek, kStopLoad };
+
+// `peek_claims` is an open peek that no palette or dialog sits above; `can_stop_load` is a
+// loading page that no overlay owns. The caller decides both from the window state.
+[[nodiscard]] inline StopLoadingTarget ResolveStopLoading(bool cheatsheet_open, bool peek_claims,
+                                                          bool can_stop_load) noexcept {
+    if (cheatsheet_open) {
+        return StopLoadingTarget::kCloseCheatsheet;
+    }
+    if (peek_claims) {
+        return StopLoadingTarget::kClosePeek;
+    }
+    if (can_stop_load) {
+        return StopLoadingTarget::kStopLoad;
+    }
+    return StopLoadingTarget::kNone;
+}
+
 // Owns the controller of one overlay. Release() hides the overlay at once but destroys it on
 // the next UI task, because Hide() is routinely reached from the overlay's own key or button
 // handler, and destroying a widget inside its own event dispatch is not safe. Create() flushes
