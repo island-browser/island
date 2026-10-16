@@ -29,9 +29,10 @@
 - Real vibrancy (`NSVisualEffectView` behind the sidebar). CEF views cannot host it today, so the
   sidebar uses an opaque grey that matches the light and dark source-list colors. This can be
   revisited later as a macOS-only overlay, like the page card.
-- Per-space accent colors in the Native look. The space color still exists (the sidebar dot and an
-  optional tint), but selection and focus stay system blue. People who want Arc-style color switch
-  the "Look" preset (see Settings).
+- Any space color in the Native look: no tint, no dot, no colored accent (decided 2026-10-16).
+  Spaces are told apart by name in the switcher. Selection and focus stay system blue. People who
+  want Arc-style color switch the "Look" preset (see Settings).
+- A status bar. Page state is shown by small indicators inside the address field instead (§3).
 - Store extensions, more top-level windows, or a new agent protocol. The plan graph rides on ACP
   plan updates through an optional `_meta` extension (see "Agent protocol").
 
@@ -103,7 +104,7 @@ and 5.0:1 dark; white on `selection` 5.5:1 light and 4.8:1 dark (white on the da
   (cards, segmented track, approval card) · 10 (plan nodes, palette rows) · 12 (window corners,
   palette, popovers). Pills (`999`) only for switches.
 - Spacing on a 4 px grid: 4, 6, 8, 10, 12, 14, 16, 18, 24.
-- Sizes: sidebar 248 (200 compact) · tab row 28 (34 comfortable) · toolbar 52 · status bar 28 ·
+- Sizes: sidebar 248 (200 compact) · tab row 28 (34 comfortable) · toolbar 52 · address indicator 20 ·
   button 28 · small button 24 · field 30 (address) and 44 (start-page search) · segmented 24 ·
   switch 22×38 · keycap 24 min-width · inspector 316 · agent panel 380 · icon rail 52 (unchanged).
 - Shadows: buttons `0 1px 3px rgba(0,0,0,.12)` (active segment), cards
@@ -113,14 +114,14 @@ and 5.0:1 dark; white on `selection` 5.5:1 light and 4.8:1 dark (white on the da
 ## 3. Window anatomy
 
 ```
-┌ sidebar 248 ─────────┬ toolbar 52: ‹ ›  [   centered address field   ]  share  agent ┐
+┌ sidebar 248 ─────────┬ toolbar 52: ‹ ›  [ 🛡14  example.com   ≡  • ]  share  agent ┐
 │ ● ● ●                │                                                                 │
 │ Favorites            │                                                                 │
 │  ▢ Mail              │                         page (full bleed)                       │
 │ Work · Tabs          │                                                                 │
 │ ▐▢ island / island ▌ │                                                                 │
 │  ▢ CEF Forum      •  │                                                                 │
-│  …                   ├ status bar 28: 14 trackers blocked · Reader available · Work ───┤
+│  …                   │                                                                 │
 │ ✦ Agent              │                                                                 │
 └──────────────────────┴─────────────────────────────────────────────────────────────────┘
 ```
@@ -134,12 +135,18 @@ and 5.0:1 dark; white on `selection` 5.5:1 light and 4.8:1 dark (white on the da
 - **Toolbar** (`surface_secondary`, hairline below): back and forward as 28 px icon buttons, then
   the address field (`fill`, radius 8, 30 tall) whose text is centered while idle and left-aligned
   while editing, then share and the agent toggle.
+- **Address indicators** (instead of a status bar, decided 2026-10-16): 20 px glyph buttons inside
+  the address field, at its edges, in `text_secondary`; each shows only when it has something
+  to say:
+  - left: a shield with the number of blocked requests (click → blocker popover for this site);
+  - right: Reader available (click → Reader view), and an agent dot (`accent` = the agent is
+    reading this tab, `warning_text` = it is waiting for you; click → agent panel).
+  A slept tab is shown in its sidebar row (title at `text_tertiary`), not in the address field.
+  Every indicator has an `aria-label` and a tooltip with the full text ("14 trackers blocked").
 - **Page:** white, square, full bleed.
-- **Status bar** (new, can be turned off in Appearance): blocker count, Reader availability,
-  sleep state, and the space name. 12 px `text_secondary`.
 
 The Appearance defaults for this look: tint 0 %, page radius 0, shadow off, full bleed on, font
-System, density comfortable. "Look" in Appearance becomes a preset menu, Native (default) / Arc
+System, density comfortable, space tint off. "Look" in Appearance becomes a preset menu, Native (default) / Arc
 / Graphite, that sets these knobs. Changing any knob afterwards shows "Custom".
 
 ## 4. Screens
@@ -194,9 +201,13 @@ cheatsheet: a 320 px popover in the bottom right with the ten most-used bindings
 
 ### 4.6 Plan mode: the research plan graph
 
-This is the screen the owner singled out. Plan mode opens in the content area when a Research
-query is submitted, or when the agent proposes a plan with two or more branches. Nothing runs
-until the person approves.
+This is the screen the owner singled out. Plan mode opens **in the content area, as its own tab**
+(a Plan tab, pinned at the top of the space's tab list while research runs) when a Research query
+is submitted, or when the agent proposes a plan with two or more branches. Nothing runs until the
+person approves. Once it runs, the agent **opens the pages it reads as ordinary tabs**, grouped
+under the Plan tab in the sidebar (indented one level, with the branch label as a small kicker).
+Selecting a node with an open page switches to that tab, and the Result opens as a Report tab. The
+Plan tab stays the hub: closing it asks whether to stop the research.
 
 **Layout.** The toolbar (52) holds a graph icon, "Research plan", the pill "Paused · nothing runs
 until you approve", the Graph / List segmented control, and "Tidy up". Under it, the graph canvas
@@ -227,7 +238,9 @@ vertical edge.
 a branch reads as a group even after many sub-branches.
 
 **Layout algorithm.** Columns follow depth, and the column pitch is node width + 40. Rows: each
-branch gets its own band, and sub-branches split their parent's band. A Join sits in the column
+branch gets its own band, and sub-branches split their parent's band. Branching is limited to
+**3 levels** (decided 2026-10-16): an agent that wants to go deeper must put a Needs-you node in
+the plan and ask, and "Branch from here" is disabled on level-3 nodes with a tooltip saying why. A Join sits in the column
 after its deepest input, vertically centered on its inputs. Result goes below Join when the
 canvas is narrower than depth × pitch, otherwise to its right. "Tidy up" reruns the layout, and
 dragging a node only moves it visually; the order still comes from the edges.
@@ -280,9 +293,9 @@ ACP `plan` updates are flat (`content`, `status`, `priority`), and Island stores
 ## 6. Where each piece lives
 
 - **Native chrome** (`src/main/browser_chrome.cc`, `design_tokens.*`): sidebar rows and selection
-  fill, toolbar layout with the centered address field, status bar, and the new token slots. Each
-  new view re-asserts its colors through the theme-reset mechanism. The ChromeViewId range stays
-  1001–1027, and the status bar takes the next free id after review.
+  fill, toolbar layout with the centered address field and its indicators, and the new token slots.
+  Each new view re-asserts its colors through the theme-reset mechanism. The ChromeViewId range
+  stays 1001–1027; the indicator buttons are children of the address view and take no new ids.
 - **Local pages** (`src/main/pages/`): `start.html`, `agent.html`, `settings.html` (Appearance,
   Shortcuts, Look preset), and a new `plan.html` for the graph. The graph is an inline SVG with
   absolutely positioned `<button>` nodes, rendered from the plan JSON pushed in by the agent bridge,
@@ -302,14 +315,17 @@ ACP `plan` updates are flat (`content`, `status`, `priority`), and Island stores
 4. Plan mode: a fixture agent that emits the `_meta.island` plan from §5 renders 3 branches, 1 join
    and 1 result. Skip, Restore, Branch from here, Run A only and Run plan send the expected messages
    (unit tests on the bridge plus a pytest against `plan.html`). A plan without `_meta` opens in
-   List view.
+   List view. Plan opens as a tab; pages the agent reads open as tabs grouped under it; a 4th
+   branching level is refused with a Needs-you node.
+6. Address indicators: the shield shows the blocked count and hides at 0, Reader shows only when
+   available, the agent dot follows agent state; all have accessible names.
 5. Windows and Linux: the system font resolves and the toolbar and sidebar keep their metrics.
    Evidence comes from the six-target CI run, not from macOS.
 
-## 8. Open questions
+## 8. Decisions (owner, 2026-10-16)
 
-1. Should the Native look tint the sidebar with the space color at all (0 % now), or only show
-   the space dot?
-2. Is the status bar on by default?
-3. Should Plan mode open in the content slot (as drawn) or replace the agent panel while planning?
-4. How many sub-branch levels are allowed before the agent must ask (proposal: 3)?
+1. No space color in the Native look: no tint, no dot.
+2. No status bar; page state is a set of small indicators in the address field.
+3. Plan mode lives in the content area as a Plan tab; the agent then opens the pages it reads as
+   tabs grouped under it.
+4. Branching is limited to 3 levels before the agent must ask.
