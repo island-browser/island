@@ -176,6 +176,20 @@ h1.title { margin: 0 0 6px; font-size: 28px; line-height: 1.2; letter-spacing: -
       var value = theme[key.replace("-", "_")];
       if (value) root.style.setProperty("--" + key, value);
     });
+    [
+      ["fill", "--fill"], ["border_2", "--border-2"], ["text_3", "--text-3"],
+      ["selection", "--selection"], ["accent_soft", "--accent-soft"],
+      ["accent_text", "--accent-text"], ["warn_bg", "--warn-bg"],
+      ["warn_border", "--warn-border"], ["warn_text", "--warn-text"],
+      ["success", "--success"], ["danger", "--danger"]
+    ].forEach(function (mapping) {
+      var value = theme[mapping[0]];
+      if (value) root.style.setProperty(mapping[1], value);
+    });
+    ["--branch-a", "--branch-b", "--branch-c", "--branch-d"].forEach(function (variable, index) {
+      var value = theme.branch && theme.branch[index];
+      if (value) root.style.setProperty(variable, value);
+    });
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
   }
 

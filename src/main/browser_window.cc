@@ -98,7 +98,7 @@ std::filesystem::path UserBaseHome() {
 }
 
 std::string CssColor(ArgbColor color) {
-    static constexpr char kHex[] = "0123456789ABCDEF";
+    static constexpr char kHex[] = "0123456789abcdef";
     std::string css = "#";
     for (int shift = 20; shift >= 0; shift -= 4) {
         css += kHex[(color.argb >> static_cast<unsigned>(shift)) & 0xFU];
@@ -952,14 +952,30 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
 
 json::Value BrowserWindow::ThemeJson() const {
     const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
+    json::Value branch = json::Value::MakeArray();
+    for (const ArgbColor color : tokens.branch) {
+        branch.Push(json::Value::String(CssColor(color)));
+    }
     return json::Value::MakeObject()
         .Set("bg", json::Value::String(CssColor(tokens.background)))
         .Set("surface", json::Value::String(CssColor(tokens.surface)))
         .Set("surface_2", json::Value::String(CssColor(tokens.surface_secondary)))
+        .Set("fill", json::Value::String(CssColor(tokens.fill)))
         .Set("text", json::Value::String(CssColor(tokens.text)))
         .Set("text_2", json::Value::String(CssColor(tokens.text_secondary)))
+        .Set("text_3", json::Value::String(CssColor(tokens.text_tertiary)))
         .Set("border", json::Value::String(CssColor(tokens.border)))
+        .Set("border_2", json::Value::String(CssColor(tokens.border_strong)))
         .Set("accent", json::Value::String(CssColor(tokens.accent)))
+        .Set("selection", json::Value::String(CssColor(tokens.selection)))
+        .Set("accent_soft", json::Value::String(CssColor(tokens.accent_soft)))
+        .Set("accent_text", json::Value::String(CssColor(tokens.accent_text)))
+        .Set("warn_bg", json::Value::String(CssColor(tokens.warning_bg)))
+        .Set("warn_border", json::Value::String(CssColor(tokens.warning_border)))
+        .Set("warn_text", json::Value::String(CssColor(tokens.warning_text)))
+        .Set("success", json::Value::String(CssColor(tokens.success)))
+        .Set("danger", json::Value::String(CssColor(tokens.danger)))
+        .Set("branch", std::move(branch))
         .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
         .Set("font", json::Value::String(CssFontStack(tokens)))
         .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));

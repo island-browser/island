@@ -97,6 +97,27 @@ TEST(BrowserWindowPagesTest, SettingsStateListsShortcutsSourcesAndConflicts) {
     EXPECT_NE(state->FindMember("theme"), nullptr);
 }
 
+TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"set_look","look":"native"})"));
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"set_theme","value":"light"})"));
+
+    const std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* theme = state->FindMember("theme");
+    ASSERT_NE(theme, nullptr);
+    EXPECT_EQ(theme->StringOr("selection", ""), "#0a64d8");
+    const Value* branch = theme->FindMember("branch");
+    ASSERT_NE(branch, nullptr);
+    ASSERT_TRUE(branch->IsArray());
+    ASSERT_EQ(branch->array_val.size(), 4U);
+    for (const Value& color : branch->array_val) {
+        EXPECT_TRUE(color.IsString());
+    }
+}
+
 TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->OnLocalPageMessage(LocalPageKind::kSettings,

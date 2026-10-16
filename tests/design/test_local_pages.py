@@ -53,6 +53,21 @@ ALLOWED_TAGS = {
 TAG = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z-]+=\"[^\"<>]*\")*)\s*/?>")
 ALLOWED_ATTRIBUTES = {"href", "rel", "title", "style", "start", "class"}
 
+THEME_VARIABLES = {
+    "fill": "--fill",
+    "border_2": "--border-2",
+    "text_3": "--text-3",
+    "selection": "--selection",
+    "accent_soft": "--accent-soft",
+    "accent_text": "--accent-text",
+    "warn_bg": "--warn-bg",
+    "warn_border": "--warn-border",
+    "warn_text": "--warn-text",
+    "success": "--success",
+    "danger": "--danger",
+}
+BRANCH_VARIABLES = ("--branch-a", "--branch-b", "--branch-c", "--branch-d")
+
 
 def page(name: str) -> str:
     return (PAGES / name).read_text(encoding="utf-8")
@@ -150,6 +165,23 @@ class EveryLocalPage(unittest.TestCase):
                 self.assertIn("window.islandRender = function", text)
                 self.assertIn("window.islandFocus = function", text)
                 self.assertIn('post({ type: "ready" })', text)
+
+    def test_pages_map_every_theme_key(self) -> None:
+        for path in PAGE_FILES:
+            text = path.read_text(encoding="utf-8")
+            marker = "function applyTheme(theme)"
+            if marker not in text:
+                continue
+            apply_theme = text[
+                text.index(marker) : text.index("window.islandRender", text.index(marker))
+            ]
+            with self.subTest(page=path.name):
+                for key, variable in THEME_VARIABLES.items():
+                    self.assertIn(f'"{key}"', apply_theme)
+                    self.assertIn(f'"{variable}"', apply_theme)
+                self.assertIn("theme.branch", apply_theme)
+                for variable in BRANCH_VARIABLES:
+                    self.assertIn(f'"{variable}"', apply_theme)
 
 
 class StartPage(unittest.TestCase):
