@@ -19,6 +19,49 @@ struct Draft {
     std::vector<int> parents;  // draft indices, in `after` order
 };
 
+std::vector<int> StronglyConnectedComponents(const std::vector<Draft>& drafts) {
+    const int n = static_cast<int>(drafts.size());
+    std::vector<int> discovered(n, -1);
+    std::vector<int> low(n, -1);
+    std::vector<int> component(n, -1);
+    std::vector<int> stack;
+    std::vector<bool> on_stack(n, false);
+    int next_discovery = 0;
+    int next_component = 0;
+
+    std::function<void(int)> visit = [&](int node) {
+        discovered[node] = next_discovery;
+        low[node] = next_discovery;
+        ++next_discovery;
+        stack.push_back(node);
+        on_stack[node] = true;
+
+        for (const int parent : drafts[node].parents) {
+            if (discovered[parent] == -1) {
+                visit(parent);
+                low[node] = std::min(low[node], low[parent]);
+            } else if (on_stack[parent]) {
+                low[node] = std::min(low[node], discovered[parent]);
+            }
+        }
+
+        if (low[node] != discovered[node]) return;
+        while (true) {
+            const int member = stack.back();
+            stack.pop_back();
+            on_stack[member] = false;
+            component[member] = next_component;
+            if (member == node) break;
+        }
+        ++next_component;
+    };
+
+    for (int node = 0; node < n; ++node) {
+        if (discovered[node] == -1) visit(node);
+    }
+    return component;
+}
+
 PlanNodeKind KindFromMeta(const std::string& kind) {
     if (kind == "question") return PlanNodeKind::kQuestion;
     if (kind == "join") return PlanNodeKind::kJoin;
@@ -123,8 +166,9 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
         }
     }
 
-    // 3. Kahn. Whatever is left sits on or behind a cycle: it loses its back edges (edges
-    //    from a later entry), which makes the remainder acyclic, and the sort runs again.
+    // 3. Kahn. If a cycle remains, find its strongly connected components and drop only
+    //    back edges inside each component. A node downstream of a cycle is not part of its
+    //    component, so its dependency stays intact.
     auto topo = [&](std::vector<int>& order) {
         std::vector<int> indegree(n, 0);
         std::vector<std::vector<int>> children(n);
@@ -149,13 +193,11 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
     };
     std::vector<int> order;
     if (!topo(order)) {
-        std::vector<bool> placed(n, false);
-        for (int i : order) placed[i] = true;
+        const std::vector<int> component = StronglyConnectedComponents(drafts);
         for (int i = 0; i < n; ++i) {
-            if (placed[i]) continue;
             std::vector<int> kept;
             for (int p : drafts[i].parents) {
-                if (!placed[p] && p >= i) {
+                if (component[p] == component[i] && p >= i) {
                     graph.dropped.push_back(drafts[p].node.id + "->" + drafts[i].node.id +
                                             ": cycle");
                 } else {

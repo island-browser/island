@@ -71,6 +71,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
   until you approve the plan.
 
+### Fixed
+
+- Plan graphs with a cycle keep valid dependencies from that cycle to downstream steps.
+
 ## [0.6.2] - 2026-10-15
 
 ### Fixed

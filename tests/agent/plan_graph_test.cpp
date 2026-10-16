@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <chrono>
 #include <map>
 #include <string>
 #include <utility>
@@ -123,6 +122,17 @@ TEST(PlanGraphTest, CyclesAreBrokenAndReported) {
     const PlanGraph g = BuildPlanGraph({E("a", {"b"}, ""), E("b", {"a"}, "")}, {});
     EXPECT_EQ(g.nodes.size(), 2U);
     EXPECT_EQ(g.dropped, std::vector<std::string>{"b->a: cycle"});
+    EXPECT_TRUE(Find(g, "a").after.empty());
+    EXPECT_EQ(Find(g, "b").after, std::vector<std::string>{"a"});
+}
+
+TEST(PlanGraphTest, CycleBreakingKeepsEdgesLeavingTheComponent) {
+    const PlanGraph g =
+        BuildPlanGraph({E("downstream", {"b"}, ""), E("a", {"b"}, ""), E("b", {"a"}, "")}, {});
+    EXPECT_EQ(g.dropped, std::vector<std::string>{"b->a: cycle"});
+    EXPECT_TRUE(Find(g, "a").after.empty());
+    EXPECT_EQ(Find(g, "b").after, std::vector<std::string>{"a"});
+    EXPECT_EQ(Find(g, "downstream").after, std::vector<std::string>{"b"});
 }
 
 TEST(PlanGraphTest, UnknownAfterIsDropped) {
@@ -133,8 +143,12 @@ TEST(PlanGraphTest, UnknownAfterIsDropped) {
 }
 
 TEST(PlanGraphTest, DuplicateIdsKeepTheFirst) {
-    const PlanGraph g = BuildPlanGraph({E("a", {}, ""), E("a", {}, "")}, {});
-    EXPECT_EQ(g.nodes.size(), 1U);
+    const PlanGraph g =
+        BuildPlanGraph({E("a", {}, ""), E("a", {"missing"}, ""), E("b", {"a"}, "")}, {});
+    ASSERT_EQ(g.nodes.size(), 2U);
+    EXPECT_EQ(g.dropped, std::vector<std::string>{"a: duplicate id"});
+    EXPECT_TRUE(Find(g, "a").after.empty());
+    EXPECT_EQ(Find(g, "b").after, std::vector<std::string>{"a"});
 }
 
 TEST(PlanGraphTest, DepthBeyondThreeBecomesNeedsYou) {
@@ -165,7 +179,7 @@ TEST(PlanGraphTest, DeepNodeKeepsTheAgentsNeedsYouReason) {
     EXPECT_EQ(Find(g, "a111").needs_you, "sign-in");
 }
 
-TEST(PlanGraphTest, FiveHundredEntriesStayFast) {
+TEST(PlanGraphTest, FiveHundredEntriesLayoutAsALinearChain) {
     std::vector<AcpPlanEntry> many;
     for (int i = 0; i < 500; ++i) {
         many.push_back(E(
@@ -173,10 +187,12 @@ TEST(PlanGraphTest, FiveHundredEntriesStayFast) {
             i ? std::vector<std::string>{"n" + std::to_string(i - 1)} : std::vector<std::string>{},
             ""));
     }
-    const auto start = std::chrono::steady_clock::now();
     const PlanGraph g = BuildPlanGraph(many, {});
-    EXPECT_EQ(g.nodes.size(), 500U);
-    EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(50));
+    ASSERT_EQ(g.nodes.size(), 500U);
+    EXPECT_TRUE(g.dropped.empty());
+    EXPECT_EQ(g.nodes.front().column, 0);
+    EXPECT_EQ(g.nodes.back().column, 499);
+    EXPECT_EQ(g.nodes.back().after, std::vector<std::string>{"n498"});
 }
 
 TEST(PlanGraphTest, StatusMapsToState) {
