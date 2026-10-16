@@ -19,6 +19,8 @@
 #include "agent_navigation.h"
 #include "agent_providers.h"
 #include "agent_session.h"
+#include "plan_edits.h"
+#include "plan_graph.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
 #include "browser_chrome.h"
@@ -244,6 +246,26 @@ class BrowserWindow : public CefClient,
     // cannot base64-encode).
     void SetReportsFileForTest(std::filesystem::path path);
     void SetReportPageUrlForTest(std::string url) { report_page_url_ = std::move(url); }
+    // --- Plan tab (Plan mode, native-look spec 4.6) ----------------------------
+    // The Plan tab is a tab whose document is plan.html at the fixed plan URL. The window
+    // holds the plan (the newest plan the research agent sent), the person's edits and the
+    // view; plan.html shows them and sends its edits back as messages.
+    // Applies one plan page message from the tab `source` (nullptr in tests).
+    void HandlePlanPageMessage(const json::Value& message,
+                               CefRefPtr<CefBrowser> source = nullptr);
+    // The state plan.html renders, exposed for tests.
+    [[nodiscard]] std::string PlanStateJson() const;
+    // Developer capture: opens a Plan tab that shows the sample plan waiting for approval.
+    void OpenPlanFixtureTab();
+    // Test seams: the plan page URL, the agent send path (research and plan turns go through
+    // it instead of the agent session), and the plan shown without an agent turn.
+    void SetPlanPageUrlForTest(std::string url) { plan_page_url_ = std::move(url); }
+    void SetAgentSendForTest(std::function<bool(std::string)> send) {
+        agent_send_for_test_ = std::move(send);
+    }
+    void SetPlanEntriesForTest(std::vector<agent::AcpPlanEntry> entries) {
+        plan_entries_ = std::move(entries);
+    }
     // Marks a research task as running without sending anything, as if the
     // prompt had gone out after `turns_ended_before` turns.
     void SetResearchTaskForTest(std::string question, std::uint64_t turns_ended_before = 0) {
@@ -700,6 +722,23 @@ class BrowserWindow : public CefClient,
     // (and each open report page its report and theme).
     void RenderStartPages();
     void RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const;
+    // The plan page's fixed data: URL, and the Plan tab's rendering.
+    [[nodiscard]] const std::string& PlanPageUrl() const;
+    [[nodiscard]] bool IsPlanPageUrl(std::string_view url) const;
+    void RenderPlanFrame(CefRefPtr<CefFrame> frame) const;
+    // Pushes the plan state to every open Plan tab.
+    void RenderPlanPages();
+    // Opens the Plan tab in the active space, pinned and first.
+    void OpenPlanTab();
+    // Takes the newest plan from the agent transcript (when it has one) and keeps the edits.
+    void RefreshPlanFromTranscript();
+    // Sends one user turn to the research agent (through the test seam when set).
+    bool SendToAgent(std::string text);
+    // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
+    // approval, and it becomes the turn the research classifies next.
+    void SendPlanTurn(std::string text);
+    // Turns the agent session has ended so far (0 without a session).
+    [[nodiscard]] std::uint64_t TurnsEnded() const;
     void SetResearchStatus(std::string state, std::string message);
     void OnAgentSessionChanged();
     void SaveReports() const;
@@ -806,12 +845,25 @@ class BrowserWindow : public CefClient,
     std::string initial_url_;
     mutable std::string start_page_url_;
     mutable std::string report_page_url_;
+    mutable std::string plan_page_url_;
+    // The newest plan of the research agent, the person's edits to it, and the view
+    // (graph | list) and selected node the Plan tab shows.
+    std::vector<agent::AcpPlanEntry> plan_entries_;
+    agent::PlanEdits plan_edits_;
+    std::string plan_view_ = "graph";
+    std::string plan_selected_;
+    // Why the last plan action was refused (depth limit, agent busy); empty when none.
+    std::string plan_notice_;
+    std::function<bool(std::string)> agent_send_for_test_;
     // The research task in flight: what was asked, the space the agent was told
     // to create, and how many turns had ended before the prompt went out.
     struct ResearchTask {
         std::string question;
         std::string space_name;
         std::uint64_t turns_ended_before = 0;
+        // The plan was proposed and nothing runs until the person approves it. The next turn
+        // is the one a Run starts, so turns_ended_before is reset to the current count.
+        bool awaiting_approval = false;
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;

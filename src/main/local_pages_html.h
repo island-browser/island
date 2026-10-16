@@ -18,6 +18,7 @@ namespace island {
 [[nodiscard]] std::string_view ReaderPageHtml() noexcept;
 [[nodiscard]] std::string_view ReaderExtractScript() noexcept;
 [[nodiscard]] std::string_view ReportPageHtml() noexcept;
+[[nodiscard]] std::string_view PlanPageHtml() noexcept;
 
 [[nodiscard]] inline std::string_view LocalPageHtml(LocalPageKind kind) noexcept {
     switch (kind) {
@@ -31,6 +32,8 @@ namespace island {
             return StartPageHtml();
         case LocalPageKind::kReport:
             return ReportPageHtml();
+        case LocalPageKind::kPlan:
+            return PlanPageHtml();
     }
     return AgentPageHtml();
 }

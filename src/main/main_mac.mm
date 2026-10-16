@@ -447,6 +447,10 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->OpenNewestReport();
         return true;
     }
+    if (action == "plan_fixture") {
+        app->OpenPlanFixture();
+        return true;
+    }
     // `appearance:<key>=<value>` (e.g. appearance:sidebar_side=right, appearance:reset) and
     // `space_color:<index>=#RRGGBB` run the Settings > Appearance path.
     constexpr std::string_view kAppearance = "appearance:";

@@ -15,6 +15,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Research opens a Plan tab, pinned first in the space, that shows the agent's plan as a graph
+  (or a list) of steps, branches, a join and a result. Nothing runs until you approve: Run plan,
+  Run one branch only, or Cancel. You can skip and restore steps, write an instruction for a
+  step, branch from a step (at most 3 levels deep) or ask the agent to expand one. A research
+  turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
 - ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,

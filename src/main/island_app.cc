@@ -208,6 +208,13 @@ void IslandApp::StartResearch(const std::string& question) {
     }
 }
 
+void IslandApp::OpenPlanFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenPlanFixtureTab();
+    }
+}
+
 void IslandApp::OpenNewestReport() {
     CEF_REQUIRE_UI_THREAD();
 

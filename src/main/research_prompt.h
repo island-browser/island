@@ -39,10 +39,12 @@ inline constexpr std::size_t kMaxResearchQuestionBytes = 2000;
 
 // How a research turn ended, from the transcript of the session that ran it.
 struct ResearchOutcome {
-    enum class Kind : std::uint8_t { kReport, kCancelled, kFailed };
+    // kAwaitingApproval: the turn proposed a plan and stopped; nothing runs until the person
+    // approves it. The research stays in flight for the next turn.
+    enum class Kind : std::uint8_t { kReport, kCancelled, kFailed, kAwaitingApproval };
     Kind kind = Kind::kFailed;
     std::string markdown;  // kReport
-    std::string message;   // kCancelled / kFailed: what to tell the user
+    std::string message;   // kCancelled / kFailed / kAwaitingApproval: what to tell the user
 };
 
 // Classifies the turn that started when `turns_ended_before` turns had ended.

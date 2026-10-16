@@ -219,6 +219,7 @@ foreach(_island_page IN ITEMS "pages/agent.html:AgentPageHtml" "pages/settings.h
                               "pages/tab_overview.html:TabOverviewPageHtml"
                               "pages/start.html:StartPageHtml"
                               "pages/report.html:ReportPageHtml"
+                              "pages/plan.html:PlanPageHtml"
                               "reader/reader_page.html:ReaderPageHtml"
                               "reader/reader_extract.js:ReaderExtractScript")
     string(REPLACE ":" ";" _island_page "${_island_page}")

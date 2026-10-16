@@ -11,6 +11,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "agent/plan_fixture.h"
 #include "browser_window.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
@@ -18,6 +19,8 @@
 #include "island_version.h"
 #include "json_util.h"
 #include "keymap.h"
+#include "plan_dev_fixture.h"
+#include "plan_edits.h"
 #include "sha256.h"
 #include "updater.h"
 
@@ -958,6 +961,161 @@ TEST(BrowserWindowPagesTest, SettingsListsOpensAndDeletesReports) {
     EXPECT_EQ(window->reports().reports[0].id, older);
     // The "Open report" button of the start page followed the deleted report.
     EXPECT_NE(window->research_status().state, "done");
+}
+
+// --- Plan tab (native-look spec 4.6, Task 10) ----------------------------------
+
+constexpr std::string_view kPlanUrl = "data:text/html;charset=utf-8,plan";
+
+// Sets an environment variable for one test and restores the previous value.
+class ScopedAgentCommand {
+  public:
+    explicit ScopedAgentCommand(const char* value) {
+        const char* saved = std::getenv("ISLAND_AGENT_COMMAND");
+        if (saved != nullptr) saved_ = saved;
+        Set(value);
+    }
+    ~ScopedAgentCommand() { Set(saved_ ? saved_->c_str() : nullptr); }
+
+  private:
+    static void Set(const char* value) {
+#if defined(_WIN32)
+        _putenv_s("ISLAND_AGENT_COMMAND", value != nullptr ? value : "");
+#else
+        if (value != nullptr) {
+            setenv("ISLAND_AGENT_COMMAND", value, 1);
+        } else {
+            unsetenv("ISLAND_AGENT_COMMAND");
+        }
+#endif
+    }
+    std::optional<std::string> saved_;
+};
+
+void SendPlanMessage(BrowserWindow& window, std::string_view json_text) {
+    const std::optional<Value> message = json::Parse(json_text);
+    ASSERT_TRUE(message.has_value()) << json_text;
+    window.HandlePlanPageMessage(*message);
+}
+
+TEST(BrowserWindowPagesTest, StartingResearchOpensAPinnedPlanTabAndSendsTheResearchPrompt) {
+    const ScopedAgentCommand command("true");  // pins the command; nothing is launched
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+
+    const BrowserWindow::ResearchStartResult result = window->StartResearch("why is the sky blue");
+    EXPECT_EQ(result.code, BrowserWindow::ResearchStart::kStarted);
+    EXPECT_EQ(window->research_status().state, "running");
+    ASSERT_EQ(sent.size(), 1U);
+    EXPECT_NE(sent[0].find("why is the sky blue"), std::string::npos);
+
+    // The Plan tab is the first tab of the space and pinned.
+    const Space& space = SpaceAt(*window, 0);
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_EQ(space.tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(space.tabs()[0].pinned());
+}
+
+TEST(BrowserWindowPagesTest, APlanWithoutAReportWaitsForApprovalWithoutCompleting) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetResearchTaskForTest("q");
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+
+    EXPECT_TRUE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "awaiting_approval");
+    EXPECT_EQ(window->research_status().message, "Waiting for approval");
+    EXPECT_TRUE(window->reports().reports.empty());
+}
+
+TEST(BrowserWindowPagesTest, RunSendsExactlyOneAgentMessageBuiltByTheRunBuilder) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetResearchTaskForTest("q");
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+
+    SendPlanMessage(*window, R"({"type":"run"})");
+    ASSERT_EQ(sent.size(), 1U);
+    EXPECT_EQ(sent[0], agent::BuildPlanRunMessage(agent::SpecPlan(), {}, std::nullopt));
+    EXPECT_EQ(window->research_status().state, "running");
+
+    // Running already: a second run is refused, not sent again.
+    SendPlanMessage(*window, R"({"type":"run"})");
+    EXPECT_EQ(sent.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, RunBranchSendsTheBranchRunMessage) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetResearchTaskForTest("q");
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+
+    SendPlanMessage(*window, R"({"type":"run_branch","branch":"A"})");
+    ASSERT_EQ(sent.size(), 1U);
+    EXPECT_EQ(sent[0], agent::BuildPlanRunMessage(agent::SpecPlan(), {}, std::string("A")));
+}
+
+TEST(BrowserWindowPagesTest, SkipReRendersThePlanWithTheNodeInTheEdits) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    SendPlanMessage(*window, R"({"type":"skip","id":"c"})");
+    SendPlanMessage(*window, R"({"type":"skip","id":"not-in-the-plan"})");
+
+    const std::optional<Value> state = json::Parse(window->PlanStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* skipped = state->FindMember("edits")->FindMember("skipped");
+    ASSERT_NE(skipped, nullptr);
+    ASSERT_EQ(skipped->array_val.size(), 1U);
+    EXPECT_EQ(skipped->array_val[0].string_val, "c");
+
+    // Restoring takes it back out.
+    SendPlanMessage(*window, R"({"type":"restore","id":"c"})");
+    const std::optional<Value> restored = json::Parse(window->PlanStateJson());
+    ASSERT_TRUE(restored.has_value());
+    EXPECT_TRUE(restored->FindMember("edits")->FindMember("skipped")->array_val.empty());
+}
+
+TEST(BrowserWindowPagesTest, PlanStateCarriesTheThemeGraphAndStatus) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    const std::optional<Value> state = json::Parse(window->PlanStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_NE(state->FindMember("theme"), nullptr);
+    const Value* graph = state->FindMember("graph");
+    ASSERT_NE(graph, nullptr);
+    EXPECT_TRUE(graph->BoolOr("branching", false));
+    EXPECT_EQ(graph->FindMember("nodes")->array_val.size(), agent::SpecPlan().size());
+    EXPECT_EQ(state->FindMember("status")->StringOr("state", ""), "idle");
+    EXPECT_EQ(state->StringOr("view", ""), "graph");
+}
+
+TEST(BrowserWindowPagesTest, PlanDevFixtureIsTheSpecPlan) {
+    EXPECT_EQ(DevPlanFixture(), agent::SpecPlan());
 }
 
 }  // namespace

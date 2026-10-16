@@ -61,6 +61,16 @@ std::string StripOuterFence(std::string body) {
     return Trim(inner);
 }
 
+// Whether the turn that ended last (the items after the last user prompt) carried a plan.
+bool TurnHasPlan(const std::vector<agent::TranscriptItem>& items) {
+    using Kind = agent::TranscriptItem::Kind;
+    for (auto it = items.rbegin(); it != items.rend(); ++it) {
+        if (it->kind == Kind::kUser) break;
+        if (it->kind == Kind::kPlan) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 std::string ResearchSpaceName(std::string_view question) {
@@ -181,6 +191,11 @@ ResearchOutcome ClassifyResearchTurn(const agent::AgentTranscript& transcript,
     }
     std::optional<std::string> report = ExtractResearchReport(transcript.items());
     if (!report.has_value()) {
+        if (TurnHasPlan(transcript.items())) {
+            outcome.kind = ResearchOutcome::Kind::kAwaitingApproval;
+            outcome.message = "Waiting for approval";
+            return outcome;
+        }
         outcome.message = "The agent finished without writing a report.";
         return outcome;
     }

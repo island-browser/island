@@ -2,6 +2,7 @@
 // start page, the agent session, the report store and the Report tab. The pure
 // parts (prompt, extraction, outcome, store) live in research_prompt.* and
 // report_store.*.
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <string>
@@ -12,6 +13,8 @@
 // bases hold CefRefPtr<CefWindow>/<CefPanel>/<CefOverlayController> by value.
 #include "browser_window.h"
 #include "download_path.h"
+#include "plan_dev_fixture.h"
+#include "plan_graph.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/cef_browser.h"
@@ -59,6 +62,30 @@ void RunInMainFrame(const CefRefPtr<CefBrowser>& browser, const std::string& scr
     if (frame != nullptr) {
         frame->ExecuteJavaScript(script, url, 0);
     }
+}
+
+// Clips to at most `limit` bytes without splitting a UTF-8 sequence.
+std::string ClipPlanText(std::string text, std::size_t limit) {
+    if (text.size() <= limit) return text;
+    std::size_t end = limit;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0U) == 0x80U) --end;
+    text.resize(end);
+    return text;
+}
+
+bool HasPlanId(const std::vector<agent::AcpPlanEntry>& plan, std::string_view id) {
+    return std::any_of(plan.begin(), plan.end(), [id](const agent::AcpPlanEntry& entry) {
+        return entry.island.has_value() && entry.island->id == id;
+    });
+}
+
+// The plan node's depth (branch points it is nested in), or -1 when it is not in the graph.
+int PlanNodeDepth(const std::vector<agent::AcpPlanEntry>& plan,
+                  const std::set<std::string>& skipped, std::string_view id) {
+    for (const agent::PlanNode& node : agent::BuildPlanGraph(plan, skipped).nodes) {
+        if (node.id == id) return node.depth;
+    }
+    return -1;
 }
 
 std::string ResultScript(std::string_view kind, std::string_view text) {
@@ -162,7 +189,7 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     task.space_name = ResearchSpaceName(asked);
     task.turns_ended_before = agent_session_->transcript().turns_ended();
     // The page context would only distract the researcher: it works from the question.
-    if (!agent_session_->Send(BuildResearchPrompt(asked), {})) {
+    if (!SendToAgent(BuildResearchPrompt(asked))) {
         const std::string message = agent_session_->error().empty()
                                         ? "The agent could not be started. Check Settings."
                                         : agent_session_->error();
@@ -172,14 +199,28 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     }
     research_ = std::move(task);
     research_status_.question = asked;
+    plan_entries_.clear();
+    plan_edits_ = {};
+    plan_selected_.clear();
+    plan_notice_.clear();
     SetResearchStatus("running", {});
+    OpenPlanTab();
     SetAgentPanelOpen(true);
     return {ResearchStart::kStarted, {}};
 }
 
 void BrowserWindow::CancelResearch() {
     CEF_REQUIRE_UI_THREAD();
-    if (!research_.has_value() || agent_session_ == nullptr) {
+    if (!research_.has_value()) {
+        return;
+    }
+    if (research_->awaiting_approval) {
+        // Nothing runs while the plan waits, so there is no turn to cancel.
+        research_.reset();
+        SetResearchStatus("cancelled", "Research cancelled.");
+        return;
+    }
+    if (agent_session_ == nullptr) {
         return;
     }
     agent_session_->Cancel();
@@ -188,8 +229,10 @@ void BrowserWindow::CancelResearch() {
 void BrowserWindow::OnAgentSessionChanged() {
     ScheduleLocalPagesRender();
     RefreshAddressIndicators();
-    if (!research_.has_value() || research_finish_posted_ || closing_ ||
-        agent_session_ == nullptr || agent_session_->busy()) {
+    RefreshPlanFromTranscript();
+    RenderPlanPages();
+    if (!research_.has_value() || research_->awaiting_approval || research_finish_posted_ ||
+        closing_ || agent_session_ == nullptr || agent_session_->busy()) {
         return;
     }
     if (chrome_ == nullptr) {
@@ -206,8 +249,8 @@ void BrowserWindow::OnAgentSessionChanged() {
 
 void BrowserWindow::FinishResearch() {
     research_finish_posted_ = false;
-    if (closing_ || !research_.has_value() || agent_session_ == nullptr ||
-        agent_session_->busy()) {
+    if (closing_ || !research_.has_value() || research_->awaiting_approval ||
+        agent_session_ == nullptr || agent_session_->busy()) {
         return;
     }
     CompleteResearch(ClassifyResearchTurn(agent_session_->transcript(),
@@ -220,6 +263,16 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     if (!research_.has_value()) {
         return;
     }
+    if (outcome.kind == ResearchOutcome::Kind::kAwaitingApproval) {
+        // The research stays in flight: the plan is shown and the next turn, started by
+        // Run, is the one that may report.
+        research_->awaiting_approval = true;
+        research_->turns_ended_before = TurnsEnded();
+        research_finish_posted_ = false;
+        SetResearchStatus("awaiting_approval", outcome.message);
+        RenderPlanPages();
+        return;
+    }
     const ResearchTask task = std::move(*research_);
     research_.reset();
     research_finish_posted_ = false;
@@ -230,6 +283,8 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
             return;
         case ResearchOutcome::Kind::kFailed:
             SetResearchStatus("failed", outcome.message);
+            return;
+        case ResearchOutcome::Kind::kAwaitingApproval:  // handled above
             return;
         case ResearchOutcome::Kind::kReport:
             break;
@@ -250,6 +305,249 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     OpenReportTab(id, task.space_name);
     RenderStartPages();
     ScheduleLocalPagesRender();
+}
+
+// --- Plan tab -------------------------------------------------------------------
+
+namespace {
+constexpr std::size_t kMaxPlanInstructionBytes = 1000;
+}  // namespace
+
+bool BrowserWindow::SendToAgent(std::string text) {
+    if (agent_send_for_test_) {
+        return agent_send_for_test_(std::move(text));
+    }
+    return agent_session_ != nullptr && agent_session_->Send(std::move(text), {});
+}
+
+std::uint64_t BrowserWindow::TurnsEnded() const {
+    return agent_session_ != nullptr ? agent_session_->transcript().turns_ended() : 0;
+}
+
+void BrowserWindow::SendPlanTurn(std::string text) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!research_.has_value() || !research_->awaiting_approval) {
+        plan_notice_ = "The agent can change the plan only while it waits for your approval.";
+        RenderPlanPages();
+        return;
+    }
+    if (!agent_send_for_test_ && (agent_session_ == nullptr || agent_session_->busy())) {
+        plan_notice_ = "The agent is busy. Try again when it finishes.";
+        RenderPlanPages();
+        return;
+    }
+    // The turn this sends is the one the research waits for.
+    research_->awaiting_approval = false;
+    research_->turns_ended_before = TurnsEnded();
+    if (!SendToAgent(std::move(text))) {
+        // Refused (the session is busy or cannot start): the plan keeps waiting.
+        research_->awaiting_approval = true;
+        plan_notice_ = agent_session_ != nullptr && !agent_session_->error().empty()
+                           ? agent_session_->error()
+                           : "The agent could not take the plan.";
+        RenderPlanPages();
+        return;
+    }
+    plan_notice_.clear();
+    SetResearchStatus("running", {});
+    RenderPlanPages();
+}
+
+const std::string& BrowserWindow::PlanPageUrl() const {
+    if (plan_page_url_.empty()) {
+        plan_page_url_ = LocalPage::PageUrl(LocalPageKind::kPlan);
+    }
+    return plan_page_url_;
+}
+
+bool BrowserWindow::IsPlanPageUrl(std::string_view url) const { return url == PlanPageUrl(); }
+
+std::string BrowserWindow::PlanStateJson() const {
+    using json::Value;
+    const agent::PlanEdits edits = agent::CarryEditsOver(plan_edits_, plan_entries_);
+    const agent::PlanGraph graph = agent::BuildPlanGraph(plan_entries_, edits.skipped);
+    Value skipped = Value::MakeArray();
+    for (const std::string& id : edits.skipped) {
+        skipped.Push(Value::String(id));
+    }
+    Value instructions = Value::MakeObject();
+    for (const auto& [id, text] : edits.instructions) {
+        instructions.Set(id, Value::String(text));
+    }
+    const bool awaiting = research_.has_value() && research_->awaiting_approval;
+    Value graph_value = json::Parse(agent::PlanGraphJson(graph)).value_or(Value::Null());
+    return json::Serialize(
+        Value::MakeObject()
+            .Set("theme", ThemeJson())
+            .Set("graph", std::move(graph_value))
+            .Set("edits", Value::MakeObject()
+                              .Set("skipped", std::move(skipped))
+                              .Set("instructions", std::move(instructions)))
+            .Set("status", Value::MakeObject()
+                               .Set("state", Value::String(research_status_.state))
+                               .Set("message", Value::String(research_status_.message)))
+            .Set("awaiting", Value::Bool(awaiting))
+            .Set("running", Value::Bool(research_.has_value() && !awaiting))
+            .Set("selected", Value::String(plan_selected_))
+            .Set("view", Value::String(plan_view_))
+            .Set("notice", Value::String(plan_notice_))
+            .Set("depth_limit", Value::Int(agent::kMaxBranchDepth))
+            .Set("question", Value::String(research_status_.question)));
+}
+
+void BrowserWindow::RenderPlanFrame(CefRefPtr<CefFrame> frame) const {
+    if (frame == nullptr) {
+        return;
+    }
+    frame->ExecuteJavaScript(LocalPage::RenderScript(PlanStateJson()),
+                             frame->GetURL().ToString(), 0);
+}
+
+void BrowserWindow::RenderPlanPages() {
+    if (closing_) {
+        return;
+    }
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            const CefRefPtr<CefBrowser> browser = tab.browser();
+            const CefRefPtr<CefFrame> frame =
+                browser != nullptr ? browser->GetMainFrame() : nullptr;
+            if (frame != nullptr && IsPlanPageUrl(frame->GetURL().ToString())) {
+                RenderPlanFrame(frame);
+            }
+        }
+    }
+}
+
+void BrowserWindow::OpenPlanTab() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    AppendTabToActiveSpace(PlanPageUrl());
+    // Find the new tab by its id: pinning may move it within the space.
+    const TabId id = active_tab()->id();
+    const auto index_of_plan = [this, id]() -> std::optional<std::size_t> {
+        const Space& space = active_space();
+        for (std::size_t index = 0; index < space.tab_count(); ++index) {
+            if (space.tabs()[index].id() == id) return index;
+        }
+        return std::nullopt;
+    };
+    if (const std::optional<std::size_t> index = index_of_plan()) {
+        static_cast<void>(SetActiveSpaceTabPinned(*index, true));
+    }
+    if (const std::optional<std::size_t> index = index_of_plan()) {
+        static_cast<void>(MoveTabWithinSpace(active_space_index(), *index, 0));
+    }
+    HideInternalPage();
+}
+
+void BrowserWindow::OpenPlanFixtureTab() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    plan_entries_ = DevPlanFixture();
+    plan_edits_ = {};
+    plan_selected_.clear();
+    plan_notice_.clear();
+    if (!research_.has_value()) {
+        research_ = ResearchTask{.question = "Sample plan",
+                                 .space_name = {},
+                                 .turns_ended_before = TurnsEnded(),
+                                 .awaiting_approval = true};
+    }
+    research_status_.question = "Sample plan";
+    SetResearchStatus("awaiting_approval", "Waiting for approval");
+    OpenPlanTab();
+}
+
+void BrowserWindow::RefreshPlanFromTranscript() {
+    if (agent_session_ == nullptr) {
+        return;
+    }
+    using Kind = agent::TranscriptItem::Kind;
+    const std::vector<agent::TranscriptItem>& items = agent_session_->transcript().items();
+    for (auto it = items.rbegin(); it != items.rend(); ++it) {
+        if (it->kind != Kind::kPlan) continue;
+        plan_entries_ = it->plan;
+        plan_edits_ = agent::CarryEditsOver(plan_edits_, plan_entries_);
+        if (!plan_selected_.empty() && !HasPlanId(plan_entries_, plan_selected_)) {
+            plan_selected_.clear();
+        }
+        return;
+    }
+}
+
+void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
+                                          CefRefPtr<CefBrowser> source) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    const std::string_view type = message.StringOr("type", "");
+    const std::string id(message.StringOr("id", ""));
+    if (type == "ready") {
+        RenderPlanFrame(source != nullptr ? source->GetMainFrame() : nullptr);
+        return;
+    }
+    if (type == "view") {
+        const std::string_view mode = message.StringOr("mode", "");
+        if (mode == "graph" || mode == "list") {
+            plan_view_ = std::string(mode);
+        }
+        RenderPlanPages();
+        return;
+    }
+    if (type == "cancel") {
+        CancelResearch();
+        return;
+    }
+    if (type == "run" || type == "run_branch") {
+        std::optional<std::string> branch;
+        if (type == "run_branch") {
+            branch = std::string(message.StringOr("branch", ""));
+        }
+        SendPlanTurn(agent::BuildPlanRunMessage(plan_entries_,
+                                                agent::CarryEditsOver(plan_edits_, plan_entries_),
+                                                branch));
+        return;
+    }
+    // Every other message names one node of the plan; an id the plan does not have is ignored.
+    if (!HasPlanId(plan_entries_, id)) {
+        return;
+    }
+    if (type == "select") {
+        plan_selected_ = id;
+    } else if (type == "skip") {
+        plan_edits_.skipped.insert(id);
+    } else if (type == "restore") {
+        plan_edits_.skipped.erase(id);
+    } else if (type == "instruction") {
+        const std::string text =
+            ClipPlanText(std::string(Trimmed(message.StringOr("text", ""))),
+                         kMaxPlanInstructionBytes);
+        if (text.empty()) {
+            plan_edits_.instructions.erase(id);
+        } else {
+            plan_edits_.instructions[id] = text;
+        }
+    } else if (type == "branch_from") {
+        const std::set<std::string> skipped = plan_edits_.skipped;
+        if (PlanNodeDepth(plan_entries_, skipped, id) >= agent::kMaxBranchDepth) {
+            plan_notice_ = "Plans branch at most " + std::to_string(agent::kMaxBranchDepth) +
+                           " levels deep";
+            RenderPlanPages();
+            return;
+        }
+        SendPlanTurn(agent::BuildBranchFromMessage(id));
+        return;
+    } else if (type == "expand") {
+        SendPlanTurn(agent::BuildExpandMessage(id));
+        return;
+    }
+    RenderPlanPages();
 }
 
 // --- Reports --------------------------------------------------------------------

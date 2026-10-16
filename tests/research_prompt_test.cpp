@@ -214,6 +214,36 @@ TEST(ClassifyResearchTurnTest, CancelErrorEarlyStopAndNoReportAreNotReports) {
     EXPECT_NE(outcome.message.find("without writing a report"), std::string::npos);
 }
 
+TEST(ClassifyResearchTurnTest, APlanWithoutAReportAwaitsApproval) {
+    agent::AgentTranscript transcript;
+    transcript.Apply(Ended("end_turn"));  // an earlier turn
+    const std::uint64_t before = transcript.turns_ended();
+    transcript.AddUserPrompt("research");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    agent::AcpPlanEntry entry;
+    entry.content = "Open the sources";
+    plan.plan.push_back(entry);
+    transcript.Apply(plan);
+    transcript.Apply(Ended("end_turn"));
+    const ResearchOutcome outcome = ClassifyResearchTurn(transcript, before, "");
+    EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kAwaitingApproval);
+    EXPECT_EQ(outcome.message, "Waiting for approval");
+    EXPECT_TRUE(outcome.markdown.empty());
+}
+
+TEST(ClassifyResearchTurnTest, AReportWinsOverAPlanInTheSameTurn) {
+    agent::AgentTranscript transcript;
+    transcript.AddUserPrompt("research");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    plan.plan.push_back(agent::AcpPlanEntry{.content = "step"});
+    transcript.Apply(plan);
+    transcript.Apply(Chunk("<<<ISLAND_REPORT_BEGIN>>>\n# R\nbody\n<<<ISLAND_REPORT_END>>>"));
+    transcript.Apply(Ended("end_turn"));
+    EXPECT_EQ(ClassifyResearchTurn(transcript, 0, "").kind, ResearchOutcome::Kind::kReport);
+}
+
 TEST(ClassifyResearchTurnTest, ATurnThatNeverEndedIsAFailure) {
     agent::AgentTranscript transcript;
     transcript.Apply(Ended("end_turn"));
