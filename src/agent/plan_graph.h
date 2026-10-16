@@ -22,17 +22,17 @@ struct PlanNode {
     PlanNodeKind kind = PlanNodeKind::kStep;
     PlanNodeState state = PlanNodeState::kQueued;
     std::vector<std::string> after;  // only edges that resolve
-    int depth = 0;                   // branching depth, 0 = trunk
+    int depth = 0;                   // branch points this node is nested in, 0 = trunk
     int column = 0, row = 0;         // layout grid
 };
 
 struct PlanGraph {
     std::vector<PlanNode> nodes;       // topological order
     bool branching = false;            // false -> open in List view
-    std::vector<std::string> dropped;  // diagnostics: "a→b: cycle", "x: unknown after"
+    std::vector<std::string> dropped;  // diagnostics: "a->b: cycle", "x: unknown after"
 };
 
-// Branch points allowed on a path; a deeper node becomes a Needs-you node asking first.
+// Branch nesting allowed; a node nested deeper becomes a Needs-you node asking first.
 inline constexpr int kMaxBranchDepth = 3;
 
 [[nodiscard]] PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <queue>
+#include <set>
 #include <unordered_map>
 #include <utility>
 
@@ -155,7 +156,7 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
             std::vector<int> kept;
             for (int p : drafts[i].parents) {
                 if (!placed[p] && p >= i) {
-                    graph.dropped.push_back(drafts[p].node.id + "→" + drafts[i].node.id +
+                    graph.dropped.push_back(drafts[p].node.id + "->" + drafts[i].node.id +
                                             ": cycle");
                 } else {
                     kept.push_back(p);
@@ -166,22 +167,41 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
         topo(order);
     }
 
-    // 4. Children, branching, depth and column along the topological order.
+    // 4. Children, branching, depth and column along the topological order. Depth is
+    //    branch nesting: a node sits inside the branch points its parent hands down (the
+    //    parent's own, plus the parent when it branches). A node with several inputs closes
+    //    the branch point they diverged from, the last one they share.
     std::vector<std::vector<int>> children(n);
     for (int i = 0; i < n; ++i) {
         for (int p : drafts[i].parents) children[p].push_back(i);
     }
+    std::vector<std::vector<int>> open(n);  // enclosing branch points, outermost first
+    auto handed_down = [&](int p) {
+        std::vector<int> stack = open[p];
+        if (children[p].size() >= 2) stack.push_back(p);
+        return stack;
+    };
     std::vector<int> column(n, 0);
     for (int i : order) {
         Draft& d = drafts[i];
-        for (int p : d.parents) {
-            column[i] = std::max(column[i], column[p] + 1);
-            const int through = drafts[p].node.depth + (children[p].size() >= 2 ? 1 : 0);
-            d.node.depth = std::max(d.node.depth, through);
+        for (int p : d.parents) column[i] = std::max(column[i], column[p] + 1);
+        if (d.parents.size() == 1) {
+            open[i] = handed_down(d.parents[0]);
+        } else if (d.parents.size() >= 2) {
+            std::vector<int> shared = handed_down(d.parents[0]);
+            for (std::size_t k = 1; k < d.parents.size(); ++k) {
+                const std::vector<int> other = handed_down(d.parents[k]);
+                const auto end =
+                    std::mismatch(shared.begin(), shared.end(), other.begin(), other.end()).first;
+                shared.erase(end, shared.end());
+            }
+            if (!shared.empty()) shared.pop_back();
+            open[i] = std::move(shared);
         }
+        d.node.depth = static_cast<int>(open[i].size());
         d.node.column = column[i];
         if (children[i].size() >= 2) graph.branching = true;
-        if (d.node.depth > kMaxBranchDepth) d.node.needs_you = "depth";
+        if (d.node.depth > kMaxBranchDepth && d.node.needs_you.empty()) d.node.needs_you = "depth";
         if (!d.node.needs_you.empty()) d.node.kind = PlanNodeKind::kNeedsYou;
         for (int p : d.parents) d.node.after.push_back(drafts[p].node.id);
     }
@@ -189,14 +209,17 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
     // 5. Rows. The tree parent is the sole parent; roots and joins start their own tree.
     //    A tree's leaves take the next free rows and a parent sits in the middle of its
     //    tree children. A join sits in the middle of its inputs, and its own tree shifts
-    //    to follow it.
+    //    to follow it, further down while any of its cells is taken. A root starts below
+    //    everything placed so far.
     std::vector<std::vector<int>> tree_children(n);
     for (int i = 0; i < n; ++i) {
         if (drafts[i].parents.size() == 1) tree_children[drafts[i].parents[0]].push_back(i);
     }
     std::vector<int> row(n, 0);
     std::vector<bool> laid(n, false);
-    int next_row = 0;
+    std::set<std::pair<int, int>> taken;  // (column, row)
+    bool any_laid = false;
+    int bottom = 0;  // lowest row placed so far
     for (int root : order) {
         if (laid[root] || drafts[root].parents.size() == 1) continue;
         std::vector<int> preorder;
@@ -223,7 +246,7 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
             }
             row[*it] = (low + high) / 2;
         }
-        int shift = next_row;
+        int shift = any_laid ? bottom + 1 : 0;
         if (!drafts[root].parents.empty()) {
             int low = row[drafts[root].parents.front()];
             int high = low;
@@ -233,11 +256,20 @@ PlanGraph BuildPlanGraph(const std::vector<AcpPlanEntry>& entries,
             }
             shift = (low + high) / 2 - row[root];
         }
+        auto collides = [&] {
+            for (int cur : preorder) {
+                if (taken.count({column[cur], row[cur] + shift}) != 0) return true;
+            }
+            return false;
+        };
+        while (collides()) ++shift;
         for (int cur : preorder) {
             row[cur] += shift;
             laid[cur] = true;
+            taken.emplace(column[cur], row[cur]);
+            bottom = any_laid ? std::max(bottom, row[cur]) : row[cur];
+            any_laid = true;
         }
-        if (drafts[root].parents.empty()) next_row += leaf;
     }
     int lowest = 0;
     for (int i = 0; i < n; ++i) lowest = std::min(lowest, row[i]);
