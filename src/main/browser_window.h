@@ -493,7 +493,8 @@ class BrowserWindow : public CefClient,
     CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override;
 
     bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                          const CefString& target_url, WindowOpenDisposition target_disposition,
+                          const CefString& target_url,
+                          cef_window_open_disposition_t target_disposition,
                           bool user_gesture) override;
     void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                              CefRefPtr<CefContextMenuParams> params,
@@ -515,7 +516,7 @@ class BrowserWindow : public CefClient,
 
     bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
                        const CefString& target_url, const CefString& target_frame_name,
-                       WindowOpenDisposition target_disposition, bool user_gesture,
+                       cef_window_open_disposition_t target_disposition, bool user_gesture,
                        const CefPopupFeatures& popup_features, CefWindowInfo& window_info,
                        CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
                        CefRefPtr<CefDictionaryValue>& extra_info,

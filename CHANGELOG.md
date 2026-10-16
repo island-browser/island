@@ -15,6 +15,39 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Arc-style look. On macOS the window is frameless: no title bar or title text, the traffic lights
+  sit over the top-left of the sidebar, and the sidebar's top band (and the canvas strip above the
+  page) drags the window. The sidebar and the window margin are one canvas tinted in the active
+  space's color (stronger than before), the page sits on a card inset 8 DIP with rounded corners
+  and one soft shadow, the selected and hovered tab rows and the address pill are soft rounded
+  fills, and favicons sit on a small rounded plate so dark ones stay visible on a dark sidebar, in
+  the 52 DIP icon rail as well. CEF views cannot round or shadow anything, so on macOS a native
+  overlay (`macos/page_card_mac.mm`) paints the corners and the shadow; other platforms keep
+  square corners and the platform frame.
+- Settings > Appearance, applied live and saved in the prefs: per-space color (ten presets or a
+  custom hex), sidebar tint intensity, sidebar on the left or right, page corner radius
+  (0/6/10/14), density (comfortable/compact), interface font (Geist, System, or any installed
+  family), the page card's shadow and "full bleed" (no inset, no rounding, no shadow). Theme stays
+  System/Light/Dark.
+
+## [0.6.2] - 2026-10-15
+
+### Fixed
+
+- Compiled the Windows build as UTF-8, so window titles and the command palette no longer
+  show garbled dashes and non-ASCII download names keep their bytes in the tests.
+
+## [0.6.1] - 2026-10-15
+
+### Fixed
+
+- Fixed the Linux build by using CEF's unambiguous window-open disposition type in popup and
+  new-tab callback signatures.
+
+## [0.6.0] - 2026-10-15
+
+### Added
+
 - Start page **Research** mode: Enter sends the question to the configured agent with a prompt to research it with Island's browser tools (a new space named after the question, several sources in tabs, compared) and to finish with a Markdown report that cites every claim. The final report opens in a new **Report** tab (local page, shared safe Markdown renderer, links open in new tabs) with Copy Markdown, Save as .md... and Continue in agent panel. Clear messages for a missing agent (with an Open Settings button), a busy agent, and Cancel.
   Reports list: persisted in `reports.json` under the support directory, listed in Settings > Reports and in Cmd/Ctrl+K as REPORT rows.
   Dev capture actions `research:<question>` and `open_report`.
@@ -47,20 +80,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   them from Cmd/Ctrl+K alongside open tabs and bookmarks. The last typed word matches as a prefix. Results are URL-deduplicated, combine
   BM25/recency with repeat-visit frequency, and stay entirely on the device. Settings can stop
   remembering new visits or clear the persisted history.
-- Arc-style look. On macOS the window is frameless: no title bar or title text, the traffic lights
-  sit over the top-left of the sidebar, and the sidebar's top band (and the canvas strip above the
-  page) drags the window. The sidebar and the window margin are one canvas tinted in the active
-  space's color (stronger than before), the page sits on a card inset 8 DIP with rounded corners
-  and one soft shadow, the selected and hovered tab rows and the address pill are soft rounded
-  fills, and favicons sit on a small rounded plate so dark ones stay visible on a dark sidebar, in
-  the 52 DIP icon rail as well. CEF views cannot round or shadow anything, so on macOS a native
-  overlay (`macos/page_card_mac.mm`) paints the corners and the shadow; other platforms keep
-  square corners and the platform frame.
-- Settings > Appearance, applied live and saved in the prefs: per-space color (ten presets or a
-  custom hex), sidebar tint intensity, sidebar on the left or right, page corner radius
-  (0/6/10/14), density (comfortable/compact), interface font (Geist, System, or any installed
-  family), the page card's shadow and "full bleed" (no inset, no rounding, no shadow). Theme stays
-  System/Light/Dark.
 - Cmd/Ctrl+B now collapses the sidebar to a 52 DIP icon rail instead of hiding it: one square
   button per tab of the active space (pinned tabs first, the active tab highlighted like the
   selected row, the page title as tooltip and accessible name), a "+" new-tab button and the
@@ -254,7 +273,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/island-browser/island/releases/tag/v0.6.2
+[0.6.1]: https://github.com/island-browser/island/releases/tag/v0.6.1
+[0.6.0]: https://github.com/island-browser/island/releases/tag/v0.6.0
 [0.5.1]: https://github.com/island-browser/island/releases/tag/v0.5.1
 [0.5.0]: https://github.com/island-browser/island/releases/tag/v0.5.0
 [0.4.0]: https://github.com/island-browser/island/releases/tag/v0.4.0
