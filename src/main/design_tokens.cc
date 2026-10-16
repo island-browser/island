@@ -8,15 +8,102 @@
 namespace island {
 
 ChromeTokens ChromeTokens::ForTheme(ChromeTheme theme) noexcept {
+    return ForLook(LookPreset::kGraphite, theme);
+}
+
+ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept {
+    if (look == LookPreset::kNative) {
+        if (theme == ChromeTheme::kDark) {
+            ChromeTokens tokens{
+                .background = {.argb = 0xFF2A2A2DU},
+                .surface = {.argb = 0xFF1E1E20U},
+                .surface_secondary = {.argb = 0xFF252527U},
+                .fill = {.argb = 0xFF3A3A3DU},
+                .text = {.argb = 0xFFF5F5F7U},
+                .text_secondary = {.argb = 0xFF98989DU},
+                .text_tertiary = {.argb = 0xFF6E6E73U},
+                .border = {.argb = 0xFF38383AU},
+                .border_strong = {.argb = 0xFF48484AU},
+                .accent = {.argb = 0xFF0A84FFU},
+                .selection = {.argb = 0xFF0A6FE0U},
+                .accent_soft = {.argb = 0xFF16324FU},
+                .accent_text = {.argb = 0xFF64B5FFU},
+                .warning_bg = {.argb = 0xFF3A2E12U},
+                .warning_border = {.argb = 0xFF6B5420U},
+                .warning_text = {.argb = 0xFFFFD60AU},
+                .success = {.argb = 0xFF30D158U},
+                .danger = {.argb = 0xFFFF453AU},
+                .branch = {{{.argb = 0xFF0A84FFU},
+                            {.argb = 0xFFBF5AF2U},
+                            {.argb = 0xFFFF9F0AU},
+                            {.argb = 0xFF40C8A0U}}},
+            };
+            tokens.canvas = tokens.background;
+            tokens.selected = tokens.selection;
+            tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
+            tokens.well = tokens.fill;
+            tokens.plate = tokens.surface;
+            tokens.ui_font_family = "system";
+            return tokens;
+        }
+
+        ChromeTokens tokens{
+            .background = {.argb = 0xFFEBEBEFU},
+            .surface = {.argb = 0xFFFFFFFFU},
+            .surface_secondary = {.argb = 0xFFF6F6F8U},
+            .fill = {.argb = 0xFFE8E8EDU},
+            .text = {.argb = 0xFF1D1D1FU},
+            .text_secondary = {.argb = 0xFF636366U},
+            .text_tertiary = {.argb = 0xFF8E8E93U},
+            .border = {.argb = 0xFFE5E5EAU},
+            .border_strong = {.argb = 0xFFD2D2D7U},
+            .accent = {.argb = 0xFF0A64D8U},
+            .selection = {.argb = 0xFF0A64D8U},
+            .accent_soft = {.argb = 0xFFDFE9F8U},
+            .accent_text = {.argb = 0xFF0A4FA8U},
+            .warning_bg = {.argb = 0xFFFFF8E6U},
+            .warning_border = {.argb = 0xFFF5D38AU},
+            .warning_text = {.argb = 0xFF6A4A00U},
+            .success = {.argb = 0xFF248A3DU},
+            .danger = {.argb = 0xFFD70015U},
+            .branch = {{{.argb = 0xFF0A64D8U},
+                        {.argb = 0xFF8E44ADU},
+                        {.argb = 0xFFC25400U},
+                        {.argb = 0xFF1F8A70U}}},
+        };
+        tokens.canvas = tokens.background;
+        tokens.selected = tokens.selection;
+        tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
+        tokens.well = tokens.fill;
+        tokens.plate = tokens.surface;
+        tokens.ui_font_family = "system";
+        return tokens;
+    }
+
     if (theme == ChromeTheme::kDark) {
         return {
             .background = {.argb = 0xFF0A0A0AU},
             .surface = {.argb = 0xFF111111U},
             .surface_secondary = {.argb = 0xFF1A1A1AU},
+            .fill = {.argb = 0xFF3A3A3DU},
             .text = {.argb = 0xFFEDEDEDU},
             .text_secondary = {.argb = 0xFFA1A1A1U},
+            .text_tertiary = {.argb = 0xFF6E6E73U},
             .border = {.argb = 0xFF2A2A2AU},
+            .border_strong = {.argb = 0xFF48484AU},
             .accent = {.argb = 0xFF3291FFU},
+            .selection = {.argb = 0xFF0A6FE0U},
+            .accent_soft = {.argb = 0xFF16324FU},
+            .accent_text = {.argb = 0xFF64B5FFU},
+            .warning_bg = {.argb = 0xFF3A2E12U},
+            .warning_border = {.argb = 0xFF6B5420U},
+            .warning_text = {.argb = 0xFFFFD60AU},
+            .success = {.argb = 0xFF30D158U},
+            .danger = {.argb = 0xFFFF453AU},
+            .branch = {{{.argb = 0xFF0A84FFU},
+                        {.argb = 0xFFBF5AF2U},
+                        {.argb = 0xFFFF9F0AU},
+                        {.argb = 0xFF40C8A0U}}},
             .canvas = {.argb = 0xFF1A1A1AU},
             .selected = {.argb = 0xFF2A2A2AU},
             .hover = {.argb = 0xFF222222U},
@@ -29,10 +116,25 @@ ChromeTokens ChromeTokens::ForTheme(ChromeTheme theme) noexcept {
         .background = {.argb = 0xFFFAFAFAU},
         .surface = {.argb = 0xFFFFFFFFU},
         .surface_secondary = {.argb = 0xFFF2F2F2U},
+        .fill = {.argb = 0xFFE8E8EDU},
         .text = {.argb = 0xFF0A0A0AU},
         .text_secondary = {.argb = 0xFF666666U},
+        .text_tertiary = {.argb = 0xFF8E8E93U},
         .border = {.argb = 0xFFE5E5E5U},
+        .border_strong = {.argb = 0xFFD2D2D7U},
         .accent = {.argb = 0xFF0068D6U},
+        .selection = {.argb = 0xFF0A64D8U},
+        .accent_soft = {.argb = 0xFFDFE9F8U},
+        .accent_text = {.argb = 0xFF0A4FA8U},
+        .warning_bg = {.argb = 0xFFFFF8E6U},
+        .warning_border = {.argb = 0xFFF5D38AU},
+        .warning_text = {.argb = 0xFF6A4A00U},
+        .success = {.argb = 0xFF248A3DU},
+        .danger = {.argb = 0xFFD70015U},
+        .branch = {{{.argb = 0xFF0A64D8U},
+                    {.argb = 0xFF8E44ADU},
+                    {.argb = 0xFFC25400U},
+                    {.argb = 0xFF1F8A70U}}},
         .canvas = {.argb = 0xFFF2F2F2U},
         .selected = {.argb = 0xFFFFFFFFU},
         .hover = {.argb = 0xFFEAEAEAU},
@@ -190,7 +292,10 @@ AppearanceSettings NormalizeAppearance(AppearanceSettings settings) {
 ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
                                       const AppearanceSettings& raw) const {
     const AppearanceSettings appearance = NormalizeAppearance(raw);
-    ChromeTokens tokens = Tint(*this, space_color, theme, appearance.sidebar_tint_percent / 100.0);
+    ChromeTokens tokens =
+        appearance.look == LookPreset::kNative
+            ? *this
+            : Tint(*this, space_color, theme, appearance.sidebar_tint_percent / 100.0);
     tokens.sidebar_side = appearance.sidebar_side;
     const bool bleed = appearance.full_bleed;
     tokens.card_radius_dip = bleed ? 0 : appearance.card_radius_dip;

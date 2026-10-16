@@ -15,6 +15,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Native look color tokens: neutral source-list surfaces, system blue selection, accessible
+  secondary/warning text pairs, and four plan-branch colors in light and dark themes. Native
+  customization ignores space color so its canvas and accent stay fixed.
 - Arc-style look. On macOS the window is frameless: no title bar or title text, the traffic lights
   sit over the top-left of the sidebar, and the sidebar's top band (and the canvas strip above the
   page) drags the window. The sidebar and the window margin are one canvas tinted in the active

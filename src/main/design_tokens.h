@@ -1,6 +1,7 @@
 #ifndef ISLAND_DESIGN_TOKENS_H_
 #define ISLAND_DESIGN_TOKENS_H_
 
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -29,9 +30,12 @@ enum class SidebarSide : std::uint8_t { kLeft, kRight };
 // compact tightens rows to 26 DIP.
 enum class Density : std::uint8_t { kComfortable, kCompact };
 
+enum class LookPreset : std::uint8_t { kNative, kArc, kGraphite };
+
 // The user-customizable look layered on the theme tokens (Settings > Appearance, persisted in
 // prefs). CEF-free; every field is clamped/normalized by NormalizeAppearance before use.
 struct AppearanceSettings {
+    LookPreset look = LookPreset::kNative;
     // How strongly the active space's color tints the sidebar and canvas, 0 (neutral graphite)
     // to 100 (vivid).
     int sidebar_tint_percent = 60;
@@ -60,10 +64,22 @@ struct ChromeTokens {
     ArgbColor background;
     ArgbColor surface;
     ArgbColor surface_secondary;
+    ArgbColor fill{};
     ArgbColor text;
     ArgbColor text_secondary;
+    ArgbColor text_tertiary{};
     ArgbColor border;
+    ArgbColor border_strong{};
     ArgbColor accent;
+    ArgbColor selection{};
+    ArgbColor accent_soft{};
+    ArgbColor accent_text{};
+    ArgbColor warning_bg{};
+    ArgbColor warning_border{};
+    ArgbColor warning_text{};
+    ArgbColor success{};
+    ArgbColor danger{};
+    std::array<ArgbColor, 4> branch{};
     // Arc-style runtime tokens (derived by TintedForSpace; neutral defaults from ForTheme).
     // `canvas` is the single surface of the sidebar and of the window margin around the page
     // card; `selected`/`hover` are the soft fills of the selected and hovered rows; `well` is
@@ -97,6 +113,7 @@ struct ChromeTokens {
     ChromeFont mono_font = ChromeFont::kGeistMono;
 
     [[nodiscard]] static ChromeTokens ForTheme(ChromeTheme theme) noexcept;
+    [[nodiscard]] static ChromeTokens ForLook(LookPreset look, ChromeTheme theme) noexcept;
 
     // Arc-style space theming, applied at runtime on top of the contract
     // tokens: the canvas, rail, and hairlines take a faint cast of the active

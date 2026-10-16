@@ -150,6 +150,65 @@ values.
 }
 ```
 
+### Native look contract
+
+```design-tokens-native
+{
+  "contract": "island-native-look",
+  "version": 1,
+  "colors": {
+    "light": {
+      "background": "#EBEBEF",
+      "surface": "#FFFFFF",
+      "surface_secondary": "#F6F6F8",
+      "fill": "#E8E8ED",
+      "text": "#1D1D1F",
+      "text_secondary": "#636366",
+      "text_tertiary": "#8E8E93",
+      "border": "#E5E5EA",
+      "border_strong": "#D2D2D7",
+      "accent": "#0A64D8",
+      "selection": "#0A64D8",
+      "accent_soft": "#DFE9F8",
+      "accent_text": "#0A4FA8",
+      "warning_bg": "#FFF8E6",
+      "warning_border": "#F5D38A",
+      "warning_text": "#6A4A00",
+      "success": "#248A3D",
+      "danger": "#D70015",
+      "branch_a": "#0A64D8",
+      "branch_b": "#8E44AD",
+      "branch_c": "#C25400",
+      "branch_d": "#1F8A70"
+    },
+    "dark": {
+      "background": "#2A2A2D",
+      "surface": "#1E1E20",
+      "surface_secondary": "#252527",
+      "fill": "#3A3A3D",
+      "text": "#F5F5F7",
+      "text_secondary": "#98989D",
+      "text_tertiary": "#6E6E73",
+      "border": "#38383A",
+      "border_strong": "#48484A",
+      "accent": "#0A84FF",
+      "selection": "#0A6FE0",
+      "accent_soft": "#16324F",
+      "accent_text": "#64B5FF",
+      "warning_bg": "#3A2E12",
+      "warning_border": "#6B5420",
+      "warning_text": "#FFD60A",
+      "success": "#30D158",
+      "danger": "#FF453A",
+      "branch_a": "#0A84FF",
+      "branch_b": "#BF5AF2",
+      "branch_c": "#FF9F0A",
+      "branch_d": "#40C8A0"
+    }
+  }
+}
+```
+
 ### Documented colors
 
 | Role | Token | Light | Dark | Usage |

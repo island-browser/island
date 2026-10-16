@@ -70,7 +70,9 @@ TEST(AppearanceTokensTest, GivenTintStrengthWhenResolvedThenTheCanvasMovesToward
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
         const ChromeTokens base = ChromeTokens::ForTheme(theme);
         const auto canvas = [&](int tint) {
-            return base.Customized(kBlue, theme, {.sidebar_tint_percent = tint}).canvas;
+            return base
+                .Customized(kBlue, theme, {.look = LookPreset::kArc, .sidebar_tint_percent = tint})
+                .canvas;
         };
         EXPECT_GT(ContrastRatio(canvas(0), canvas(100)), 1.0);
         // The farther from neutral, the closer to the space color.
@@ -100,7 +102,7 @@ TEST(AppearanceTokensTest, GivenAnySpaceColorAndTintThenTextStaysReadableOnEvery
              {0xFF0090FFU, 0xFFFFB224U, 0xFFFFFFFFU, 0xFF000000U, 0xFFE5484DU, 0xFF8E4EC6U}) {
             for (const int tint : {0, 25, 60, 100}) {
                 const ChromeTokens t = ChromeTokens::ForTheme(theme).Customized(
-                    {space}, theme, {.sidebar_tint_percent = tint});
+                    {space}, theme, {.look = LookPreset::kArc, .sidebar_tint_percent = tint});
                 for (const ArgbColor surface : {t.canvas, t.selected, t.hover, t.well}) {
                     EXPECT_GE(ContrastRatio(t.text, surface), 4.5);
                     EXPECT_GE(ContrastRatio(t.text_secondary, surface), 4.5);
