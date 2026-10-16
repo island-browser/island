@@ -10,12 +10,19 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
 namespace island {
+
+// The lowercase host of an absolute http or https URL. Nothing else qualifies: other schemes,
+// URLs that carry credentials, and URLs without a host. Ports are dropped and IPv6 literals keep
+// their brackets. History is grouped by this host, so `Docs.Test:8443` and `docs.test` are one
+// site.
+[[nodiscard]] std::optional<std::string> WebUrlHost(std::string_view url);
 
 struct HistoryResult {
     std::string url;
@@ -61,6 +68,10 @@ class HistoryRecorder final {
     void QueryAsync(std::string query, std::uint64_t query_now_ms, std::size_t max_results,
                     QueryCallback callback);
     void ClearAsync(ClearCallback callback = {});
+    // The most visited sites, most visits first (then the latest visit). Visits are grouped by
+    // normalized host before the limit applies; each site is represented by its latest page, and
+    // `score` is the site's visit count. Feeds the start page's speed-dial tiles.
+    void MostVisitedAsync(std::size_t max_results, QueryCallback callback);
 
     // Stops accepting work and asks the worker to flush after all queued work.
     // The flush itself stays off the caller's thread. Destruction joins it.
@@ -71,6 +82,7 @@ class HistoryRecorder final {
     [[nodiscard]] std::vector<HistoryResult> QueryForTest(std::string query,
                                                           std::uint64_t query_now_ms,
                                                           std::size_t max_results = 8);
+    [[nodiscard]] std::vector<HistoryResult> MostVisitedForTest(std::size_t max_results);
     [[nodiscard]] std::size_t EntryCountForTest();
 
     [[nodiscard]] static std::string NormalizeHistoryUrl(std::string_view url);

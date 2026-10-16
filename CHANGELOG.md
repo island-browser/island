@@ -15,6 +15,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
+  control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
+  the most visited sites (from history, one per host, opened in the current tab). Tab and
+  Shift+Tab step through the modes while the field has focus. Clearing history clears the tiles.
+  Visits are grouped by host before the six-tile limit applies, so one busy site with many pages
+  no longer hides the others. IP-address sites get a neutral globe instead of a digit, and the
+  old keyboard-shortcut list under the start page is removed.
 - Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
   blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
   version at the bottom, and one section shown at a time. Appearance groups its controls into

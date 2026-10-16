@@ -48,6 +48,7 @@
 #include "runtime_style.h"
 #include "search_provider.h"
 #include "session_store.h"
+#include "start_tiles.h"
 #include "startup_options.h"
 #include "window_agent_host.h"
 #include "zoom_policy.h"
@@ -1440,6 +1441,10 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
                                             browser_window->settings_message_ =
                                                 ok ? "Browsing history cleared."
                                                    : "Browsing history could not be cleared.";
+                                            if (ok) {
+                                                browser_window->start_tiles_.clear();
+                                                browser_window->RenderStartPages();
+                                            }
                                             browser_window->ScheduleLocalPagesRender();
                                         },
                                         window, cleared)));
@@ -2042,6 +2047,13 @@ bool BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
 
 std::string BrowserWindow::StartPageStateJson() const {
     using json::Value;
+    Value tiles = Value::MakeArray();
+    for (const StartTile& tile : start_tiles_) {
+        tiles.Push(Value::MakeObject()
+                       .Set("title", Value::String(tile.title))
+                       .Set("url", Value::String(tile.url))
+                       .Set("host", Value::String(tile.host)));
+    }
     return json::Serialize(
         Value::MakeObject()
             .Set("theme", ThemeJson())
@@ -2049,6 +2061,7 @@ std::string BrowserWindow::StartPageStateJson() const {
                  Value::MakeObject()
                      .Set("mode", Value::String(std::string(start_mode())))
                      .Set("engine", Value::String(std::string(search_engine().display_name)))
+                     .Set("tiles", std::move(tiles))
                      .Set("research",
                           Value::MakeObject()
                               .Set("seq",
@@ -2209,6 +2222,21 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
         }
     } else if (type == "cancel_research") {
         CancelResearch();
+    } else if (type == "ready") {
+        RefreshStartTiles();
+    } else if (type == "open_tile") {
+        // Only http and https pages open from a tile: the page's message is not trusted to name
+        // any other scheme.
+        const std::string_view url = message.StringOr("url", "");
+        if (!IsWebTileUrl(url)) {
+            return;
+        }
+        const CefRefPtr<CefBrowser> target =
+            source != nullptr ? source : BrowserForTab(std::nullopt);
+        const CefRefPtr<CefFrame> frame = target != nullptr ? target->GetMainFrame() : nullptr;
+        if (frame != nullptr) {
+            frame->LoadURL(std::string(url));
+        }
     } else if (type == "open_settings") {
         ShowSettingsSection("agent");
     } else if (type == "open_report") {
@@ -4104,6 +4132,27 @@ void BrowserWindow::ApplyHistoryResults(std::string query, std::vector<HistoryRe
                            .score = result.score});
     }
     command_palette_->SetHistoryResults(query, std::move(history));
+}
+
+void BrowserWindow::RefreshStartTiles() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || history_ == nullptr) {
+        return;
+    }
+    history_->MostVisitedAsync(kStartTileLimit, [window = CefRefPtr<BrowserWindow>(this)](
+                                                    std::vector<HistoryResult> results) {
+        CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::ApplyStartTiles,
+                                                                window, std::move(results))));
+    });
+}
+
+void BrowserWindow::ApplyStartTiles(std::vector<HistoryResult> most_visited) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    start_tiles_ = BuildStartTiles(most_visited);
+    RenderStartPages();
 }
 
 void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,

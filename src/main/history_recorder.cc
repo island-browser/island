@@ -35,7 +35,44 @@ bool StartsWithAsciiCaseInsensitive(std::string_view text, std::string_view pref
     return true;
 }
 
+std::string LowerAscii(std::string_view text) {
+    std::string lower(text);
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return lower;
+}
+
 }  // namespace
+
+std::optional<std::string> WebUrlHost(std::string_view url) {
+    const std::size_t scheme_end = url.find("://");
+    if (scheme_end == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::string scheme = LowerAscii(url.substr(0, scheme_end));
+    if (scheme != "http" && scheme != "https") {
+        return std::nullopt;
+    }
+    const std::string_view rest = url.substr(scheme_end + 3);
+    const std::string_view authority = rest.substr(0, rest.find_first_of("/?#"));
+    if (authority.find('@') != std::string_view::npos) {
+        return std::nullopt;
+    }
+    std::string_view host = authority;
+    if (host.starts_with('[')) {
+        const std::size_t close = host.find(']');
+        if (close == std::string_view::npos) {
+            return std::nullopt;
+        }
+        host = host.substr(0, close + 1);
+    } else {
+        host = host.substr(0, host.find(':'));
+    }
+    if (host.empty()) {
+        return std::nullopt;
+    }
+    return LowerAscii(host);
+}
 
 struct HistoryRecorder::Visit {
     std::string url;
@@ -304,6 +341,49 @@ std::vector<HistoryResult> QueryHistory(HistoryRecorder::WorkerState& state, std
     return results;
 }
 
+// Every logged visit, grouped by normalized host: the visit count is the site's score, and the
+// page, title and time of the latest visit represent the site. Grouping happens before the limit,
+// so one host with many pages cannot push other sites out of the list. Most visits first, then
+// the most recent visit, then the URL.
+std::vector<HistoryResult> MostVisited(const HistoryRecorder::WorkerState& state,
+                                       std::size_t max_results) {
+    std::unordered_map<std::string, HistoryResult> by_host;
+    for (const HistoryRecorder::Visit& visit : state.visits) {
+        const std::optional<std::string> host = WebUrlHost(visit.url);
+        if (!host) {
+            continue;
+        }
+        HistoryResult& result = by_host[*host];
+        ++result.visit_count;
+        if (result.url.empty() || visit.visited_at_ms >= result.visited_at_ms) {
+            result.url = visit.url;
+            result.title = visit.title;
+            result.visited_at_ms = visit.visited_at_ms;
+        }
+    }
+
+    std::vector<HistoryResult> results;
+    results.reserve(by_host.size());
+    for (auto& [host, result] : by_host) {
+        result.score = static_cast<double>(result.visit_count);
+        results.push_back(std::move(result));
+    }
+    std::sort(results.begin(), results.end(),
+              [](const HistoryResult& lhs, const HistoryResult& rhs) {
+                  if (lhs.visit_count != rhs.visit_count) {
+                      return lhs.visit_count > rhs.visit_count;
+                  }
+                  if (lhs.visited_at_ms != rhs.visited_at_ms) {
+                      return lhs.visited_at_ms > rhs.visited_at_ms;
+                  }
+                  return lhs.url < rhs.url;
+              });
+    if (results.size() > max_results) {
+        results.resize(max_results);
+    }
+    return results;
+}
+
 bool ClearHistory(const HistoryRecorder::Options& options, HistoryRecorder::WorkerState& state) {
     state.index.reset();
     state.visits.clear();
@@ -448,6 +528,16 @@ void HistoryRecorder::QueryAsync(std::string query, std::uint64_t query_now_ms,
     }));
 }
 
+void HistoryRecorder::MostVisitedAsync(std::size_t max_results, QueryCallback callback) {
+    static_cast<void>(
+        Enqueue([max_results, callback = std::move(callback)](WorkerState& state) mutable {
+            std::vector<HistoryResult> results = MostVisited(state, max_results);
+            if (callback) {
+                callback(std::move(results));
+            }
+        }));
+}
+
 void HistoryRecorder::ClearAsync(ClearCallback callback) {
     static_cast<void>(Enqueue([this, callback = std::move(callback)](WorkerState& state) mutable {
         const bool cleared = ClearHistory(options_, state);
@@ -523,6 +613,15 @@ std::vector<HistoryResult> HistoryRecorder::QueryForTest(std::string query,
                [completed](std::vector<HistoryResult> results) mutable {
                    completed->set_value(std::move(results));
                });
+    return future.get();
+}
+
+std::vector<HistoryResult> HistoryRecorder::MostVisitedForTest(std::size_t max_results) {
+    auto completed = std::make_shared<std::promise<std::vector<HistoryResult>>>();
+    std::future<std::vector<HistoryResult>> future = completed->get_future();
+    MostVisitedAsync(max_results, [completed](std::vector<HistoryResult> results) mutable {
+        completed->set_value(std::move(results));
+    });
     return future.get();
 }
 
