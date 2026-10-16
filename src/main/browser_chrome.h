@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "address_bar_model.h"
+#include "address_indicators.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "collapsed_rail.h"
@@ -140,6 +141,9 @@ enum class ChromeViewId : int {
     kAddressIdleLabel = 1071,
     kFavoritesSectionHeader = 1072,
     kTabsSectionHeader = 1073,
+    // Address indicators (shield, agent dot); Reader reuses kReaderButton.
+    kAddressShield = 1074,
+    kAddressAgentDot = 1075,
 };
 
 struct ChromeViewTreeNode {
@@ -254,6 +258,8 @@ class BrowserChromeHost {
     virtual void ToggleAgentPanel() = 0;
     virtual void ToggleTabOverview() = 0;
     virtual void ToggleSettings() = 0;
+    // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
+    virtual void OpenBlockerSettings() = 0;
 };
 
 class BrowserChrome final : public NavigationObserver {
@@ -283,6 +289,8 @@ class BrowserChrome final : public NavigationObserver {
     void SetReaderState(bool available, bool active);
     [[nodiscard]] bool reader_available() const noexcept { return reader_available_; }
     [[nodiscard]] bool reader_active() const noexcept { return reader_active_; }
+    // The shield, Reader and agent-dot indicators inside the Native address field.
+    void SetAddressIndicators(const AddressIndicators& indicators);
 
     // Focus-ring thickness of the address pill and ActivePageIndicator thickness in
     // DIP; both are 2 so the accent marks read as one weight.
@@ -769,6 +777,7 @@ class BrowserChrome final : public NavigationObserver {
     void ApplyTabRowVisual(std::size_t index);
     void ApplyCollapsedTabVisual(std::size_t position);
     void ApplyAddressPillImages();
+    void ApplyAddressIndicators();
     // Called by the row buttons' delegates on every pointer-state change.
     void RefreshRowHover();
     void PushCornerPatches();
@@ -813,6 +822,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;
     CefRefPtr<CefLabelButton> reader_button_;
+    CefRefPtr<CefLabelButton> address_shield_button_;
+    CefRefPtr<CefLabelButton> address_agent_dot_;
+    AddressIndicators address_indicators_;
     CefRefPtr<CefLabelButton> share_button_;
     CefRefPtr<CefLabelButton> toolbar_agent_button_;
     bool reader_available_ = false;

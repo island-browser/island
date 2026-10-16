@@ -15,6 +15,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- The Native address field shows page state as 20 DIP indicators instead of a status bar: a
+  shield with the blocked-request count at the left edge (capped at "9999+", hidden at 0; click
+  opens Settings > Privacy), Reader at the right edge only on pages that have a reader view, and
+  an agent dot (blue while the agent works, orange while it waits for an answer; click opens the
+  agent panel). Each has an accessible name and a full-text tooltip, and the indicators follow
+  the active tab.
 - The Native look now uses a 248 DIP source-list sidebar and a 52 DIP page toolbar with 28 DIP
   navigation buttons, a centered idle address field, Share and Agent actions, sentence-case
   section labels, system-blue selected rows with white text, and space switchers without space

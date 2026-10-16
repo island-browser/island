@@ -999,6 +999,8 @@ void BrowserWindow::ToggleTabOverview() { ToggleInternalPage(LocalPageKind::kTab
 
 void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettings); }
 
+void BrowserWindow::OpenBlockerSettings() { ShowSettingsSection("privacy"); }
+
 void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent ||
@@ -1948,6 +1950,7 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
                                           option != nullptr && option->IsString()
                                               ? std::optional<std::string>(option->string_val)
                                               : std::nullopt);
+        RefreshAddressIndicators();
     } else if (type == "new_chat") {
         agent_session_->NewChat();
     } else if (type == "set_provider") {
@@ -2846,6 +2849,9 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
 
     // The blocked-request badge counts the current page, not the tab's history.
     owner->ResetBlockedRequests();
+    if (active_tab() == owner) {
+        RefreshAddressIndicators();
+    }
     owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
     if (find_tab_.has_value() && *find_tab_ == owner->id()) {
         // The old counts describe a document that is gone.
@@ -3434,6 +3440,7 @@ void BrowserWindow::AttachActiveTabObservers() {
         // The find bar belongs to the tab it searched; a different (or no) active tab ends it.
         CloseFindBar(/*refocus_page=*/false);
     }
+    RefreshAddressIndicators();
     if (tab == nullptr) {
         UpdateChromeCollections();
         return;
@@ -4132,11 +4139,57 @@ void BrowserWindow::RecordBlockedRequest(int browser_identifier) {
         for (Tab& tab : space.tabs()) {
             const CefRefPtr<CefBrowser> browser = tab.browser();
             if (browser != nullptr && browser->GetIdentifier() == browser_identifier) {
-                tab.IncrementBlockedRequests();
-                ScheduleLocalPagesRender();
+                RecordBlockedRequestForTab(tab.id());
                 return;
             }
         }
+    }
+}
+
+void BrowserWindow::RecordBlockedRequestForTab(TabId tab_id) {
+    CEF_REQUIRE_UI_THREAD();
+    Tab* tab = closing_ ? nullptr : FindTabById(tab_id);
+    if (tab == nullptr) {
+        return;
+    }
+    tab->IncrementBlockedRequests();
+    if (active_tab() == tab) {
+        RefreshAddressIndicators();
+    }
+    ScheduleLocalPagesRender();
+}
+
+bool BrowserWindow::ReaderAvailableForActiveTab() const {
+    const Tab* tab = active_tab();
+    return tab != nullptr && agent_host_ != nullptr &&
+           (ReaderActiveFor(*tab) || IsReaderEligibleUrl(tab->navigation_state().snapshot().url));
+}
+
+// The agent works on the active tab (the tools default to it), so its state is the window's
+// agent state: a prompt waiting for an answer beats a running turn.
+AgentTabState BrowserWindow::AgentStateForActiveTab() const {
+    if (agent_session_ == nullptr || active_tab() == nullptr || !agent_session_->busy()) {
+        return AgentTabState::kIdle;
+    }
+    for (const agent::TranscriptItem& item : agent_session_->transcript().items()) {
+        if (item.kind == agent::TranscriptItem::Kind::kPermission && item.resolution.empty()) {
+            return AgentTabState::kWaitingForYou;
+        }
+    }
+    return AgentTabState::kReading;
+}
+
+void BrowserWindow::RefreshAddressIndicators() {
+    const Tab* tab = active_tab();
+    const AddressIndicators next =
+        ComputeAddressIndicators(tab != nullptr ? tab->blocked_requests() : 0,
+                                 ReaderAvailableForActiveTab(), AgentStateForActiveTab());
+    if (next == address_indicators_) {
+        return;
+    }
+    address_indicators_ = next;
+    if (chrome_ != nullptr) {
+        chrome_->SetAddressIndicators(address_indicators_);
     }
 }
 

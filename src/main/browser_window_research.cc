@@ -187,6 +187,7 @@ void BrowserWindow::CancelResearch() {
 
 void BrowserWindow::OnAgentSessionChanged() {
     ScheduleLocalPagesRender();
+    RefreshAddressIndicators();
     if (!research_.has_value() || research_finish_posted_ || closing_ ||
         agent_session_ == nullptr || agent_session_->busy()) {
         return;

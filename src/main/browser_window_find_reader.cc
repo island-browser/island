@@ -221,6 +221,7 @@ std::string BrowserWindow::EffectiveUrl(const Tab& tab) const {
 }
 
 void BrowserWindow::UpdateReaderButton() {
+    RefreshAddressIndicators();
     if (chrome_ == nullptr) {
         return;
     }

@@ -245,6 +245,76 @@ CefRefPtr<CefImage> MakeSpaceDotImage(ArgbColor fill, ArgbColor ring, bool activ
     return image;
 }
 
+constexpr int kIndicatorDip = 20;
+constexpr int kShieldGlyphDip = 14;
+constexpr int kAgentDotDip = 8;
+
+// Even-odd point-in-polygon test for the shield outline.
+bool InsidePolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon) {
+    bool inside = false;
+    for (std::size_t i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
+        const auto& [xi, yi] = polygon[i];
+        const auto& [xj, yj] = polygon[j];
+        if (((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// A filled shield glyph in `color`, drawn in software because the icon set has none.
+CefRefPtr<CefImage> MakeShieldImage(ArgbColor color) {
+    const std::vector<std::pair<double, double>> outline = {{7.0, 0.8},   {12.6, 2.8}, {12.6, 7.0},
+                                                            {10.8, 10.2}, {7.0, 13.2}, {3.2, 10.2},
+                                                            {1.4, 7.0},   {1.4, 2.8}};
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        RasterBitmap bitmap = NewRasterBitmap(kShieldGlyphDip, kShieldGlyphDip, scale);
+        constexpr int kSamples = 4;
+        for (int py = 0; py < bitmap.height_px; ++py) {
+            for (int px = 0; px < bitmap.width_px; ++px) {
+                int hits = 0;
+                for (int sy = 0; sy < kSamples; ++sy) {
+                    for (int sx = 0; sx < kSamples; ++sx) {
+                        const double x = (px + (sx + 0.5) / kSamples) / scale;
+                        const double y = (py + (sy + 0.5) / kSamples) / scale;
+                        hits += InsidePolygon(x, y, outline) ? 1 : 0;
+                    }
+                }
+                const double coverage = static_cast<double>(hits) / (kSamples * kSamples);
+                const std::size_t at = (static_cast<std::size_t>(py) * bitmap.width_px + px) * 4;
+                const auto channel = [&](std::uint32_t shift) {
+                    return static_cast<std::uint8_t>(((color.argb >> shift) & 0xFFU) * coverage +
+                                                     0.5);
+                };
+                bitmap.bgra[at] = channel(0);
+                bitmap.bgra[at + 1] = channel(8);
+                bitmap.bgra[at + 2] = channel(16);
+                bitmap.bgra[at + 3] = static_cast<std::uint8_t>(255.0 * coverage + 0.5);
+            }
+        }
+        image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
+}
+
+// The agent dot: a filled circle (`kAgentDotDip` wide) in `color`.
+CefRefPtr<CefImage> MakeAgentDotImage(ArgbColor color) {
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        RasterBitmap bitmap = NewRasterBitmap(kAgentDotDip, kAgentDotDip, scale);
+        FillRoundedRect(bitmap, 0, 0, kAgentDotDip, kAgentDotDip,
+                        {kAgentDotDip / 2, kAgentDotDip / 2, kAgentDotDip / 2, kAgentDotDip / 2},
+                        color);
+        image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
+}
+
 // Pixels of a CefImage at `scale`, premultiplied BGRA.
 struct ImagePixels {
     int width = 0;
@@ -989,6 +1059,17 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
     address_row->AddChildView(address_location_icon_);
 
+    // Native address indicators (spec §3): the shield sits at the left edge, the agent dot at the
+    // right. Both stay hidden until SetAddressIndicators has something to show.
+    address_shield_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    address_shield_button_->SetID(static_cast<int>(ChromeViewId::kAddressShield));
+    address_shield_button_->SetAccessibleName("Trackers blocked");
+    address_shield_button_->SetTooltipText("Trackers blocked");
+    address_shield_button_->SetFocusable(true);
+    address_shield_button_->SetMinimumSize(CefSize(kIndicatorDip, kIndicatorDip));
+    address_shield_button_->SetVisible(false);
+    address_row->AddChildView(address_shield_button_);
+
     textfield_delegate_ = new TextfieldDelegate(
         this, CefSize(tokens_.spacing_6_dip * 4, control_height - kHairlineDip * 2));
     address_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
@@ -1042,6 +1123,15 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     reader_button_->SetMinimumSize(
         CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
     address_row->AddChildView(reader_button_);
+
+    address_agent_dot_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    address_agent_dot_->SetID(static_cast<int>(ChromeViewId::kAddressAgentDot));
+    address_agent_dot_->SetAccessibleName("Agent");
+    address_agent_dot_->SetTooltipText("Agent");
+    address_agent_dot_->SetFocusable(true);
+    address_agent_dot_->SetMinimumSize(CefSize(kIndicatorDip, kIndicatorDip));
+    address_agent_dot_->SetVisible(false);
+    address_row->AddChildView(address_agent_dot_);
     sidebar_->AddChildView(address_row);
 
     validation_message_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
@@ -1424,6 +1514,50 @@ void BrowserChrome::SetReaderState(bool available, bool active) {
     reader_button_->SetEnabledTextColors((active ? tokens_.accent : tokens_.text_secondary).argb);
     reader_button_->SetTooltipText(active ? "Exit reader view" : "Reader view");
     reader_button_->SetAccessibleName(active ? "Exit reader view" : "Reader view");
+    ApplyAddressIndicators();
+}
+
+void BrowserChrome::SetAddressIndicators(const AddressIndicators& indicators) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || indicators == address_indicators_) {
+        return;
+    }
+    address_indicators_ = indicators;
+    ApplyAddressIndicators();
+}
+
+// Native shows an indicator only while it has something to say; the other looks keep the always
+// present Reader cell and have no shield or dot.
+void BrowserChrome::ApplyAddressIndicators() {
+    const bool native = tokens_.look == LookPreset::kNative;
+    const AddressIndicators& indicators = address_indicators_;
+    const ArgbColor well = AddressPlateStyleFor(tokens_).fill;
+
+    const bool shield = native && indicators.show_shield;
+    address_shield_button_->SetVisible(shield);
+    if (shield) {
+        address_shield_button_->SetText(indicators.shield_label);
+        address_shield_button_->SetTooltipText(indicators.shield_tooltip);
+        address_shield_button_->SetAccessibleName(indicators.shield_tooltip);
+        SetAllStateImages(address_shield_button_, MakeShieldImage(tokens_.text_secondary));
+        address_shield_button_->SetEnabledTextColors(tokens_.text_secondary.argb);
+        address_shield_button_->SetFontList(FontList(11, ChromeFontWeight::kMedium));
+        address_shield_button_->SetBackgroundColor(well.argb);
+    }
+
+    reader_button_->SetVisible(!native || indicators.show_reader);
+
+    const bool dot = native && indicators.agent != AgentTabState::kIdle;
+    address_agent_dot_->SetVisible(dot);
+    if (dot) {
+        const bool waiting = indicators.agent == AgentTabState::kWaitingForYou;
+        const char* name = waiting ? "Agent is waiting for you" : "Agent is reading this tab";
+        SetAllStateImages(address_agent_dot_,
+                          MakeAgentDotImage(waiting ? tokens_.warning_text : tokens_.accent));
+        address_agent_dot_->SetTooltipText(name);
+        address_agent_dot_->SetAccessibleName(name);
+        address_agent_dot_->SetBackgroundColor(well.argb);
+    }
 }
 
 AddressSelectionSnapshot BrowserChrome::address_selection_snapshot() const {
@@ -2028,6 +2162,7 @@ void BrowserChrome::ApplyLookStructure() {
             layout->SetFlexForView(address_row_, 1);
         }
     }
+    ApplyAddressIndicators();
 }
 
 void BrowserChrome::ApplyDensity() {
@@ -2244,6 +2379,12 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             return;
         case ChromeViewId::kReaderButton:
             host_->ExecuteBrowserCommand(BrowserCommand::kToggleReaderMode);
+            return;
+        case ChromeViewId::kAddressShield:
+            host_->OpenBlockerSettings();
+            return;
+        case ChromeViewId::kAddressAgentDot:
+            host_->ToggleAgentPanel();
             return;
         case ChromeViewId::kAddress:
         case ChromeViewId::kAddressIdleLabel:
@@ -2561,6 +2702,7 @@ void BrowserChrome::ApplyControlTheme() {
     }
     ApplyRailButtonTheme();
     ApplyCollectionTheme();
+    ApplyAddressIndicators();
 }
 
 void BrowserChrome::ApplyRailButtonTheme() {

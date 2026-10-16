@@ -1136,3 +1136,30 @@ TEST(BrowserWindowTest, GivenZoomStepsWhenSteppedThenTheyClampToTheUsableRange) 
 }
 }  // namespace
 }  // namespace island
+
+namespace island {
+namespace {
+
+TEST(BrowserWindowTest, GivenTabsWithDifferentBlockedCountsWhenSelectingThenTheIndicatorsFollow) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    AppendTabs(*window, 1);
+    const std::vector<TabId> ids = ActiveSpaceTabIds(*window);
+    ASSERT_EQ(ids.size(), 2U);
+    for (int i = 0; i < 5; ++i) {
+        window->RecordBlockedRequestForTab(ids[0]);
+    }
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    EXPECT_TRUE(window->address_indicators().show_shield);
+    EXPECT_EQ(window->address_indicators().shield_label, "5");
+
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
+    EXPECT_FALSE(window->address_indicators().show_shield);
+
+    window->RecordBlockedRequestForTab(ids[0]);
+    EXPECT_FALSE(window->address_indicators().show_shield);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    EXPECT_EQ(window->address_indicators().shield_label, "6");
+}
+
+}  // namespace
+}  // namespace island

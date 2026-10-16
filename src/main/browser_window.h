@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "active_tab_provider.h"
+#include "address_indicators.h"
 #include "address_input.h"
 #include "agent_navigation.h"
 #include "agent_providers.h"
@@ -276,6 +277,13 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] const agent::AgentSession* agent_session() const noexcept {
         return agent_session_.get();
     }
+    // What the Native address field shows for the active tab (shield, Reader, agent dot).
+    [[nodiscard]] const AddressIndicators& address_indicators() const noexcept {
+        return address_indicators_;
+    }
+    // Counts one blocked request against `tab` (the resource handler resolves its browser id to
+    // the tab first) and refreshes the indicators when it is the active tab.
+    void RecordBlockedRequestForTab(TabId tab);
     // The state the agent panel renders, exposed for tests.
     [[nodiscard]] std::string AgentPanelStateJson() const;
     // Test seam: provider availability is searched in `dirs` instead of the
@@ -291,6 +299,7 @@ class BrowserWindow : public CefClient,
     // too. No-op without chrome.
     void ToggleTabOverview() override;
     void ToggleSettings() override;
+    void OpenBlockerSettings() override;
     void ToggleInternalPage(LocalPageKind kind);
     [[nodiscard]] std::optional<LocalPageKind> internal_page() const noexcept {
         return internal_page_;
@@ -612,6 +621,11 @@ class BrowserWindow : public CefClient,
     void ApplyContentBlockerPolicy();
     [[nodiscard]] json::Value ContentBlockerStateJson() const;
     void RecordBlockedRequest(int browser_identifier);
+    // Recomputes the active tab's address indicators from its blocked count, Reader availability
+    // and the agent session, and pushes them to the chrome when they changed.
+    void RefreshAddressIndicators();
+    [[nodiscard]] bool ReaderAvailableForActiveTab() const;
+    [[nodiscard]] AgentTabState AgentStateForActiveTab() const;
     // Navigates the active tab to a stored bookmark URL through the single
     // address-validation path; a URL the allow-list rejects is a no-op.
     void OpenBookmark(const PaletteBookmarkEntry& bookmark);
@@ -822,6 +836,7 @@ class BrowserWindow : public CefClient,
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;
     ChromeSnapshot chrome_snapshot_;
+    AddressIndicators address_indicators_;
     CefRefPtr<CefWindow> window_;
     std::vector<Space> spaces_;
     std::size_t active_space_index_ = 0;

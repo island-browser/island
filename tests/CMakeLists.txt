@@ -16,6 +16,7 @@ include(GoogleTest)
 
 add_executable(island_tests
     address_bar_model_test.cpp
+    address_indicators_test.cpp
     address_input_test.cpp
     address_policy_test.cpp
     local_page_test.cpp
