@@ -13,6 +13,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-17
+
+### Fixed
+
+- Opening the agent panel no longer hides the page and the toolbar.
+
 ## [0.7.1] - 2026-10-17
 
 ### Fixed
@@ -389,7 +395,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2
 [0.7.1]: https://github.com/island-browser/island/releases/tag/v0.7.1
 [0.7.0]: https://github.com/island-browser/island/releases/tag/v0.7.0
 [0.6.2]: https://github.com/island-browser/island/releases/tag/v0.6.2
