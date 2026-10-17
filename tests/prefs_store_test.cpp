@@ -42,6 +42,56 @@ TEST(PrefsStoreTest, GivenARoundTripWhenSavedAndLoadedThenTheStateSurvives) {
     }
 }
 
+TEST(PrefsStoreTest, GivenACustomizedNativeLookWhenSavedThenEveryKnobRoundTrips) {
+    PrefsState state;
+    state.appearance = ApplyLookPreset(LookPreset::kNative);
+    state.appearance.density = Density::kCompact;
+    const std::filesystem::path path = TempPath("native_appearance.json");
+    ASSERT_EQ(PrefsStore::Save(path, state), PrefsError::kNone);
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.appearance, state.appearance);
+}
+
+TEST(PrefsStoreTest, GivenAppearanceObjectWithoutLookWhenLoadedThenItStaysArc) {
+    const std::filesystem::path path = TempPath("legacy_appearance.json");
+    WriteFile(
+        path,
+        R"({"version":1,"onboarding_completed":true,"theme":"dark","appearance":{"sidebar_tint_percent":85,"card_radius":14,"font":"Avenir Next"}})");
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.appearance.look, LookPreset::kArc);
+    EXPECT_EQ(loaded.state.appearance.sidebar_tint_percent, 85);
+    EXPECT_EQ(loaded.state.appearance.card_radius_dip, 14);
+    EXPECT_EQ(loaded.state.appearance.font_family, "Avenir Next");
+    EXPECT_EQ(AppearanceSettings{}, ApplyLookPreset(LookPreset::kNative));
+}
+
+TEST(PrefsStoreTest, GivenReleasedPrefsWithoutAppearanceWhenLoadedThenTheyUseNative) {
+    const std::filesystem::path path = TempPath("released_without_appearance.json");
+    WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.appearance, AppearanceSettings{});
+    EXPECT_EQ(loaded.state.appearance, ApplyLookPreset(LookPreset::kNative));
+}
+
+TEST(PrefsStoreTest, GivenAnUnknownLookWhenLoadedThenStoredKnobsStayCustom) {
+    const std::filesystem::path path = TempPath("unknown_appearance.json");
+    WriteFile(
+        path,
+        R"({"version":1,"onboarding_completed":true,"theme":"dark","appearance":{"look":"future","sidebar_tint_percent":37,"card_radius":6,"font":"system","card_shadow":false,"full_bleed":false}})");
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.appearance.look, LookPreset::kArc);
+    EXPECT_EQ(loaded.state.appearance.sidebar_tint_percent, 37);
+    EXPECT_EQ(loaded.state.appearance.card_radius_dip, 6);
+    EXPECT_EQ(loaded.state.appearance.font_family, "system");
+    EXPECT_FALSE(loaded.state.appearance.card_shadow);
+    EXPECT_FALSE(loaded.state.appearance.full_bleed);
+    EXPECT_EQ(MatchingLook(loaded.state.appearance), std::nullopt);
+}
+
 TEST(PrefsStoreTest, GivenTabSleepMinutesThenTheyRoundTripAndUnknownValuesFallBackToThirty) {
     const std::filesystem::path path = TempPath("tab_sleep.json");
     EXPECT_EQ(PrefsState().tab_sleep_minutes, 30);

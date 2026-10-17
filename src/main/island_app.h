@@ -53,8 +53,14 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // `open_report` opens the newest report in a new tab.
     void StartResearch(const std::string& question);
     void OpenNewestReport();
+    // Developer capture only: a Plan tab showing the sample plan waiting for approval.
+    void OpenPlanFixture();
+    // Developer capture only: `count` agent pages opened back to back during the plan fixture.
+    void OpenAgentPagesForDev(int count, int gap_ms);
+    void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
     void ToggleSettings();
+    void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
     void BeginSpaceRenaming();
     // Space reorder menu entries; a move that would leave the space list is a

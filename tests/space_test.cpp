@@ -24,6 +24,28 @@ Space MakeSpace(std::string name = "Work") {
 
 Tab MakeTab() { return Tab(NextTabId()); }
 
+Tab MakeTab(std::string title) {
+    Tab tab = MakeTab();
+    tab.navigation_state().OnTitleChange(std::move(title));
+    return tab;
+}
+
+Space MakeTitledSpace(std::initializer_list<std::string> titles) {
+    Space space = MakeSpace();
+    for (const std::string& title : titles) {
+        space.AppendTab(MakeTab(title));
+    }
+    return space;
+}
+
+std::vector<std::string> Titles(const Space& space) {
+    std::vector<std::string> titles;
+    for (const Tab& tab : space.tabs()) {
+        titles.push_back(tab.navigation_state().snapshot().page_title);
+    }
+    return titles;
+}
+
 std::vector<TabId> TabIds(const Space& space) {
     std::vector<TabId> ids;
     for (const Tab& tab : space.tabs()) {
@@ -474,6 +496,143 @@ TEST(Space, PinningKeepsThePinnedGroupContiguousAtTheFront) {
     EXPECT_EQ(space.pinned_count(), 1U);
     EXPECT_TRUE(space.SetTabPinned(b, true));  // already pinned: no-op success
     EXPECT_FALSE(space.SetTabPinned(TabId{987654}, true));
+}
+
+TEST(Space, ChildTabsFollowTheirParent) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other"}));
+}
+
+TEST(Space, ClosingAChildKeepsTheGroup) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId c1 = space.AppendChildTab(plan, MakeTab("c1"));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+
+    space.RemoveTab(c1);
+
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan);
+}
+
+TEST(Space, RemovingTheParentUngroupsChildren) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+
+    space.RemoveTab(plan);
+
+    ASSERT_EQ(space.tab_count(), 1U);
+    EXPECT_FALSE(space.tabs()[0].group_parent().has_value());
+}
+
+TEST(Space, ChildrenOfAPinnedParentDoNotSplitThePinnedGroup) {
+    Space space = MakeTitledSpace({"plan", "fav", "other"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId fav = space.tabs()[1].id();
+    ASSERT_TRUE(space.SetTabPinned(plan, true));
+    ASSERT_TRUE(space.SetTabPinned(fav, true));
+
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "fav", "c1", "c2", "other"}));
+    EXPECT_EQ(space.pinned_count(), 2U);
+    EXPECT_FALSE(space.tabs()[2].pinned());
+}
+
+TEST(Space, ABackgroundChildKeepsTheActiveTab) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+    ASSERT_TRUE(space.SelectTab(space.tabs()[1].id()));
+    const TabId other = space.active_tab_id();
+
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1"), false));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "other"}));
+    EXPECT_EQ(space.active_tab_id(), other);
+}
+
+TEST(Space, MovingAChildAwayUngroupsIt) {
+    Space space = MakeTitledSpace({"plan", "other", "third"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "other", "third"}));
+
+    ASSERT_TRUE(space.MoveTab(1, 3));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "other", "third", "c1"}));
+    EXPECT_FALSE(space.tabs()[3].group_parent().has_value());
+}
+
+TEST(Space, UnpinningAFavouriteKeepsAPinnedParentsRunTogether) {
+    Space space = MakeTitledSpace({"plan", "fav", "other"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId fav = space.tabs()[1].id();
+    ASSERT_TRUE(space.SetTabPinned(plan, true));
+    ASSERT_TRUE(space.SetTabPinned(fav, true));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "fav", "c1", "c2", "other"}));
+
+    ASSERT_TRUE(space.SetTabPinned(fav, false));
+
+    // The run follows the pinned group instead of being ungrouped behind the old favourite.
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "fav", "other"}));
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan);
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+    EXPECT_FALSE(space.tabs()[3].group_parent().has_value());
+}
+
+TEST(Space, DraggingATabIntoARunReplacesTheRunBehindItsParent) {
+    Space space = MakeTitledSpace({"plan", "other", "third"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other", "third"}));
+    const TabId active = space.active_tab_id();
+
+    ASSERT_TRUE(space.MoveTab(4, 1));  // "third" lands between the parent and its children
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "third", "other"}));
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan);
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+    EXPECT_EQ(space.active_tab_id(), active);
+}
+
+TEST(Space, MovingAParentCarriesItsChildren) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+
+    ASSERT_TRUE(space.MoveTab(0, 2));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"other", "plan", "c1"}));
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+}
+
+TEST(Space, PinningAChildUngroupsIt) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId child = space.AppendChildTab(plan, MakeTab("c1"));
+
+    ASSERT_TRUE(space.SetTabPinned(child, true));
+
+    EXPECT_FALSE(space.FindTab(child)->group_parent().has_value());
+}
+
+TEST(Space, NormalizeGroupsDropsAnUnknownParent) {
+    Space space = MakeTitledSpace({"a", "b"});
+    space.tabs()[1].SetGroupParent(TabId{987654});
+
+    space.NormalizeGroups();
+
+    EXPECT_FALSE(space.tabs()[1].group_parent().has_value());
 }
 
 }  // namespace

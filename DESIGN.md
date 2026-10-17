@@ -16,9 +16,11 @@
 
 Island is a precise, quiet tool. Surfaces are neutral grays that recede; type does the work. The
 only color in the interface is meaningful color: the accent for actions and active state, and the
-active space's marker, which casts a faint tint over the sidebar and hairlines (Arc's idea, kept
-minimal). The product shell — a sidebar of exactly 286 DIP beside the page on a floating card —
-is the signature, drawn with 1px hairlines rather than shadows or glass. Honesty still rules: no
+active space's color, which tints the sidebar and the window margin around the page (Arc's idea,
+strengthened on 2026-10-15: the sidebar and the margin are one `canvas` surface). The product
+shell — a sidebar of exactly 286 DIP beside the page on a rounded, softly shadowed card inset 8 DIP
+in a frameless window (macOS: the traffic lights sit over the sidebar) — is the signature. Every
+part of that look is customizable in Settings > Appearance. Honesty still rules: no
 surface depicts a feature that does not exist in the build.
 
 ## 2. Color
@@ -76,6 +78,38 @@ values.
     "radius_medium": 10
   },
   "rail_width_dip": 286,
+  "arc": {
+    "surfaces": {
+      "light": {
+        "canvas": "#F2F2F2",
+        "selected": "#FFFFFF",
+        "hover": "#EAEAEA",
+        "well": "#FAFAFA",
+        "plate": "#FFFFFF"
+      },
+      "dark": {
+        "canvas": "#1A1A1A",
+        "selected": "#2A2A2A",
+        "hover": "#222222",
+        "well": "#242424",
+        "plate": "#EDEDED"
+      }
+    },
+    "defaults": {
+      "sidebar_tint_percent": 60,
+      "sidebar_side": "left",
+      "card_radius_dip": 10,
+      "card_radius_choices": [0, 6, 10, 14],
+      "card_inset_dip": 8,
+      "control_height_dip": 32,
+      "compact_control_height_dip": 26,
+      "collapsed_rail_width_dip": 52,
+      "titlebar_band_dip": 40,
+      "font": "geist",
+      "card_shadow": true,
+      "full_bleed": false
+    }
+  },
   "typography": {
     "ui_family": "Geist",
     "mono_family": "Geist Mono",
@@ -116,6 +150,65 @@ values.
 }
 ```
 
+### Native look contract
+
+```design-tokens-native
+{
+  "contract": "island-native-look",
+  "version": 1,
+  "colors": {
+    "light": {
+      "background": "#EBEBEF",
+      "surface": "#FFFFFF",
+      "surface_secondary": "#F6F6F8",
+      "fill": "#E8E8ED",
+      "text": "#1D1D1F",
+      "text_secondary": "#636366",
+      "text_tertiary": "#8E8E93",
+      "border": "#E5E5EA",
+      "border_strong": "#D2D2D7",
+      "accent": "#0A64D8",
+      "selection": "#0A64D8",
+      "accent_soft": "#DFE9F8",
+      "accent_text": "#0A4FA8",
+      "warning_bg": "#FFF8E6",
+      "warning_border": "#F5D38A",
+      "warning_text": "#6A4A00",
+      "success": "#248A3D",
+      "danger": "#D70015",
+      "branch_a": "#0A64D8",
+      "branch_b": "#8E44AD",
+      "branch_c": "#C25400",
+      "branch_d": "#1F8A70"
+    },
+    "dark": {
+      "background": "#2A2A2D",
+      "surface": "#1E1E20",
+      "surface_secondary": "#252527",
+      "fill": "#3A3A3D",
+      "text": "#F5F5F7",
+      "text_secondary": "#98989D",
+      "text_tertiary": "#6E6E73",
+      "border": "#38383A",
+      "border_strong": "#48484A",
+      "accent": "#0A84FF",
+      "selection": "#0A6FE0",
+      "accent_soft": "#16324F",
+      "accent_text": "#64B5FF",
+      "warning_bg": "#3A2E12",
+      "warning_border": "#6B5420",
+      "warning_text": "#FFD60A",
+      "success": "#30D158",
+      "danger": "#FF453A",
+      "branch_a": "#0A84FF",
+      "branch_b": "#BF5AF2",
+      "branch_c": "#FF9F0A",
+      "branch_d": "#40C8A0"
+    }
+  }
+}
+```
+
 ### Documented colors
 
 | Role | Token | Light | Dark | Usage |
@@ -135,7 +228,13 @@ The browser cycles new spaces through `#0090FF`, `#30A46C`, `#FFB224`, `#E5484D`
 Rules: accent only signifies an action or active state. Every text token, including `--text-2`,
 meets 4.5:1 on every surface in both themes (asserted by `test_token_contract.py`), so secondary
 text is usable everywhere. No gradients of any kind, no photos, no glow. Space tinting is a runtime
-cast — 4–5% on the background, 7–8% on the sidebar, 12–14% on hairlines — and never changes text.
+cast: the `canvas` (sidebar + window margin) mixes the space color into the neutral surface by up
+to 62% light / 42% dark at the default 60% intensity (Settings > Appearance > Sidebar tint, 0–100),
+and `selected`, `hover`, `well` and `plate` are derived from it. Tinting never changes the text
+tokens' values; instead the cast eases off whenever primary text would drop below 4.5:1 on the
+canvas or a row fill, and `text_secondary` walks toward the text color until it holds 4.5:1 on
+every one of those surfaces (asserted for pure white/black spaces at every intensity in
+`tests/appearance_test.cpp`). The `arc` block of the contract pins the neutral defaults.
 
 ## 3. Typography
 
@@ -158,27 +257,39 @@ keys and code in Geist Mono.
 
 Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--space-4: 16px`,
 `--space-6: 24px`. Radii: `--radius-sm: 6px` (controls, chips, tabs) and `--radius-md: 10px`
-(cards, panels, the page card). The sidebar is 286 DIP; the page sits on a card inset by
-`--space-3` from the window edge.
+(cards, panels). The sidebar is 286 DIP (52 DIP collapsed); the page sits on a card inset by
+`--space-2` (8 DIP) on its top, outer side and bottom and flush with the sidebar, radius 0/6/10/14
+(default 10), with the sidebar on the left or right. Density sets the sidebar row height: 32 DIP
+comfortable, 26 compact. Full bleed removes inset, radius and shadow.
 
 ## 5. Components
 
-- **Sidebar (native):** one `--surface-2` surface with the space cast. Controls are ghost by
-  default (no fill, hover/pressed ink only) at one 32 DIP height and 16px icons on a 4/8/12 DIP
-  rhythm: back/forward, then the address as one hairline-outlined pill (site glyph, field, reload,
-  all `--surface`; the outline turns `--accent` while the field has focus), then a quiet New Tab
-  row, then the tab list — tabs are rows on the sidebar itself, the selected tab `--surface` with a
-  1px `--border` outline — and a footer with a quiet space chip (color dot and name, no box) and
-  evenly spaced icon buttons. Chrome text is Geist 13px; mono is not used in the sidebar. CEF `cef_views` has no
-  corner-radius or border API, so native outlined controls are square (a 1px hairline panel
-  around surface-filled children); `--radius-sm` applies to web surfaces. CEF resets custom view
-  colors on every theme change, so each chrome view reports the reset and the chrome repaints from
-  the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`, `SpaceChipColors`).
+- **Frameless window (macOS):** no title bar and no title text. The first 40 DIP of the sidebar
+  is the titlebar band: the traffic lights sit in it at the left, back/forward start 92 DIP in, and
+  the band (minus those buttons) plus the canvas strip above the page card drag the window
+  (`CefWindow::SetDraggableRegions`, `BrowserChrome::DragRegionsForBounds`). With the sidebar on
+  the right, or collapsed to the 52 DIP rail, the lights sit over the page column, so the page
+  card starts below the band. Windows/Linux keep the platform frame.
+- **Sidebar (native):** one `canvas` surface (the space color, tinted by the intensity setting)
+  shared with the window margin. Controls are ghost by default at one control height (32 DIP,
+  26 compact) and 16px icons on a 4/8/12 DIP rhythm: back/forward, then the address as one soft
+  `well` pill (the outline turns `--accent` while the field has focus), then a quiet New Tab row,
+  then the tab list — rows on the canvas, the selected tab a soft `selected` fill, the hovered
+  one `hover`, no outline — and a footer with a quiet space chip and icon buttons. Favicons sit
+  on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on a dark
+  sidebar. Chrome text uses the interface font (Geist, the system font, or an installed family).
+  CEF `cef_views` has no corner-radius API and clips button images to the button's insets, so the
+  soft rounded fills are square fills whose four corners a native macOS overlay repaints in the
+  canvas color, or in the patch's own `outside` color (the Native toolbar around the address
+  plate) (`CornerPatch` / `ApplyCornerPatches`, macos/page_card_mac.mm; the chrome pushes
+  them on selection, hover, relayout and scroll). Elsewhere the fills stay square. CEF resets
+  custom view colors on every theme change, so each chrome view reports the reset and the chrome
+  repaints from the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`,
+  `SpaceChipColors`).
 - **Collapsed icon rail (native):** Cmd/Ctrl+B swaps the 286 DIP sidebar for a 52 DIP rail on the
-  same `--surface-2` surface, never hiding the tabs. One 32 DIP square button per tab of the
-  active space (16 DIP favicon, globe fallback), pinned tabs first with a hairline between the
-  groups; the active tab is `--surface` with a 1px `--border` outline, the same language as the
-  selected row. A quiet "+" and the spaces (round dots; the active one wears a ring, so state is a
+  same `canvas` surface, never hiding the tabs. One 32 DIP square button per tab of the
+active space (16 DIP favicon on its plate, globe fallback), pinned tabs first with a hairline
+between the groups; the active tab is the same soft `selected` fill as the selected row. A quiet "+" and the spaces (round dots; the active one wears a ring, so state is a
   shape and never color alone) sit at the bottom. The tab title is the tooltip and the accessible
   name, buttons are keyboard focusable, and the list scrolls vertically (buttons plus a classic
   scrollbar always fit the 52 DIP). There is no edge sliver or hover reveal. Cmd/Ctrl+L expands
@@ -196,7 +307,31 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
   a `--text` submit button, mono uppercase label and keycap hints. It follows the app theme once
   the native side sends it (system light/dark before that) and requests nothing until a search
   is submitted.
-- **Page card (native):** `--surface` with a 1px `--border` and radius `--radius-md`.
+- **Page card (native):** the page sits on the canvas with an 8 DIP inset on its top, outer side
+  and bottom (flush with the sidebar), radius from the Appearance setting and one soft shadow.
+  CEF cannot round or shadow the `CefBrowserView` and the page is composited by the browser, so on
+  macOS a mouse-transparent native frame view lays a canvas-colored ring (the hole carries the
+  rounded corners) and the shadow over the card (`ApplyPageCardStyle`); other platforms keep a
+  square card.
+- **Address-field indicators (Native):** 20 DIP glyph buttons inside the 30 DIP address field, at
+  its edges, in `text_secondary`, each shown only when it has something to say (spec §3).
+  Left: a shield with the count of blocked requests, hidden at 0 and capped at `9999+`; click opens
+  Settings > Privacy. Right: Reader, only on pages that have a reader view, and the agent dot,
+  `accent` while the agent reads the tab and `warning_text` while it waits for the person; click
+  opens the agent panel. The dot is never the only cue: each indicator has an accessible name and
+  a tooltip with the full text ("14 trackers blocked"). A slept tab shows its state in its sidebar
+  row, not in the field (`address_indicators.h`, `BrowserChrome::SetAddressIndicators`).
+- **Plan graph nodes (Native, `pages/plan.html`):** 148 × 92 DIP, radius 10, drawn as real
+  buttons over an inline SVG of edges. Kinds: **Question** (`accent_soft` fill, the root),
+  **Step** (`surface`, `border_strong` outline, 3 DIP stripe in its branch color), **Needs you**
+  (`warning_bg`/`warning_border`, "Asks first" chip), **Join** ("Joins A + B" chip), **Result**
+  (kicker "Result"; opens as a Report tab). Skipped is a state of any node, not a kind:
+  `surface_secondary`, dashed `text_tertiary` outline, struck title, "Skipped by you" chip. Run
+  states: queued at 60 % opacity; running with an `accent` ring; done with a `success` tick in the
+  kicker; waiting with one pulse of the `warning_border` outline; failed with a `danger` outline.
+  The dashed "+ Add a branch" ghost hangs off a branching step. Edges are cubic Béziers in the
+  branch color (trunk `text_tertiary`), dashed into skipped nodes. Branches stop at 3 levels.
+  Branch labels ("Branch A") always accompany the color.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground; the accent marks focus and the
@@ -215,9 +350,9 @@ Base unit is 4px: `--space-1: 4px`, `--space-2: 8px`, `--space-3: 12px`, `--spac
 
 ## 7. Depth & Surface
 
-Flat by default. Depth comes from 1px hairlines and surface steps (`--bg` → `--surface-2` →
-`--surface`). The only shadow is the product window / page card: `0 1px 2px` plus `0 8px 24px`,
-both low-opacity neutral. No glass stacks, no glow, no gradients.
+Flat by default. Depth comes from surface steps (`canvas` → `selected` / `well` → `--surface`)
+and 1px hairlines. The only shadow is the page card's single soft shadow (an ~8 DIP blur cast into
+the window margin on macOS, optional in Settings). No glass stacks, no glow, no gradients.
 
 ## 8. Accessibility Constraints & Accepted Debt
 
@@ -232,4 +367,7 @@ both low-opacity neutral. No glass stacks, no glow, no gradients.
 | Item | Location | Why accepted | Owner / Exit |
 | --- | --- | --- | --- |
 | CEF theme parity gap | `src/main/browser_window.cc` dark detection | The chrome derives light/dark from the OS via the CEF window theme, which has no automated visual verification yet. Values are drift-guarded by `tests/design_tokens_test.cpp` and `tests/design/test_token_contract.py`. | Close with native visual acceptance evidence on real hardware. |
+| Native selected segment has no shadow | `src/main/browser_chrome.cc` `ComputeCornerPatches` | CEF views cannot draw a shadow; the selected segment gets its `surface` fill and rounded corners only (spec §3 asks for `0 1px 3px` shadow). `src/main/macos/page_card_mac.mm` is the only native shadow path. | Close when the Native switcher gets a macOS-native shadow layer (same approach as the page card). |
 | Native Graphite pass partly verified | `src/main/browser_chrome.cc`, `src/main/welcome_flow.cc`, `src/main/pages/start.html` | The macOS light-theme sidebar was inspected in a running build through an in-process window capture (the sandbox cannot use screen recording), up to the theme-reset repaint. The final address-field holder, space-chip widths, the restyled welcome card, and the styled start page were built and unit-tested but not looked at; dark theme, Windows, and Linux were verified only through the token tests. | Visual pass of the welcome card, start page, dark theme, and the other platforms. |
+| Arc corners are native patches, not view radii | `src/main/macos/page_card_mac.mm`, `src/main/browser_chrome.cc` | CEF 150 `cef_views` exposes no corner radius, clips button images to the button insets, and the Views compositor is opaque, so rounded fills and the rounded page card are drawn by a native macOS overlay (corner patches and a ring frame) on top of square views. Windows/Linux keep square corners and the platform frame. The interface-font choice applies to the sidebar and the internal pages; the palettes and the welcome card keep Geist. | Close if CEF exposes view corner radii or custom-drawn views. |
+| Focus ring on the address pill stays square | `src/main/browser_chrome.cc` | The 1 px accent ring is a panel behind the pill, so its square corners show beside the rounded fill while the field has focus. | Same exit. |

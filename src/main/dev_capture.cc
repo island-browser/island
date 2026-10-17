@@ -1,6 +1,8 @@
 #include "dev_capture.h"
 
+#include <array>
 #include <cstdlib>
+#include <utility>
 
 namespace island {
 namespace {
@@ -49,6 +51,43 @@ DevCaptureOptions DevCaptureOptions::Parse(std::span<const std::string_view> arg
         }
     }
     return options;
+}
+
+std::string_view DevActionSelectorName(std::string_view action) {
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 18> kActions = {{
+        {"welcome", "showWelcome:"},
+        {"theme:system", "useSystemTheme:"},
+        {"theme:light", "useLightTheme:"},
+        {"theme:dark", "useDarkTheme:"},
+        {"command_palette", "openCommandPalette:"},
+        {"search_palette", "openSearchPalette:"},
+        {"focus_address", "focusAddress:"},
+        {"toggle_sidebar", "toggleSidebar:"},
+        {"toggle_agent", "toggleAgentPanel:"},
+        {"settings", "openSettings:"},
+        {"tab_overview", "openTabOverview:"},
+        {"new_tab", "newTab:"},
+        {"next_tab", "selectNextTab:"},
+        {"previous_tab", "selectPreviousTab:"},
+        {"toggle_split", "toggleSplit:"},
+        {"new_space", "newSpace:"},
+        {"rename_space", "beginSpaceRenaming:"},
+        {"cheatsheet", "showCheatsheet:"},
+    }};
+    for (const auto& [name, selector] : kActions) {
+        if (action == name) {
+            return selector;
+        }
+    }
+    return {};
+}
+
+std::string_view DevSettingsSectionName(std::string_view action) {
+    constexpr std::string_view kPrefix = "settings:";
+    if (!action.starts_with(kPrefix)) {
+        return {};
+    }
+    return action.substr(kPrefix.size());
 }
 
 }  // namespace island

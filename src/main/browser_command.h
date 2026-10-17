@@ -48,6 +48,8 @@ enum class BrowserCommand : std::uint8_t {
     kFindPrevious,
     // Toggles Reader view of the active tab.
     kToggleReaderMode,
+    // Opens or closes the shortcut cheatsheet (⌘/ on macOS, Ctrl+/ elsewhere).
+    kShowCheatsheet,
 };
 
 }  // namespace island

@@ -53,6 +53,23 @@ ALLOWED_TAGS = {
 TAG = re.compile(r"<(/?)([a-zA-Z][a-zA-Z0-9]*)((?:\s+[a-zA-Z-]+=\"[^\"<>]*\")*)\s*/?>")
 ALLOWED_ATTRIBUTES = {"href", "rel", "title", "style", "start", "class"}
 
+THEME_VARIABLES = {
+    "fill": "--fill",
+    "border_2": "--border-2",
+    "text_3": "--text-3",
+    "selection": "--selection",
+    "accent_soft": "--accent-soft",
+    "accent_text": "--accent-text",
+    "warn_bg": "--warn-bg",
+    "warn_border": "--warn-border",
+    "warn_text": "--warn-text",
+    "success": "--success",
+    "danger": "--danger",
+}
+BRANCH_VARIABLES = ("--branch-a", "--branch-b", "--branch-c", "--branch-d")
+# The namespace the Plan page names for its inline SVG; it identifies XML, it is not fetched.
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+
 
 def page(name: str) -> str:
     return (PAGES / name).read_text(encoding="utf-8")
@@ -95,7 +112,8 @@ class EveryLocalPage(unittest.TestCase):
     def test_pages_exist(self) -> None:
         self.assertEqual(
             [path.name for path in PAGE_FILES],
-            ["agent.html", "report.html", "settings.html", "start.html", "tab_overview.html"],
+            ["agent.html", "plan.html", "report.html", "settings.html", "start.html",
+             "tab_overview.html"],
         )
         self.assertEqual([path.name for path in SCRIPT_FILES], ["markdown.js"])
 
@@ -106,6 +124,8 @@ class EveryLocalPage(unittest.TestCase):
                 with self.subTest(page=path.name, fragment=fragment):
                     self.assertNotIn(fragment, text)
             for match in re.finditer(r"https?://[^\s\"'<>)]*", text):
+                if match.group(0) == SVG_NAMESPACE:
+                    continue  # an XML namespace identifier that createElementNS needs, not a request
                 self.fail(f"{path.name} embeds an absolute URL: {match.group(0)}")
 
     def test_scripts_are_ascii(self) -> None:
@@ -151,6 +171,26 @@ class EveryLocalPage(unittest.TestCase):
                 self.assertIn("window.islandFocus = function", text)
                 self.assertIn('post({ type: "ready" })', text)
 
+    def test_pages_map_every_theme_key(self) -> None:
+        checked_pages = 0
+        for path in PAGE_FILES:
+            text = path.read_text(encoding="utf-8")
+            marker = "function applyTheme(theme)"
+            if marker not in text:
+                continue
+            checked_pages += 1
+            apply_theme = text[
+                text.index(marker) : text.index("window.islandRender", text.index(marker))
+            ]
+            with self.subTest(page=path.name):
+                for key, variable in THEME_VARIABLES.items():
+                    self.assertIn(f'"{key}"', apply_theme)
+                    self.assertIn(f'"{variable}"', apply_theme)
+                self.assertIn("theme.branch", apply_theme)
+                for variable in BRANCH_VARIABLES:
+                    self.assertIn(f'"{variable}"', apply_theme)
+        self.assertGreater(checked_pages, 0)
+
 
 class StartPage(unittest.TestCase):
     def setUp(self) -> None:
@@ -162,7 +202,7 @@ class StartPage(unittest.TestCase):
         self.assertIn('data-mode="agent"', self.html)
         self.assertIn('data-mode="research"', self.html)
         self.assertIn(">Search</button>", self.html)
-        self.assertIn(">Ask agent</button>", self.html)
+        self.assertIn(">Ask Agent</button>", self.html)
         self.assertIn(">Research</button>", self.html)
 
     def test_research_mode_speaks_the_documented_messages(self) -> None:
@@ -214,9 +254,54 @@ class StartPage(unittest.TestCase):
         for token in ("--bg", "--surface", "--surface-2", "--text", "--text-2", "--border", "--accent"):
             self.assertIn(token + ":", self.html)
 
-    def test_uses_the_graphite_type_stack(self) -> None:
-        self.assertIn("Geist, ui-sans-serif", self.html)
-        self.assertIn('"Geist Mono"', self.html)
+    def test_uses_the_native_system_font_stack(self) -> None:
+        # Native has no bundled face: the system stack, as settings.html does.
+        self.assertIn('-apple-system, BlinkMacSystemFont, "SF Pro Text"', self.html)
+        self.assertIn('ui-monospace, "SF Mono"', self.html)
+        self.assertNotIn("Geist", self.html)
+
+    def test_placeholders_follow_the_mode_verbatim(self) -> None:
+        self.assertIn('placeholder="Search with Google"', self.html)
+        self.assertIn('"Search with " + state.engine', self.html)
+        self.assertIn('"Ask about this tab or anything"', self.html)
+        self.assertIn('"Research a question \\u2014 you\'ll see the plan first"', self.html)
+
+    def test_tab_cycles_the_segments_only_from_the_field(self) -> None:
+        self.assertIn('input.addEventListener("keydown"', self.html)
+        self.assertIn('event.key !== "Tab"', self.html)
+        self.assertIn("event.shiftKey ? -1 : 1", self.html)
+        self.assertIn("% MODES.length", self.html)
+        self.assertIn("event.preventDefault()", self.html)
+
+    def test_speed_dial_tiles_are_buttons_with_accessible_names(self) -> None:
+        self.assertIn('id="tiles"', self.html)
+        self.assertIn("state.tiles", self.html)
+        self.assertIn('document.createElement("button")', self.html)
+        self.assertNotIn('document.createElement("a")', self.html)
+        self.assertIn('setAttribute("aria-label"', self.html)
+        self.assertIn('type: "open_tile"', self.html)
+        # Titles come from the web: text nodes only, and no fetched favicons.
+        self.assertNotIn("<img", self.html)
+        self.assertNotIn("favicon", self.html.lower())
+
+    def test_tiles_row_hides_when_there_is_no_history(self) -> None:
+        self.assertIn('tiles.hidden = !list.length', self.html)
+
+    def test_the_shortcut_list_is_gone_and_the_page_ends_after_the_speed_dial(self) -> None:
+        # The Native start page has no shortcut section (spec 4.1, S2-Start).
+        self.assertNotIn("shortcuts", self.html)
+        self.assertNotIn("<kbd", self.html)
+        self.assertNotIn("Cmd/Ctrl", self.html)
+        self.assertNotIn("Command palette", self.html)
+        self.assertTrue(self.html.index('id="tiles"') < self.html.index("</main>"))
+
+    def test_ip_literal_hosts_get_a_globe_instead_of_a_digit(self) -> None:
+        # 127.0.0.1 and [::1] say nothing about the site; a neutral globe stands in for them.
+        self.assertIn(r"/^\d{1,3}(\.\d{1,3}){3}$/", self.html)
+        self.assertIn('host.charAt(0) === "["', self.html)
+        self.assertIn('<template id="globe">', self.html)
+        self.assertIn('getElementById("globe")', self.html)
+        self.assertIn("isIpLiteral(host)", self.html)
 
 
 class ReportPage(unittest.TestCase):
@@ -260,6 +345,144 @@ class ReportPage(unittest.TestCase):
 
 
 
+class PlanPage(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("plan.html")
+
+    def test_has_the_toolbar_graph_list_tidy_up_and_the_run_actions(self) -> None:
+        for element_id in ("view-graph", "view-list", "tidy", "run", "run-branch", "cancel"):
+            with self.subTest(id=element_id):
+                self.assertIn(f'id="{element_id}"', self.html)
+        self.assertIn("Tidy up", self.html)
+        self.assertIn('role="tree"', self.html)
+
+    def test_posts_the_documented_messages(self) -> None:
+        for message in ("select", "skip", "restore", "instruction", "branch_from", "expand",
+                        "run", "run_branch", "cancel", "view"):
+            with self.subTest(message=message):
+                self.assertIn(f'"{message}"', self.html)
+
+    def test_places_nodes_on_the_documented_grid(self) -> None:
+        self.assertIn("NODE_W = 148", self.html)
+        self.assertIn("NODE_H = 92", self.html)
+        self.assertIn("PITCH_X = 188", self.html)
+        self.assertIn("PITCH_Y = 112", self.html)
+        self.assertIn("PAD = 16", self.html)
+        self.assertIn("radial-gradient(circle, var(--border-2) 1px", self.html)
+
+    def test_branch_from_is_limited_by_the_depth_the_native_side_sends(self) -> None:
+        self.assertIn("node.depth >= state.depth_limit", self.html)
+        self.assertIn("Plans branch at most 3 levels deep", self.html)
+
+    def test_graph_builds_an_accessible_add_branch_ghost_for_the_selection(self) -> None:
+        self.assertRegex(self.html, r'el\("button", "node add", "\\u002b Add a branch"\)')
+        self.assertIn('setAttribute("aria-label", "Add a branch after " + selected.title)', self.html)
+        self.assertIn('post({ type: "branch_from", id: selected.id })', self.html)
+        self.assertIn("selected.depth >= state.depth_limit", self.html)
+        ghost = self.html[self.html.index("function addBranchButton(selected, position)") :]
+        ghost = ghost[: ghost.index("function renderList()")]
+        self.assertNotIn('setAttribute("role", "treeitem")', ghost)
+
+    def test_drag_offsets_are_page_state_and_tidy_clears_them(self) -> None:
+        self.assertIn("var movedPositions = {}", self.html)
+        self.assertIn('addEventListener("pointerdown"', self.html)
+        self.assertIn('addEventListener("pointermove"', self.html)
+        self.assertIn('addEventListener("pointerup"', self.html)
+        tidy = self.html[self.html.index('$("tidy").addEventListener') :]
+        tidy = tidy[: tidy.index("function zoomBy")]
+        self.assertIn("movedPositions = {}", tidy)
+        self.assertIn("zoomLevel = 1", tidy)
+
+    def test_pointerup_only_rebuilds_the_canvas_after_a_drag(self) -> None:
+        finish = self.html[self.html.index("function finishDrag(event)") :]
+        finish = finish[: finish.index('button.addEventListener("pointerup"')]
+        self.assertIn("var dragged = activeDrag.dragged", finish)
+        self.assertRegex(finish, r"if \(dragged\)\s+renderCanvas\(\);")
+
+    def test_drag_click_suppression_clears_after_the_synthetic_click(self) -> None:
+        finish = self.html[self.html.index("function finishDrag(event)") :]
+        finish = finish[: finish.index('button.addEventListener("pointerup"')]
+        self.assertIn('setTimeout(function () { suppressClickId = ""; }, 0)', finish)
+
+    def test_select_updates_the_existing_nodes_for_reliable_double_click(self) -> None:
+        select = self.html[self.html.index("function select(id)") :]
+        select = select[: select.index("function neighbourOf(key)")]
+        self.assertNotIn("render();", select)
+        self.assertIn('setAttribute("aria-selected"', select)
+
+    def test_narrow_layout_stacks_result_below_join_with_a_vertical_edge(self) -> None:
+        self.assertIn("function layoutForCanvas(nodes)", self.html)
+        self.assertIn('node.kind === "result"', self.html)
+        self.assertIn('parent.kind === "join"', self.html)
+        self.assertIn('vertical: !!stackedResults[node.id] && parent.kind === "join"', self.html)
+        self.assertRegex(self.html, r'edge\.vertical\s*\?\s*"M"')
+
+    def test_running_states_have_spinner_retry_approval_and_edge_motion(self) -> None:
+        self.assertIn('className = "spinner"', self.html)
+        self.assertIn('data-state="waiting"', self.html)
+        self.assertIn('el("div", "approval-card"', self.html)
+        self.assertIn('el("button", "tool retry", "Retry")', self.html)
+        self.assertIn('post({ type: "retry", id: node.id })', self.html)
+        self.assertIn('path.setAttribute("class", "edge running")', self.html)
+        reduced = re.search(r"@media \(prefers-reduced-motion: reduce\)\s*\{([^}]|}(?!\s*</style>))*",
+                            self.html)
+        self.assertIsNotNone(reduced)
+        self.assertIn("animation: none", reduced.group(0))
+
+    def test_plan_close_confirmation_uses_the_required_actions(self) -> None:
+        self.assertIn("Stop the research?", self.html)
+        self.assertIn(">Keep running</button>", self.html)
+        self.assertIn(">Stop</button>", self.html)
+        self.assertIn('post({ type: "confirm_close", stop: false })', self.html)
+        self.assertIn('post({ type: "confirm_close", stop: true })', self.html)
+        self.assertIn("window.islandConfirmResearchClose = function", self.html)
+
+    def test_plan_close_confirmation_escape_keeps_running_and_traps_focus(self) -> None:
+        keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]
+        modal = keyboard[: keyboard.index('(event.metaKey || event.ctrlKey) && event.key === "Enter"')]
+        self.assertIn('event.key === "Escape"', modal)
+        self.assertIn('$("keep-running").click()', modal)
+        self.assertIn('event.key === "Tab"', modal)
+
+    def test_run_shortcut_is_handled_before_inputs_return_early(self) -> None:
+        keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]
+        shortcut = keyboard.index('(event.metaKey || event.ctrlKey) && event.key === "Enter"')
+        input_guard = keyboard.index('event.target.tagName === "INPUT"')
+        self.assertLess(shortcut, input_guard)
+
+    def test_toolbar_has_a_graph_icon_and_paused_uses_accent_tokens(self) -> None:
+        self.assertIn('class="graph-icon"', self.html)
+        awaiting = re.search(r'\.pill\[data-tone="awaiting"\]\s*\{([^}]*)\}', self.html)
+        self.assertIsNotNone(awaiting)
+        self.assertIn("var(--accent-soft)", awaiting.group(1))
+        self.assertIn("var(--accent-text)", awaiting.group(1))
+
+    def test_never_navigates_by_itself(self) -> None:
+        self.assertNotIn("window.open", self.html)
+        self.assertNotIn("location.href", self.html)
+        self.assertNotIn("location.assign", self.html)
+
+    def test_every_button_it_builds_has_an_accessible_name(self) -> None:
+        for match in re.finditer(r'el\("button"|createElement\("button"\)|<button', self.html):
+            window = self.html[match.start() : match.start() + 400]
+            with self.subTest(at=match.group(0)):
+                self.assertIn("aria-label", window)
+
+    def test_uses_only_defined_css_variables(self) -> None:
+        defined = set(re.findall(r"(--[a-z0-9-]+)\s*:", self.html))
+        defined |= set(re.findall(r'"(--[a-z0-9-]+)"', self.html))
+        used = set(re.findall(r"var\((--[a-z0-9-]+)", self.html))
+        self.assertEqual(used - defined, set())
+
+    def test_text_reaches_the_dom_as_text_not_markup(self) -> None:
+        self.assertNotIn("innerHTML", self.html)
+        self.assertNotIn("insertAdjacentHTML", self.html)
+
+    def test_follows_the_app_theme_with_a_system_fallback(self) -> None:
+        self.assertIn("prefers-color-scheme: dark", self.html)
+        self.assertIn('[data-theme="dark"]', self.html)
+
+
 class SettingsPage(unittest.TestCase):
     def test_offers_the_search_engine_setting(self) -> None:
         html = page("settings.html")
@@ -286,6 +509,111 @@ class SettingsPage(unittest.TestCase):
         self.assertIn('id="reports-list"', html)
         self.assertIn('type: "open_report"', html)
         self.assertIn('type: "delete_report"', html)
+
+
+    def test_settings_shell_has_a_section_list_search_and_version(self) -> None:
+        html = page("settings.html")
+        self.assertIn('<nav class="pane-nav"', html)
+        self.assertIn('aria-label="Settings sections"', html)
+        for pane in ("general", "appearance", "privacy", "tabs", "reader", "agent", "shortcuts", "about"):
+            with self.subTest(pane=pane):
+                self.assertIn(f'data-pane="{pane}"', html)
+                self.assertIn(f'<section id="{pane}">', html)
+        # The selected item is announced with aria-current, set by the script.
+        self.assertIn('setAttribute("aria-current", "page")', html)
+        # Up and Down move through the list like a native source list.
+        self.assertIn('"ArrowDown"', html)
+        self.assertIn('"ArrowUp"', html)
+        self.assertIn('<input id="settings-search" type="search"', html)
+        self.assertIn('placeholder="Search settings"', html)
+        self.assertIn('id="version"', html)
+        self.assertIn('<section id="reader">', html)  # existing anchors stay
+
+    def test_appearance_follows_the_native_mockup(self) -> None:
+        html = page("settings.html")
+        for group in (">Theme<", ">Color<", ">Layout<", ">Text<"):
+            with self.subTest(group=group):
+                self.assertIn(group, html)
+        self.assertIn(">Match system</button>", html)
+        self.assertIn('id="space-colors-row"', html)
+        self.assertIn('id="tint-row"', html)
+        self.assertIn("base_look", html)  # Native hides the space-color rows
+        self.assertIn("Changes apply right away to every window.", html)
+        # The space copy is only for looks that have space colors.
+        self.assertNotIn('<p class="lead">Each space tints', html)
+        self.assertIn("Each space tints the sidebar", html)
+        self.assertIn('id="reset-appearance"', html)
+        self.assertIn("var(--fill", html)
+        self.assertIn("var(--border-2", html)
+        self.assertIn("var(--accent-soft", html)
+
+    def test_a_focus_request_is_deduplicated_by_its_sequence_number(self) -> None:
+        # The same section can be requested twice in a row (privacy shield, click, shield again),
+        # so the page compares the native sequence number, not the section name.
+        html = page("settings.html")
+        self.assertIn("s.focus_seq", html)
+        self.assertIn("lastFocusSeq", html)
+        self.assertNotIn("s.focus !== lastFocus", html)
+
+    def test_search_matches_section_names_and_keeps_the_whole_pane(self) -> None:
+        html = page("settings.html")
+        search = html[html.index("function paneLabel("):html.index("// ---- Settings rows")]
+        # A pane whose nav label or title matches is shown whole.
+        self.assertIn('.pane-title', search)
+        self.assertIn('data-pane', search)
+        self.assertIn("paneMatch", search)
+
+    def test_search_treats_row_less_groups_as_one_searchable_unit(self) -> None:
+        # The Import source cards and the About list have no .row, so they match as a group.
+        html = page("settings.html")
+        search = html[html.index("function paneLabel("):html.index("// ---- Settings rows")]
+        self.assertIn("rows.length === 0", search)
+        self.assertIn("group.textContent", search)
+        self.assertIn('id="sources"', html)
+        self.assertIn('id="about-list"', html)
+
+    def test_selected_section_is_filled_with_semibold_text(self) -> None:
+        html = page("settings.html")
+        rule = re.search(r'\.nav-item\[aria-current="page"\]\s*\{([^}]*)\}', html)
+        self.assertIsNotNone(rule)
+        self.assertIn("var(--fill)", rule.group(1))
+        self.assertIn("font-weight: 600", rule.group(1))
+        self.assertNotIn("var(--selection)", rule.group(1))
+
+    def test_search_fields_use_the_interface_font_not_monospace(self) -> None:
+        html = page("settings.html")
+        rule = re.search(r"input\.field\.filter\s*\{([^}]*)\}", html)
+        self.assertIsNotNone(rule)
+        self.assertIn("font: inherit", rule.group(1))
+        self.assertIn('id="settings-search" type="search"', html)
+
+    def test_shortcuts_are_two_columns_of_grouped_cards(self) -> None:
+        html = page("settings.html")
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr))", html)
+        for group in ("Tabs", "Navigation", "Agent", "Spaces", "Window"):
+            with self.subTest(group=group):
+                self.assertIn(f'"{group}"', html)
+        self.assertIn("Search shortcuts", html)
+        self.assertIn('id="key-filter"', html)
+
+    def test_shortcuts_record_resolve_conflicts_and_reset_all(self) -> None:
+        html = page("settings.html")
+        self.assertIn('type: "record_shortcut"', html)
+        self.assertIn('type: "replace_shortcut"', html)
+        self.assertIn('type: "cancel_shortcut"', html)
+        self.assertIn('type: "reset_shortcuts"', html)
+        self.assertNotIn('post({ type: "set_binding", action: recording', html)
+        self.assertIn('id="key-conflict"', html)
+        self.assertIn("var(--warn-bg", html)
+        self.assertIn(r"Press keys\u2026", html)
+        self.assertIn('"Add shortcut"', html)
+        self.assertIn(">Reset all<", html)
+        self.assertIn('id="mac-note"', html)
+        keycap = re.search(r"\.keycap \{[^}]*\}", html)
+        self.assertIsNotNone(keycap)
+        self.assertIn("min-width: 24px", keycap.group(0))
+        self.assertIn("border-radius: 5px", keycap.group(0))
+        self.assertIn("var(--border-2", keycap.group(0))
 
 
 class AgentMarkdownStatic(unittest.TestCase):

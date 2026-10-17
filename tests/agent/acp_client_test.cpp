@@ -216,5 +216,74 @@ TEST_F(AcpClientTest, PromptErrorsReturnToReady) {
     EXPECT_NE(events_.back().text.find("rate limited"), std::string::npos);
 }
 
+TEST_F(AcpClientTest, PlanEntriesCarryIslandMeta) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"Known problems","status":"pending","_meta":{"island":{"id":"a2","after":["a"],"branch":"A","kind":"step","tool":"browser_open_tab","site":"github.com","needs_you":"sign-in"},"x-other":1}}]}}})");
+    ASSERT_EQ(events_.size(), 1U);
+    const AcpPlanEntry& e = events_[0].plan.at(0);
+    ASSERT_TRUE(e.island.has_value());
+    EXPECT_EQ(e.island->id, "a2");
+    EXPECT_EQ(e.island->after, std::vector<std::string>{"a"});
+    EXPECT_EQ(e.island->needs_you, "sign-in");
+    EXPECT_NE(e.raw_meta.find("x-other"), std::string::npos);  // unknown keys kept
+}
+
+TEST_F(AcpClientTest, PlainPlanEntriesHaveNoIslandMeta) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"Find docs","status":"pending"}]}}})");
+    EXPECT_FALSE(events_.at(0).plan.at(0).island.has_value());
+}
+
+TEST_F(AcpClientTest, MalformedIslandMetaIsIgnoredNotFatal) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":7,"after":"a"}}}]}}})");
+    ASSERT_EQ(events_.at(0).plan.size(), 1U);
+    EXPECT_FALSE(events_.at(0).plan.at(0).island.has_value());  // id must be a non-empty string
+}
+
+TEST_F(AcpClientTest, NonArrayAfterDefaultsToNoDependencies) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":"a","after":"b"}}}]}}})");
+    const AcpPlanEntry& entry = events_.at(0).plan.at(0);
+    ASSERT_TRUE(entry.island.has_value());
+    EXPECT_TRUE(entry.island->after.empty());
+}
+
+TEST_F(AcpClientTest, NonStringAfterElementDefaultsToNoDependencies) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":"a","after":["b",7]}}}]}}})");
+    const AcpPlanEntry& entry = events_.at(0).plan.at(0);
+    ASSERT_TRUE(entry.island.has_value());
+    EXPECT_TRUE(entry.island->after.empty());
+}
+
+TEST_F(AcpClientTest, EmptyIslandMetaIdIsIgnored) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":""}}}]}}})");
+    EXPECT_FALSE(events_.at(0).plan.at(0).island.has_value());
+}
+
+TEST_F(AcpClientTest, MissingIslandMetaKindDefaultsToStep) {
+    Handshake(true);
+    events_.clear();
+    client_.HandleLine(
+        R"({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":{"sessionUpdate":"plan","entries":[{"content":"x","status":"pending","_meta":{"island":{"id":"a"}}}]}}})");
+    const AcpPlanEntry& entry = events_.at(0).plan.at(0);
+    ASSERT_TRUE(entry.island.has_value());
+    EXPECT_TRUE(entry.island->kind.empty());  // PlanGraph maps the empty default to step.
+}
+
 }  // namespace
 }  // namespace island::agent

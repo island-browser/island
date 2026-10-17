@@ -16,6 +16,7 @@ include(GoogleTest)
 
 add_executable(island_tests
     address_bar_model_test.cpp
+    address_indicators_test.cpp
     address_input_test.cpp
     address_policy_test.cpp
     local_page_test.cpp
@@ -26,6 +27,7 @@ add_executable(island_tests
     browser_window_pages_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
+    appearance_test.cpp
     chrome/collapsed_rail_test.cpp
     chrome/welcome_flow_style_test.cpp
     command_palette_test.cpp
@@ -43,11 +45,13 @@ add_executable(island_tests
     peek_state_test.cpp
     prefs_store_test.cpp
     reader_mode_test.cpp
+    settings_focus_test.cpp
     report_store_test.cpp
     research_prompt_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
+    start_tiles_test.cpp
     session_store_test.cpp
     sidebar_state_test.cpp
     space_test.cpp
@@ -79,12 +83,14 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker.cc"
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/row_raster.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"
     "${CMAKE_SOURCE_DIR}/src/main/icon_catalog.cc"
     "${CMAKE_SOURCE_DIR}/src/main/history_recorder.cc"
     "${CMAKE_SOURCE_DIR}/src/main/keymap.cc"
     "${CMAKE_SOURCE_DIR}/src/main/find_bar_model.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/cheatsheet_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/find_bar_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/reader_mode.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window_find_reader.cc"
@@ -97,6 +103,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/start_tiles.cc"
     "${CMAKE_SOURCE_DIR}/src/main/session_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sha256.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
@@ -112,7 +119,8 @@ add_executable(island_tests
 
 target_compile_features(island_tests PRIVATE cxx_std_20)
 target_compile_options(island_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
-target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main" "${CEF_ROOT}")
+target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main"
+                           "${CMAKE_SOURCE_DIR}/tests" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
                       island_agent island_search island_content_blocker_ffi)
 
@@ -131,7 +139,13 @@ gtest_discover_tests(island_content_blocker_stub_tests)
 # mirror src/main's split.
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
-                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm")
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/mouse_down_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm")
+    target_link_libraries(island_tests PRIVATE "-framework QuartzCore")
+    set_source_files_properties("${CMAKE_SOURCE_DIR}/src/main/macos/mouse_down_mac.mm"
+                                "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm"
+                                PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/bookmark_import_stub.cc"
                     "${CMAKE_SOURCE_DIR}/src/main/clipboard_stub.cc")

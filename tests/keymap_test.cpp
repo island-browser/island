@@ -2,8 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace island {
 namespace {
@@ -87,6 +89,17 @@ TEST(KeymapTest, ConflictsAreReportedAndResetRestoresTheDefault) {
     keymap.ResetToDefault(KeyAction::kSettings);
     EXPECT_TRUE(keymap.Conflicts().empty());
     EXPECT_EQ(keymap, Keymap::Defaults());
+}
+
+TEST(KeymapTest, ConflictForReportsTheOtherActionBoundToAChord) {
+    const Keymap keymap = Keymap::Defaults();
+    EXPECT_EQ(keymap.ConflictFor(KeyAction::kNewTab, *ParseKeyBinding("Mod+B")),
+              KeyAction::kToggleSidebar);
+    EXPECT_EQ(keymap.ConflictFor(KeyAction::kNewTab, *ParseKeyBinding("Mod+Shift+Y")),
+              std::nullopt);
+    // Its own current chord is not a conflict.
+    EXPECT_EQ(keymap.ConflictFor(KeyAction::kToggleSidebar, *ParseKeyBinding("Mod+B")),
+              std::nullopt);
 }
 
 TEST(KeymapTest, MacKeyEquivalentsUseMenuConventions) {
@@ -190,6 +203,62 @@ TEST(KeymapTest, ControlBindingsSurviveOverridesAndRoundTrip) {
     const Keymap keymap = Keymap::WithOverrides({{"next_tab", "Control+Tab"}});
     EXPECT_EQ(keymap.ActionFor(*ParseKeyBinding("Control+Tab")), KeyAction::kNextTab);
     EXPECT_EQ(Keymap::WithOverrides(keymap.Overrides()), keymap);
+}
+TEST(KeymapTest, ModSlashShowsTheCheatsheet) {
+    const Keymap defaults = Keymap::Defaults();
+    EXPECT_EQ(defaults.Binding(KeyAction::kShowCheatsheet), ParseKeyBinding("Mod+/"));
+    EXPECT_EQ(defaults.ActionFor(*ParseKeyBinding("Mod+/")), KeyAction::kShowCheatsheet);
+    EXPECT_EQ(KeyActionFromId("cheatsheet"), KeyAction::kShowCheatsheet);
+    EXPECT_TRUE(defaults.Conflicts().empty());
+}
+
+TEST(CheatsheetRowsTest, DefaultsListTheTenRowsInSpecOrder) {
+    const std::vector<CheatsheetRow> rows = CheatsheetRows(Keymap::Defaults(), /*mac=*/true);
+    ASSERT_EQ(rows.size(), 10U);
+    EXPECT_EQ(rows[0], (CheatsheetRow{"Command palette", "⌘K"}));
+    const std::vector<std::string> labels = {
+        "Command palette", "Ask agent",    "Toggle sidebar", "Split view", "New tab",
+        "Close tab",       "Find in page", "Reader view",    "Settings",   "Cheatsheet"};
+    const std::vector<std::string> keys = {"⌘K", "⌘J", "⌘B",  "⇧⌘S", "⌘T",
+                                           "⌘W", "⌘F", "⌥⌘R", "⌘,",  "⌘/"};
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(rows[i].label, labels[i]) << i;
+        EXPECT_EQ(rows[i].keys, keys[i]) << i;
+    }
+}
+
+TEST(CheatsheetRowsTest, RowsFollowTheCurrentBinding) {
+    Keymap keymap = Keymap::Defaults();
+    keymap.SetBinding(KeyAction::kCommandPalette, ParseKeyBinding("Mod+P"));
+    EXPECT_EQ(CheatsheetRows(keymap, /*mac=*/true)[0], (CheatsheetRow{"Command palette", "⌘P"}));
+    EXPECT_EQ(CheatsheetRows(keymap, /*mac=*/false)[0],
+              (CheatsheetRow{"Command palette", "Ctrl+P"}));
+}
+
+TEST(CheatsheetRowsTest, OtherPlatformsSpellTheModifiers) {
+    const std::vector<CheatsheetRow> rows = CheatsheetRows(Keymap::Defaults(), /*mac=*/false);
+    ASSERT_EQ(rows.size(), 10U);
+    EXPECT_EQ(rows[0].keys, "Ctrl+K");
+    EXPECT_EQ(rows[3].keys, "Ctrl+Shift+S");
+    EXPECT_EQ(rows[7].keys, "Ctrl+Alt+R");
+    EXPECT_EQ(rows[9].keys, "Ctrl+/");
+}
+
+TEST(CheatsheetRowsTest, AnUnboundActionKeepsItsRowWithoutKeys) {
+    Keymap keymap = Keymap::Defaults();
+    keymap.SetBinding(KeyAction::kToggleAgentPanel, std::nullopt);
+    const std::vector<CheatsheetRow> rows = CheatsheetRows(keymap, /*mac=*/true);
+    ASSERT_EQ(rows.size(), 10U);
+    EXPECT_EQ(rows[1], (CheatsheetRow{"Ask agent", ""}));
+}
+
+TEST(CheatsheetRowsTest, KeyGlyphsMatchTheSettingsKeycaps) {
+    // Control, Option, Shift, Command: the order Settings > Shortcuts renders.
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Mod+Control+Alt+Shift+K"), true), "⌃⌥⇧⌘K");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Control+Tab"), true), "⌃⇥");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Mod+Alt+Down"), true), "⌥⌘↓");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("F2"), true), "F2");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Alt+Left"), false), "Alt+Left");
 }
 }  // namespace
 }  // namespace island

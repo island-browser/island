@@ -41,5 +41,21 @@ TEST(DevCaptureOptions, IgnoresMalformedOrOutOfRangeDelays) {
     EXPECT_DOUBLE_EQ(ParseArgs({"--island-dev-delay=0"}).delay_seconds, 0.0);
 }
 
+TEST(DevCaptureActions, MenuBackedNamesMapToTheirSelectors) {
+    EXPECT_EQ(DevActionSelectorName("command_palette"), "openCommandPalette:");
+    EXPECT_EQ(DevActionSelectorName("cheatsheet"), "showCheatsheet:");
+    EXPECT_EQ(DevActionSelectorName("theme:dark"), "useDarkTheme:");
+    EXPECT_TRUE(DevActionSelectorName("navigate:https://example.com").empty());
+    EXPECT_TRUE(DevActionSelectorName("no_such_action").empty());
+}
+
+TEST(DevCaptureActions, SettingsActionOpensANamedSection) {
+    EXPECT_EQ(DevSettingsSectionName("settings:shortcuts"), "shortcuts");
+    EXPECT_EQ(DevSettingsSectionName("settings:appearance"), "appearance");
+    EXPECT_TRUE(DevSettingsSectionName("settings:").empty());
+    EXPECT_TRUE(DevSettingsSectionName("settings").empty());
+    EXPECT_TRUE(DevSettingsSectionName("navigate:settings:shortcuts").empty());
+}
+
 }  // namespace
 }  // namespace island

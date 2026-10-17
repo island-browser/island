@@ -79,57 +79,59 @@ TEST(BrowserChromeLedgerTest, RailControlRowsShareOneHeight) {
     EXPECT_EQ(BrowserChrome::SpacePillHeightDip(), BrowserChrome::TabRowHeightDip());
 }
 
-// The floating-canvas gutter that insets the browser card on every side is the calm
-// spacing_3 (12) step: wide enough to read as a raised card over the tinted
-// background, tight enough to keep the canvas dominant at the 800x560 minimum.
-TEST(BrowserChromeLedgerTest, BrowserContentPaddingUsesTheCalmThreeStep) {
+// The floating-canvas gutter around the page card is the spacing_2 (8) step (Arc): enough to
+// read as a raised card over the tinted canvas, tight enough to keep the page dominant.
+TEST(BrowserChromeLedgerTest, BrowserContentPaddingUsesTheEightStep) {
     const ChromeTokens tokens = Light();
-    EXPECT_EQ(BrowserChrome::BrowserContentPaddingDip(), tokens.spacing_3_dip);
-    EXPECT_EQ(BrowserChrome::BrowserContentPaddingDip(), 12);
+    EXPECT_EQ(BrowserChrome::BrowserContentPaddingDip(), tokens.spacing_2_dip);
+    EXPECT_EQ(BrowserChrome::BrowserContentPaddingDip(), 8);
+    EXPECT_EQ(tokens.card_inset_dip, BrowserChrome::BrowserContentPaddingDip());
 }
 
 // The rail is retinted from surface to surface_secondary so the calm sidebar sits one
 // step off the canvas and the floating browser card (browser_content -> background)
 // separates from it; the active-page pill lifts to surface against that tint. This
 // replaces the old flush surface rail. The ID/tree contract is untouched.
-TEST(BrowserChromeLedgerTest, RootAndBrowserContentUsePaperBackgroundInLight) {
+TEST(BrowserChromeLedgerTest, SidebarAndMarginShareTheCanvasInLight) {
     const ChromeTokens tokens = Light();
     const ChromeTheme theme = ChromeTheme::kLight;
+    // The sidebar and the window margin around the page card are one `canvas` surface.
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kRoot, theme),
-              tokens.background);
+              tokens.canvas);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kRail, theme),
-              tokens.surface_secondary);
+              tokens.canvas);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kBrowserContent, theme),
-              tokens.background);
+              tokens.canvas);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kHairline, theme),
               tokens.border);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kAddressWell, theme),
-              tokens.surface);
+              tokens.well);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kNavControl, theme),
-              tokens.surface);
+              tokens.hover);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kActivePage, theme),
-              tokens.surface);
+              tokens.selected);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kAccent, theme),
               tokens.accent);
 }
 
-TEST(BrowserChromeLedgerTest, RootAndBrowserContentUseCanvasBackgroundInDark) {
+TEST(BrowserChromeLedgerTest, SidebarAndMarginShareTheCanvasInDark) {
     const ChromeTokens tokens = Dark();
     const ChromeTheme theme = ChromeTheme::kDark;
+    // The sidebar and the window margin around the page card are one `canvas` surface.
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kRoot, theme),
-              tokens.background);
+              tokens.canvas);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kRail, theme),
-              tokens.surface_secondary);
+              tokens.canvas);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kBrowserContent, theme),
-              tokens.background);
+              tokens.canvas);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kHairline, theme),
               tokens.border);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kAddressWell, theme),
-              tokens.surface);
+              tokens.well);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kNavControl, theme),
-              tokens.surface);
+              tokens.hover);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kActivePage, theme),
-              tokens.surface);
+              tokens.selected);
     EXPECT_EQ(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kAccent, theme),
               tokens.accent);
 }
@@ -163,7 +165,7 @@ TEST(BrowserChromeLedgerTest, BrowserViewNeverCarriesTokenizedChromeColor) {
     EXPECT_NE(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kBrowserContent, theme),
               tokens.accent);
     EXPECT_NE(BrowserChrome::ChromeSurfaceRole(BrowserChrome::SurfaceSlot::kBrowserContent, theme),
-              tokens.surface_secondary);
+              tokens.surface);
 }
 
 // ---- Graphite pass: per-view color resolution -------------------------------------
@@ -177,19 +179,25 @@ std::vector<ChromeTokens> AllTokenSets() {
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
         const ChromeTokens base = ChromeTokens::ForTheme(theme);
         sets.push_back(base);
-        for (const std::uint32_t space : {0xFF0090FFU, 0xFFE5484DU, 0xFF30A46CU, 0xFFFFB224U}) {
+        for (const std::uint32_t space : {0xFF0090FFU, 0xFFE5484DU, 0xFF30A46CU, 0xFFFFB224U,
+                                          0xFF8E4EC6U, 0xFFFFFFFFU, 0xFF000000U}) {
             sets.push_back(base.TintedForSpace({.argb = space}, theme));
+            for (const int tint : {0, 35, 100}) {
+                sets.push_back(
+                    base.Customized({.argb = space}, theme,
+                                    {.look = LookPreset::kGraphite, .sidebar_tint_percent = tint}));
+            }
         }
     }
     return sets;
 }
 
-TEST(BrowserChromeGraphiteTest, SelectedRowIsSurfaceFilledAndHairlineOutlined) {
+TEST(BrowserChromeGraphiteTest, SelectedRowIsASoftFillWithNoOutline) {
     for (const ChromeTokens& tokens : AllTokenSets()) {
         const BrowserChrome::EntryColors active =
             BrowserChrome::TabRowColors(tokens, /*active=*/true, /*pinned=*/false);
-        EXPECT_EQ(active.fill, tokens.surface);
-        EXPECT_EQ(active.outline, tokens.border);
+        EXPECT_EQ(active.fill, tokens.selected);
+        EXPECT_EQ(active.outline, tokens.selected);
         EXPECT_EQ(active.title, tokens.text);
     }
 }
@@ -199,9 +207,9 @@ TEST(BrowserChromeGraphiteTest, SpaceChipsHaveNoFillOrEdgeAndTheActiveLabelTakes
     for (const ChromeTokens& tokens : AllTokenSets()) {
         const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);
         const BrowserChrome::EntryColors idle = BrowserChrome::SpaceChipColors(tokens, false);
-        EXPECT_EQ(active.fill, tokens.surface_secondary);
-        EXPECT_EQ(active.outline, tokens.surface_secondary);
-        EXPECT_EQ(idle.fill, tokens.surface_secondary);
+        EXPECT_EQ(active.fill, tokens.canvas);
+        EXPECT_EQ(active.outline, tokens.canvas);
+        EXPECT_EQ(idle.fill, tokens.canvas);
         EXPECT_EQ(active.title, tokens.text);
         EXPECT_EQ(idle.title, tokens.text_secondary);
         EXPECT_GE(ContrastRatio(active.title, active.fill), 4.5);
@@ -213,8 +221,8 @@ TEST(BrowserChromeGraphiteTest, InactiveRowsAreTheSidebarItselfWithNoEdge) {
     for (const ChromeTokens& tokens : AllTokenSets()) {
         const BrowserChrome::EntryColors idle =
             BrowserChrome::TabRowColors(tokens, /*active=*/false, /*pinned=*/false);
-        EXPECT_EQ(idle.fill, tokens.surface_secondary);
-        EXPECT_EQ(idle.outline, tokens.surface_secondary);
+        EXPECT_EQ(idle.fill, tokens.canvas);
+        EXPECT_EQ(idle.outline, tokens.canvas);
         EXPECT_EQ(idle.title, tokens.text_secondary);
     }
 }
@@ -223,8 +231,8 @@ TEST(BrowserChromeGraphiteTest, PinnedRowsSitBetweenTheSidebarAndTheSurface) {
     const ChromeTokens tokens = Light();
     const ArgbColor pinned =
         BrowserChrome::TabRowColors(tokens, /*active=*/false, /*pinned=*/true).fill;
-    EXPECT_NE(pinned, tokens.surface_secondary);
-    EXPECT_NE(pinned, tokens.surface);
+    EXPECT_NE(pinned, tokens.canvas);
+    EXPECT_NE(pinned, tokens.selected);
 }
 
 TEST(BrowserChromeGraphiteTest, RowTextMeetsBodyContrastOnEveryFillInBothThemes) {

@@ -43,6 +43,13 @@ bool EndpointDisabled() {
     return value != nullptr && (std::string_view(value) == "off" || std::string_view(value) == "0");
 }
 
+// Names the tab the caller meant: the active one, or the one it gave an index for.
+std::string PlanTabError(std::optional<std::size_t> tab) {
+    return std::string(tab.has_value() ? "That tab" : "The active tab") +
+           " is the research Plan tab, Island's own page. Open a page with browser_open_tab, or "
+           "address a page tab.";
+}
+
 agent::HostStatus StatusFor(bool ok, std::string error) {
     return ok ? agent::HostStatus::Ok() : agent::HostStatus::Error(std::move(error));
 }
@@ -114,7 +121,7 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
         const Tab& tab = space.tabs()[index];
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
         tabs.push_back({.index = index,
-                        .title = nav.page_title.empty() ? std::string("New Tab") : nav.page_title,
+                        .title = tab.DisplayTitle(),
                         .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
                         .active = space.has_active_tab() && index == space.active_tab_index(),
                         .loading = nav.load_phase == LoadPhase::kLoading,
@@ -124,10 +131,13 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
 }
 
 agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
-    return StatusFor(window_->OpenNewTab(url), "Could not open that address.");
+    return StatusFor(window_->OpenAgentTab(url), "Could not open that address.");
 }
 
 agent::HostStatus WindowAgentHost::Navigate(std::optional<std::size_t> tab, std::string_view url) {
+    if (window_->IsPlanTabIndex(tab)) {
+        return agent::HostStatus::Error(PlanTabError(tab));
+    }
     return StatusFor(window_->NavigateTab(tab, url),
                      "Could not navigate: unknown tab or an address Island does not allow.");
 }
@@ -157,6 +167,12 @@ agent::HostStatus WindowAgentHost::NewSpace(std::string_view name) {
 }
 
 agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
+    const bool history = action == agent::AgentBrowserAction::kBack ||
+                         action == agent::AgentBrowserAction::kForward ||
+                         action == agent::AgentBrowserAction::kReload;
+    if (history && window_->IsPlanTabIndex(std::nullopt)) {
+        return agent::HostStatus::Error(PlanTabError(std::nullopt));
+    }
     switch (action) {
         case agent::AgentBrowserAction::kBack:
             window_->ExecuteCommand(BrowserCommand::kBack);
@@ -179,6 +195,15 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
 
 void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_view method,
                                    json::Value params, agent::DevToolsCallback done) {
+    // Every page tool (read, snapshot, click, type, evaluate, screenshot) comes through here.
+    // The Plan tab is Island's own page: an agent could press Run on it and approve its own plan.
+    if (window_->IsPlanTabIndex(tab)) {
+        agent::DevToolsReply reply;
+        reply.ok = false;
+        reply.error = PlanTabError(tab);
+        done(std::move(reply));
+        return;
+    }
     CefRefPtr<CefBrowser> browser = window_->BrowserForTab(tab);
     if (browser == nullptr) {
         agent::DevToolsReply reply;

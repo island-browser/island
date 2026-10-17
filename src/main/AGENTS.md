@@ -17,7 +17,7 @@ platform executable links.
 | `CMakeLists.txt` | Defines `island_browser_core` plus the macOS bundle / Windows / Linux executable wiring |
 | `island_app.{h,cc}` | `CefApp` + `CefBrowserProcessHandler`; owns `BrowserWindow`, dispatches `BrowserCommand`, holds navigation/chrome observers |
 | `browser_window.{h,cc}` | Top-level `CefWindow` host, owns the `Space` vector, creates the active tab's `CefBrowserView`, and drives the CEF close lifecycle |
-| `browser_chrome.{h,cc}` | Native chrome layout; declares the `ChromeViewId` enum (`kRoot = 1001` …) |
+| `browser_chrome.{h,cc}` | Native chrome layout; declares the `ChromeViewId` enum (`kRoot = 1001` …). Native's sidebar bottom is a footer with a switcher row (segments, `+`, overview, settings; `kRailSwitcherRow`) above the full-width Agent entry (`kRailAgentButton`); the toolbar has no Agent button under Native |
 | `chrome_snapshot.h` | Observable snapshot struct + `ChromeObserver` seam used by tests |
 | `browser_command.h` | The Back / Forward / Reload command enum |
 | `navigation_state.{h,cc}` | Back/forward/reload availability and navigation snapshot |
@@ -25,8 +25,11 @@ platform executable links.
 | `address_policy.{h,cc}` | Validates an already-parsed absolute http/https address (allowed schemes, hosts, ports) |
 | `address_input.{h,cc}` | CEF-free address-bar heuristic: explicit scheme / host-like text becomes a URL (bare hosts get `https://`), everything else is a web search. Used only by `BrowserWindow::ResolveAddressInput` |
 | `search_engine.{h,cc}` | CEF-free table of web search engines (Google default, DuckDuckGo, Yandex), `BuildSearchUrl`, and the start page's remembered mode |
+| `start_tiles.{h,cc}` | CEF-free speed-dial model for the start page: `BuildStartTiles` turns the most-visited history into at most six `{title, url, host}` tiles (http/https only, no credentials, one per host, host as the label fallback); `IsWebTileUrl` guards `open_tile`. `BrowserWindow` refreshes them on the page's `ready` message from `HistoryRecorder::MostVisitedAsync`, which groups visits by `WebUrlHost` before its limit of six applies |
 | `cef_address_parser.{h,cc}` | CEF-dependent URL parsing behind the policy seam |
-| `design_tokens.{h,cc}` | `ArgbColor` and the token palette shared with `tests/design/` |
+| `design_tokens.{h,cc}` | `ArgbColor`, the token palette shared with `tests/design/`, the Arc `canvas/selected/hover/well/plate` surfaces, `AppearanceSettings` and `ChromeTokens::Customized` (tint, density, radius, inset, shadow, side, font) |
+| `page_card.h`, `macos/page_card_mac.mm` | Native macOS overlay that rounds and shadows the page card and repaints row/pill corners (`PageCardStyle`, `CornerPatch`); no-op elsewhere |
+| `row_raster.{h,cc}` | CEF-free rounded-rect raster used for favicon plates (and tested) |
 | `icon_catalog.{h,cc}` | Resolves icon names/sizes/scales against `resources/island/icons/manifest.json` |
 | `app_resources.{h,cc}` | Runtime resource-directory resolution (fonts, icons) |
 | `font_registry.h` | Font registration seam, implemented per platform |
@@ -39,11 +42,15 @@ platform executable links.
 | `space.{h,cc}` | Named, colored space owning ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
-| `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; `pages/start.html` (`LocalPageKind::kStart`) is the exception: it is the document each new tab loads, and `BrowserWindow::OnConsoleMessage` accepts its `search` / `ask_agent` / `set_start_mode` messages only from a tab whose main frame is exactly that URL; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
-| `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping |
+| `pages/settings.html` | Settings shell: a section list (`data-pane` items, `aria-current`) over one `<section id=...>` pane at a time, sidebar search over rows, version footer. `settings.appearance.base_look` decides whether Space colors and Sidebar tint show (hidden for Native). Native-side focus requests (`ShowSettingsSection`, dev `settings:<section>`) carry a `focus_seq` from `SettingsFocus` (`settings_focus.h`), so the page opens a repeated section again; they wait until the page has loaded (`LocalPage::loaded()`) |
+| `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; `pages/start.html` (`LocalPageKind::kStart`) is the exception: it is the document each new tab loads, and `BrowserWindow::OnConsoleMessage` accepts its `search` / `ask_agent` / `research` / `set_start_mode` / `open_tile` / `ready` messages only from a tab whose main frame is exactly that URL; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
+| `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping, keycap glyphs (`FormatKeyGlyphs`) and the ten `CheatsheetRows` |
+| `cheatsheet_overlay.{h,cc}` | The ⌘/ shortcut cheatsheet: CEF-free `CheatsheetLifetime` (toggle, detach, `OutsideMouseDownCloses` → `OverlayStep`) and the 320 DIP bottom-right card, created on show and destroyed on hide (see `overlay_lifetime.h`). A mouse press outside the card closes it through `mouse_down_monitor.h`; focus and window activation never do. Escape reaches it through the stop-loading route, where the cheatsheet comes before a peek |
+| `mouse_down_monitor.h`, `macos/mouse_down_mac.mm` | Reports every mouse press the app receives (an `NSEvent` local monitor, passed through unchanged), installed only while an overlay that closes on an outside click is shown; no-op elsewhere |
 | `history_recorder.{h,cc}` | Single-sequence background owner of the on-device history `SearchIndex`; records web navigations, rebuilds/flushes the bounded segment, queries, and clears history |
 | `find_bar_model.{h,cc}`, `find_bar_overlay.{h,cc}` | CEF-free find-bar state (query, match case, "n of m", the `FindRequest` each gesture needs) and the overlay card shown only while the bar is open; `browser_window_find_reader.cc` wires both to `CefBrowserHost::Find` / `OnFindResult` |
 | `reader_mode.{h,cc}`, `reader/` | Reader view: `reader/reader_extract.js` (injected through DevTools `Runtime.evaluate`, returns a whitelist tree) and `reader/reader_page.html` (the document, embedded like `pages/`); `reader_mode.cc` builds the data: URL. Per-tab `ReaderSession`s record the origin page and the document's URL hash; its messages (`reader_settings`, `reader_exit`) are accepted only with that document's token |
+| `address_indicators.h` | CEF-free rules for the Native address-field indicators (`ComputeAddressIndicators`: shield count capped at "9999+", Reader, agent state). `BrowserWindow::RefreshAddressIndicators` recomputes them on tab/space switch, blocked request, Reader change and agent session change and calls `BrowserChrome::SetAddressIndicators`; the shield opens Settings > Privacy (no blocker popover exists), the dot toggles the agent panel. The agent state is window-wide because the agent drives the active tab |
 | `prefs_store.{h,cc}` | Preferences JSON (theme, history capture, agent provider + custom command with migration from the old single command, agent panel state, shortcut overrides, update checks) |
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
 | `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
@@ -53,6 +60,10 @@ platform executable links.
 | `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers, Safari, Firefox (`.jsonlz4` bookmark backups) and Arc (spaces + pinned tabs) |
 | `tab_sleep_policy.h`, `peek_state.h` | CEF-free models: tab sleep decisions (injected clock, per-tab last-active time, exclusions as inputs; `Expired` for the timed sweep, `AllEligible` for "Sleep inactive tabs now") and the peek card's state (open/replace/close/open-as-tab/Escape, generation counter for stale callbacks) |
 | `peek_overlay.{h,cc}` | The peek card: an overlay of the one `CefWindow`, created in `Open` and released in `Close` (see `overlay_lifetime.h`), covering only the card, holding a title bar and its own `CefBrowserView` with its own client (popups load in the card, Escape claimed in `OnPreKeyEvent`) |
+| `overlay_lifetime.h`, `overlay_card.h` | CEF-free overlay rule (an overlay exists only while its surface is shown, because a live `CefWindow` overlay blocks mouse input on macOS) and the solid-color `OverlayFillDelegate` that re-asserts its color on theme change |
+| `browser_window_research.cc`, `research_prompt.{h,cc}`, `report_store.{h,cc}` | Research mode in `BrowserWindow` (start, cancel and finish, the Plan hub, the Report tab with save/copy/continue); the CEF-free prompt, research space name and report extraction; and the Reports list persisted as `reports.json` |
+| `plan_dev_fixture.h` | The developer capture's sample research plan (`--island-dev-actions=plan_fixture`), kept equal to the test fixture by a unit test |
+| `pages/plan.html`, `pages/report.html`, `pages/markdown.js` | The Plan tab's graph and list page, the Report tab page, and the shared safe Markdown renderer both use (inlined where a page carries `// @@ISLAND_MARKDOWN@@`) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
 
@@ -172,3 +183,21 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 
 <!-- MANUAL: -->
 - Content blocker startup: cached lists load and compile on a file thread after the window exists, so requests of tabs restored at launch can pass until the engine is published (a few hundred ms); list downloads use `CefURLRequest` on the UI thread but compile off it, and `CefURLRequest` callbacks hand back a different wrapper object, so never compare it by pointer.
+- Research source tabs use `Tab::group_parent`. `StartResearch` makes the research space itself
+  (`OpenResearchSpace`: the newest space with the question's name, else a new one whose only tab
+  is the Plan hub, so the view swaps once) and the research prompt no longer asks the agent to
+  create one. `OpenAgentTab` appends the page as a child and activates it
+  (`AppendPlanChildTab(..., activate=true)`) so the agent's page tools find a live browser: one
+  swap per MCP call. Never swap the content view twice in one turn: that crashed CEF a few
+  seconds later. The dev fixture appends background children (`activate=false`, no browser until
+  first shown; their `Tab::DisplayTitle` is the address and `EffectiveUrl` saves the startup
+  URL). Children sit right after the Plan tab's last child; a pinned Plan's children start the
+  unpinned tabs, so the pinned group stays whole (`Space::AppendChildTab`). `NormalizeGroups`
+  re-places a parent's children behind it after moves, pinning and restore; only the child the
+  person dragged away is ungrouped. A hub outside the active space (an agent that made its own
+  space) gets no group. `BrowserWindow` maps the running `BuildPlanGraph` node id to the opened
+  `TabId`. `NavigateTab` and the agent's back/forward/reload refuse the Plan tab
+  (`IsPlanTabIndex`). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
+  every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
+  deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
+  the page has no live frame; removing the Plan's space stops the research (no dialog).

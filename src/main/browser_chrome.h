@@ -12,12 +12,15 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "address_bar_model.h"
+#include "address_indicators.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "collapsed_rail.h"
@@ -25,7 +28,10 @@
 #include "icon_catalog.h"
 #include "include/cef_image.h"
 #include "navigation_state.h"
+#include "page_card.h"
+#include "row_raster.h"
 #include "sidebar_state.h"
+#include "tab_id.h"
 
 class CefBoxLayout;
 class CefView;
@@ -129,6 +135,23 @@ enum class ChromeViewId : int {
     kFindBarMatchCase = 1065,
     kFindBarClose = 1066,
     kReaderButton = 1067,
+    // Native-look toolbar. Existing IDs remain fixed; these append after the current range.
+    kToolbar = 1068,
+    kToolbarShare = 1069,
+    // Retired from the Native toolbar on 2026-10-16: the sidebar Agent entry replaces it. The
+    // id is kept so no later id moves; no view carries it any more.
+    kToolbarAgent = 1070,
+    kAddressIdleLabel = 1071,
+    kFavoritesSectionHeader = 1072,
+    kTabsSectionHeader = 1073,
+    // Address indicators (shield, agent dot); Reader reuses kReaderButton.
+    kAddressShield = 1074,
+    kAddressAgentDot = 1075,
+    // Native's bottom switcher row (the segment track plus the 24 DIP buttons). Added with the
+    // 2026-10-16 Native sidebar; it sits inside kRailFooter in Native only.
+    kRailSwitcherRow = 1076,
+    // The branch label above the first grouped (research) tab row of a run; Native only.
+    kTabGroupKicker = 1077,
 };
 
 struct ChromeViewTreeNode {
@@ -153,6 +176,10 @@ struct TabStripEntrySnapshot {
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;
+    // A tab opened by research sits under its parent (the Plan tab) one level deep; the label
+    // names the plan branch and is drawn as a kicker line above the first row of a run.
+    std::optional<TabId> group_parent;
+    std::string group_label;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -172,12 +199,25 @@ struct SpaceSwitcherEntrySnapshot {
 struct ChromeGeometrySnapshot {
     DipRect root_bounds;
     DipRect rail_bounds;
+    DipRect toolbar_bounds;
+    int toolbar_leading_inset_dip = 0;
     DipRect browser_content_bounds;
     DipRect browser_view_bounds;
     // Zero width (at the right edge) while the agent panel is closed.
     DipRect agent_panel_bounds;
 
     bool operator==(const ChromeGeometrySnapshot&) const = default;
+};
+
+// Bounds of the four chrome regions managed by RootPanelDelegate. A layout pass may overwrite
+// these without changing the requested ChromeGeometrySnapshot.
+struct ManagedChromeBounds {
+    DipRect rail;
+    DipRect toolbar;
+    DipRect browser_content;
+    DipRect agent_panel;
+
+    bool operator==(const ManagedChromeBounds&) const = default;
 };
 
 struct AddressSelectionSnapshot {
@@ -206,6 +246,22 @@ struct CollapsedRailTabLayout {
     std::size_t separator_before = npos;
 };
 
+enum class ChromeFontWeight : std::uint8_t {
+    kRegular,
+    kMedium,
+    kSemiBold,
+    kBold,
+};
+
+struct AddressPlateStyle {
+    ArgbColor fill;
+    ArgbColor outside;
+    int outline_dip = 0;
+    int radius_dip = 0;
+
+    bool operator==(const AddressPlateStyle&) const = default;
+};
+
 class BrowserChromeHost {
   public:
     virtual ~BrowserChromeHost() = default;
@@ -225,6 +281,8 @@ class BrowserChromeHost {
     virtual void ToggleAgentPanel() = 0;
     virtual void ToggleTabOverview() = 0;
     virtual void ToggleSettings() = 0;
+    // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
+    virtual void OpenBlockerSettings() = 0;
 };
 
 class BrowserChrome final : public NavigationObserver {
@@ -238,7 +296,14 @@ class BrowserChrome final : public NavigationObserver {
 
     [[nodiscard]] CefRefPtr<CefPanel> root() const;
     [[nodiscard]] CefRefPtr<CefPanel> sidebar() const;
+    // The browser views currently in the page card slot (one, or two in split view).
+    [[nodiscard]] std::vector<CefRefPtr<CefBrowserView>> visible_browser_views() const;
     [[nodiscard]] ChromeViewTreeNode view_tree_snapshot() const;
+    // The projection view_tree_snapshot() returns: the look's collection contract, plus the
+    // divider and second pane under kBrowserContent while a split is shown.
+    [[nodiscard]] static ChromeViewTreeNode LiveViewTree(
+        const std::vector<TabStripEntrySnapshot>& tabs,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look, bool split_active);
     [[nodiscard]] ChromeGeometrySnapshot view_bounds_snapshot() const;
     [[nodiscard]] AddressSelectionSnapshot address_selection_snapshot() const;
 
@@ -247,6 +312,8 @@ class BrowserChrome final : public NavigationObserver {
     void SetReaderState(bool available, bool active);
     [[nodiscard]] bool reader_available() const noexcept { return reader_available_; }
     [[nodiscard]] bool reader_active() const noexcept { return reader_active_; }
+    // The shield, Reader and agent-dot indicators inside the Native address field.
+    void SetAddressIndicators(const AddressIndicators& indicators);
 
     // Focus-ring thickness of the address pill and ActivePageIndicator thickness in
     // DIP; both are 2 so the accent marks read as one weight.
@@ -255,22 +322,76 @@ class BrowserChrome final : public NavigationObserver {
         return AddressFocusLeadingEdgeDip();
     }
 
-    // Top inset above the navigation row. The window keeps the platform's standard
-    // title bar, which already clears the window controls, so the rail starts on
-    // the same spacing_3 (12) gutter as its sides.
+    // Top inset above the navigation row on platforms that keep their own title bar, which
+    // already clears the window controls: the rail starts on the same spacing_3 (12) gutter as
+    // its sides. With a frameless window (ChromeTokens::titlebar_band_dip > 0) the navigation row
+    // is vertically centered in that band instead, next to the traffic lights.
     [[nodiscard]] static constexpr int RailTopInsetDip() { return 12; }
+    [[nodiscard]] static int RailTopInsetDip(const ChromeTokens& tokens) {
+        return tokens.titlebar_band_dip > 0
+                   ? std::max(0, (tokens.titlebar_band_dip - tokens.control_height_dip) / 2)
+                   : RailTopInsetDip();
+    }
+    // Height of the frameless titlebar band (macOS traffic lights centered in it) and the width
+    // the three buttons occupy from the window's left edge, plus a gap.
+    [[nodiscard]] static constexpr int TrafficLightBandDip() { return 40; }
+    [[nodiscard]] static constexpr int TrafficLightClearDip() { return 92; }
+    // Extra leading space of the navigation row (past the rail's own gutter) that clears them.
+    [[nodiscard]] static constexpr int NavigationLeadDip() { return TrafficLightClearDip() - 12; }
 
     // Vertical cadence between rail sections: one spacing_2 (8) step, so the
     // controls read as one dense, even column (Graphite, "Linear-calm").
     [[nodiscard]] static constexpr int RailSectionSpacingDip() { return 8; }
+    [[nodiscard]] static constexpr int NativeToolbarHeightDip() { return 52; }
+    [[nodiscard]] static constexpr int NativeToolbarButtonDip() { return 28; }
+    [[nodiscard]] static constexpr int NativeAddressHeightDip() { return 30; }
+    [[nodiscard]] static constexpr int NativeAddressRadiusDip() { return 8; }
+    [[nodiscard]] static constexpr int NativeSectionHeaderHeightDip() { return 20; }
+    [[nodiscard]] static constexpr int GroupedTabIndentDip() { return 16; }
+    [[nodiscard]] static constexpr int GroupedTabKickerFontPx() { return 10; }
+    [[nodiscard]] static constexpr int GroupedTabKickerHeightDip() { return 16; }
+    // True when entry `index` is the first row of a run of grouped tabs with one label, which
+    // gets a kicker line above it.
+    [[nodiscard]] static bool NeedsGroupKicker(const std::vector<TabStripEntrySnapshot>& entries,
+                                               std::size_t index) {
+        const TabStripEntrySnapshot& entry = entries[index];
+        if (!entry.group_parent.has_value() || entry.group_label.empty()) {
+            return false;
+        }
+        if (index == 0) {
+            return true;
+        }
+        const TabStripEntrySnapshot& previous = entries[index - 1];
+        return previous.group_parent != entry.group_parent ||
+               previous.group_label != entry.group_label;
+    }
+    // The address field's plate: Native draws a `fill` plate with radius 8 and no hairline on the
+    // toolbar; the other looks keep the hairline-outlined well on the canvas.
+    [[nodiscard]] static AddressPlateStyle AddressPlateStyleFor(const ChromeTokens& tokens);
+    // The color the address row paints around its children: the hairline (accent while focused),
+    // or the plate fill itself in Native so no outline or ring shows.
+    [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
+    // The corner patch that rounds the address plate at `bounds` (window DIP). Native's address
+    // sits in the always-shown toolbar; the other looks' address lives in the expanded sidebar
+    // only, so it has no patch while the sidebar is collapsed.
+    [[nodiscard]] static std::optional<CornerPatch> AddressCornerPatch(const ChromeTokens& tokens,
+                                                                       const DipRect& bounds,
+                                                                       bool sidebar_expanded);
+    // A CEF font list ("Family, [Medium |Semi-Bold |Bold ]13px") for the resolved interface font.
+    // The weight is explicit. The tokens are those gfx::FontList::ParseDescription accepts in
+    // the pinned Chromium (150.0.7871.129); an unknown token ("SemiBold") fails the whole list.
+    [[nodiscard]] static std::string FontListForTokens(const ChromeTokens& tokens, int size_px,
+                                                       ChromeFontWeight weight);
+    // Native's sentence-case section headers ("Favorites", "<Space> · Tabs"): 11 px, weight 600.
+    [[nodiscard]] static std::string SectionHeaderFontList(const ChromeTokens& tokens) {
+        return FontListForTokens(tokens, 11, ChromeFontWeight::kSemiBold);
+    }
 
-    // Uniform gutter padding the browser_content panel on every side so the single
-    // CefBrowserView reads as a floating card over the tinted canvas. spacing_3 (12)
-    // is the calm edge: wide enough to separate the card from the rail and window
-    // edge, tight enough to keep the canvas dominant at the 800x560 minimum.
-    // CEF cannot round or clip the CefBrowserView, so the floating read comes from
-    // this rectangular inset, not from a corner radius.
-    [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 12; }
+    // Default gutter around the page card (ChromeTokens::card_inset_dip is the live value): the
+    // card floats on the sidebar-colored canvas, inset on its top, outer side and bottom and flush
+    // with the sidebar on the fourth side. CEF cannot round or clip the CefBrowserView, so the
+    // macOS helper (macos/page_card_mac.mm) rounds it natively; elsewhere the corners stay square.
+    [[nodiscard]] static constexpr int BrowserContentPaddingDip() { return 8; }
 
     // The agent panel column: a fixed 380 DIP that yields to the page, so the
     // browser content never drops below MinimumBrowserContentWidthDip.
@@ -281,6 +402,7 @@ class BrowserChrome final : public NavigationObserver {
         kRoot,
         kRail,
         kBrowserContent,
+        kToolbar,
         kHairline,
         kAddressWell,
         // The hairline (accent while focused) the address pill paints around its
@@ -295,27 +417,22 @@ class BrowserChrome final : public NavigationObserver {
         switch (slot) {
             case SurfaceSlot::kRoot:
             case SurfaceSlot::kBrowserContent:
-                return tokens.background;
             case SurfaceSlot::kRail:
-                // The calm tinted rail sits one step off the canvas so the floating
-                // browser card separates from it.
+                // One surface: the sidebar and the window margin around the page card share
+                // the canvas, so the card floats on it (Arc).
+                return tokens.canvas;
+            case SurfaceSlot::kToolbar:
                 return tokens.surface_secondary;
             case SurfaceSlot::kHairline:
             case SurfaceSlot::kAddressOutline:
                 return tokens.border;
             case SurfaceSlot::kAddressWell:
-                // The address pill lifts to the primary surface so it reads as a raised
-                // rounded field against the tinted rail, matching the canonical
-                // .rail-address anatomy (surface fill, hairline edge).
-                return tokens.surface;
+                // The address pill is a soft well on the canvas.
+                return tokens.well;
             case SurfaceSlot::kNavControl:
-                // Nav icon-button hover/pressed fill stays on the quiet surface step so
-                // the tinted rail keeps the controls calm until targeted.
-                return tokens.surface;
+                return tokens.hover;
             case SurfaceSlot::kActivePage:
-                // The active-page pill lifts to the primary surface against the tinted
-                // rail so the current page reads as the one raised card.
-                return tokens.surface;
+                return tokens.selected;
             case SurfaceSlot::kAccent:
                 return tokens.accent;
         }
@@ -325,18 +442,19 @@ class BrowserChrome final : public NavigationObserver {
         switch (slot) {
             case SurfaceSlot::kRoot:
             case SurfaceSlot::kBrowserContent:
-                return tokens_.background;
             case SurfaceSlot::kRail:
+                return tokens_.canvas;
+            case SurfaceSlot::kToolbar:
                 return tokens_.surface_secondary;
             case SurfaceSlot::kHairline:
             case SurfaceSlot::kAddressOutline:
                 return tokens_.border;
             case SurfaceSlot::kAddressWell:
-                return tokens_.surface;
+                return tokens_.well;
             case SurfaceSlot::kNavControl:
-                return tokens_.surface;
+                return tokens_.hover;
             case SurfaceSlot::kActivePage:
-                return tokens_.surface;
+                return tokens_.selected;
             case SurfaceSlot::kAccent:
                 return tokens_.accent;
         }
@@ -353,22 +471,80 @@ class BrowserChrome final : public NavigationObserver {
         ArgbColor title;
         ArgbColor trailing;
     };
-    // The selected row is surface-filled and hairline-outlined (DESIGN.md §5);
-    // pinned rows sit half a step toward the surface; every other row is the rail.
+    // The selected row is a soft `selected` fill with no outline (Arc); pinned rows sit half a
+    // step toward it; every other row is the canvas.
     [[nodiscard]] static EntryColors TabRowColors(const ChromeTokens& tokens, bool active,
                                                   bool pinned) {
-        const ArgbColor rail = tokens.surface_secondary;
+        const ArgbColor rail = tokens.canvas;
+        RowColors row = ResolveRowColors(tokens, active, /*hovered=*/false, /*slept=*/false);
+        if (tokens.look != LookPreset::kNative && pinned && !active) {
+            row.fill = MixColor(rail, tokens.selected, 0.5);
+        }
         return {
-            .outline = active ? tokens.border : rail,
-            .fill = active ? tokens.surface : (pinned ? MixColor(rail, tokens.surface, 0.5) : rail),
-            .title = active ? tokens.text : tokens.text_secondary,
-            .trailing = tokens.text_secondary,
+            .outline = row.fill,
+            .fill = row.fill,
+            .title = row.title,
+            .trailing =
+                tokens.look == LookPreset::kNative && active ? row.title : tokens.text_secondary,
         };
     }
+    // Native's Agent entry (2026-10-16): full width at the sidebar bottom. Open takes the
+    // accent_soft fill with accent_text; closed is the bare sidebar with an accent sparkle, and
+    // hover takes the hover token.
+    struct NativeAgentColors {
+        ArgbColor fill;
+        ArgbColor text;
+        ArgbColor sparkle;
+    };
+    [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
+                                                                  bool open, bool hovered) {
+        if (open) {
+            return {.fill = tokens.accent_soft,
+                    .text = tokens.accent_text,
+                    .sparkle = tokens.accent};
+        }
+        return {.fill = hovered ? tokens.hover : tokens.canvas,
+                .text = tokens.text,
+                .sparkle = tokens.accent};
+    }
+    // Native's space segmented control: a `fill` track, the selected segment on `surface`,
+    // the selected name in `text` and the others in `text_secondary`.
+    struct SegmentPalette {
+        ArgbColor track;
+        ArgbColor fill;
+        ArgbColor title;
+    };
+    [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
+                                                            bool active) {
+        return {.track = tokens.fill,
+                .fill = active ? tokens.segment_selected : tokens.fill,
+                .title = active ? tokens.text : tokens.text_secondary};
+    }
+    // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP
+    // icon buttons share one row; the segments sit inside the track's 2 DIP inset.
+    struct NativeSwitcherMetrics {
+        int row_dip;
+        int button_dip;
+        int track_inset_dip;
+        int segment_dip;
+    };
+    [[nodiscard]] static constexpr NativeSwitcherMetrics NativeSwitcherSizes() {
+        return {.row_dip = 24, .button_dip = 24, .track_inset_dip = 2, .segment_dip = 20};
+    }
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
-    // active chip, carry the state); the active chip's label takes --text.
+    // active chip, carry the state); the active chip's label takes --text. Native segments
+    // use NativeSegmentColors instead.
     [[nodiscard]] static EntryColors SpaceChipColors(const ChromeTokens& tokens, bool active) {
-        const ArgbColor rail = tokens.surface_secondary;
+        const ArgbColor rail = tokens.canvas;
+        if (tokens.look == LookPreset::kNative) {
+            const SegmentPalette segment = NativeSegmentColors(tokens, active);
+            return {
+                .outline = segment.fill,
+                .fill = segment.fill,
+                .title = segment.title,
+                .trailing = tokens.text_secondary,
+            };
+        }
         return {
             .outline = rail,
             .fill = rail,
@@ -390,103 +566,125 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr ChromeIconTone FallbackFaviconIconTone() {
         return ChromeIconTone::kSecondary;
     }
-    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(
-        DipRect root_bounds, const ChromeTokens& tokens) noexcept {
+    [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
+                                                                const ChromeTokens& tokens) {
         return LayoutForBounds(root_bounds, tokens, /*sidebar_expanded=*/true);
     }
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
-                                                                bool sidebar_expanded) noexcept {
+                                                                bool sidebar_expanded) {
         return LayoutForBounds(root_bounds, tokens, sidebar_expanded,
                                /*agent_panel_open=*/false);
     }
     // The collapsed sidebar occupies the icon rail's 52 DIP of layout width instead of the
     // full 286; the rail stays in the view tree, so the contract shape is unchanged and
     // only the content x-offset moves. This is the single layout path for both states.
-    // The open agent panel takes its column from the right edge before the
-    // content gutter applies; closed, it is a zero-width rect at that edge.
+    // The open agent panel takes its column from the window edge opposite the sidebar before
+    // the card inset applies; closed, it is a zero-width rect at that edge.
     [[nodiscard]] static ChromeGeometrySnapshot LayoutForBounds(DipRect root_bounds,
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
-                                                                bool agent_panel_open) noexcept {
-        const int rail_width = std::min(
-            sidebar_expanded ? tokens.rail_width_dip : kCollapsedRailWidthDip, root_bounds.width);
-        const int panel_width =
-            agent_panel_open
-                ? std::clamp(root_bounds.width - rail_width - MinimumBrowserContentWidthDip(), 0,
-                             AgentPanelWidthDip())
-                : 0;
-        const DipRect rail_bounds = {
-            .x = root_bounds.x,
-            .y = root_bounds.y,
-            .width = rail_width,
-            .height = root_bounds.height,
-        };
-        // The floating-canvas gutter insets the browser card on every side; it shrinks
-        // the content region symmetrically and is clamped so the card never inverts on
-        // very narrow windows.
-        const int pad = BrowserContentPaddingDip();
-        const int content_x = root_bounds.x + rail_width;
-        const int content_width = std::max(0, root_bounds.width - rail_width - panel_width);
-        const DipRect browser_content_bounds = {
-            .x = content_x,
-            .y = root_bounds.y,
-            .width = content_width,
-            .height = root_bounds.height,
-        };
-        const int inset_width = std::max(0, content_width - 2 * pad);
-        const int inset_height = std::max(0, root_bounds.height - 2 * pad);
-        const DipRect browser_view_bounds = {
-            .x = content_x + std::min(pad, content_width / 2),
-            .y = root_bounds.y + std::min(pad, root_bounds.height / 2),
-            .width = inset_width,
-            .height = inset_height,
-        };
-        const DipRect agent_panel_bounds = {
-            .x = content_x + content_width,
-            .y = root_bounds.y,
-            .width = panel_width,
-            .height = root_bounds.height,
-        };
-        return {
-            .root_bounds = root_bounds,
-            .rail_bounds = rail_bounds,
-            .browser_content_bounds = browser_content_bounds,
-            .browser_view_bounds = browser_view_bounds,
-            .agent_panel_bounds = agent_panel_bounds,
-        };
+                                                                bool agent_panel_open);
+    // A repeated root snapshot is a no-op only while every managed region remains at its target.
+    // The live-bounds input keeps this decision CEF-free and testable.
+    [[nodiscard]] static bool NeedsRelayout(const std::optional<ChromeGeometrySnapshot>& applied,
+                                            const ChromeGeometrySnapshot& requested,
+                                            const ManagedChromeBounds& actual) {
+        return !applied.has_value() || *applied != requested ||
+               actual.rail != requested.rail_bounds || actual.toolbar != requested.toolbar_bounds ||
+               actual.browser_content != requested.browser_content_bounds ||
+               actual.agent_panel != requested.agent_panel_bounds;
     }
+
+    // Insets of the page card (browser_view_bounds inside browser_content_bounds) and of the
+    // agent panel's own card, resolved for the same inputs as LayoutForBounds.
+    struct CardInsets {
+        int left = 0;
+        int top = 0;
+        int right = 0;
+        int bottom = 0;
+    };
+    [[nodiscard]] static CardInsets ContentInsets(DipRect root_bounds, const ChromeTokens& tokens,
+                                                  bool sidebar_expanded, bool agent_panel_open);
+    [[nodiscard]] static CardInsets AgentPanelInsets(DipRect root_bounds,
+                                                     const ChromeTokens& tokens,
+                                                     bool sidebar_expanded);
+
+    // The window regions that drag the window in a frameless window: the sidebar's top band
+    // (minus the navigation buttons) and the canvas margin above the page card.
+    struct DragRegion {
+        DipRect bounds;
+        bool draggable = true;
+    };
+    [[nodiscard]] static std::vector<DragRegion> DragRegionsForBounds(DipRect root_bounds,
+                                                                      const ChromeTokens& tokens,
+                                                                      bool sidebar_expanded,
+                                                                      bool agent_panel_open);
     // The fixed rail regions keep their Phase 2 shape; the collection regions
     // (kTabStrip, kSpaceSwitcher) are present but empty because Phase 3 U3
     // wires no real tab/space data yet. Per-entry structure is asserted
     // through CollectionCountContract below, not by absolute rail index.
-    [[nodiscard]] static ChromeViewTreeNode ViewTreeContract() {
-        return {ChromeViewId::kRoot,
-                {{ChromeViewId::kRail,
-                  {{ChromeViewId::kNavigationRow,
-                    {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}},
-                   {ChromeViewId::kAddressRow,
-                    {{ChromeViewId::kAddressLocationIcon, {}},
-                     {ChromeViewId::kAddress, {}},
-                     {ChromeViewId::kReload, {}},
-                     {ChromeViewId::kReaderButton, {}}}},
-                   {ChromeViewId::kValidationMessage, {}},
-                   {ChromeViewId::kRailNewTab, {}},
-                   {ChromeViewId::kTabStrip, {}},
-                   {ChromeViewId::kSpacer, {}},
-                   {ChromeViewId::kDivider, {}},
-                   {ChromeViewId::kSpaceSwitcher, {}},
-                   {ChromeViewId::kRailFooter,
-                    {{ChromeViewId::kRailAgentButton, {}},
-                     {ChromeViewId::kRailTabsButton, {}},
-                     {ChromeViewId::kRailSettingsButton, {}},
-                     {ChromeViewId::kRailNewSpaceButton, {}}}},
-                   {ChromeViewId::kActivePage,
-                    {{ChromeViewId::kActivePageFallbackFavicon, {}},
-                     {ChromeViewId::kActiveTab, {}},
-                     {ChromeViewId::kActivePageIndicator, {}}}}}},
-                 {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}},
-                 {ChromeViewId::kAgentPanel, {}}}};
+    [[nodiscard]] static ChromeViewTreeNode ViewTreeContract(LookPreset look = LookPreset::kArc) {
+        const bool native = look == LookPreset::kNative;
+        const ChromeViewTreeNode navigation = {
+            ChromeViewId::kNavigationRow,
+            {{ChromeViewId::kBack, {}}, {ChromeViewId::kForward, {}}}};
+        ChromeViewTreeNode address = {ChromeViewId::kAddressRow,
+                                      {{ChromeViewId::kAddressLocationIcon, {}},
+                                       {ChromeViewId::kAddress, {}},
+                                       {ChromeViewId::kReload, {}},
+                                       {ChromeViewId::kReaderButton, {}}}};
+        if (native) {
+            address.children.insert(address.children.begin() + 2,
+                                    {ChromeViewId::kAddressIdleLabel, {}});
+        }
+        std::vector<ChromeViewTreeNode> rail_children;
+        if (!native) {
+            rail_children.push_back(navigation);
+            rail_children.push_back(address);
+        }
+        rail_children.push_back({ChromeViewId::kValidationMessage, {}});
+        // Arc and Graphite list New Tab above the tabs; Native moves it to the list's end.
+        if (!native) {
+            rail_children.push_back({ChromeViewId::kRailNewTab, {}});
+        }
+        rail_children.insert(rail_children.end(), {{ChromeViewId::kTabStrip, {}},
+                                                   {ChromeViewId::kSpacer, {}},
+                                                   {ChromeViewId::kDivider, {}}});
+        if (native) {
+            // Bottom-up the owner's layout reads: the full-width Agent entry at the very bottom,
+            // with the switcher row (segments plus the new-space, overview and settings buttons)
+            // above it.
+            rail_children.push_back(
+                {ChromeViewId::kRailFooter,
+                 {{ChromeViewId::kRailSwitcherRow,
+                   {{ChromeViewId::kSpaceSwitcher, {}},
+                    {ChromeViewId::kRailNewSpaceButton, {}},
+                    {ChromeViewId::kRailTabsButton, {}},
+                    {ChromeViewId::kRailSettingsButton, {}}}},
+                  {ChromeViewId::kRailAgentButton, {}}}});
+        } else {
+            rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
+            rail_children.push_back({ChromeViewId::kRailFooter,
+                                     {{ChromeViewId::kRailAgentButton, {}},
+                                      {ChromeViewId::kRailTabsButton, {}},
+                                      {ChromeViewId::kRailSettingsButton, {}},
+                                      {ChromeViewId::kRailNewSpaceButton, {}}}});
+        }
+        rail_children.push_back({ChromeViewId::kActivePage,
+                                 {{ChromeViewId::kActivePageFallbackFavicon, {}},
+                                  {ChromeViewId::kActiveTab, {}},
+                                  {ChromeViewId::kActivePageIndicator, {}}}});
+        std::vector<ChromeViewTreeNode> root_children = {
+            {ChromeViewId::kRail, std::move(rail_children)}};
+        if (native) {
+            root_children.push_back({ChromeViewId::kToolbar,
+                                     {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
+        }
+        root_children.push_back(
+            {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
+        root_children.push_back({ChromeViewId::kAgentPanel, {}});
+        return {ChromeViewId::kRoot, std::move(root_children)};
     }
 
     // Projects the collection regions the way U4/U5 wire them at runtime: one
@@ -498,25 +696,64 @@ class BrowserChrome final : public NavigationObserver {
     // snapshot and the contract tests go through.
     [[nodiscard]] static ChromeViewTreeNode CollectionCountContract(
         const std::vector<TabStripEntrySnapshot>& tabs,
-        const std::vector<SpaceSwitcherEntrySnapshot>& spaces) {
-        ChromeViewTreeNode tree = ViewTreeContract();
-        ChromeViewTreeNode& rail = tree.children[0];
-        for (ChromeViewTreeNode& child : rail.children) {
-            if (child.id == ChromeViewId::kTabStrip) {
-                child.children.reserve(tabs.size());
-                for (std::size_t i = 0; i < tabs.size(); ++i) {
-                    child.children.push_back({ChromeViewId::kTabStripEntry,
-                                              {{ChromeViewId::kTabStripEntryFavicon, {}},
-                                               {ChromeViewId::kTabStripEntryTitle, {}},
-                                               {ChromeViewId::kTabStripEntryClose, {}}}});
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look = LookPreset::kArc) {
+        ChromeViewTreeNode tree = ViewTreeContract(look);
+        const bool native = look == LookPreset::kNative;
+        // Native nests the switcher inside the footer's switcher row, so it is found by id
+        // anywhere in the tree rather than only among the rail's direct children.
+        const auto find = [](ChromeViewTreeNode& node, ChromeViewId id,
+                             const auto& self) -> ChromeViewTreeNode* {
+            for (ChromeViewTreeNode& child : node.children) {
+                if (child.id == id) {
+                    return &child;
                 }
-            } else if (child.id == ChromeViewId::kSpaceSwitcher) {
-                child.children.reserve(spaces.size());
-                for (std::size_t i = 0; i < spaces.size(); ++i) {
-                    child.children.push_back({ChromeViewId::kSpaceSwitcherEntry,
-                                              {{ChromeViewId::kSpaceSwitcherEntryColorMark, {}},
-                                               {ChromeViewId::kSpaceSwitcherEntryName, {}}}});
+                if (ChromeViewTreeNode* match = self(child, id, self); match != nullptr) {
+                    return match;
                 }
+            }
+            return nullptr;
+        };
+        if (ChromeViewTreeNode* tab_strip = find(tree, ChromeViewId::kTabStrip, find);
+            tab_strip != nullptr) {
+            tab_strip->children.reserve(tabs.size() + 3);
+            bool favorites_header_added = false;
+            bool tabs_header_added = false;
+            for (std::size_t i = 0; i < tabs.size(); ++i) {
+                if (native && tabs[i].pinned && !favorites_header_added) {
+                    tab_strip->children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
+                    favorites_header_added = true;
+                }
+                if (native && !tabs[i].pinned && !tabs_header_added) {
+                    tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+                    tabs_header_added = true;
+                }
+                if (native && NeedsGroupKicker(tabs, i)) {
+                    tab_strip->children.push_back({ChromeViewId::kTabGroupKicker, {}});
+                }
+                tab_strip->children.push_back({ChromeViewId::kTabStripEntry,
+                                               {{ChromeViewId::kTabStripEntryFavicon, {}},
+                                                {ChromeViewId::kTabStripEntryTitle, {}},
+                                                {ChromeViewId::kTabStripEntryClose, {}}}});
+            }
+            if (native && !tabs_header_added) {
+                tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+            }
+            // Native's New Tab row is the list's last row, after the last tab.
+            if (native) {
+                tab_strip->children.push_back({ChromeViewId::kRailNewTab, {}});
+            }
+        }
+        if (ChromeViewTreeNode* switcher = find(tree, ChromeViewId::kSpaceSwitcher, find);
+            switcher != nullptr) {
+            switcher->children.reserve(spaces.size());
+            for (std::size_t i = 0; i < spaces.size(); ++i) {
+                // Native segments carry only the name: the space color is never shown there.
+                ChromeViewTreeNode segment = {ChromeViewId::kSpaceSwitcherEntry, {}};
+                if (!native) {
+                    segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryColorMark, {}});
+                }
+                segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryName, {}});
+                switcher->children.push_back(std::move(segment));
             }
         }
         return tree;
@@ -556,6 +793,10 @@ class BrowserChrome final : public NavigationObserver {
     void SetSplitRatio(double ratio);
     [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
     [[nodiscard]] bool split_active() const noexcept { return split_view_ != nullptr; }
+    [[nodiscard]] std::size_t browser_view_size_change_count() const noexcept {
+        return browser_view_size_change_count_;
+    }
+    [[nodiscard]] std::size_t relayout_count() const noexcept { return relayout_count_; }
 
     // Split divider geometry. The divider is keyboard-adjustable through the
     // kMoveDividerLeft/Right commands (drag is a documented deviation: the
@@ -607,6 +848,10 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] const std::string& update_notice() const noexcept { return update_notice_; }
     void BeginAddressEditing();
     void Detach();
+    // The window host applies the corner patches (page_card.h) the chrome computes for its soft
+    // rounded fills; the chrome re-pushes them when rows change, hover, scroll or relayout.
+    void SetCornerPatchSink(std::function<void(const std::vector<CornerPatch>&)> sink);
+    [[nodiscard]] std::vector<CornerPatch> ComputeCornerPatches() const;
     // Repaints every chrome view from the resolved tokens and each entry's current
     // state. Runs after CEF's asynchronous theme reset has wiped the custom colors.
     void ReapplyThemeColors();
@@ -649,7 +894,37 @@ class BrowserChrome final : public NavigationObserver {
     void ProjectAddress(const AddressBarSnapshot& snapshot);
     void ScheduleAddressSelection();
     void ApplyControlTheme();
+    // Re-creates the box layouts whose insets depend on the tokens (sidebar side, titlebar band,
+    // card inset, density) and the expand/agent state; a no-op while nothing relevant changed.
+    void ApplyLayoutTokens();
+    // Developer diagnostics: record root relayouts and changes to the attached page bounds.
+    // The counters are read only by the existing --island-dev-keep-open SIGUSR2 report.
+    void RecordRelayout();
+    // The row/control heights follow the density token; rebuilds the rows when it changes.
+    void ApplyDensity();
+    void ApplyLookStructure();
+    // FontListForTokens for the current tokens.
+    [[nodiscard]] std::string FontList(int size_px, ChromeFontWeight weight) const;
+    [[nodiscard]] int RowHeight() const { return tokens_.control_height_dip; }
+    [[nodiscard]] int NavigationButtonSize() const {
+        return tokens_.look == LookPreset::kNative ? NativeToolbarButtonDip()
+                                                   : tokens_.control_height_dip;
+    }
+    [[nodiscard]] int AddressHeight() const {
+        return tokens_.look == LookPreset::kNative ? NativeAddressHeightDip()
+                                                   : tokens_.control_height_dip;
+    }
+    [[nodiscard]] std::string ActiveSpaceSectionTitle() const;
     void ApplyCollectionTheme();
+    // Re-renders the soft rounded fill (selected / hovered / none) of one row's edge buttons.
+    void ApplyTabRowVisual(std::size_t index);
+    void ApplyCollapsedTabVisual(std::size_t position);
+    void ApplyAddressPillImages();
+    void ApplyAddressIndicators();
+    // Called by the row buttons' delegates on every pointer-state change.
+    void RefreshRowHover();
+    void PushCornerPatches();
+    void SchedulePatchPoll();
     void ApplyCollapsedRailTheme();
     void UpdateAddressFocusLeadingEdge();
 
@@ -660,10 +935,24 @@ class BrowserChrome final : public NavigationObserver {
     std::shared_ptr<BrowserChrome*> alive_;
     bool theme_reapply_pending_ = false;
     CefRefPtr<CefPanel> root_;
+    CefRefPtr<CefBoxLayout> root_layout_;
+    CefRefPtr<CefPanel> rail_host_;
+    CefRefPtr<PanelDelegate> rail_host_delegate_;
+    CefRefPtr<CefPanel> content_column_;
+    CefRefPtr<CefBoxLayout> content_column_layout_;
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<PanelDelegate> browser_content_delegate_;
+    CefRefPtr<CefPanel> toolbar_;
+    CefRefPtr<CefPanel> toolbar_content_;
+    CefRefPtr<CefPanel> toolbar_hairline_;
     CefRefPtr<CefBoxLayout> browser_content_layout_;
+    CefRefPtr<CefBoxLayout> agent_panel_layout_;
+    CefRefPtr<CefBoxLayout> navigation_row_layout_;
+    CefRefPtr<CefBoxLayout> rail_layout_;
+    CefRefPtr<CefBoxLayout> collapsed_layout_;
     CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<PanelDelegate> agent_panel_delegate_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
     std::string update_notice_;
@@ -677,17 +966,31 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> spacer_;
     CefRefPtr<CefBoxLayout> address_layout_;
     CefRefPtr<CefPanel> address_field_holder_;
+    CefRefPtr<CefLabelButton> address_idle_label_;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
     CefRefPtr<CefLabelButton> reload_button_;
     CefRefPtr<CefLabelButton> reader_button_;
+    CefRefPtr<CefLabelButton> address_shield_button_;
+    CefRefPtr<CefLabelButton> address_agent_dot_;
+    AddressIndicators address_indicators_;
+    CefRefPtr<CefLabelButton> share_button_;
+    CefRefPtr<CefPanel> switcher_row_;
     bool reader_available_ = false;
     bool reader_active_ = false;
     CefRefPtr<CefLabelButton> address_location_icon_;
+    CefRefPtr<CefImage> location_icon_source_;
+    CefRefPtr<CefImage> reload_icon_source_;
     CefRefPtr<CefTextfield> address_field_;
+    bool address_editing_ = false;
     CefRefPtr<CefLabelButton> validation_message_;
     CefRefPtr<CefPanel> tab_strip_;
+    CefRefPtr<CefLabelButton> favorites_section_header_;
+    CefRefPtr<CefLabelButton> tabs_section_header_;
+    // Branch labels of grouped tab runs and their indent panels (rebuilt with the tab strip).
+    std::vector<CefRefPtr<CefPanel>> group_kicker_panels_;
+    std::vector<CefRefPtr<CefLabelButton>> group_kickers_;
     // The collapsed icon rail. `collapsed_rail_` is the panel shown instead of `sidebar_`;
     // the tab list scrolls inside `collapsed_tab_scroll_`, the "+" button and the space
     // dots sit in the bottom group.
@@ -706,7 +1009,10 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> space_switcher_;
     CefRefPtr<CefLabelButton> new_tab_button_;
     CefRefPtr<CefPanel> rail_footer_;
+    CefRefPtr<SurfacePanelDelegate> rail_footer_delegate_;
     CefRefPtr<CefLabelButton> agent_button_;
+    // Native's Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
+    bool native_agent_hovered_ = false;
     CefRefPtr<CefLabelButton> new_space_button_;
     CefRefPtr<CefLabelButton> tabs_button_;
     CefRefPtr<CefLabelButton> settings_button_;
@@ -717,6 +1023,12 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefLabelButton> favicon;
         CefRefPtr<CefLabelButton> title;
         CefRefPtr<CefLabelButton> close;
+        // The glyph sources the row's edge-button images are re-rendered from (favicon or the
+        // globe fallback, close or pin icon) and the live pointer state.
+        CefRefPtr<CefImage> favicon_source;
+        bool favicon_is_page = false;
+        CefRefPtr<CefImage> trailing_source;
+        bool hovered = false;
     };
     // Collapsed-rail entries: `row` paints the hairline outline of the active tab and
     // `inner` its fill; `button` carries the favicon (or the space dot) and the tooltip.
@@ -725,6 +1037,9 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefPanel> inner;
         CefRefPtr<CefLabelButton> button;
         std::size_t source_index = 0;
+        CefRefPtr<CefImage> favicon_source;
+        bool favicon_is_page = false;
+        bool hovered = false;
     };
     struct CollapsedSpaceViews {
         CefRefPtr<CefLabelButton> button;
@@ -756,11 +1071,23 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> active_page_indicator_;
     CefRefPtr<SurfacePanelDelegate> rail_delegate_;
     CefRefPtr<RootPanelDelegate> root_delegate_;
+    CefRefPtr<SurfacePanelDelegate> navigation_row_delegate_;
+    CefRefPtr<SurfacePanelDelegate> address_row_delegate_;
+    int applied_control_height_ = 0;
+    LookPreset applied_look_ = LookPreset::kGraphite;
     CefRefPtr<ButtonDelegate> button_delegate_;
     CefRefPtr<TextfieldDelegate> textfield_delegate_;
     std::vector<CefRefPtr<SurfacePanelDelegate>> surface_delegates_;
     bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool detached_ = false;
+    // The inputs ApplyLayoutTokens() last laid out for.
+    std::string layout_key_;
+    std::function<void(const std::vector<CornerPatch>&)> corner_sink_;
+    std::vector<CornerPatch> last_patches_;
+    bool patch_poll_pending_ = false;
+    std::size_t browser_view_size_change_count_ = 0;
+    std::size_t relayout_count_ = 0;
+    std::vector<CefRect> last_browser_view_bounds_;
 };
 
 }  // namespace island

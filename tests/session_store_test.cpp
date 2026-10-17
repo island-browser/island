@@ -95,6 +95,22 @@ TEST(SessionStore, RoundTripsPinnedTabsAndLoadsSessionsWithoutThePinnedKey) {
     std::filesystem::remove(path);
 }
 
+TEST(SessionStore, RoundTripsTabGroupParentAndLabel) {
+    SessionState original = BuildSampleState();
+    original.spaces[0].tabs[1].group_parent = original.spaces[0].tabs[0].id;
+    original.spaces[0].tabs[1].group_label = "Branch A";
+    const auto path = std::filesystem::temp_directory_path() / "island_test_tab_group.json";
+
+    ASSERT_EQ(SessionStore::Save(path, original), SessionError::kNone);
+    LoadResult result = SessionStore::Load(path);
+    std::filesystem::remove(path);
+
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state, original);
+    EXPECT_EQ(result.state.spaces[0].tabs[1].group_parent, original.spaces[0].tabs[0].id);
+    EXPECT_EQ(result.state.spaces[0].tabs[1].group_label, "Branch A");
+}
+
 TEST(SessionStore, RoundTripsDefaultEmptySession) {
     // Given: a fresh default session (zero spaces, zero tabs)
     SessionState empty = SessionState::Default();

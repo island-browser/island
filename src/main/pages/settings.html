@@ -6,121 +6,178 @@
 <title>Settings</title>
 <style>
 :root {
-  --bg: #FAFAFA; --surface: #FFFFFF; --surface-2: #F2F2F2; --text: #0A0A0A; --text-2: #666666;
-  --border: #E5E5E5; --accent: #0068D6; --accent-text: #FFFFFF; --danger: #CD2B31; --success: #18794E;
-  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .05);
-  --radius: 10px; --radius-sm: 6px;
-  --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bg: #EBEBEF; --surface: #FFFFFF; --surface-2: #F6F6F8; --fill: #E8E8ED; --text: #1D1D1F;
+  --text-2: #636366; --text-3: #8E8E93; --border: #E5E5EA; --border-2: #D2D2D7; --accent: #0A64D8;
+  --selection: #0A64D8; --accent-soft: #DFE9F8; --accent-text: #0A4FA8; --warn-bg: #FFF8E6;
+  --warn-border: #F5D38A; --warn-text: #6A4A00; --success: #248A3D; --danger: #D70015;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: light;
 }
-:root[data-theme="dark"] { color-scheme: dark; --danger: #FF6369; --success: #4CC38A;
-  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 12px rgba(0,0,0,.35); }
+:root[data-theme="dark"], :root:not([data-theme="light"]) {
+  color-scheme: dark;
+}
+:root[data-theme="dark"] {
+  --bg: #2A2A2D; --surface: #1E1E20; --surface-2: #252527; --fill: #3A3A3D; --text: #F5F5F7;
+  --text-2: #98989D; --text-3: #6E6E73; --border: #38383A; --border-2: #48484A; --accent: #0A84FF;
+  --selection: #0A6FE0; --accent-soft: #16324F; --accent-text: #64B5FF; --warn-bg: #3A2E12;
+  --warn-border: #6B5420; --warn-text: #FFD60A; --success: #30D158; --danger: #FF453A;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #2A2A2D; --surface: #1E1E20; --surface-2: #252527; --fill: #3A3A3D; --text: #F5F5F7;
+    --text-2: #98989D; --text-3: #6E6E73; --border: #38383A; --border-2: #48484A; --accent: #0A84FF;
+    --selection: #0A6FE0; --accent-soft: #16324F; --accent-text: #64B5FF; --warn-bg: #3A2E12;
+    --warn-border: #6B5420; --warn-text: #FFD60A; --success: #30D158; --danger: #FF453A;
+  }
+}
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
-body { background: var(--bg); color: var(--text); font: 13.5px/1.55 var(--font);
+html, body { margin: 0; height: 100%; }
+body { background: var(--surface); color: var(--text); font: 13px/1.45 var(--font);
   -webkit-font-smoothing: antialiased; }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
-.page { max-width: 760px; margin: 0 auto; padding: 32px 28px 64px; }
-.top { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
-.top h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.03em; flex: 1; }
-.close { width: 32px; height: 32px; border-radius: var(--radius-sm); border: 1px solid var(--border);
-  background: var(--surface); color: var(--text-2); display: grid; place-items: center;
-  transition: background .16s, color .16s; }
-.close:hover { background: var(--surface-2); color: var(--text); }
-nav { display: flex; gap: 2px; flex-wrap: wrap; margin: 0 0 22px; padding-bottom: 10px;
-  border-bottom: 1px solid var(--border); }
-nav a { color: var(--text-2); text-decoration: none; font-size: 13px; padding: 4px 10px;
-  border-radius: var(--radius-sm); transition: background .16s, color .16s; }
-nav a:hover { background: var(--surface-2); color: var(--text); }
-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 18px 20px; margin-bottom: 14px; }
-section h2 { margin: 0 0 2px; font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
-section > p.lead { margin: 0 0 12px; color: var(--text-2); font-size: 13px; }
-.row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
-.row:first-of-type { border-top: 0; }
-.row .label { flex: 1; min-width: 0; }
-.row .label small { display: block; color: var(--text-2); font-size: 12px; }
-.segmented { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 2px; }
-.segmented button { border: 0; background: transparent; padding: 4px 12px; border-radius: 4px;
-  font-size: 12.5px; color: var(--text-2); transition: color .16s; }
-.segmented button:hover { color: var(--text); }
-.segmented button[aria-pressed="true"] { background: var(--surface); color: var(--text);
-  box-shadow: 0 0 0 1px var(--border), 0 1px 2px rgba(0,0,0,.06); font-weight: 500; }
-.btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
-  padding: 5px 12px; font-size: 12.5px; font-weight: 500; white-space: nowrap;
-  transition: background .16s, border-color .16s, opacity .16s; }
+[data-search-hidden] { display: none !important; }
+
+.shell { display: flex; height: 100%; min-height: 0; }
+.sidebar { width: 220px; flex: none; display: flex; flex-direction: column; gap: 2px;
+  padding: 26px 12px 14px; background: var(--bg); border-right: 1px solid var(--border); }
+.sidebar-top { display: flex; align-items: center; gap: 8px; padding: 0 8px 12px; }
+.sidebar h1 { margin: 0; flex: 1; font: 700 22px/1.1 var(--display); letter-spacing: -.01em; }
+.close { width: 26px; height: 26px; border-radius: 6px; border: 0; background: transparent;
+  color: var(--text-2); display: grid; place-items: center; }
+.close:hover { background: var(--fill); color: var(--text); }
+.search { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; margin: 0 0 10px;
+  border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface); color: var(--text-2); }
+.search input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; color: var(--text);
+  font-size: 13px; }
+.search input::placeholder { color: var(--text-3); }
+.pane-nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-item { display: flex; align-items: center; height: 30px; padding: 0 10px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text); text-align: left; font-size: 13px; }
+.nav-item:hover { background: color-mix(in srgb, var(--fill) 60%, transparent); }
+.nav-item[aria-current="page"] { background: var(--fill); color: var(--text); font-weight: 600; }
+.sb-foot { margin-top: auto; padding: 8px 10px 0; color: var(--text-2); font-size: 12px; }
+
+.content { flex: 1; min-width: 0; overflow-y: auto; padding: 28px 40px 64px; }
+.content-inner { max-width: 1000px; }
+.empty { color: var(--text-2); margin: 0 0 16px; }
+.content-inner > section { display: flex; flex-direction: column; gap: 18px; }
+.pane-head { display: flex; align-items: flex-end; gap: 16px; }
+.pane-head .titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.pane-title { margin: 0; font: 700 26px/1.1 var(--display); letter-spacing: -.01em; }
+.pane-lead { margin: 0; color: var(--text-2); font-size: 13px; }
+.stack { display: flex; flex-direction: column; gap: 20px; max-width: 720px; }
+.pane-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 28px; align-items: start; }
+@media (max-width: 900px) { .pane-grid { grid-template-columns: minmax(0, 1fr); } }
+.group { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.group-title { margin: 0; font-size: 11px; font-weight: 600; color: var(--text-2); }
+.group-note { margin: 0; color: var(--text-2); font-size: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 2px 18px; }
+.row { display: flex; align-items: center; gap: 24px; min-height: 44px; padding: 10px 0; border-top: 1px solid var(--border); }
+.card > .row:first-child { border-top: 0; }
+.row .label { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.row .label small { color: var(--text-2); font-size: 12px; line-height: 1.4; }
+.row-block { display: block; }
+.row-block > .label { display: block; margin-bottom: 8px; }
+.row-block > .label small { display: block; margin-top: 3px; }
+.row.plain { min-height: 34px; }
+.segmented { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--fill); flex: none; }
+.segmented button { height: 20px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text); font-size: 12px; white-space: nowrap; }
+.segmented button[aria-pressed="true"] { background: var(--surface); font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+/* Dark: the selected segment is lighter than the track (macOS uses #636366). */
+:root[data-theme="dark"] .segmented button[aria-pressed="true"] { background: #636366; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .segmented button[aria-pressed="true"] { background: #636366; }
+}
+.popup { position: relative; display: inline-flex; flex: none; }
+.popup select { appearance: none; -webkit-appearance: none; height: 28px; min-width: 180px; padding: 0 30px 0 12px;
+  border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; }
+.popup .chev { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--text-2);
+  pointer-events: none; }
+input[type="checkbox"] { -webkit-appearance: none; appearance: none; position: relative; width: 38px; height: 22px;
+  margin: 0; flex: none; border-radius: 999px; background: var(--border-2); cursor: pointer; transition: background .16s; }
+input[type="checkbox"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .16s; }
+input[type="checkbox"]:checked { background: var(--accent); }
+input[type="checkbox"]:checked::after { transform: translateX(16px); }
+input[type="checkbox"]:disabled { opacity: .4; cursor: default; }
+.btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface);
+  color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .btn:hover { background: var(--surface-2); }
-.btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
-.btn.primary:hover { background: var(--text); opacity: .88; }
-.btn.quiet { border-color: transparent; background: transparent; color: var(--text-2); }
-.btn.quiet:hover { color: var(--text); background: var(--surface-2); }
+.btn.primary { background: var(--selection); border-color: var(--selection); color: #FFFFFF; }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--text); font-weight: 600; }
+.btn.quiet:hover { background: var(--fill); }
 .btn:disabled { opacity: .4; cursor: default; }
-input.field { width: 100%; font: 12.5px var(--mono); background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 7px 10px; transition: border-color .16s; }
-input.field:focus { border-color: var(--text-2); outline: none; }
-input.field::placeholder { color: var(--text-2); }
+input.field { width: 100%; font: 12.5px var(--mono); background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: 6px; padding: 5px 10px; height: 28px; }
+input.field:focus { border-color: var(--accent); outline: none; }
+input.field::placeholder { color: var(--text-3); }
 .inline { display: flex; gap: 8px; align-items: center; }
 .inline input { flex: 1; }
-pre.code { margin: 10px 0 0; background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 12px 14px; font: 12px/1.6 var(--mono); overflow-x: auto; white-space: pre; }
-.note { color: var(--text-2); font-size: 12px; margin-top: 8px; }
-.note code, .lead code { font: 11.5px var(--mono); background: var(--surface-2); border: 1px solid var(--border);
-  border-radius: 4px; padding: 0 4px; }
+.note { color: var(--text-2); font-size: 12px; margin: 6px 0 0; }
+.note code, .pane-lead code { font: 11.5px var(--mono); background: var(--fill); border-radius: 4px; padding: 0 4px; }
+pre.code { margin: 10px 0 0; background: var(--fill); border-radius: 6px; padding: 12px 14px; font: 12px/1.6 var(--mono);
+  overflow-x: auto; white-space: pre; }
 .pill { display: inline-flex; align-items: center; gap: 6px; font: 11px/1.4 var(--mono); color: var(--text-2); }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
 .dot.on { background: var(--success); }
-.keys { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.key-row { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border-top: 1px solid var(--border); }
-.key-row:first-child { border-top: 0; }
-.key-row:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
-.key-row .name { flex: 1; font-size: 13px; }
-.chip { min-width: 96px; text-align: center; border: 1px solid var(--border); border-bottom-width: 2px;
-  background: var(--surface); border-radius: var(--radius-sm); padding: 2px 10px; font: 12px var(--mono);
-  transition: border-color .16s; }
-.chip:hover { border-color: var(--text-2); }
-.chip.recording { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
-.chip.unbound { color: var(--text-2); font-family: var(--font); border-style: dashed; border-bottom-width: 1px; }
-.chip.conflict { border-color: var(--danger); color: var(--danger); }
+.dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+
+.key-conflict { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px;
+  border: 1px solid var(--warn-border); background: var(--warn-bg); color: var(--warn-text); }
+.key-conflict span { flex: 1; min-width: 0; }
+.key-conflict .btn.quiet { color: var(--text); }
+.shortcuts-top { display: flex; align-items: center; gap: 10px; }
+.shortcuts-top .filter { flex: 1; margin-bottom: 0; }
+.filter { margin-bottom: 0; }
+input.field.filter { font: inherit; }
+.key-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; align-items: start; }
+@media (max-width: 900px) { .key-grid { grid-template-columns: minmax(0, 1fr); } }
+.key-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.key-row { display: flex; align-items: center; gap: 12px; min-height: 38px; padding: 6px 0; border-top: 1px solid var(--border);
+  cursor: pointer; }
+.key-group .key-row:first-of-type { border-top: 0; }
+.key-row .name { flex: 1; min-width: 0; font-size: 13px; }
 .key-row .changed { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.filter { margin-bottom: 10px; }
+.key-row .row-actions { display: none; gap: 2px; }
+.key-row:hover .row-actions, .key-row:focus-within .row-actions { display: inline-flex; }
+.key-row .row-actions .btn { height: 24px; padding: 0 6px; font-size: 12px; }
+.chip { display: inline-flex; gap: 4px; align-items: center; justify-content: flex-end; min-height: 26px; padding: 0 2px;
+  border: 1px solid transparent; border-radius: 5px; background: transparent; }
+.chip.recording { padding: 0 10px; min-height: 24px; border: 1px dashed var(--accent); border-radius: 5px;
+  background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.chip.unbound { padding: 0 4px; border: 0; background: transparent; color: var(--accent); font-size: 12px; font-weight: 600; }
+.chip.unbound:hover { text-decoration: underline; }
+.keycap { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; min-width: 24px;
+  height: 24px; padding: 0 6px; border: 1px solid var(--border-2); border-radius: 5px; background: var(--surface);
+  box-shadow: 0 1px 0 var(--border-2); font: 12px/1 var(--font); color: var(--text); }
+.chip.conflict .keycap { border-color: var(--warn-border); background: var(--warn-bg); color: var(--warn-text); }
+.keys-empty { margin: 0; color: var(--text-2); }
+
 .sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
-.source { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; display: flex;
-  flex-direction: column; gap: 8px; background: var(--surface); transition: border-color .16s; }
-.source:hover { border-color: var(--text-2); }
+.source { border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column;
+  gap: 8px; background: var(--surface); }
+.source:hover { border-color: var(--border-2); }
 .source .head { display: flex; align-items: center; gap: 8px; font-weight: 500; }
-.source .badge { width: 22px; height: 22px; border-radius: var(--radius-sm); display: grid; place-items: center;
-  color: #fff; font: 600 11px var(--mono); flex: none; }
+.source .badge { width: 22px; height: 22px; border-radius: 5px; display: grid; place-items: center; color: #fff;
+  font: 600 11px var(--mono); flex: none; }
 .source small { color: var(--text-2); font-size: 12px; }
 .source .btn { margin-top: auto; }
-input.field.filter { font-family: var(--font); font-size: 13px; }
-.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--text);
-  color: var(--surface); padding: 7px 14px; border-radius: var(--radius-sm); font-size: 12.5px; box-shadow: var(--shadow);
-  animation: rise .2s cubic-bezier(.16, 1, .3, 1); }
-@keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
-@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
-dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
-dt { color: var(--text-2); font: 11px/1.8 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
-dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
-.providers { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-.provider { display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px 9px 12px; border-top: 1px solid var(--border);
-  transition: background .16s; }
+.providers { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; }
+.provider { display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px 9px 12px; border-top: 1px solid var(--border); }
 .provider:first-child { border-top: 0; }
-.provider:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
-.provider.selected { background: var(--surface-2); }
-.provider:first-child.selected { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
-.provider:last-child.selected { border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
+.provider.selected { background: var(--fill); }
 .provider label { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .provider input[type="radio"] { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin: 3px 0 0;
-  flex: none; border: 1px solid var(--text-2); border-radius: 50%; background: var(--surface); cursor: pointer;
-  transition: border-color .16s, box-shadow .16s; }
-.provider input[type="radio"]:checked { border-color: var(--text); box-shadow: inset 0 0 0 3.5px var(--surface), inset 0 0 0 8px var(--text); }
-.provider input[type="radio"]:focus-visible { outline-offset: 2px; }
+  flex: none; border: 1px solid var(--text-2); border-radius: 50%; background: var(--surface); cursor: pointer; }
+.provider input[type="radio"]:checked { border-color: var(--accent); box-shadow: inset 0 0 0 3.5px var(--surface),
+  inset 0 0 0 8px var(--accent); }
 .provider .p-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .provider .p-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .provider .p-name { font-size: 13px; font-weight: 500; }
@@ -129,200 +186,412 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   text-overflow: ellipsis; margin-top: 2px; }
 .provider .p-install { font: 11.5px/1.5 var(--mono); color: var(--text); overflow-wrap: anywhere; }
 .provider .p-install::before { content: "\2193  "; color: var(--text-2); }
-.provider .btn.quiet { padding: 2px 8px; font-size: 12px; flex: none; }
-.dot.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--text-2); }
+.provider .btn.quiet { padding: 0 8px; font-size: 12px; flex: none; height: 24px; }
 #custom-command { margin-top: 10px; }
-#custom-command .label { display: block; margin-bottom: 6px; font-size: 13px; }
-#updates input[type="checkbox"], #history input[type="checkbox"], #privacy input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--text); }
-#updates .status { font: 12px/1.5 var(--mono); }
-#updates .status.error { color: var(--danger); }
+#custom-command .label { display: block; margin-bottom: 6px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.swatch { width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0; background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.space-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.space-row:first-child { border-top: 0; }
+.space-row .name { width: 110px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-row .name small { color: var(--text-2); font-weight: 400; }
+input.hex { width: 92px; font: 12px var(--mono); }
+input[type="range"] { width: 180px; accent-color: var(--accent); }
+.range-value { font: 12px var(--mono); color: var(--text-2); min-width: 38px; text-align: right; }
+input.family { width: 180px; font-family: var(--font); font-size: 13px; }
+.status { font: 12px/1.5 var(--mono); }
+.status.error { color: var(--danger); }
 .allow-sites { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .allow-site { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); }
 .allow-site span { flex: 1; overflow-wrap: anywhere; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; padding: 8px 0; font-size: 13px; }
+dt { color: var(--text-2); font: 11px/1.8 var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all; }
+.toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--text);
+  color: var(--surface); padding: 7px 14px; border-radius: 6px; font-size: 12.5px;
+  animation: rise .2s cubic-bezier(.16, 1, .3, 1); }
+@keyframes rise { from { opacity: 0; transform: translate(-50%, 6px); } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
-<div class="page">
-  <div class="top">
-    <h1>Settings</h1>
-    <button class="close" id="close" title="Close settings (Esc)" aria-label="Close settings">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-    </button>
-  </div>
-  <nav aria-label="Sections">
-    <a href="#appearance">Appearance</a><a href="#search">Search</a><a href="#history">History</a><a href="#tabs">Tabs</a><a href="#reader">Reader</a><a href="#agent">Agent &amp; tools</a><a href="#privacy">Privacy</a><a href="#reports">Reports</a>
-    <a href="#shortcuts">Keyboard shortcuts</a><a href="#import">Import</a><a href="#updates">Updates</a><a href="#about">About</a>
-  </nav>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <h1>Settings</h1>
+      <button class="close" id="close" title="Close settings (Esc)" aria-label="Close settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <label class="search">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span class="sr-only" hidden>Search settings</span>
+      <input id="settings-search" type="search" placeholder="Search settings" aria-label="Search settings" spellcheck="false">
+    </label>
+    <nav class="pane-nav" aria-label="Settings sections">
+      <button class="nav-item" data-pane="general">General</button>
+      <button class="nav-item" data-pane="appearance">Appearance</button>
+      <button class="nav-item" data-pane="privacy">Privacy &amp; blocking</button>
+      <button class="nav-item" data-pane="tabs">Tabs</button>
+      <button class="nav-item" data-pane="reader">Reader</button>
+      <button class="nav-item" data-pane="agent">Agent &amp; tools</button>
+      <button class="nav-item" data-pane="shortcuts">Shortcuts</button>
+      <button class="nav-item" data-pane="about">About</button>
+    </nav>
+    <div class="sb-foot" id="version"></div>
+  </aside>
 
-  <section id="appearance">
-    <h2>Appearance</h2>
-    <p class="lead">Each space tints the sidebar with its own color.</p>
-    <div class="row">
-      <div class="label">Theme<small>Follow the system, or always light or dark.</small></div>
-      <div class="segmented" role="group" aria-label="Theme" id="theme">
-        <button data-value="system">System</button><button data-value="light">Light</button><button data-value="dark">Dark</button>
-      </div>
-    </div>
-  </section>
+  <main class="content">
+    <div class="content-inner">
+      <p class="empty" id="search-empty" hidden>No settings match your search.</p>
 
-  <section id="search">
-    <h2>Search</h2>
-    <p class="lead">Used when you type something that is not an address in the address bar, and by the search box on the start page.</p>
-    <div class="row">
-      <div class="label">Search engine<small id="engine-hint">Google is the default.</small></div>
-      <div class="segmented" role="group" aria-label="Search engine" id="engine"></div>
-    </div>
-  </section>
-
-  <section id="history">
-    <h2>History</h2>
-    <p class="lead">History stays on this computer and powers results in the command palette.</p>
-    <div class="row">
-      <label class="label" for="history-remember">Remember history<small>Save the address and title of web pages you visit.</small></label>
-      <input type="checkbox" id="history-remember">
-    </div>
-    <div class="row">
-      <div class="label">Browsing history<small>Remove every saved history result from this device.</small></div>
-      <button class="btn quiet" id="history-clear">Clear browsing history</button>
-    </div>
-  </section>
-
-  <section id="tabs">
-    <h2>Tabs</h2>
-    <p class="lead">Tabs you have not used for a while release their page to free memory. They stay in the sidebar, dimmed, and reload where you left off when you select them. Pinned tabs, the tab you are on, split-view partners, tabs playing audio and tabs with unsaved form input never sleep.</p>
-    <div class="row">
-      <div class="label">Sleep inactive tabs<small>Also in the command palette: &ldquo;Sleep inactive tabs now&rdquo;.</small></div>
-      <div class="segmented" role="group" aria-label="Sleep inactive tabs after" id="tab-sleep"></div>
-    </div>
-  </section>
-
-  <section id="reader">
-    <h2>Reader</h2>
-    <p class="lead">Choose the default appearance for Reader view. You can change the same controls while reading an article.</p>
-    <div class="row">
-      <div class="label">Text size<small>Adjust article text from 14 to 28 pixels.</small></div>
-      <div class="segmented" role="group" aria-label="Reader text size" id="reader-size"></div>
-    </div>
-    <div class="row">
-      <div class="label">Page width<small>Choose how wide article text appears.</small></div>
-      <div class="segmented" role="group" aria-label="Reader page width" id="reader-width"></div>
-    </div>
-    <div class="row">
-      <div class="label">Color theme<small>Auto follows Island's current light or dark theme.</small></div>
-      <div class="segmented" role="group" aria-label="Reader color theme" id="reader-theme"></div>
-    </div>
-  </section>
-
-  <section id="agent">
-    <h2>Agent &amp; tools</h2>
-    <p class="lead">Run any Agent Client Protocol agent in the sidebar, and let external agents drive Island over MCP.</p>
-    <div class="row" style="display:block">
-      <div class="label" style="margin-bottom:8px">Agent in the sidebar<small id="agent-hint"></small></div>
-      <div class="providers" id="providers" role="radiogroup" aria-label="Agent in the sidebar"></div>
-      <div id="custom-command" hidden>
-        <label class="label" for="agent-command">Command<small>Any command that starts an Agent Client Protocol agent over stdio.</small></label>
-        <div class="inline">
-          <input class="field" id="agent-command" spellcheck="false" placeholder="my-agent --acp">
-          <button class="btn" id="agent-save">Save</button>
+      <section id="general">
+        <header class="pane-head"><div class="titles">
+          <h2 class="pane-title">General</h2>
+          <p class="pane-lead">Search, history, imports and updates for this browser.</p>
+        </div></header>
+        <div class="stack">
+          <div class="group">
+            <h3 class="group-title">Search</h3>
+            <div class="card">
+              <div class="row">
+                <div class="label">Search engine<small id="engine-hint">Used for text that is not an address, and by the start page search.</small></div>
+                <div class="segmented" role="group" aria-label="Search engine" id="engine"></div>
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">History</h3>
+            <div class="card">
+              <div class="row">
+                <label class="label" for="history-remember">Remember history<small>History stays on this computer and powers results in the command palette.</small></label>
+                <input type="checkbox" role="switch" id="history-remember">
+              </div>
+              <div class="row">
+                <div class="label">Browsing history<small>Remove every saved history result from this device.</small></div>
+                <button class="btn" id="history-clear">Clear browsing history</button>
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">Import from another browser</h3>
+            <p class="group-note">Bring your bookmarks over, or recreate your Arc spaces and pinned tabs. Nothing leaves this computer.</p>
+            <div class="sources" id="sources"></div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">Updates</h3>
+            <p class="group-note">Island checks its GitHub releases for new versions. Every download is checked against its published SHA-256 checksum before it is installed.</p>
+            <div class="card">
+              <div class="row">
+                <div class="label">Island <span id="update-current"></span><small class="status" id="update-status" role="status" aria-live="polite"></small></div>
+                <button class="btn quiet" id="update-notes" hidden>Release notes</button>
+                <button class="btn" id="update-check">Check for updates</button>
+                <button class="btn primary" id="update-install" hidden>Download and install</button>
+              </div>
+              <div class="row">
+                <label class="label" for="update-auto">Check automatically<small>Once a day, shortly after Island starts.</small></label>
+                <input type="checkbox" role="switch" id="update-auto">
+              </div>
+              <div class="row">
+                <label class="label" for="update-pre">Include pre-releases<small>Also offer test versions such as 0.5.0-beta.1.</small></label>
+                <input type="checkbox" role="switch" id="update-pre">
+              </div>
+              <p class="note" id="update-note" hidden></p>
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="inline" style="margin-top:12px">
-        <button class="btn primary" id="agent-open">Open agent</button>
-        <span class="note" id="agent-note" style="margin-top:0"></span>
-      </div>
-    </div>
-    <div class="row" style="display:block">
-      <div class="label">MCP endpoint <span class="pill"><span class="dot" id="endpoint-dot"></span><span id="endpoint-state"></span></span>
-        <small>Add this to Claude Code, Claude Desktop, Cursor, or any MCP client. The token changes on every launch.</small></div>
-      <pre class="code" id="endpoint-config"></pre>
-      <div class="inline" style="margin-top:8px">
-        <button class="btn" id="copy-config">Copy config</button>
-        <span class="note" id="bridge-note"></span>
-      </div>
-    </div>
-  </section>
+      </section>
 
-  <section id="privacy">
-    <h2>Privacy</h2>
-    <p class="lead">Block advertising and tracking requests with EasyList and EasyPrivacy.</p>
-    <div class="row">
-      <label class="label" for="privacy-ads">Block ads<small>Uses EasyList network rules.</small></label>
-      <input type="checkbox" id="privacy-ads">
-    </div>
-    <div class="row">
-      <label class="label" for="privacy-trackers">Block trackers<small>Uses EasyPrivacy network rules.</small></label>
-      <input type="checkbox" id="privacy-trackers">
-    </div>
-    <div class="row">
-      <div class="label">Filter lists<small id="privacy-status" role="status" aria-live="polite"></small></div>
-      <button class="btn" id="privacy-update">Update now</button>
-    </div>
-    <div class="row" style="display:block">
-      <label class="label" for="privacy-site">Allowed sites<small>Ads and trackers are allowed on these sites and their subdomains.</small></label>
-      <div class="inline" style="margin-top:8px">
-        <input class="field" id="privacy-site" placeholder="example.com" spellcheck="false">
-        <button class="btn" id="privacy-add">Add</button>
-      </div>
-      <div class="allow-sites" id="privacy-sites"></div>
-    </div>
-  </section>
+      <section id="appearance">
+        <header class="pane-head">
+          <div class="titles">
+            <h2 class="pane-title">Appearance</h2>
+            <p class="pane-lead">Changes apply right away to every window.</p>
+          </div>
+          <button class="btn quiet" id="reset-appearance">Reset to defaults</button>
+        </header>
+        <div class="pane-grid">
+          <div class="group">
+            <h3 class="group-title">Theme</h3>
+            <div class="card">
+              <div class="row">
+                <label class="label" for="look">Look<small>Native, Arc or Graphite. Changing any setting below makes it Custom.</small></label>
+                <span class="popup">
+                  <select id="look" aria-label="Look">
+                    <option value="native">Native</option><option value="arc">Arc</option><option value="graphite">Graphite</option><option value="custom" disabled hidden>Custom</option>
+                  </select>
+                  <span class="chev" aria-hidden="true">&#8964;</span>
+                </span>
+              </div>
+              <div class="row">
+                <div class="label">Theme<small>Follow the system, or always light or dark.</small></div>
+                <div class="segmented" role="group" aria-label="Theme" id="theme">
+                  <button data-value="light">Light</button><button data-value="dark">Dark</button><button data-value="system">Match system</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="group" id="color-group">
+            <h3 class="group-title">Color</h3>
+            <div class="card">
+              <div class="row row-block" id="space-colors-row">
+                <div class="label">Space colors<small>Each space tints the sidebar with its own color. Pick a preset or type a hex color such as <code>#7C5CFF</code>.</small></div>
+                <div id="space-colors"></div>
+              </div>
+              <div class="row" id="tint-row">
+                <label class="label" for="tint">Sidebar tint<small>How strongly the space color washes the sidebar and the window margin.</small></label>
+                <input type="range" id="tint" min="0" max="100" step="1" aria-label="Sidebar tint intensity">
+                <span class="range-value" id="tint-value"></span>
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">Layout</h3>
+            <div class="card">
+              <div class="row">
+                <div class="label">Sidebar density<small>Row and control height in the sidebar.</small></div>
+                <div class="segmented" role="group" aria-label="Sidebar density" data-key="density">
+                  <button data-value="comfortable">Comfortable</button><button data-value="compact">Compact</button>
+                </div>
+              </div>
+              <div class="row">
+                <label class="label" for="sidebar-side">Sidebar position</label>
+                <span class="popup">
+                  <select id="sidebar-side" data-key="sidebar_side" aria-label="Sidebar position">
+                    <option value="left">Left</option><option value="right">Right</option>
+                  </select>
+                  <span class="chev" aria-hidden="true">&#8964;</span>
+                </span>
+              </div>
+              <div class="row">
+                <div class="label">Page corner radius<small>The page card's rounded corners (macOS).</small></div>
+                <div class="segmented" role="group" aria-label="Page corner radius" data-key="card_radius" data-number="1">
+                  <button data-value="0">0</button><button data-value="6">6</button><button data-value="10">10</button><button data-value="14">14</button>
+                </div>
+              </div>
+              <div class="row">
+                <label class="label" for="full-bleed">Full bleed<small>No inset, no rounding, no shadow: the page fills its side edge to edge.</small></label>
+                <input type="checkbox" role="switch" id="full-bleed">
+              </div>
+              <div class="row">
+                <label class="label" for="card-shadow">Page card shadow<small>One soft shadow under the page card.</small></label>
+                <input type="checkbox" role="switch" id="card-shadow">
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">Text</h3>
+            <div class="card">
+              <div class="row">
+                <label class="label" for="font-select">Interface font<small>Geist is bundled; System uses the platform font.</small></label>
+                <span class="popup">
+                  <select id="font-select" data-key="font" aria-label="Interface font">
+                    <option value="geist">Geist</option><option value="system">System</option><option value="custom" hidden>Custom family</option>
+                  </select>
+                  <span class="chev" aria-hidden="true">&#8964;</span>
+                </span>
+              </div>
+              <div class="row">
+                <label class="label" for="font-family">Custom family<small>Or name any installed font family.</small></label>
+                <input class="field family" id="font-family" spellcheck="false" placeholder="Custom family">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <section id="reports">
-    <h2>Reports</h2>
-    <p class="lead">Finished answers from Research mode on the start page. Open one to read it, copy it, save it, or continue it with the agent. Cmd/Ctrl+K finds them too.</p>
-    <div id="reports-list"></div>
-  </section>
+      <section id="privacy">
+        <header class="pane-head"><div class="titles">
+          <h2 class="pane-title">Privacy &amp; blocking</h2>
+          <p class="pane-lead">Block advertising and tracking requests with EasyList and EasyPrivacy.</p>
+        </div></header>
+        <div class="stack">
+          <div class="group">
+            <h3 class="group-title">Blocking</h3>
+            <div class="card">
+              <div class="row">
+                <label class="label" for="privacy-ads">Block ads<small>Uses EasyList network rules.</small></label>
+                <input type="checkbox" role="switch" id="privacy-ads">
+              </div>
+              <div class="row">
+                <label class="label" for="privacy-trackers">Block trackers<small>Uses EasyPrivacy network rules.</small></label>
+                <input type="checkbox" role="switch" id="privacy-trackers">
+              </div>
+              <div class="row">
+                <div class="label">Filter lists<small id="privacy-status" role="status" aria-live="polite"></small></div>
+                <button class="btn" id="privacy-update">Update now</button>
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">Allowed sites</h3>
+            <div class="card">
+              <div class="row row-block">
+                <label class="label" for="privacy-site">Ads and trackers are allowed on these sites and their subdomains.</label>
+                <div class="inline">
+                  <input class="field" id="privacy-site" placeholder="example.com" spellcheck="false">
+                  <button class="btn" id="privacy-add">Add</button>
+                </div>
+                <div class="allow-sites" id="privacy-sites"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <section id="shortcuts">
-    <h2>Keyboard shortcuts</h2>
-    <p class="lead">Click a shortcut, then press the new keys. Esc cancels. Shortcuts need Ctrl/Cmd or Alt, except function keys.</p>
-    <input class="field filter" id="key-filter" placeholder="Filter shortcuts" aria-label="Filter shortcuts">
-    <div class="keys" id="keys"></div>
-    <div class="inline" style="margin-top:10px">
-      <button class="btn quiet" id="reset-keys">Reset all to defaults</button>
-      <span class="note" id="mac-note" hidden>On macOS, menu shortcuts update after Island restarts.</span>
-    </div>
-  </section>
+      <section id="tabs">
+        <header class="pane-head"><div class="titles">
+          <h2 class="pane-title">Tabs</h2>
+          <p class="pane-lead">Tabs you have not used for a while release their page to free memory. They stay in the sidebar, dimmed, and reload where you left off when you select them. Pinned tabs, the tab you are on, split-view partners, tabs playing audio and tabs with unsaved form input never sleep.</p>
+        </div></header>
+        <div class="stack">
+          <div class="group">
+            <h3 class="group-title">Sleep</h3>
+            <div class="card">
+              <div class="row">
+                <div class="label">Sleep inactive tabs<small>Also in the command palette: &ldquo;Sleep inactive tabs now&rdquo;.</small></div>
+                <div class="segmented" role="group" aria-label="Sleep inactive tabs after" id="tab-sleep"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <section id="import">
-    <h2>Import from another browser</h2>
-    <p class="lead">Bring your bookmarks over, or recreate your Arc spaces and pinned tabs. Nothing leaves this computer.</p>
-    <div class="sources" id="sources"></div>
-  </section>
+      <section id="reader">
+        <header class="pane-head"><div class="titles">
+          <h2 class="pane-title">Reader</h2>
+          <p class="pane-lead">Choose the default appearance for Reader view. You can change the same controls while reading an article.</p>
+        </div></header>
+        <div class="stack">
+          <div class="group">
+            <h3 class="group-title">Text</h3>
+            <div class="card">
+              <div class="row">
+                <div class="label">Text size<small>Adjust article text from 14 to 28 pixels.</small></div>
+                <div class="segmented" role="group" aria-label="Reader text size" id="reader-size"></div>
+              </div>
+              <div class="row">
+                <div class="label">Page width<small>Choose how wide article text appears.</small></div>
+                <div class="segmented" role="group" aria-label="Reader page width" id="reader-width"></div>
+              </div>
+              <div class="row">
+                <div class="label">Color theme<small>Auto follows Island's current light or dark theme.</small></div>
+                <div class="segmented" role="group" aria-label="Reader color theme" id="reader-theme"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <section id="updates">
-    <h2>Updates</h2>
-    <p class="lead">Island checks its GitHub releases for new versions. Every download is checked against its published SHA-256 checksum before it is installed.</p>
-    <div class="row">
-      <div class="label">Island <span id="update-current"></span><small class="status" id="update-status" role="status" aria-live="polite"></small></div>
-      <button class="btn quiet" id="update-notes" hidden>Release notes</button>
-      <button class="btn" id="update-check">Check for updates</button>
-      <button class="btn primary" id="update-install" hidden>Download and install</button>
-    </div>
-    <div class="row">
-      <label class="label" for="update-auto">Check automatically<small>Once a day, shortly after Island starts.</small></label>
-      <input type="checkbox" id="update-auto">
-    </div>
-    <div class="row">
-      <label class="label" for="update-pre">Include pre-releases<small>Also offer test versions such as 0.5.0-beta.1.</small></label>
-      <input type="checkbox" id="update-pre">
-    </div>
-    <p class="note" id="update-note" hidden></p>
-  </section>
+      <section id="agent">
+        <header class="pane-head"><div class="titles">
+          <h2 class="pane-title">Agent &amp; tools</h2>
+          <p class="pane-lead">Run any Agent Client Protocol agent in the sidebar, and let external agents drive Island over MCP.</p>
+        </div></header>
+        <div class="stack">
+          <div class="group">
+            <h3 class="group-title">Agent in the sidebar</h3>
+            <div class="card">
+              <div class="row row-block">
+                <div class="label">Agent<small id="agent-hint"></small></div>
+                <div class="providers" id="providers" role="radiogroup" aria-label="Agent in the sidebar"></div>
+                <div id="custom-command" hidden>
+                  <label class="label" for="agent-command">Command<small>Any command that starts an Agent Client Protocol agent over stdio.</small></label>
+                  <div class="inline">
+                    <input class="field" id="agent-command" spellcheck="false" placeholder="my-agent --acp">
+                    <button class="btn" id="agent-save">Save</button>
+                  </div>
+                </div>
+                <div class="inline" style="margin-top:12px">
+                  <button class="btn primary" id="agent-open">Open agent</button>
+                  <span class="note" id="agent-note" style="margin-top:0"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">MCP endpoint</h3>
+            <div class="card">
+              <div class="row row-block">
+                <div class="label">Endpoint <span class="pill"><span class="dot" id="endpoint-dot"></span><span id="endpoint-state"></span></span>
+                  <small>Add this to Claude Code, Claude Desktop, Cursor, or any MCP client. The token changes on every launch.</small></div>
+                <pre class="code" id="endpoint-config"></pre>
+                <div class="inline" style="margin-top:8px">
+                  <button class="btn" id="copy-config">Copy config</button>
+                  <span class="note" id="bridge-note"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="group-title">Reports</h3>
+            <p class="group-note">Finished answers from Research mode on the start page. Open one to read it, copy it, save it, or continue it with the agent. Cmd/Ctrl+K finds them too.</p>
+            <div class="card" id="reports-list"></div>
+          </div>
+        </div>
+      </section>
 
-  <section id="about">
-    <h2>About Island</h2>
-    <dl id="about-list"></dl>
-  </section>
+      <section id="shortcuts">
+        <header class="pane-head">
+          <div class="titles">
+            <h2 class="pane-title">Shortcuts</h2>
+            <p class="pane-lead">Click a shortcut, then press the new keys. Esc cancels. Shortcuts need Ctrl/Cmd or Alt, except function keys.</p>
+          </div>
+          <button class="btn quiet" id="reset-keys">Reset all</button>
+        </header>
+        <p class="note" id="mac-note" hidden>On macOS the menu bar picks up changes after a restart.</p>
+        <div class="shortcuts-top">
+          <input class="field filter" id="key-filter" placeholder="Search shortcuts" aria-label="Search shortcuts">
+        </div>
+        <div class="key-conflict" id="key-conflict" role="alert" hidden>
+          <span id="key-conflict-text"></span>
+          <button class="btn primary" id="key-replace">Replace</button>
+          <button class="btn quiet" id="key-cancel">Cancel</button>
+        </div>
+        <div class="key-grid" id="keys"></div>
+      </section>
+
+      <section id="about">
+        <header class="pane-head"><div class="titles">
+          <h2 class="pane-title">About</h2>
+          <p class="pane-lead">Island and where its data is kept on this computer.</p>
+        </div></header>
+        <div class="stack">
+          <div class="group">
+            <h3 class="group-title">About Island</h3>
+            <div class="card"><dl id="about-list"></dl></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
 </div>
 <div class="toast" id="toast" hidden></div>
 <script>
 "use strict";
 (function () {
   var PREFIX = "\u0001island:";
+  var PANES = ["general", "appearance", "privacy", "tabs", "reader", "agent", "shortcuts", "about"];
+  // Older section names that Island may still ask to open map onto the pane that now holds them.
+  var PANE_ALIASES = { search: "general", history: "general", updates: "general", import: "general", reports: "agent" };
+  // Shortcut groups by action id; anything not listed falls into Window.
+  var SHORTCUT_GROUPS = [
+    ["Tabs", ["new_tab", "close_tab", "reopen_tab", "next_tab", "previous_tab", "next_tab_alt",
+      "previous_tab_alt", "toggle_pin", "toggle_split", "divider_left", "divider_right", "tab_overview"]],
+    ["Navigation", ["back", "forward", "reload", "reload_ignore_cache", "stop_loading", "focus_address",
+      "copy_url", "find_in_page", "find_next", "find_previous", "zoom_in", "zoom_in_alt", "zoom_out",
+      "zoom_reset", "reader_mode"]],
+    ["Agent", ["toggle_agent"]],
+    ["Spaces", ["new_space", "rename_space", "next_space", "previous_space"]],
+    ["Window", ["toggle_sidebar", "command_palette", "search_palette", "settings", "cheatsheet"]]
+  ];
   var state = { settings: null };
   var recording = null;
   var toastTimer = 0;
+  var currentPane = "appearance";
+  var lastFocusSeq = 0;
   function post(message) { console.log(PREFIX + JSON.stringify(message)); }
   function $(id) { return document.getElementById(id); }
   function el(tag, className, text) {
@@ -398,41 +667,188 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     toast(ok ? "Copied" : "Select the text and copy it");
   }
 
+  // One keycap per modifier and the key: "\u2318", "\u21e7", "K" on macOS; "Ctrl", "Shift", "K" elsewhere.
+  function keycaps(binding) {
+    if (!isMac()) return displayBinding(binding).split(/\+(?!$)/);
+    var text = displayBinding(binding);
+    var caps = [];
+    while (text && "\u2303\u2325\u21e7\u2318".indexOf(text.charAt(0)) >= 0) {
+      caps.push(text.charAt(0));
+      text = text.slice(1);
+    }
+    if (text === "\u238b") text = "esc";
+    if (text) caps.push(text);
+    return caps;
+  }
+
+  // ---- Panes and the section list -------------------------------------------------------
+
+  function paneFor(name) {
+    if (!name) return "";
+    if (PANES.indexOf(name) >= 0) return name;
+    return PANE_ALIASES[name] || "";
+  }
+  function navItems() { return Array.prototype.slice.call(document.querySelectorAll(".nav-item")); }
+  function selectPane(name) {
+    currentPane = name;
+    navItems().forEach(function (item) {
+      if (item.getAttribute("data-pane") === name) item.setAttribute("aria-current", "page");
+      else item.removeAttribute("aria-current");
+    });
+    PANES.forEach(function (pane) { $(pane).hidden = pane !== name; });
+  }
+  function showPane(name) {
+    var pane = paneFor(name);
+    if (!pane) return;
+    selectPane(pane);
+    applySearch();
+  }
+
+  // ---- Search: filters the section list and the rows of every pane ----------------------
+
+  function rowText(row) { return (row.getAttribute("data-label") || row.textContent || "").toLowerCase(); }
+  // The nav label and the pane title, lowercased: a query that names a section finds it.
+  function paneLabel(name) {
+    var item = document.querySelector('.nav-item[data-pane="' + name + '"]');
+    var title = $(name).querySelector(".pane-title");
+    return ((item ? item.textContent : "") + " " + (title ? title.textContent : "")).toLowerCase();
+  }
+  function applySearch() {
+    var query = $("settings-search").value.trim().toLowerCase();
+    var hits = {};
+    var total = 0;
+    PANES.forEach(function (name) {
+      // A pane whose label matches is shown whole: every group and row stays visible.
+      var paneMatch = !!query && paneLabel(name).indexOf(query) >= 0;
+      var count = 0;
+      Array.prototype.forEach.call($(name).querySelectorAll(".group"), function (group) {
+        if (group.hidden) return;
+        var rows = Array.prototype.slice.call(group.querySelectorAll(".row, .key-row"));
+        var title = (group.querySelector(".group-title") || { textContent: "" }).textContent.toLowerCase();
+        if (rows.length === 0) {
+          // A group without rows (the Import sources, the About list) is one searchable unit.
+          var unitMatch = !query || paneMatch || group.textContent.toLowerCase().indexOf(query) >= 0;
+          group.toggleAttribute("data-search-hidden", !unitMatch);
+          count += unitMatch ? 1 : 0;
+          return;
+        }
+        var visible = 0;
+        rows.forEach(function (row) {
+          var match = !query || paneMatch || rowText(row).indexOf(query) >= 0 || title.indexOf(query) >= 0;
+          row.toggleAttribute("data-search-hidden", !match);
+          // Rows the layout hides (the Color rows under Native) never count as hits.
+          if (match && !row.hidden) visible += 1;
+        });
+        group.toggleAttribute("data-search-hidden", !!query && !paneMatch && visible === 0);
+        count += visible;
+      });
+      // A pane that matched by name counts as a hit even when its rows are empty or hidden.
+      if (paneMatch) count = Math.max(count, 1);
+      hits[name] = count;
+      total += count;
+    });
+    navItems().forEach(function (item) {
+      item.hidden = !!query && !hits[item.getAttribute("data-pane")];
+    });
+    $("search-empty").hidden = !(query && total === 0);
+    if (query && !hits[currentPane]) {
+      var first = PANES.filter(function (name) { return hits[name]; })[0];
+      if (first) selectPane(first);
+    }
+  }
+
+  // ---- Settings rows --------------------------------------------------------------------
+
+  function renderShortcutConflict() {
+    var pending = state.settings.shortcut_conflict;
+    $("key-conflict").hidden = !pending;
+    if (!pending) return;
+    $("key-conflict-text").textContent =
+      displayBinding(pending.binding) + " is already used by " + pending.conflict + ".";
+  }
+
+  function shortcutGroupFor(id) {
+    for (var index = 0; index < SHORTCUT_GROUPS.length; index += 1) {
+      if (SHORTCUT_GROUPS[index][1].indexOf(id) >= 0) return SHORTCUT_GROUPS[index][0];
+    }
+    return "Window";
+  }
+
+  function shortcutRow(row) {
+    var line = el("div", "key-row");
+    line.setAttribute("data-label", row.label);
+    line.appendChild(el("span", "name", row.label));
+    if (row.binding !== row.default_binding) {
+      var mark = el("span", "changed");
+      mark.title = "Changed from " + displayBinding(row.default_binding);
+      line.appendChild(mark);
+    }
+    var chip = el("button", "chip");
+    var isRecording = recording === row.id;
+    if (isRecording) {
+      chip.classList.add("recording");
+      chip.textContent = "Press keys\u2026";
+    } else if (!row.binding) {
+      chip.classList.add("unbound");
+      chip.textContent = "Add shortcut";
+    } else {
+      keycaps(row.binding).forEach(function (cap) { chip.appendChild(el("kbd", "keycap", cap)); });
+    }
+    if (row.conflict) { chip.classList.add("conflict"); chip.title = "Also used by another shortcut"; }
+    chip.setAttribute("aria-label", row.label + ": " + displayBinding(row.binding) + ". Activate to change.");
+    // Clicking anywhere on the row (but its buttons) starts or stops recording.
+    line.addEventListener("click", function (event) {
+      var button = event.target.closest("button");
+      if (button && button !== chip) return;
+      recording = isRecording ? null : row.id;
+      renderShortcuts();
+    });
+    line.appendChild(chip);
+    var actions = el("span", "row-actions");
+    var clear = el("button", "btn quiet", "Remove");
+    clear.disabled = !row.binding;
+    clear.addEventListener("click", function () { post({ type: "set_binding", action: row.id, binding: "" }); });
+    actions.appendChild(clear);
+    var reset = el("button", "btn quiet", "Reset");
+    reset.disabled = row.binding === row.default_binding;
+    reset.addEventListener("click", function () { post({ type: "reset_binding", action: row.id }); });
+    actions.appendChild(reset);
+    line.appendChild(actions);
+    return line;
+  }
+
   function renderShortcuts() {
     var settings = state.settings;
-    var list = $("keys");
+    renderShortcutConflict();
     var filter = $("key-filter").value.trim().toLowerCase();
-    list.textContent = "";
+    var grid = $("keys");
+    grid.textContent = "";
+    var columns = [el("div", "key-col"), el("div", "key-col")];
+    var buckets = {};
+    SHORTCUT_GROUPS.forEach(function (group) { buckets[group[0]] = []; });
     (settings.shortcuts || []).forEach(function (row) {
       if (filter && row.label.toLowerCase().indexOf(filter) < 0 &&
           displayBinding(row.binding).toLowerCase().indexOf(filter) < 0) return;
-      var line = el("div", "key-row");
-      var name = el("div", "name", row.label);
-      line.appendChild(name);
-      if (row.binding !== row.default_binding) {
-        var mark = el("span", "changed");
-        mark.title = "Changed from " + displayBinding(row.default_binding);
-        line.appendChild(mark);
-      }
-      var chip = el("button", "chip");
-      var isRecording = recording === row.id;
-      chip.textContent = isRecording ? "Press keys..." : displayBinding(row.binding);
-      if (isRecording) chip.classList.add("recording");
-      else if (!row.binding) chip.classList.add("unbound");
-      if (row.conflict) { chip.classList.add("conflict"); chip.title = "Also used by another shortcut"; }
-      chip.setAttribute("aria-label", row.label + ": " + displayBinding(row.binding) + ". Activate to change.");
-      chip.addEventListener("click", function () { recording = isRecording ? null : row.id; renderShortcuts(); });
-      line.appendChild(chip);
-      var clear = el("button", "btn quiet", "Remove");
-      clear.disabled = !row.binding;
-      clear.addEventListener("click", function () { post({ type: "set_binding", action: row.id, binding: "" }); });
-      line.appendChild(clear);
-      var reset = el("button", "btn quiet", "Reset");
-      reset.disabled = row.binding === row.default_binding;
-      reset.addEventListener("click", function () { post({ type: "reset_binding", action: row.id }); });
-      line.appendChild(reset);
-      list.appendChild(line);
+      buckets[shortcutGroupFor(row.id)].push(row);
     });
+    // Tabs and Navigation share the left column; Agent, Spaces and Window the right one.
+    SHORTCUT_GROUPS.forEach(function (group, index) {
+      var rows = buckets[group[0]];
+      if (!rows.length) return;
+      var section = el("section", "group key-group");
+      section.appendChild(el("h3", "group-title", group[0]));
+      var card = el("div", "card");
+      rows.forEach(function (row) { card.appendChild(shortcutRow(row)); });
+      section.appendChild(card);
+      columns[index < 2 ? 0 : 1].appendChild(section);
+    });
+    if (!columns[0].childNodes.length && !columns[1].childNodes.length) {
+      grid.appendChild(el("p", "keys-empty", "No shortcuts match that filter."));
+    } else {
+      grid.appendChild(columns[0]);
+      grid.appendChild(columns[1]);
+    }
+    applySearch();
   }
 
   function renderReports() {
@@ -674,9 +1090,87 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     renderChoice("reader-theme", "theme", [["auto", "Auto"], ["light", "Light"], ["sepia", "Sepia"], ["dark", "Dark"]]);
   }
 
+  var PRESETS = ["#0090FF", "#30A46C", "#FFB224", "#E5484D", "#8E4EC6", "#F76B15", "#12A594", "#D6409F", "#6E56CF", "#8D8D8D"];
+  var spaceSignature = "";
+  function setAppearance(key, value) { post({ type: "set_appearance", key: key, value: value }); }
+  function renderSpaceColors(spaces) {
+    var signature = JSON.stringify(spaces);
+    var box = $("space-colors");
+    // Do not rebuild under the user's cursor while a hex field is being edited.
+    if (signature === spaceSignature || box.contains(document.activeElement)) return;
+    spaceSignature = signature;
+    box.textContent = "";
+    spaces.forEach(function (space) {
+      var row = el("div", "space-row");
+      var name = el("div", "name", space.name);
+      if (space.active) name.appendChild(el("small", "", " \u00b7 active"));
+      row.appendChild(name);
+      var swatches = el("div", "swatches");
+      PRESETS.forEach(function (color) {
+        var button = el("button", "swatch");
+        button.style.setProperty("--c", color);
+        button.setAttribute("aria-label", space.name + " color " + color);
+        button.setAttribute("aria-pressed", color.toLowerCase() === space.color.toLowerCase() ? "true" : "false");
+        button.addEventListener("click", function () { post({ type: "set_space_color", index: space.index, color: color }); });
+        swatches.appendChild(button);
+      });
+      row.appendChild(swatches);
+      var hex = el("input", "field hex");
+      hex.value = space.color.toUpperCase();
+      hex.spellcheck = false;
+      hex.setAttribute("aria-label", space.name + " custom hex color");
+      function commit() {
+        var value = hex.value.trim();
+        if (value[0] !== "#") value = "#" + value;
+        if (/^#[0-9a-fA-F]{6}$/.test(value)) post({ type: "set_space_color", index: space.index, color: value });
+        else toast("Use a color like #7C5CFF");
+      }
+      hex.addEventListener("keydown", function (event) { if (event.key === "Enter") commit(); });
+      hex.addEventListener("change", commit);
+      row.appendChild(hex);
+      box.appendChild(row);
+    });
+  }
+  function renderAppearance(a) {
+    if (!a) return;
+    var customLook = $("look").querySelector('option[value="custom"]');
+    customLook.hidden = a.look !== "custom";
+    $("look").value = a.look;
+    // Native has no space color (spec 8.1). Arc, Graphite and a Custom built on them keep it.
+    var native = (a.base_look || a.look) === "native";
+    $("color-group").hidden = native;
+    $("space-colors-row").hidden = native;
+    $("tint-row").hidden = native;
+    Array.prototype.forEach.call(document.querySelectorAll("#appearance [data-key]"), function (control) {
+      var key = control.getAttribute("data-key");
+      var current = String(a[key]);
+      if (control.tagName === "SELECT") {
+        var known = Array.prototype.some.call(control.options, function (option) { return option.value === current; });
+        control.value = known ? current : "custom";
+        if (key === "font" && document.activeElement !== $("font-family")) {
+          $("font-family").value = known ? "" : current;
+        }
+        return;
+      }
+      Array.prototype.forEach.call(control.querySelectorAll("button"), function (button) {
+        var on = button.getAttribute("data-value") === current;
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    });
+    var tint = $("tint");
+    if (document.activeElement !== tint) tint.value = a.sidebar_tint;
+    $("tint-value").textContent = a.sidebar_tint + "%";
+    $("card-shadow").checked = !!a.card_shadow;
+    $("full-bleed").checked = !!a.full_bleed;
+    $("card-shadow").disabled = !!a.full_bleed;
+    renderSpaceColors(a.spaces || []);
+  }
+
   function render() {
     var s = state.settings;
     if (!s) return;
+    $("version").textContent = s.version ? "Island " + s.version : "";
+    renderAppearance(s.appearance);
     Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {
       button.setAttribute("aria-pressed", button.getAttribute("data-value") === s.theme_pref ? "true" : "false");
     });
@@ -704,19 +1198,46 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       about.appendChild(el("dd", "", row[1]));
     });
     if (s.message) toast(s.message);
-    if (s.focus) {
-      var section = $(s.focus);
-      if (section) {
-        section.scrollIntoView({ block: "start" });
-        var checked = section.querySelector("input[type=radio]:checked");
-        if (checked) checked.focus();
-      }
+    // A focus request opens its pane once per sequence number, so a section that is already
+    // selected still moves when it is asked for again. An explicit request also clears the search,
+    // which would otherwise hide or redirect the section it names.
+    if (s.focus && s.focus_seq !== lastFocusSeq) {
+      lastFocusSeq = s.focus_seq;
+      $("settings-search").value = "";
+      showPane(s.focus);
     }
+    applySearch();
   }
 
   Array.prototype.forEach.call($("theme").querySelectorAll("button"), function (button) {
     button.addEventListener("click", function () { post({ type: "set_theme", value: button.getAttribute("data-value") }); });
   });
+  $("look").addEventListener("change", function () {
+    post({ type: "set_look", look: $("look").value });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#appearance .segmented[data-key]"), function (group) {
+    Array.prototype.forEach.call(group.querySelectorAll("button"), function (button) {
+      button.addEventListener("click", function () {
+        var value = button.getAttribute("data-value");
+        setAppearance(group.getAttribute("data-key"), group.hasAttribute("data-number") ? Number(value) : value);
+      });
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("#appearance select[data-key]"), function (select) {
+    select.addEventListener("change", function () {
+      setAppearance(select.getAttribute("data-key"), select.value);
+    });
+  });
+  var tintTimer = 0;
+  $("tint").addEventListener("input", function () {
+    $("tint-value").textContent = $("tint").value + "%";
+    clearTimeout(tintTimer);
+    tintTimer = setTimeout(function () { setAppearance("sidebar_tint", Number($("tint").value)); }, 60);
+  });
+  $("font-family").addEventListener("change", function () { setAppearance("font", $("font-family").value.trim() || "geist"); });
+  $("card-shadow").addEventListener("change", function () { setAppearance("card_shadow", $("card-shadow").checked); });
+  $("full-bleed").addEventListener("change", function () { setAppearance("full_bleed", $("full-bleed").checked); });
+  $("reset-appearance").addEventListener("click", function () { post({ type: "reset_appearance" }); });
   $("agent-save").addEventListener("click", function () {
     post({ type: "set_agent_command", command: $("agent-command").value });
     toast("Saved");
@@ -733,7 +1254,13 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     post({ type: "clear_history" });
   });
   $("reset-keys").addEventListener("click", function () { recording = null; post({ type: "reset_shortcuts" }); });
+  $("key-replace").addEventListener("click", function () {
+    var pending = state.settings.shortcut_conflict;
+    if (pending) post({ type: "replace_shortcut", action: pending.action, binding: pending.binding });
+  });
+  $("key-cancel").addEventListener("click", function () { post({ type: "cancel_shortcut" }); });
   $("key-filter").addEventListener("input", renderShortcuts);
+  $("settings-search").addEventListener("input", applySearch);
   $("close").addEventListener("click", function () { post({ type: "close" }); });
   $("privacy-ads").addEventListener("change", function () {
     post({ type: "set_content_blocker_pref", key: "ads", value: $("privacy-ads").checked });
@@ -764,11 +1291,19 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
   $("update-pre").addEventListener("change", function () {
     post({ type: "set_update_pref", key: "include_prereleases", value: $("update-pre").checked });
   });
-  Array.prototype.forEach.call(document.querySelectorAll("nav a"), function (link) {
-    link.addEventListener("click", function (event) {
+
+  // The section list is a source list: each item is a button, Up and Down move the selection.
+  navItems().forEach(function (item) {
+    item.addEventListener("click", function () { showPane(item.getAttribute("data-pane")); });
+    item.addEventListener("keydown", function (event) {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      var visible = navItems().filter(function (candidate) { return !candidate.hidden; });
+      var index = visible.indexOf(item);
+      var next = visible[index + (event.key === "ArrowDown" ? 1 : -1)];
+      if (!next) return;
       event.preventDefault();
-      var target = document.querySelector(link.getAttribute("href"));
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      next.focus();
+      showPane(next.getAttribute("data-pane"));
     });
   });
 
@@ -781,9 +1316,14 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       var binding = bindingFromEvent(event);
       if (!binding) { toast("That key can't be used for a shortcut"); return; }
       if (!binding.valid) { toast("Add " + (isMac() ? "Cmd" : "Ctrl") + " or Alt"); return; }
-      post({ type: "set_binding", action: recording, binding: binding.text });
+      post({ type: "record_shortcut", action: recording, binding: binding.text });
       recording = null;
       renderShortcuts();
+      return;
+    }
+    if (event.key === "Escape" && state.settings && state.settings.shortcut_conflict) {
+      event.preventDefault();
+      post({ type: "cancel_shortcut" });
       return;
     }
     if (event.key === "Escape" && document.activeElement && document.activeElement.tagName !== "INPUT") {
@@ -798,6 +1338,21 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       var value = theme[key.replace("-", "_")];
       if (value) root.style.setProperty("--" + key, value);
     });
+    [
+      ["fill", "--fill"], ["border_2", "--border-2"], ["text_3", "--text-3"],
+      ["selection", "--selection"], ["accent_soft", "--accent-soft"],
+      ["accent_text", "--accent-text"], ["warn_bg", "--warn-bg"],
+      ["warn_border", "--warn-border"], ["warn_text", "--warn-text"],
+      ["success", "--success"], ["danger", "--danger"]
+    ].forEach(function (mapping) {
+      var value = theme[mapping[0]];
+      if (value) root.style.setProperty(mapping[1], value);
+    });
+    ["--branch-a", "--branch-b", "--branch-c", "--branch-d"].forEach(function (variable, index) {
+      var value = theme.branch && theme.branch[index];
+      if (value) root.style.setProperty(variable, value);
+    });
+    if (theme.font) root.style.setProperty("--font", theme.font);
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
   }
 
@@ -806,7 +1361,11 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     if (next.settings) state.settings = next.settings;
     render();
   };
-  window.islandFocus = function () { $("close").focus(); };
+  window.islandFocus = function () {
+    var item = document.querySelector('.nav-item[aria-current="page"]');
+    (item || $("close")).focus();
+  };
+  selectPane(currentPane);
   post({ type: "ready" });
 })();
 </script>

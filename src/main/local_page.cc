@@ -26,6 +26,8 @@ class LocalPage::Client final : public CefClient,
 
     void Detach() { delegate_ = nullptr; }
 
+    [[nodiscard]] bool loaded() const { return loaded_; }
+
     void Render(std::string state_json) {
         CEF_REQUIRE_UI_THREAD();
         if (browser_ == nullptr || !loaded_) {
@@ -67,10 +69,27 @@ class LocalPage::Client final : public CefClient,
         ForwardLink(target_url.ToString());
         return true;  // the panel never opens windows
     }
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override { browser_ = browser; }
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+        browser_ = browser;
+        browser_created_at_ = std::chrono::steady_clock::now();
+        if (delegate_ != nullptr) {
+            delegate_->OnLocalPageBrowserCreated(kind_);
+        }
+    }
     void OnBeforeClose(CefRefPtr<CefBrowser>) override {
         browser_ = nullptr;
+        browser_created_at_.reset();
         loaded_ = false;
+    }
+
+    [[nodiscard]] bool browser_was_created() const { return browser_created_at_.has_value(); }
+
+    [[nodiscard]] std::optional<std::chrono::steady_clock::duration> BrowserViewAgeAt(
+        std::chrono::steady_clock::time_point now) const {
+        if (!browser_created_at_.has_value() || now < *browser_created_at_) {
+            return std::nullopt;
+        }
+        return now - *browser_created_at_;
     }
 
     // CefLoadHandler
@@ -116,6 +135,7 @@ class LocalPage::Client final : public CefClient,
     LocalPageDelegate* delegate_;
     std::string page_url_;
     CefRefPtr<CefBrowser> browser_;
+    std::optional<std::chrono::steady_clock::time_point> browser_created_at_;
     bool loaded_ = false;
     std::optional<std::string> pending_state_;
 
@@ -131,6 +151,17 @@ LocalPage::LocalPage(LocalPageKind kind, LocalPageDelegate& delegate)
 }
 
 LocalPage::~LocalPage() { Close(); }
+
+bool LocalPage::loaded() const { return client_ != nullptr && client_->loaded(); }
+
+bool LocalPage::browser_was_created() const {
+    return client_ != nullptr && client_->browser_was_created();
+}
+
+std::optional<std::chrono::steady_clock::duration> LocalPage::BrowserViewAgeAt(
+    std::chrono::steady_clock::time_point now) const {
+    return client_ != nullptr ? client_->BrowserViewAgeAt(now) : std::nullopt;
+}
 
 void LocalPage::Render(const std::string& state_json) {
     if (client_ != nullptr) client_->Render(state_json);

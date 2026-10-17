@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "plan_graph.h"
+
 namespace island {
 namespace {
 
@@ -54,8 +56,11 @@ TEST(ResearchSpaceNameTest, NeverSplitsAMultiByteCharacter) {
 TEST(BuildResearchPromptTest, CarriesTheQuestionTheSpaceAndTheReportContract) {
     const std::string prompt = BuildResearchPrompt("Why is the sky blue?");
     EXPECT_NE(prompt.find("Why is the sky blue?"), std::string::npos);
-    EXPECT_NE(prompt.find("browser_new_space"), std::string::npos);
-    EXPECT_NE(prompt.find("named exactly \"Why is the sky blue?\""), std::string::npos);
+    // Island opens the space itself: the agent is told it exists, not asked to create it.
+    EXPECT_NE(prompt.find("already opened a space named \"Why is the sky blue?\""),
+              std::string::npos);
+    EXPECT_EQ(prompt.find("browser_new_space"), std::string::npos);
+    EXPECT_EQ(prompt.find("Create a new space"), std::string::npos);
     EXPECT_NE(prompt.find("browser_open_tab"), std::string::npos);
     EXPECT_NE(prompt.find("page_read"), std::string::npos);
     EXPECT_NE(prompt.find("Compare the sources"), std::string::npos);
@@ -64,6 +69,20 @@ TEST(BuildResearchPromptTest, CarriesTheQuestionTheSpaceAndTheReportContract) {
     EXPECT_NE(prompt.find(std::string(kReportEndMarker)), std::string::npos);
     EXPECT_LT(prompt.find(std::string(kReportBeginMarker)),
               prompt.find(std::string(kReportEndMarker)));
+}
+
+TEST(BuildResearchPromptTest, AsksForABranchingPlanWithIslandMetadata) {
+    const std::string prompt = BuildResearchPrompt("q");
+    EXPECT_NE(prompt.find("_meta.island"), std::string::npos);
+    for (const char* key : {"\"id\"", "\"after\"", "\"branch\"", "\"kind\""}) {
+        EXPECT_NE(prompt.find(key), std::string::npos) << key;
+    }
+    EXPECT_NE(
+        prompt.find("at most " + std::to_string(agent::kMaxBranchDepth) + " levels of branching"),
+        std::string::npos);
+    EXPECT_NE(prompt.find("wait for approval before running"), std::string::npos);
+    // The plan comes before any browser work, so approval gates the steps.
+    EXPECT_LT(prompt.find("wait for approval before running"), prompt.find("How to work:"));
 }
 
 TEST(BuildResearchPromptTest, ClipsAnOversizedQuestion) {
@@ -196,6 +215,66 @@ TEST(ClassifyResearchTurnTest, CancelErrorEarlyStopAndNoReportAreNotReports) {
     outcome = ClassifyResearchTurn(silent, 0, "");
     EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kFailed);
     EXPECT_NE(outcome.message.find("without writing a report"), std::string::npos);
+}
+
+TEST(ClassifyResearchTurnTest, APlanWithoutAReportAwaitsApproval) {
+    agent::AgentTranscript transcript;
+    transcript.Apply(Ended("end_turn"));  // an earlier turn
+    const std::uint64_t before = transcript.turns_ended();
+    transcript.AddUserPrompt("research");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    agent::AcpPlanEntry entry;
+    entry.content = "Open the sources";
+    plan.plan.push_back(entry);
+    transcript.Apply(plan);
+    transcript.Apply(Ended("end_turn"));
+    const ResearchOutcome outcome = ClassifyResearchTurn(transcript, before, "");
+    EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kAwaitingApproval);
+    EXPECT_EQ(outcome.message, "Waiting for approval");
+    EXPECT_TRUE(outcome.markdown.empty());
+}
+
+TEST(ClassifyResearchTurnTest, AReportWinsOverAPlanInTheSameTurn) {
+    agent::AgentTranscript transcript;
+    transcript.AddUserPrompt("research");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    plan.plan.push_back(agent::AcpPlanEntry{.content = "step"});
+    transcript.Apply(plan);
+    transcript.Apply(Chunk("<<<ISLAND_REPORT_BEGIN>>>\n# R\nbody\n<<<ISLAND_REPORT_END>>>"));
+    transcript.Apply(Ended("end_turn"));
+    EXPECT_EQ(ClassifyResearchTurn(transcript, 0, "").kind, ResearchOutcome::Kind::kReport);
+}
+
+TEST(ClassifyResearchTurnTest, APlanWithAgentChatterStillAwaitsApproval) {
+    agent::AgentTranscript transcript;
+    transcript.AddUserPrompt("research");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    plan.plan.push_back(agent::AcpPlanEntry{.content = "Open the sources"});
+    transcript.Apply(plan);
+    // Plain explanatory text next to the plan is not a report.
+    transcript.Apply(Chunk("Here is my plan. I will check the sources first."));
+    transcript.Apply(Ended("end_turn"));
+    const ResearchOutcome outcome = ClassifyResearchTurn(transcript, 0, "");
+    EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kAwaitingApproval);
+    EXPECT_TRUE(outcome.markdown.empty());
+}
+
+TEST(ClassifyResearchTurnTest, AnApprovedRunWithoutMarkersStillReportsItsText) {
+    agent::AgentTranscript transcript;
+    transcript.AddUserPrompt("the plan was approved");
+    agent::AcpEvent plan;
+    plan.type = agent::AcpEvent::Type::kPlan;
+    plan.plan.push_back(agent::AcpPlanEntry{.content = "Open the sources", .status = "completed"});
+    transcript.Apply(plan);
+    transcript.Apply(Chunk("# Answer\nThe unmarked report."));
+    transcript.Apply(Ended("end_turn"));
+    const ResearchOutcome outcome =
+        ClassifyResearchTurn(transcript, 0, "", /*plan_approved=*/true);
+    EXPECT_EQ(outcome.kind, ResearchOutcome::Kind::kReport);
+    EXPECT_EQ(outcome.markdown, "# Answer\nThe unmarked report.");
 }
 
 TEST(ClassifyResearchTurnTest, ATurnThatNeverEndedIsAFailure) {

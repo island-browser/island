@@ -75,6 +75,7 @@
 - (void)togglePinTab:(id)sender;
 - (void)openSettings:(id)sender;
 - (void)openTabOverview:(id)sender;
+- (void)showCheatsheet:(id)sender;
 - (void)newTab:(id)sender;
 - (void)closeTab:(id)sender;
 - (void)selectNextTab:(id)sender;
@@ -224,6 +225,13 @@
     }
 }
 
+// The shortcut cheatsheet; the dev `cheatsheet` action uses it too.
+- (void)showCheatsheet:(id)sender {
+    if (app_ != nullptr) {
+        app_->RunKeyAction(island::KeyAction::kShowCheatsheet);
+    }
+}
+
 - (void)openTabOverview:(id)sender {
     if (app_ != nullptr) {
         app_->ToggleTabOverview();
@@ -331,31 +339,11 @@ class MenuActionsReleaseObserver final : public island::IslandAppReleaseObserver
 // Maps a dev action name to the menu selector that performs it, so a capture
 // exercises exactly the path a user's menu or key equivalent takes.
 SEL DevActionSelector(const std::string& action) {
-    static const std::pair<const char*, const char*> kActions[] = {
-        {"welcome", "showWelcome:"},
-        {"theme:system", "useSystemTheme:"},
-        {"theme:light", "useLightTheme:"},
-        {"theme:dark", "useDarkTheme:"},
-        {"command_palette", "openCommandPalette:"},
-        {"search_palette", "openSearchPalette:"},
-        {"focus_address", "focusAddress:"},
-        {"toggle_sidebar", "toggleSidebar:"},
-        {"toggle_agent", "toggleAgentPanel:"},
-        {"settings", "openSettings:"},
-        {"tab_overview", "openTabOverview:"},
-        {"new_tab", "newTab:"},
-        {"next_tab", "selectNextTab:"},
-        {"previous_tab", "selectPreviousTab:"},
-        {"toggle_split", "toggleSplit:"},
-        {"new_space", "newSpace:"},
-        {"rename_space", "beginSpaceRenaming:"},
-    };
-    for (const auto& [name, selector] : kActions) {
-        if (action == name) {
-            return NSSelectorFromString([NSString stringWithUTF8String:selector]);
-        }
+    const std::string_view selector = island::DevActionSelectorName(action);
+    if (selector.empty()) {
+        return nullptr;
     }
-    return nullptr;
+    return NSSelectorFromString([NSString stringWithUTF8String:std::string(selector).c_str()]);
 }
 
 // Composites every visible window of this process (the browser window plus
@@ -457,6 +445,45 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
     }
     if (action == "open_report") {
         app->OpenNewestReport();
+        return true;
+    }
+    // `agent_pages:<count>[:<gap>]` opens that many agent pages (after `plan_fixture`); `<gap>` is
+    // `serial` (the next page after the previous task returned) or a delay in milliseconds.
+    constexpr std::string_view kAgentPages = "agent_pages:";
+    if (action.compare(0, kAgentPages.size(), kAgentPages) == 0) {
+        const std::string rest = action.substr(kAgentPages.size());
+        const std::size_t colon = rest.find(':');
+        int gap_ms = 0;
+        if (colon != std::string::npos) {
+            const std::string gap = rest.substr(colon + 1);
+            // -1 is BrowserWindow::kSerialAgentPages.
+            gap_ms = gap == "serial" ? -1 : std::atoi(gap.c_str());
+        }
+        app->OpenAgentPagesForDev(std::atoi(rest.c_str()), gap_ms);
+        return true;
+    }
+    if (action == "plan_fixture") {
+        app->OpenPlanFixture();
+        return true;
+    }
+    // `appearance:<key>=<value>` (e.g. appearance:sidebar_side=right, appearance:reset) and
+    // `space_color:<index>=#RRGGBB` run the Settings > Appearance path.
+    constexpr std::string_view kAppearance = "appearance:";
+    constexpr std::string_view kSpaceColor = "space_color:";
+    if (action.compare(0, kSpaceColor.size(), kSpaceColor) == 0) {
+        app->ApplyAppearanceForDev("space_color", action.substr(kSpaceColor.size()));
+        return true;
+    }
+    if (action.compare(0, kAppearance.size(), kAppearance) == 0) {
+        const std::string rest = action.substr(kAppearance.size());
+        const std::size_t equals = rest.find('=');
+        app->ApplyAppearanceForDev(rest.substr(0, equals),
+                                   equals == std::string::npos ? "" : rest.substr(equals + 1));
+        return true;
+    }
+    const std::string_view settings_section = island::DevSettingsSectionName(action);
+    if (!settings_section.empty()) {
+        app->OpenSettingsSection(std::string(settings_section));
         return true;
     }
     if (action == "sidebar:expanded" || action == "sidebar:collapsed") {
@@ -826,6 +853,18 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [browser_menu_item setSubmenu:browser_menu];
     [main_menu addItem:browser_menu_item];
 
+    // Help: the shortcut cheatsheet (Cmd+/ by default), following the keymap like the
+    // Browser-menu items above.
+    NSMenuItem* help_menu_item = [[NSMenuItem alloc] initWithTitle:@"Help"
+                                                            action:nil
+                                                     keyEquivalent:@""];
+    NSMenu* help_menu = [[NSMenu alloc] initWithTitle:@"Help"];
+    NSMenuItem* cheatsheet_menu_item = AddKeyActionMenuItem(
+        help_menu, menu_actions, @"Keyboard Shortcuts", island::KeyAction::kShowCheatsheet, keymap);
+    [help_menu_item setSubmenu:help_menu];
+    [main_menu addItem:help_menu_item];
+    [NSApp setHelpMenu:help_menu];
+
     // Every configurable shortcut follows the keymap.
     ApplyKeyBinding(back_menu_item, island::KeyAction::kBack, keymap);
     ApplyKeyBinding(forward_menu_item, island::KeyAction::kForward, keymap);
@@ -850,6 +889,9 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
 
     [NSApp setMainMenu:main_menu];
 
+    [cheatsheet_menu_item release];
+    [help_menu release];
+    [help_menu_item release];
     [settings_menu_item release];
     [toggle_agent_menu_item release];
     [pin_tab_menu_item release];

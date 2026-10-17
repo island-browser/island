@@ -13,6 +13,130 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Changed
+
+- The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
+  control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
+  the most visited sites (from history, one per host, opened in the current tab). Tab and
+  Shift+Tab step through the modes while the field has focus. Clearing history clears the tiles.
+  Visits are grouped by host before the six-tile limit applies, so one busy site with many pages
+  no longer hides the others. IP-address sites get a neutral globe instead of a digit, and the
+  old keyboard-shortcut list under the start page is removed.
+- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
+  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
+  version at the bottom, and one section shown at a time. Appearance groups its controls into
+  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
+  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
+  Native has no space color. Every existing setting keeps its behavior. Search finds sections by
+  name (Privacy, Shortcuts, About) and shows the whole pane for them, and also finds the Import
+  sources and the About list. A section that is already selected opens again when it is requested
+  again (for example, the privacy shield after a click on another section), and an explicit
+  request clears the search first. The search fields use the interface font, and the selected
+  section in the list is filled with a semibold label instead of the accent.
+- The window does not re-lay out the page in a loop while idle, and the Native sidebar and
+  toolbar stay visible when a page swap is deferred, for example when pages open in the
+  background.
+
+### Added
+
+- Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
+  system-blue accent for selection and focus, a source-list sidebar and no space color. Released
+  profiles without Appearance settings use Native; Arc-era profiles with Appearance settings but
+  no saved look keep Arc. Settings > Appearance starts with a Look preset menu (Native, Arc,
+  Graphite), and changing any other control there shows "Custom".
+- The Native sidebar bottom is redesigned: one full-width Agent button (sparkle, 32 DIP)
+  sits at the very bottom of the sidebar and is tinted while the agent panel is open; the toolbar
+  Agent button is gone under Native (the address-field agent dot shows agent state).
+- Native spaces are a segmented control: a 24 DIP track with one segment per space (name only,
+  no color dot), a "+" button for a new space, and overview and settings icon buttons at its
+  right end. With more than four spaces the inactive segments show only their initial.
+- Native's "New Tab" row moves below the last tab. Arc and Graphite keep their sidebar.
+- Research opens a Plan tab, pinned first in the space, that shows the agent's plan as a graph
+  (or a list) of steps, branches, a join and a result. Nothing runs until you approve: Run plan,
+  Run one branch only, or Cancel. You can skip and restore steps, write an instruction for a
+  step, branch from a step (at most 3 levels deep) or ask the agent to expand one. A research
+  turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
+  Plain ACP plans open in List view with stable p0, p1, ... step ids, and each research reuses
+  its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab. Plan graphs
+  with a cycle keep valid dependencies from that cycle to downstream steps.
+- Island opens the research space itself (the question's name; a space with that name is reused)
+  with the Plan hub as its pinned first tab, so the agent no longer creates one. Pages the agent
+  opens during research become indented child rows under the Plan tab, each run of a branch under
+  its own "Branch A" kicker line, and open active (a freshly created page stays visible until its
+  browser is at least 100 ms old; an older page swaps immediately); selecting their plan node
+  shows the page. Children of the pinned Plan tab start the Tabs
+  section, so Favorites stays whole, and they stay together behind their parent when tabs are
+  moved or a favourite is unpinned. The final Result opens as a grouped Report tab and the
+  sidebar keeps the grouping. Plan and Report tabs are not restored after a restart; their pages
+  come back as ordinary tabs. The agent's navigate, back, forward and reload refuse
+  the Plan tab with a clear error, and so do its page tools (read, snapshot, click, type,
+  evaluate, screenshot): the plan can only be approved by you.
+- Closing the Plan hub asks whether to stop or keep the research running (Escape keeps it
+  running); with no live page to ask it stops the research and closes the tab. Deleting the
+  space that holds the Plan tab stops the research. Failed plan steps can be retried from the
+  inspector while the run goes on or after it ended, never while the plan awaits approval or
+  after you cancelled it before approving.
+- Pages the research opened but you have not shown yet keep their address in the saved session
+  and show it as their name in the sidebar and in the agent's tab list.
+- ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
+  a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
+  (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,
+  Reader view, Settings, Cheatsheet) with their current keys. ⌘/ again, Esc, its close button
+  or a click outside (macOS only) closes it, and the shortcut is configurable in Settings like
+  the others.
+- Settings > Keyboard shortcuts records a new shortcut when you click a row: the row shows an
+  accent outline and "Press keys…", and Esc cancels. A chord another action already uses is not
+  taken silently: an amber banner says "⌘B is already used by Toggle sidebar." with Replace
+  (moves the chord and unbinds the other action) and Cancel. Bindings show as keycaps, unbound
+  actions offer "Add shortcut", and "Reset all" restores every default.
+- The Native address field shows page state as 20 DIP indicators instead of a status bar: a
+  shield with the blocked-request count at the left edge (capped at "9999+", hidden at 0; click
+  opens Settings > Privacy), Reader at the right edge only on pages that have a reader view, and
+  an agent dot (blue while the agent works, orange while it waits for an answer; click opens the
+  agent panel). Each has an accessible name and a full-text tooltip, and the indicators follow
+  the active tab.
+- The Native look now uses a 248 DIP source-list sidebar and a 52 DIP page toolbar with 28 DIP
+  navigation buttons, a centered idle address field, a Share action, sentence-case
+  section labels, system-blue selected rows with white text, and space switchers without space
+  colors. Arc and Graphite keep their existing chrome. The Native address field is a rounded
+  (radius 8) fill plate without an outline, and Back/Forward stay clear of the window buttons
+  when the sidebar is on the right or collapsed to the icon rail.
+- Local pages now receive every Native look color slot, including selection, warning, status,
+  and plan-branch colors, as live CSS variables in light and dark themes.
+- Native look color tokens: neutral source-list surfaces, system blue selection, accessible
+  secondary/warning text pairs, and four plan-branch colors in light and dark themes. Native
+  customization ignores space color so its canvas and accent stay fixed.
+- Arc-style look. On macOS the window is frameless: no title bar or title text, the traffic lights
+  sit over the top-left of the sidebar, and the sidebar's top band (and the canvas strip above the
+  page) drags the window. The sidebar and the window margin are one canvas tinted in the active
+  space's color (stronger than before), the page sits on a card inset 8 DIP with rounded corners
+  and one soft shadow, the selected and hovered tab rows and the address pill are soft rounded
+  fills, and favicons sit on a small rounded plate so dark ones stay visible on a dark sidebar, in
+  the 52 DIP icon rail as well. CEF views cannot round or shadow anything, so on macOS a native
+  overlay (`macos/page_card_mac.mm`) paints the corners and the shadow; other platforms keep
+  square corners and the platform frame.
+- Settings > Appearance, applied live and saved in the prefs: per-space color (ten presets or a
+  custom hex), sidebar tint intensity, sidebar on the left or right, page corner radius
+  (0/6/10/14), density (comfortable/compact), interface font (Geist, System, or any installed
+  family), the page card's shadow and "full bleed" (no inset, no rounding, no shadow). Theme stays
+  System/Light/Dark.
+- Research mode asks the agent for a branching plan first: each step is an ACP plan entry with
+  `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
+  until you approve the plan.
+
+### Fixed
+
+- Opening Settings or All tabs right after a new tab, or switching split panes quickly, no longer
+  risks a crash.
+- Research no longer swaps the page view several times in one turn (which crashed CEF a few
+  seconds later): the space is made with the Plan tab as its only tab, reusing a space, opening
+  the Report and selecting a plan node from another space change the model first and swap the
+  view once. An attached page view is removed only after its browser exists and is at least 100 ms
+  old; generation-guarded age and fallback tasks cannot release a newer view, the startup view is
+  gated too, and the 2 s cap applies only when a browser is never created. Pages the agent already
+  moved past load when you show them. A browser whose tab was closed while it was being created no
+  longer keeps the app from quitting.
+
 ## [0.6.2] - 2026-10-15
 
 ### Fixed

@@ -1,5 +1,6 @@
-// BrowserWindow's find-in-page and Reader view behavior. The declarations live in
-// browser_window.h; this file keeps them out of the already very large browser_window.cc.
+// BrowserWindow's find-in-page, Reader view and shortcut cheatsheet behavior. The declarations
+// live in browser_window.h; this file keeps them out of the already very large
+// browser_window.cc.
 // The CEF view types must be complete before browser_window.h (see tests/browser_window_test.cpp).
 // clang-format off
 #include "include/views/cef_overlay_controller.h"
@@ -79,20 +80,66 @@ void BrowserWindow::ShowFindOverlay() {
     find_overlay_->Show(find_model_.query(), find_model_.match_case(), FindAnchorBounds());
 }
 
-void BrowserWindow::UpdateFindBarBounds() {
+void BrowserWindow::UpdateAnchoredOverlayBounds() {
     CEF_REQUIRE_UI_THREAD();
-    if (!closing_ && find_overlay_ != nullptr && find_overlay_->visible()) {
+    if (closing_) {
+        return;
+    }
+    if (find_overlay_ != nullptr && find_overlay_->visible()) {
         find_overlay_->UpdateBounds(FindAnchorBounds());
+    }
+    if (cheatsheet_open()) {
+        cheatsheet_->UpdateBounds(FindAnchorBounds());
     }
 }
 
-void BrowserWindow::ScheduleFindBarBounds() {
-    if (closing_ || find_overlay_ == nullptr || !find_overlay_->visible()) {
+void BrowserWindow::ScheduleAnchoredOverlayBounds() {
+    if (closing_ ||
+        ((find_overlay_ == nullptr || !find_overlay_->visible()) && !cheatsheet_open())) {
         return;
     }
     // The layout that moves the page card runs after this call; re-anchor once it has.
-    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::UpdateFindBarBounds,
-                                                            CefRefPtr<BrowserWindow>(this))));
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(&BrowserWindow::UpdateAnchoredOverlayBounds,
+                                                    CefRefPtr<BrowserWindow>(this))));
+}
+
+// --- Shortcut cheatsheet ----------------------------------------------------------------------
+
+void BrowserWindow::ToggleCheatsheet() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr || chrome_ == nullptr) {
+        return;
+    }
+    if (cheatsheet_ == nullptr) {
+        cheatsheet_ = std::make_unique<CheatsheetOverlay>(
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), icon_resource_root_);
+    }
+    const bool was_open = cheatsheet_->visible();
+    cheatsheet_->Toggle(CheatsheetRows(keymap_), FindAnchorBounds());
+    if (was_open) {
+        FocusBrowserView();
+    }
+}
+
+void BrowserWindow::CloseCheatsheet(bool refocus_page) {
+    CEF_REQUIRE_UI_THREAD();
+    if (!cheatsheet_open()) {
+        return;
+    }
+    cheatsheet_->Hide();
+    if (refocus_page) {
+        FocusBrowserView();
+    }
+}
+
+void BrowserWindow::OnCheatsheetCloseRequested(bool refocus_page) {
+    CEF_REQUIRE_UI_THREAD();
+    // Reached from the close button's press or from a press outside the card: close once that
+    // dispatch is over.
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(&BrowserWindow::CloseCheatsheet,
+                                                    CefRefPtr<BrowserWindow>(this), refocus_page)));
 }
 
 void BrowserWindow::FindInPage(std::string_view query) {
@@ -217,10 +264,14 @@ std::string BrowserWindow::EffectiveUrl(const Tab& tab) const {
     if (ReaderActiveFor(tab)) {
         return reader_sessions_.at(tab.id()).origin_url;
     }
-    return tab.navigation_state().snapshot().url;
+    // A page that never loaded (a background research page) has no committed URL yet: the page
+    // it would open is what the session keeps.
+    const std::string& committed = tab.navigation_state().snapshot().url;
+    return committed.empty() ? tab.startup_url() : committed;
 }
 
 void BrowserWindow::UpdateReaderButton() {
+    RefreshAddressIndicators();
     if (chrome_ == nullptr) {
         return;
     }

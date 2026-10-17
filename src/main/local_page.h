@@ -8,6 +8,7 @@
 // carrying a fixed prefix, which only these pages' client listens to. The
 // pages never navigate away; links are handed to the delegate as "open_url".
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -32,6 +33,9 @@ enum class LocalPageKind : std::uint8_t {
     // ordinary tabs; its messages are accepted from the main frame of such a
     // tab only, and the report is the one named by the URL, never by the page.
     kReport,
+    // The research plan (Plan tab). Like kReport it is the document of an ordinary tab, the
+    // fixed page URL; its messages are accepted from that tab's main frame only.
+    kPlan,
 };
 
 class LocalPageDelegate {
@@ -39,6 +43,7 @@ class LocalPageDelegate {
     virtual ~LocalPageDelegate() = default;
     // One decoded {"type": ...} message from a page (UI thread).
     virtual void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) = 0;
+    virtual void OnLocalPageBrowserCreated(LocalPageKind kind) {}
 };
 
 class LocalPage final {
@@ -54,6 +59,11 @@ class LocalPage final {
     // Sends a state update to the page. Updates sent before the page loaded
     // are replayed once it is ready.
     void Render(const std::string& state_json);
+    // True once the page has loaded; state rendered before that is only queued.
+    [[nodiscard]] bool loaded() const;
+    [[nodiscard]] bool browser_was_created() const;
+    [[nodiscard]] std::optional<std::chrono::steady_clock::duration> BrowserViewAgeAt(
+        std::chrono::steady_clock::time_point now) const;
     // Focuses the page and asks it to focus its primary input.
     void Focus();
     // Stops delivering messages and closes the page's browser.
