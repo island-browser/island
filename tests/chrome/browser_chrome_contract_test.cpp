@@ -222,12 +222,36 @@ TEST(BrowserChromeContractTest, GivenAnAlreadyAppliedGeometryWhenLayoutRepeatsTh
     const ChromeGeometrySnapshot geometry =
         BrowserChrome::LayoutForBounds({.width = 1440, .height = 900}, tokens);
 
-    EXPECT_TRUE(BrowserChrome::NeedsRelayout(std::nullopt, geometry));
-    EXPECT_FALSE(BrowserChrome::NeedsRelayout(geometry, geometry));
+    const ManagedChromeBounds actual = {
+        .rail = geometry.rail_bounds,
+        .toolbar = geometry.toolbar_bounds,
+        .browser_content = geometry.browser_content_bounds,
+        .agent_panel = geometry.agent_panel_bounds,
+    };
+
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(std::nullopt, geometry, actual));
+    EXPECT_FALSE(BrowserChrome::NeedsRelayout(geometry, geometry, actual));
 
     ChromeGeometrySnapshot resized = geometry;
     ++resized.root_bounds.width;
-    EXPECT_TRUE(BrowserChrome::NeedsRelayout(geometry, resized));
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(geometry, resized, actual));
+}
+
+TEST(BrowserChromeContractTest, GivenClobberedChildBoundsWhenGeometryRepeatsThenItIsReapplied) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const ChromeGeometrySnapshot geometry =
+        BrowserChrome::LayoutForBounds({.width = 1440, .height = 900}, tokens);
+    ManagedChromeBounds actual = {
+        .rail = geometry.rail_bounds,
+        .toolbar = geometry.toolbar_bounds,
+        .browser_content = geometry.browser_content_bounds,
+        .agent_panel = geometry.agent_panel_bounds,
+    };
+
+    EXPECT_FALSE(BrowserChrome::NeedsRelayout(geometry, geometry, actual));
+
+    actual.browser_content = geometry.root_bounds;
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(geometry, geometry, actual));
 }
 
 TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStable) {

@@ -711,6 +711,14 @@ class BrowserChrome::PanelDelegate final : public CefPanelDelegate {
         }
     }
 
+    void SetFixedWidth(int width) {
+        preferred_size_.width = width;
+        minimum_size_.width = width;
+        maximum_size_.width = width;
+    }
+
+    void SetPreferredSize(CefSize size) { preferred_size_ = size; }
+
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
     CefSize GetMinimumSize(CefRefPtr<CefView>) override { return minimum_size_; }
     CefSize GetMaximumSize(CefRefPtr<CefView>) override { return maximum_size_; }
@@ -783,17 +791,26 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
 
     void Detach() { chrome_ = nullptr; }
 
-    void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> collapsed_rail,
-                     CefRefPtr<CefPanel> toolbar, CefRefPtr<CefPanel> toolbar_content,
-                     CefRefPtr<CefPanel> address_row, CefRefPtr<CefPanel> browser_content,
-                     CefRefPtr<CefPanel> agent_panel) {
+    void SetChildren(CefRefPtr<CefPanel> rail_host, CefRefPtr<PanelDelegate> rail_host_delegate,
+                     CefRefPtr<CefPanel> content_column, CefRefPtr<CefPanel> rail,
+                     CefRefPtr<CefPanel> collapsed_rail, CefRefPtr<CefPanel> toolbar,
+                     CefRefPtr<CefPanel> toolbar_content, CefRefPtr<CefPanel> address_row,
+                     CefRefPtr<CefPanel> browser_content,
+                     CefRefPtr<PanelDelegate> browser_content_delegate,
+                     CefRefPtr<CefPanel> agent_panel,
+                     CefRefPtr<PanelDelegate> agent_panel_delegate) {
+        rail_host_ = rail_host;
+        rail_host_delegate_ = rail_host_delegate;
+        content_column_ = content_column;
         rail_ = rail;
         collapsed_rail_ = collapsed_rail;
         toolbar_ = toolbar;
         toolbar_content_ = toolbar_content;
         address_row_ = address_row;
         browser_content_ = browser_content;
+        browser_content_delegate_ = browser_content_delegate;
         agent_panel_ = agent_panel;
+        agent_panel_delegate_ = agent_panel_delegate;
     }
 
     void SetTokens(ChromeTokens tokens) {
@@ -810,8 +827,9 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
         applied_geometry_.reset();
     }
 
-    void OnLayoutChanged(CefRefPtr<CefView>, const CefRect& new_bounds) override {
-        if (rail_ == nullptr || browser_content_ == nullptr) {
+    void OnLayoutChanged(CefRefPtr<CefView> view, const CefRect& new_bounds) override {
+        if (applying_layout_ || rail_host_ == nullptr || rail_ == nullptr ||
+            content_column_ == nullptr || browser_content_ == nullptr) {
             return;
         }
 
@@ -821,21 +839,76 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
                                             .width = new_bounds.width,
                                             .height = new_bounds.height},
                                            tokens_, sidebar_expanded_, agent_panel_open_);
-        if (!BrowserChrome::NeedsRelayout(applied_geometry_, geometry)) {
+        const DipRect column_bounds = ToDipRect(content_column_->GetBounds());
+        const auto in_root = [&column_bounds](CefRefPtr<CefPanel> child) {
+            if (child == nullptr) {
+                return DipRect{};
+            }
+            const DipRect bounds = ToDipRect(child->GetBounds());
+            if (bounds.width == 0 && bounds.height == 0) {
+                return DipRect{};
+            }
+            return DipRect{.x = column_bounds.x + bounds.x,
+                           .y = column_bounds.y + bounds.y,
+                           .width = bounds.width,
+                           .height = bounds.height};
+        };
+        const ManagedChromeBounds actual = {
+            .rail = ToDipRect(rail_host_->GetBounds()),
+            .toolbar = in_root(toolbar_),
+            .browser_content = in_root(browser_content_),
+            .agent_panel =
+                agent_panel_ == nullptr ? DipRect{} : ToDipRect(agent_panel_->GetBounds()),
+        };
+        if (!BrowserChrome::NeedsRelayout(applied_geometry_, geometry, actual)) {
             return;
         }
-        // Layout() below can synchronously re-enter this delegate. Publish the geometry first so
-        // that callback observes an already-applied layout instead of starting a feedback loop.
+        // Layout() below can synchronously re-enter this delegate. The explicit guard makes that
+        // nested callback a no-op. The root's BoxLayout then owns the geometry; unlike the old
+        // default FillLayout, it never stretches every chrome region over the whole window.
+        applying_layout_ = true;
         applied_geometry_ = geometry;
-        // Only the shown rail (the full sidebar or the icon rail) takes the rail column.
+        rail_host_delegate_->SetFixedWidth(geometry.rail_bounds.width);
+        browser_content_delegate_->SetPreferredSize(
+            CefSize(geometry.browser_content_bounds.width, geometry.browser_content_bounds.height));
+        agent_panel_delegate_->SetFixedWidth(geometry.agent_panel_bounds.width);
+
+        CefRefPtr<CefPanel> root = view->AsPanel();
+        if (tokens_.sidebar_side == SidebarSide::kRight) {
+            if (!root->GetChildViewAt(0)->IsSame(agent_panel_)) {
+                root->ReorderChildView(agent_panel_, 0);
+                root->ReorderChildView(content_column_, 1);
+                root->ReorderChildView(rail_host_, 2);
+            }
+        } else {
+            if (!root->GetChildViewAt(0)->IsSame(rail_host_)) {
+                root->ReorderChildView(rail_host_, 0);
+                root->ReorderChildView(content_column_, 1);
+                root->ReorderChildView(agent_panel_, 2);
+            }
+        }
+        root->Layout();
+        if (CefRefPtr<CefBoxLayout> column_layout = content_column_->GetLayout()->AsBoxLayout()) {
+            // CEF 150 applies the nested column's remaining main-axis space through its leading
+            // flex slot. The page's exact preferred size below keeps the toolbar at 52 DIP and
+            // gives the page the rest of the column without an ancestor FillLayout.
+            column_layout->SetFlexForView(toolbar_, 1);
+            column_layout->SetFlexForView(browser_content_, 0);
+        }
+        content_column_->Layout();
+        rail_host_->Layout();
+        if (toolbar_ != nullptr && !toolbar_->IsVisible()) {
+            ApplyBounds(toolbar_, {});
+        }
+        if (agent_panel_ != nullptr && !agent_panel_->IsVisible()) {
+            ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
+        }
+
         const CefRefPtr<CefPanel>& shown_rail =
             sidebar_expanded_ || collapsed_rail_ == nullptr ? rail_ : collapsed_rail_;
-        ApplyBounds(shown_rail, geometry.rail_bounds);
-        ApplyBounds(browser_content_, geometry.browser_content_bounds);
         shown_rail->Layout();
         browser_content_->Layout();
         if (toolbar_ != nullptr) {
-            ApplyBounds(toolbar_, geometry.toolbar_bounds);
             // The leading inset clears the traffic lights when the sidebar does not (right side,
             // or the collapsed rail); the row layout is replaced only when its settings change.
             const ToolbarRowKey key = {geometry.toolbar_leading_inset_dip, tokens_.spacing_2_dip,
@@ -851,9 +924,9 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
             toolbar_->Layout();
         }
         if (agent_panel_ != nullptr) {
-            ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
             agent_panel_->Layout();
         }
+        applying_layout_ = false;
         if (chrome_ != nullptr) {
             chrome_->RecordRelayout();
         }
@@ -880,15 +953,21 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
     ChromeTokens tokens_;
     bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool agent_panel_open_ = false;
+    bool applying_layout_ = false;
     std::optional<ChromeGeometrySnapshot> applied_geometry_;
     ToolbarRowKey applied_toolbar_row_;
+    CefRefPtr<CefPanel> rail_host_;
+    CefRefPtr<PanelDelegate> rail_host_delegate_;
+    CefRefPtr<CefPanel> content_column_;
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> collapsed_rail_;
     CefRefPtr<CefPanel> toolbar_;
     CefRefPtr<CefPanel> toolbar_content_;
     CefRefPtr<CefPanel> address_row_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<PanelDelegate> browser_content_delegate_;
     CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<PanelDelegate> agent_panel_delegate_;
 
     IMPLEMENT_REFCOUNTING(RootPanelDelegate);
 };
@@ -1025,6 +1104,11 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     root_delegate_ = new RootPanelDelegate(this, tokens_);
     root_ = CefPanel::CreatePanel(root_delegate_);
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
+    CefBoxLayoutSettings root_settings;
+    root_settings.horizontal = static_cast<int>(true);
+    root_settings.between_child_spacing = 0;
+    root_settings.default_flex = 0;
+    root_layout_ = root_->SetToBoxLayout(root_settings);
 
     // A zero height reads as "no preference" to CEF, which then asks the layout manager: the
     // rail's preferred width followed its tab list's (a scroll view grows its content to fill
@@ -1392,8 +1476,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     collapsed_bottom_group_->AddChildView(collapsed_space_list_);
     collapsed_rail_->AddChildView(collapsed_bottom_group_);
 
-    browser_content_ = CefPanel::CreatePanel(new PanelDelegate(
-        this, CefSize(control_height, control_height), CefSize(control_height, control_height)));
+    browser_content_delegate_ = new PanelDelegate(this, CefSize(control_height, control_height),
+                                                  CefSize(control_height, control_height));
+    browser_content_ = CefPanel::CreatePanel(browser_content_delegate_);
     browser_content_->SetID(static_cast<int>(ChromeViewId::kBrowserContent));
     browser_content_layout_ = browser_content_->SetToBoxLayout(FloatingCanvasLayout(ContentInsets(
         {.x = 0, .y = 0, .width = 1200, .height = 800}, tokens_, sidebar_expanded_, false)));
@@ -1404,7 +1489,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     // The agent panel column floats on the same canvas as the page card: the
     // gutter on its top, right, and bottom matches the content gutter, and the
     // content's own right gutter separates the two.
-    agent_panel_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, 0)));
+    agent_panel_delegate_ = new PanelDelegate(this, CefSize(0, 0));
+    agent_panel_ = CefPanel::CreatePanel(agent_panel_delegate_);
     agent_panel_->SetID(static_cast<int>(ChromeViewId::kAgentPanel));
     {
         const CardInsets insets = AgentPanelInsets({.x = 0, .y = 0, .width = 1200, .height = 800},
@@ -1420,14 +1506,18 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     // Native puts navigation in a 52 DIP toolbar above the page. Arc and Graphite keep the
     // controls in the sidebar; ApplyLookStructure reparents the same views when the preset
     // changes so their state, delegates and stable IDs are never duplicated.
-    CefRefPtr<SurfacePanelDelegate> toolbar_delegate =
-        new SurfacePanelDelegate(this, SurfaceSlot::kToolbar, CefSize(0, NativeToolbarHeightDip()));
+    const CefSize toolbar_size(0, NativeToolbarHeightDip());
+    CefRefPtr<SurfacePanelDelegate> toolbar_delegate = new SurfacePanelDelegate(
+        this, SurfaceSlot::kToolbar, toolbar_size, toolbar_size, toolbar_size);
     surface_delegates_.push_back(toolbar_delegate);
     toolbar_ = CefPanel::CreatePanel(toolbar_delegate);
     toolbar_->SetID(static_cast<int>(ChromeViewId::kToolbar));
     CefBoxLayoutSettings toolbar_stack;
     toolbar_stack.horizontal = static_cast<int>(false);
     toolbar_stack.between_child_spacing = 0;
+    const int toolbar_content_inset = NativeToolbarHeightDip() - NativeAddressHeightDip() - 1;
+    toolbar_stack.inside_border_insets = CefInsets(
+        toolbar_content_inset / 2, 0, toolbar_content_inset - toolbar_content_inset / 2, 0);
     CefRefPtr<CefBoxLayout> toolbar_stack_layout = toolbar_->SetToBoxLayout(toolbar_stack);
 
     toolbar_content_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
@@ -1453,27 +1543,40 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     toolbar_->AddChildView(toolbar_hairline_);
     toolbar_->SetVisible(false);
 
-    // CEF's default panel layout stretches every child to the panel's whole size. The
-    // root therefore laid the rail out window-wide on each pass before RootPanelDelegate
-    // narrowed it again, and a CefScrollView inside it grew (and kept) a window-wide content
-    // view: a permanent horizontal scrollbar and the vertical one that comes with it. The
-    // rail sits in a host with a horizontal box layout instead: the host may stretch, the
-    // rail keeps its fixed preferred width.
-    CefRefPtr<CefPanel> rail_host = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    // The root uses one horizontal BoxLayout instead of the default FillLayout. Its middle
+    // column owns the toolbar and page vertically, so no layout pass can stretch those regions
+    // over the sidebar. The rail host still isolates the scroll view's preferred width.
+    rail_host_delegate_ = new PanelDelegate(this, CefSize(tokens_.rail_width_dip, 0));
+    rail_host_delegate_->SetFixedWidth(tokens_.rail_width_dip);
+    rail_host_ = CefPanel::CreatePanel(rail_host_delegate_);
     {
         CefBoxLayoutSettings host_settings;
         host_settings.horizontal = static_cast<int>(true);
         host_settings.between_child_spacing = 0;
-        rail_host->SetToBoxLayout(host_settings);
+        rail_host_->SetToBoxLayout(host_settings);
     }
-    rail_host->AddChildView(sidebar_);
-    rail_host->AddChildView(collapsed_rail_);
-    root_->AddChildView(rail_host);
-    root_->AddChildView(toolbar_);
-    root_->AddChildView(browser_content_);
+    rail_host_->AddChildView(sidebar_);
+    rail_host_->AddChildView(collapsed_rail_);
+
+    content_column_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    CefBoxLayoutSettings content_column_settings;
+    content_column_settings.horizontal = static_cast<int>(false);
+    content_column_settings.between_child_spacing = 0;
+    content_column_settings.default_flex = 0;
+    content_column_layout_ = content_column_->SetToBoxLayout(content_column_settings);
+    content_column_->AddChildView(toolbar_);
+    content_column_->AddChildView(browser_content_);
+    content_column_layout_->SetFlexForView(toolbar_, 1);
+    content_column_layout_->SetFlexForView(browser_content_, 0);
+
+    root_->AddChildView(rail_host_);
+    root_->AddChildView(content_column_);
     root_->AddChildView(agent_panel_);
-    root_delegate_->SetChildren(sidebar_, collapsed_rail_, toolbar_, toolbar_content_, address_row_,
-                                browser_content_, agent_panel_);
+    root_layout_->SetFlexForView(content_column_, 1);
+    root_delegate_->SetChildren(rail_host_, rail_host_delegate_, content_column_, sidebar_,
+                                collapsed_rail_, toolbar_, toolbar_content_, address_row_,
+                                browser_content_, browser_content_delegate_, agent_panel_,
+                                agent_panel_delegate_);
     ApplyLookStructure();
     ApplyControlTheme();
     // Apply the expand state before the first layout so no frame ever shows a rail the
@@ -2115,6 +2218,7 @@ void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
         browser_content_->RemoveChildView(split_divider_);
     }
     if (browser_view_ != nullptr && browser_view->IsSame(browser_view_)) {
+        browser_content_->Layout();
         return;
     }
     if (browser_view_ != nullptr) {

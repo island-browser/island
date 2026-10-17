@@ -209,6 +209,17 @@ struct ChromeGeometrySnapshot {
     bool operator==(const ChromeGeometrySnapshot&) const = default;
 };
 
+// Bounds of the four chrome regions managed by RootPanelDelegate. A layout pass may overwrite
+// these without changing the requested ChromeGeometrySnapshot.
+struct ManagedChromeBounds {
+    DipRect rail;
+    DipRect toolbar;
+    DipRect browser_content;
+    DipRect agent_panel;
+
+    bool operator==(const ManagedChromeBounds&) const = default;
+};
+
 struct AddressSelectionSnapshot {
     bool has_focus = false;
     bool has_selection = false;
@@ -574,11 +585,15 @@ class BrowserChrome final : public NavigationObserver {
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
                                                                 bool agent_panel_open);
-    // Root layout callbacks can re-enter while child panels are laid out. Apply a geometry only
-    // once; callers store the new value before touching children so that re-entry is a no-op.
+    // A repeated root snapshot is a no-op only while every managed region remains at its target.
+    // The live-bounds input keeps this decision CEF-free and testable.
     [[nodiscard]] static bool NeedsRelayout(const std::optional<ChromeGeometrySnapshot>& applied,
-                                            const ChromeGeometrySnapshot& requested) {
-        return !applied.has_value() || *applied != requested;
+                                            const ChromeGeometrySnapshot& requested,
+                                            const ManagedChromeBounds& actual) {
+        return !applied.has_value() || *applied != requested ||
+               actual.rail != requested.rail_bounds || actual.toolbar != requested.toolbar_bounds ||
+               actual.browser_content != requested.browser_content_bounds ||
+               actual.agent_panel != requested.agent_panel_bounds;
     }
 
     // Insets of the page card (browser_view_bounds inside browser_content_bounds) and of the
@@ -920,8 +935,14 @@ class BrowserChrome final : public NavigationObserver {
     std::shared_ptr<BrowserChrome*> alive_;
     bool theme_reapply_pending_ = false;
     CefRefPtr<CefPanel> root_;
+    CefRefPtr<CefBoxLayout> root_layout_;
+    CefRefPtr<CefPanel> rail_host_;
+    CefRefPtr<PanelDelegate> rail_host_delegate_;
+    CefRefPtr<CefPanel> content_column_;
+    CefRefPtr<CefBoxLayout> content_column_layout_;
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<PanelDelegate> browser_content_delegate_;
     CefRefPtr<CefPanel> toolbar_;
     CefRefPtr<CefPanel> toolbar_content_;
     CefRefPtr<CefPanel> toolbar_hairline_;
@@ -931,6 +952,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefBoxLayout> rail_layout_;
     CefRefPtr<CefBoxLayout> collapsed_layout_;
     CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<PanelDelegate> agent_panel_delegate_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
     std::string update_notice_;

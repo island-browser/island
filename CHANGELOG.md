@@ -15,6 +15,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Keep the Native sidebar and toolbar visible through deferred page swaps by replacing the root
+  fill layout with an explicit rail/content/agent box layout, without restoring idle relayouts.
 - Stop unchanged native-chrome layout callbacks from re-laying out the active page in a loop.
 - The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
   control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
