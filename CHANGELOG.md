@@ -55,6 +55,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Native space segments with an icon now show only that centered 16 DIP icon in equal-width
+  segments (the name stays in the tooltip, the accessible name and the sidebar header). Spaces
+  without an icon keep their name when it fits, else their initial, never a lone ellipsis.
 - Polished the Native sidebar footer into one aligned, hairline-separated control group with a
   raised space track, same-height ghost actions, and a quieter tinted Agent row.
 - Native's Back and Forward buttons now share one continuous toolbar surface, removing the thin

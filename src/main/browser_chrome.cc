@@ -1843,15 +1843,31 @@ std::string BrowserChrome::SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& e
     if (look != LookPreset::kNative) {
         return SpacePillLabel(entry);
     }
-    if (space_count > 4) {
-        // A chosen icon carries the compact segment by itself; spaces without one retain their
-        // initial so they never become anonymous.
-        return entry.icon_id.empty()
-                   ? SpacePillLabel(
-                         {.color = entry.color, .name = entry.name, .icon_id = {}, .active = false})
-                   : std::string();
+    if (!entry.icon_id.empty()) {
+        // A chosen icon is the whole segment; the name stays in the tooltip, the accessible name
+        // and the sidebar header.
+        return std::string();
     }
-    return TruncateCollectionTitle(entry.name);
+    const SpaceSwitcherEntrySnapshot initial_only = {
+        .color = entry.color, .name = entry.name, .icon_id = {}, .active = false};
+    if (space_count > 4) {
+        // Spaces without an icon retain their initial so they never become anonymous.
+        return SpacePillLabel(initial_only);
+    }
+    // Estimate how many characters one equal-width segment holds; never show a lone ellipsis.
+    constexpr int kTrackDip = 125;
+    constexpr int kSegmentPaddingDip = 16;
+    constexpr int kCharDip = 7;
+    const int fits = (kTrackDip / static_cast<int>(std::max<std::size_t>(space_count, 1)) -
+                      kSegmentPaddingDip) / kCharDip;
+    std::size_t characters = 0;
+    for (std::size_t index = 0; index < entry.name.size();
+         index = AdvanceUtf8Character(entry.name, index)) {
+        ++characters;
+    }
+    // The whole name or the initial: a clipped prefix with an ellipsis reads as noise here.
+    return static_cast<int>(characters) <= fits ? TruncateCollectionTitle(entry.name)
+                                                : SpacePillLabel(initial_only);
 }
 
 std::string BrowserChrome::ActiveSpaceSectionTitle() const {
@@ -2190,18 +2206,23 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     const int pill_height = native ? switcher.segment_dip : RowHeight();
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
+        const bool native_icon = native && !entry.icon_id.empty();
         SpaceEntryViews views;
-        views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, pill_height)));
+        views.row = CefPanel::CreatePanel(new PanelDelegate(
+            this, CefSize(0, pill_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry));
-        views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
+        CefRefPtr<CefBoxLayout> outline_layout =
+            views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
         views.inner = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
         CefBoxLayoutSettings pill_settings;
         pill_settings.horizontal = static_cast<int>(true);
         pill_settings.between_child_spacing = tokens_.spacing_1_dip;
-        pill_settings.inside_border_horizontal_spacing = tokens_.spacing_2_dip;
+        pill_settings.inside_border_horizontal_spacing =
+            native_icon ? kHairlineDip : tokens_.spacing_2_dip;
         pill_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
         CefRefPtr<CefBoxLayout> pill_layout = views.inner->SetToBoxLayout(pill_settings);
         views.row->AddChildView(views.inner);
+        outline_layout->SetFlexForView(views.inner, 1);
 
         // Arc and Graphite retain the color square only as the no-icon fallback. Native never
         // shows space color; its chosen icon lives on the segment button beside the name.
@@ -2222,14 +2243,14 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         views.name->SetTooltipText(entry.name);
         views.name->SetFocusable(true);
         views.name->SetInkDropEnabled(true);
+        views.name->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
         views.name->SetFontList(
             FontList(12, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         views.name->SetMinimumSize(
             CefSize(pill_height - 2 * kHairlineDip - 2 * tokens_.spacing_2_dip,
                     pill_height - 2 * kHairlineDip));
         views.inner->AddChildView(views.name);
-        // Native segments share the track: each segment and its label take an equal flex
-        // share so the selected surface covers the whole segment, not the label's minimum.
+        // Native labels fill their segment so the selected surface covers the whole cell.
         if (native) {
             pill_layout->SetFlexForView(views.name, 1);
         }
@@ -3196,7 +3217,10 @@ void BrowserChrome::ApplyCollectionTheme() {
             const ArgbColor icon_color =
                 tokens_.look == LookPreset::kNative ? colors.title : entry.color;
             const std::optional<CefRefPtr<CefImage>> icon =
-                icon_catalog_.LoadSpaceIcon(entry.icon_id, icon_color, ChromeIconSize::k15);
+                icon_catalog_.LoadSpaceIcon(entry.icon_id, icon_color,
+                                            tokens_.look == LookPreset::kNative
+                                                ? ChromeIconSize::k16
+                                                : ChromeIconSize::k15);
             SetAllStateImages(views.name, icon.has_value() ? *icon : nullptr);
         } else {
             SetAllStateImages(views.name, nullptr);

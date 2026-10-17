@@ -498,14 +498,34 @@ TEST(BrowserChromeContractTest, GivenAnIconThenItReplacesTheArcColorMark) {
               (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcherEntryName}));
 }
 
-TEST(BrowserChromeNativeContractTest, GivenCompactSegmentsThenAChosenIconReplacesTheInitial) {
-    const SpaceSwitcherEntrySnapshot icon = {
-        .name = "Work", .icon_id = "briefcase", .active = false};
-    const SpaceSwitcherEntrySnapshot fallback = {.name = "Personal", .active = false};
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kNative), "");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(fallback, 5, LookPreset::kNative), "P");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 2, LookPreset::kNative), "Work");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kArc), "W");
+TEST(BrowserChromeNativeContractTest, GivenIconSegmentsThenTheyShowOnlyTheIcon) {
+    for (const bool active : {false, true}) {
+        const SpaceSwitcherEntrySnapshot icon = {
+            .name = "Work", .icon_id = "briefcase", .active = active};
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 2, LookPreset::kNative), "");
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kNative), "");
+    }
+    const SpaceSwitcherEntrySnapshot arc = {.name = "Work", .icon_id = "briefcase"};
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(arc, 5, LookPreset::kArc), "W");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitialNeverLoneEllipsis) {
+    const SpaceSwitcherEntrySnapshot shorty = {.name = "Home", .active = false};
+    const SpaceSwitcherEntrySnapshot longer = {.name = "Personal projects", .active = false};
+    const SpaceSwitcherEntrySnapshot lower = {.name = "École supérieure", .active = false};
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 1, LookPreset::kNative), "Home");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 5, LookPreset::kNative), "H");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative),
+              "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 4, LookPreset::kNative), "P");
+    for (std::size_t count = 1; count <= 8; ++count) {
+        for (const SpaceSwitcherEntrySnapshot* entry : {&shorty, &longer, &lower}) {
+            const std::string label = BrowserChrome::SpaceSegmentLabel(*entry, count,
+                                                                       LookPreset::kNative);
+            EXPECT_NE(label, "\xE2\x80\xA6");
+            EXPECT_FALSE(label.empty());
+        }
+    }
 }
 
 TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAndClosedDiffer) {
