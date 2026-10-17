@@ -194,6 +194,7 @@ hand-maintained project instructions and take precedence over anything a nested 
 | `README.md` | Human-facing project overview |
 | `VERSION` | The single source of the version (SemVer); read by CMake and `scripts/version.py` |
 | `CHANGELOG.md` | Keep-a-Changelog release notes; the site repository renders them into its changelog page at build time |
+| `.gitbook.yaml` | GitBook Git Sync: serves `docs/user-guide/` (README.md, SUMMARY.md) |
 | `.clang-format` | Google base, 4-space indent, 100 columns, left-aligned pointers |
 
 ### Search build
