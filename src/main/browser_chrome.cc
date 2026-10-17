@@ -59,6 +59,8 @@ int ControlHeight(const ChromeTokens& tokens) { return tokens.control_height_dip
 // outlined control is a panel painted with the hairline color that insets its
 // single child by this many DIP.
 constexpr int kHairlineDip = 1;
+// Native paints focus as a 2 DIP accent ring; the row inset is that ring.
+constexpr int kNativeFocusRingDip = 2;
 
 int DividerHeight(const ChromeTokens& tokens) {
     return tokens.spacing_1_dip / tokens.spacing_1_dip;
@@ -440,7 +442,7 @@ AddressPlateStyle BrowserChrome::AddressPlateStyleFor(const ChromeTokens& tokens
     if (tokens.look == LookPreset::kNative) {
         return {.fill = tokens.fill,
                 .outside = tokens.surface_secondary,
-                .outline_dip = 0,
+                .outline_dip = kNativeFocusRingDip,
                 .radius_dip = NativeAddressRadiusDip()};
     }
     return {.fill = tokens.well,
@@ -451,7 +453,8 @@ AddressPlateStyle BrowserChrome::AddressPlateStyleFor(const ChromeTokens& tokens
 
 ArgbColor BrowserChrome::AddressOutlineColor(const ChromeTokens& tokens, bool focused) {
     if (tokens.look == LookPreset::kNative) {
-        return AddressPlateStyleFor(tokens).fill;
+        // The ring is the row's inset: plate-colored while idle, the accent while focused.
+        return focused ? tokens.accent : AddressPlateStyleFor(tokens).fill;
     }
     return focused ? tokens.accent : tokens.border;
 }

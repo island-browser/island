@@ -167,14 +167,14 @@ TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAn
     EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
 }
 
-TEST(BrowserWindowTest, GivenNativeAddressWhenStyledThenItIsARoundedFillPlateWithoutAnOutline) {
+TEST(BrowserWindowTest, GivenNativeAddressWhenStyledThenItIsARoundedFillPlateWithATwoDipRingInset) {
     const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
 
     const AddressPlateStyle style = BrowserChrome::AddressPlateStyleFor(tokens);
 
     EXPECT_EQ(style.fill, tokens.fill);
     EXPECT_EQ(style.outside, tokens.surface_secondary);
-    EXPECT_EQ(style.outline_dip, 0);
+    EXPECT_EQ(style.outline_dip, 2);
     EXPECT_EQ(style.radius_dip, 8);
 }
 
@@ -209,12 +209,12 @@ TEST(BrowserWindowTest, GivenArcAddressWhenPatchedThenItKeepsTheRailPillOnlyWhil
         BrowserChrome::AddressCornerPatch(tokens, address, /*sidebar_expanded=*/false).has_value());
 }
 
-TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenNoHairlineOrRingIsPainted) {
+TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPainted) {
     const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
 
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/false), native.fill);
-    EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/true), native.fill);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/true), native.accent);
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/false), arc.border);
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
