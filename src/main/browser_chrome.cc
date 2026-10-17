@@ -2214,6 +2214,22 @@ void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
     // Leaving split view tears the second pane and divider down even when the
     // surviving view is the one already attached. The divider panel itself is
     // kept for the next split, only removed from the view tree.
+    if (split_view_ != nullptr && browser_view->IsSame(split_view_)) {
+        // The former second pane becomes the single view. It stays in the tree: removing and
+        // re-adding a young CefBrowserView can crash CEF. The other pane and the divider leave.
+        if (browser_view_ != nullptr) {
+            browser_content_->RemoveChildView(browser_view_);
+        }
+        browser_content_->RemoveChildView(split_divider_);
+        browser_view_ = split_view_;
+        split_view_ = nullptr;
+        browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
+        if (browser_content_layout_ != nullptr) {
+            browser_content_layout_->SetFlexForView(browser_view_, 1);
+        }
+        browser_content_->Layout();
+        return;
+    }
     if (split_view_ != nullptr) {
         browser_content_->RemoveChildView(split_view_);
         split_view_ = nullptr;
@@ -2245,6 +2261,16 @@ void BrowserChrome::AttachSplitBrowserViews(CefRefPtr<CefBrowserView> first,
     // immediately re-adding a newly created CefBrowserView can crash CEF while OnAfterCreated is
     // still settling it. The divider panel is reused across splits.
     const bool first_already_attached = browser_view_ != nullptr && browser_view_->IsSame(first);
+    if (first_already_attached && split_view_ != nullptr && split_view_->IsSame(second)) {
+        // The same pair is already attached: neither pane (nor the divider) is removed.
+        const int flex = SplitFlexForRatio(split_ratio_);
+        if (browser_content_layout_ != nullptr) {
+            browser_content_layout_->SetFlexForView(browser_view_, flex);
+            browser_content_layout_->SetFlexForView(split_view_, 100 - flex);
+        }
+        browser_content_->Layout();
+        return;
+    }
     if (split_view_ != nullptr) {
         browser_content_->RemoveChildView(split_view_);
         split_view_ = nullptr;

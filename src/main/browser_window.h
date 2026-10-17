@@ -743,6 +743,8 @@ class BrowserWindow : public CefClient,
         CefRefPtr<CefBrowserView> view;
         std::optional<TabId> tab;
         LocalPage* local_page = nullptr;
+        // The view sits in the split's second slot (BrowserChrome::split_view_).
+        bool second_slot = false;
     };
     using ViewSwapClock = std::chrono::steady_clock;
     static constexpr std::chrono::milliseconds kMinimumAttachedViewAge{100};

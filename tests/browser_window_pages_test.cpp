@@ -1461,6 +1461,53 @@ TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves)
     EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
 }
 
+TEST(BrowserWindowPagesTest, SelectingTheSecondPaneOfAYoungSplitSwapsAtOnce) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId first = SpaceAt(*window, 0).tabs()[0].id();
+    const TabId second = SpaceAt(*window, 0).tabs()[1].id();
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    ASSERT_TRUE(window->SplitTabs(first, second));
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewsForSwapTest({first, second});
+    window->BrowserCreatedForViewSwapTest(first);
+    window->BrowserCreatedForViewSwapTest(second);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
+
+    // The pair is unchanged, so both young panes stay in the tree and nothing waits.
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+}
+
+TEST(BrowserWindowPagesTest, UnsplittingWithTheSecondPaneActiveHoldsTheSwapForTheFirstPane) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId first = SpaceAt(*window, 0).tabs()[0].id();
+    const TabId second = SpaceAt(*window, 0).tabs()[1].id();
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    ASSERT_TRUE(window->SplitTabs(first, second));
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewsForSwapTest({first, second});
+    window->BrowserCreatedForViewSwapTest(first);
+    window->BrowserCreatedForViewSwapTest(second);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    window->ExecuteCommand(BrowserCommand::kToggleSplit);
+
+    // The second pane becomes the single view and stays; the young first pane leaves.
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+}
+
 TEST(BrowserWindowPagesTest, AnAlreadyOldViewSwapsAtOnce) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->ExecuteCommand(BrowserCommand::kNewTab);

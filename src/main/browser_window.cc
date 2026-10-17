@@ -3785,7 +3785,9 @@ bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
     }
     const Space& space = active_space();
     if (space.split().has_value()) {
-        return *attached.tab == space.split()->first || *attached.tab == space.split()->second;
+        // A pane that changes slot is removed and re-added by the attach, so it leaves.
+        return *attached.tab == (attached.second_slot ? space.split()->second
+                                                      : space.split()->first);
     }
     return *attached.tab == space.active_tab_id();
 }
@@ -3963,7 +3965,8 @@ void BrowserWindow::SetAttachedViewsForSwapTest(std::vector<TabId> tabs) {
             continue;
         }
         tab->SetBrowserView(nullptr);
-        attached.push_back(AttachedView{.view = nullptr, .tab = tab_id});
+        attached.push_back(
+            AttachedView{.view = nullptr, .tab = tab_id, .second_slot = !attached.empty()});
     }
     attached_view_for_test_ = true;
     SetAttachedViews(std::move(attached));
@@ -4022,7 +4025,8 @@ void BrowserWindow::AttachActiveTabBrowserView() {
             EnsureTabBrowserView(*second)) {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
             SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
-                              AttachedView{.view = second->browser_view(), .tab = second->id()}});
+                              AttachedView{.view = second->browser_view(), .tab = second->id(),
+                                         .second_slot = true}});
             return;
         }
     }
