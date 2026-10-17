@@ -393,6 +393,7 @@ bool BrowserWindow::RestoreSessionState(const SessionState& state) {
                 tab.SetStartupUrl(address.url);
             }
             tab.SetPinned(tab_state.pinned && !stale_parents.contains(tab_state.id));
+            tab.SetOpenedByAgent(tab_state.opened_by_agent);
             if (tab_state.group_parent.has_value() &&
                 restored_ids.contains(*tab_state.group_parent) &&
                 !stale_parents.contains(*tab_state.group_parent)) {
@@ -452,9 +453,9 @@ SessionState BrowserWindow::BuildSessionState() const {
                 tab.group_parent().has_value() && saved_ids.contains(*tab.group_parent())
                     ? tab.group_parent()
                     : std::nullopt;
-            space_state.tabs.push_back(TabState{tab.id(), EffectiveUrl(tab), tab.pinned(),
-                                                group_parent,
-                                                group_parent.has_value() ? tab.group_label() : ""});
+            space_state.tabs.push_back(
+                TabState{tab.id(), EffectiveUrl(tab), tab.pinned(), group_parent,
+                         group_parent.has_value() ? tab.group_label() : "", tab.opened_by_agent()});
         }
         if (space_state.tabs.empty()) {
             continue;
@@ -715,11 +716,12 @@ Space& BrowserWindow::AppendSpace(std::string name) {
                                 kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]);
 }
 
-void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
+void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
     Space& space = active_space();
     DetachActiveTabObservers();
     Tab tab{NextTabId()};
     tab.SetStartupUrl(std::move(startup_url));
+    tab.SetOpenedByAgent(opened_by_agent);
     space.AppendTab(std::move(tab));
     Tab* appended = active_tab();
     if (chrome_ != nullptr && appended != nullptr) {
@@ -4710,6 +4712,27 @@ void BrowserWindow::SavePrefs() const {
         return;
     }
     static_cast<void>(PrefsStore::Save(PrefsStore::DefaultPrefsFilePath(), prefs_));
+}
+
+void BrowserWindow::AddTrustedSite(std::string host) {
+    const std::vector<std::string> normalized = NormalizeTrustedSites({std::move(host)});
+    if (normalized.empty() ||
+        std::find(prefs_.agent_trusted_sites.begin(), prefs_.agent_trusted_sites.end(),
+                  normalized.front()) != prefs_.agent_trusted_sites.end()) {
+        return;
+    }
+    prefs_.agent_trusted_sites.push_back(normalized.front());
+    SavePrefs();
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::RemoveTrustedSite(std::string_view host) {
+    const std::vector<std::string> normalized = NormalizeTrustedSites({std::string(host)});
+    if (normalized.empty() || std::erase(prefs_.agent_trusted_sites, normalized.front()) == 0) {
+        return;
+    }
+    SavePrefs();
+    ScheduleLocalPagesRender();
 }
 
 void BrowserWindow::ApplyContentBlockerPolicy() {

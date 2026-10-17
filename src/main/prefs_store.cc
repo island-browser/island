@@ -10,6 +10,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "action_gate.h"
 #include "agent_providers.h"
 #include "json_util.h"
 #include "tab_sleep_policy.h"
@@ -21,6 +22,11 @@ static_assert(agent::kDefaultAgentProviderId == "claude",
               "PrefsState::agent_provider defaults to the default provider");
 
 PrefsLoadResult Fail(PrefsError error) { return {error, PrefsState{}}; }
+
+// A bare host ("Example.com") or a URL: HostOf needs a scheme, so one is added to a bare host.
+std::string TrustedHostOf(const std::string& entry) {
+    return agent::HostOf(entry.find("://") == std::string::npos ? "https://" + entry : entry);
+}
 
 PrefsLoadResult ParsePrefsState(const json::Value& root) {
     if (!root.IsObject() || !root.HasRequiredInt("version") ||
@@ -168,6 +174,19 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             state.content_blocker_allowlist.push_back(site.string_val);
         }
     }
+    if (const json::Value* trusted = root.FindMember("agent_trusted_sites")) {
+        if (!trusted->IsArray()) {
+            return Fail(PrefsError::kSchemaError);
+        }
+        std::vector<std::string> sites;
+        for (const json::Value& site : trusted->array_val) {
+            if (!site.IsString()) {
+                return Fail(PrefsError::kSchemaError);
+            }
+            sites.push_back(site.string_val);
+        }
+        state.agent_trusted_sites = NormalizeTrustedSites(sites);
+    }
     return {PrefsError::kNone, state};
 }
 
@@ -252,6 +271,15 @@ std::string SerializeToJson(const PrefsState& state) {
     w.Key("full_bleed");
     w.BoolValue(a.full_bleed);
     w.EndObject();
+    if (!state.agent_trusted_sites.empty()) {
+        w.Key("agent_trusted_sites");
+        w.StartArray();
+        for (const std::string& site : state.agent_trusted_sites) {
+            w.ArrayElement();
+            w.StringValue(site);
+        }
+        w.EndArray();
+    }
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);
@@ -262,6 +290,18 @@ std::string SerializeToJson(const PrefsState& state) {
 }
 
 }  // namespace
+
+std::vector<std::string> NormalizeTrustedSites(const std::vector<std::string>& sites) {
+    std::vector<std::string> normalized;
+    for (const std::string& site : sites) {
+        std::string host = TrustedHostOf(site);
+        if (!host.empty() &&
+            std::find(normalized.begin(), normalized.end(), host) == normalized.end()) {
+            normalized.push_back(std::move(host));
+        }
+    }
+    return normalized;
+}
 
 std::string ThemePreferenceToString(ThemePreference preference) {
     switch (preference) {

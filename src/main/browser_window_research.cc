@@ -528,7 +528,7 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
     if (!location.has_value() || location->first != active_space_index_) {
         // The agent tools address the active space, so a Plan hub elsewhere gets no group: the
         // page opens as an ordinary tab and the view stays where the person left it.
-        AppendTabToActiveSpace(std::move(startup_url));
+        AppendTabToActiveSpace(std::move(startup_url), /*opened_by_agent=*/true);
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
     return AppendChildOfPlan(location->first, std::move(startup_url), std::move(node_id),
@@ -542,6 +542,8 @@ TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string star
     const TabId id = tab.id();
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetGroupLabel(std::move(label));
+    // Every page under the Plan tab is a research page the agent opened for the running plan.
+    tab.SetOpenedByAgent(true);
     if (activate) {
         // The model changes first (space, then selection) and the view is attached once; the
         // browser view is created while the tab is attached (EnsureTabBrowserView).
@@ -571,7 +573,7 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
         return false;
     }
     if (!research_.has_value() || !plan_tab_.has_value()) {
-        AppendTabToActiveSpace(std::move(*url));
+        AppendTabToActiveSpace(std::move(*url), /*opened_by_agent=*/true);
         return true;
     }
     const std::optional<agent::PlanNode> node = RunningPlanNode();

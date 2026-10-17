@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace island {
 namespace {
@@ -355,6 +357,24 @@ TEST(PrefsStoreTest, GivenThemeTokensWhenConvertedThenTheyRoundTripStrictly) {
     EXPECT_FALSE(ThemePreferenceFromString("DARK", parsed));
     EXPECT_FALSE(ThemePreferenceFromString("", parsed));
     EXPECT_EQ(ThemePreferenceToString(ThemePreference::kLight), "light");
+}
+
+TEST(PrefsStoreTest, TrustedSitesRoundTripNormalizedAndDeduplicated) {
+    const std::filesystem::path path = TempPath("trusted_sites.json");
+    WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"system",)"
+                    R"("agent_trusted_sites":["WWW.Example.com","example.com","","Shop.Test"]})");
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.agent_trusted_sites,
+              (std::vector<std::string>{"example.com", "shop.test"}));
+
+    ASSERT_EQ(PrefsStore::Save(path, loaded.state), PrefsError::kNone);
+    EXPECT_EQ(PrefsStore::Load(path).state.agent_trusted_sites, loaded.state.agent_trusted_sites);
+
+    WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"system",)"
+                    R"("agent_trusted_sites":"example.com"})");
+    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    std::filesystem::remove(path);
 }
 
 }  // namespace

@@ -52,6 +52,11 @@ class Tab {
     void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
     [[nodiscard]] bool pinned() const noexcept { return pinned_; }
 
+    // Whether the agent opened this tab (browser_open_tab, or a research branch page). The agent
+    // may navigate and close such a tab without asking; a tab the person opened is theirs.
+    void SetOpenedByAgent(bool opened) noexcept { opened_by_agent_ = opened; }
+    [[nodiscard]] bool opened_by_agent() const noexcept { return opened_by_agent_; }
+
     // Research pages are ordinary tabs grouped one level below their Plan tab. The optional
     // parent is a stable TabId so reordering never breaks the relationship; the label is the
     // small branch kicker shown above the child title in the sidebar.
@@ -128,6 +133,7 @@ class Tab {
     double saved_scroll_y_ = 0.0;
     std::string startup_url_;
     bool pinned_ = false;
+    bool opened_by_agent_ = false;
     std::optional<TabId> group_parent_;
     std::string group_label_;
     NavigationState navigation_state_;

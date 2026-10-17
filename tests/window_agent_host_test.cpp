@@ -246,5 +246,21 @@ TEST(WindowAgentHostTest, PinnedTabsGroupAtTheFront) {
     EXPECT_EQ(ActiveSpace(*window).pinned_count(), 0U);
 }
 
+TEST(WindowAgentHostTest, OpenTabMarksTheTabAsOpenedByAgent) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(host.OpenTab("https://docs.test/a").ok);
+
+    const Space& space = ActiveSpace(*window);
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_FALSE(space.tabs()[0].opened_by_agent());
+    EXPECT_TRUE(space.tabs()[1].opened_by_agent());
+
+    const std::vector<agent::AgentTabInfo> listed = host.ListTabs();
+    ASSERT_EQ(listed.size(), 2U);
+    EXPECT_FALSE(listed[0].opened_by_agent);
+    EXPECT_TRUE(listed[1].opened_by_agent);
+}
+
 }  // namespace
 }  // namespace island

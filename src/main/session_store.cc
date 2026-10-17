@@ -52,6 +52,10 @@ void WriteTabState(json::Writer& w, const TabState& tab) {
         w.Key("group_label");
         w.StringValue(tab.group_label);
     }
+    if (tab.opened_by_agent) {
+        w.Key("opened_by_agent");
+        w.BoolValue(true);
+    }
     w.EndObject();
 }
 
@@ -210,6 +214,12 @@ LoadResult ParseSessionState(const json::Value& root) {
                     return {SessionState::Default(), SessionError::kSchemaError};
                 }
                 tab_state.group_label = label->string_val;
+            }
+            if (const json::Value* opened = tab_val.FindMember("opened_by_agent")) {
+                if (opened->type != json::Type::kBool) {
+                    return {SessionState::Default(), SessionError::kSchemaError};
+                }
+                tab_state.opened_by_agent = opened->bool_val;
             }
             space_state.tabs.push_back(std::move(tab_state));
         }

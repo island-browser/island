@@ -39,6 +39,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Tabs the agent opens (`browser_open_tab`, and the pages of a research plan) are remembered as
+  agent-opened and keep that mark across a restart. The sites you trust for the agent are saved
+  in prefs (`agent_trusted_sites`, normalized to bare lowercase hosts).
 - The agent now asks before consequential page actions: submits and buttons with words such as
   "Buy" or "Delete", Enter in a form, running a script, opening another site in one of your tabs,
   closing your tab, and typing into card fields; it never types into password fields. Until the

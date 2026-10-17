@@ -92,5 +92,15 @@ TEST(Tab, DisplayTitleNamesTheAddressOfAnUnshownWebPage) {
     EXPECT_EQ(tab.DisplayTitle(), "Docs");
 }
 
+TEST(TabTest, OpenedByAgentDefaultsFalse) {
+    Tab tab(NextTabId());
+    EXPECT_FALSE(tab.opened_by_agent());
+
+    tab.SetOpenedByAgent(true);
+    EXPECT_TRUE(tab.opened_by_agent());
+    Tab moved(std::move(tab));
+    EXPECT_TRUE(moved.opened_by_agent());
+}
+
 }  // namespace
 }  // namespace island

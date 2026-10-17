@@ -127,12 +127,13 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
              .active = space.has_active_tab() && index == space.active_tab_index(),
              .loading = nav.load_phase == LoadPhase::kLoading,
              .pinned = tab.pinned(),
+             .opened_by_agent = tab.opened_by_agent(),
              .refusal = window_->IsPlanTabIndex(index) ? PlanTabError(index) : std::string()});
     }
     return tabs;
 }
 
-std::vector<std::string> WindowAgentHost::TrustedSites() { return {}; }
+std::vector<std::string> WindowAgentHost::TrustedSites() { return window_->trusted_sites(); }
 
 void WindowAgentHost::RequestConfirmation(agent::ConfirmationRequest /*request*/,
                                           std::function<void(agent::ConfirmationAnswer)> done) {

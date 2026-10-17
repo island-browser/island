@@ -159,6 +159,13 @@ class BrowserWindow : public CefClient,
     // The MCP browser_open_tab path. During research it inserts the page below the Plan tab,
     // labels it with the running branch and remembers which plan node opened it.
     [[nodiscard]] bool OpenAgentTab(std::string_view text);
+    // Sites the agent may act on without asking. Normalized (see NormalizeTrustedSites) and saved
+    // with the prefs; adding a site twice or removing an unknown one changes nothing.
+    void AddTrustedSite(std::string host);
+    void RemoveTrustedSite(std::string_view host);
+    [[nodiscard]] const std::vector<std::string>& trusted_sites() const {
+        return prefs_.agent_trusted_sites;
+    }
     // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
     // The URL NavigateTab would load for `text`, or nullopt when it resolves to no allowed one.
@@ -773,7 +780,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] static Space CreateDefaultSpace();
     // Appends a tab to the active space with `startup_url` (empty = the
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
-    void AppendTabToActiveSpace(std::string startup_url);
+    // `opened_by_agent` marks the tab as one the agent opened (see Tab::opened_by_agent).
+    void AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent = false);
     // Adds an empty space (next palette color) at the end and returns it; the caller gives it
     // a tab and makes it active.
     Space& AppendSpace(std::string name);
