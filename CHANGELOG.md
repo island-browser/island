@@ -39,6 +39,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- The agent now asks before consequential page actions: submits and buttons with words such as
+  "Buy" or "Delete", Enter in a form, running a script, opening another site in one of your tabs,
+  closing your tab, and typing into card fields; it never types into password fields. Until the
+  confirmation card lands (agent-actions Task 4) the temporary host answers every such question
+  with "declined", so `page_evaluate`, navigation and closing of your tabs are refused. Do not
+  release this branch before then.
 - Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
   system-blue accent for selection and focus, a source-list sidebar and no space color. Released
   profiles without Appearance settings use Native; Arc-era profiles with Appearance settings but

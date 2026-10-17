@@ -17,6 +17,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -33,6 +34,9 @@ struct AgentTabInfo {
     bool loading = false;
     bool pinned = false;
     bool opened_by_agent = false;  // the agent opened this tab, so it may navigate it freely
+    // Non-empty: Island's own page (the research Plan tab). Page tools and navigation refuse the
+    // tab with this message before the action gate asks anyone.
+    std::string refusal;
 };
 
 struct AgentSpaceInfo {
@@ -175,10 +179,16 @@ class BrowserToolbox {
     // Classifies `input` and runs `run` when allowed, asking the person first when the gate says
     // so. `done` receives the error result when the action is blocked, declined or times out.
     // `run` receives `done` and finishes the action.
+    // `after_wait`, when set, replaces `run` once the person was asked: the page may have changed
+    // during the wait, so it re-reads the target, compares it with what was approved and acts on
+    // the fresh state.
     void Gate(GateInput input, std::optional<std::size_t> tab,
-              std::function<void(ToolCallback)> run, ToolCallback done);
+              std::function<void(ToolCallback)> run, ToolCallback done,
+              std::function<void(ToolCallback)> after_wait = nullptr);
     // The info of `tab` (the active tab when nullopt); nullopt for an unknown tab.
     [[nodiscard]] std::optional<AgentTabInfo> FindTab(std::optional<std::size_t> tab);
+    // The error for a tab the agent must not act on (the Plan tab); nullopt when it may.
+    [[nodiscard]] std::optional<ToolResult> Refusal(std::optional<std::size_t> tab);
     // Reads the focused element's facts with one evaluation; nullopt when the evaluation failed
     // or nothing is focused.
     void ReadFocusedFacts(std::optional<std::size_t> tab,
@@ -192,7 +202,8 @@ class BrowserToolbox {
 
     AgentBrowserHost& host_;
     std::vector<ToolDefinition> definitions_;
-    std::set<std::pair<std::string, GateRule>> task_grants_;
+    // (host, rule, scope): scope is the target origin for a foreign navigation, else empty.
+    std::set<std::tuple<std::string, GateRule, std::string>> task_grants_;
     std::uint64_t next_confirmation_ = 1;
 };
 

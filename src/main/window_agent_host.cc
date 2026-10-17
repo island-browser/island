@@ -120,12 +120,14 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
     for (std::size_t index = 0; index < space.tab_count(); ++index) {
         const Tab& tab = space.tabs()[index];
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
-        tabs.push_back({.index = index,
-                        .title = tab.DisplayTitle(),
-                        .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
-                        .active = space.has_active_tab() && index == space.active_tab_index(),
-                        .loading = nav.load_phase == LoadPhase::kLoading,
-                        .pinned = tab.pinned()});
+        tabs.push_back(
+            {.index = index,
+             .title = tab.DisplayTitle(),
+             .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
+             .active = space.has_active_tab() && index == space.active_tab_index(),
+             .loading = nav.load_phase == LoadPhase::kLoading,
+             .pinned = tab.pinned(),
+             .refusal = window_->IsPlanTabIndex(index) ? PlanTabError(index) : std::string()});
     }
     return tabs;
 }

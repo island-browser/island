@@ -297,7 +297,8 @@ bool IsConsequentialText(std::string_view text) {
 GateDecision Classify(const GateInput& input, const std::vector<std::string>& trusted_sites) {
     GateDecision decision;
     decision.host = HostOf(input.page_url);
-    const std::string& host = decision.host;
+    // Pages without a host (data:, about:blank, sandboxed) read as "this page" in the summaries.
+    const std::string host = decision.host.empty() ? "this page" : decision.host;
     const bool facts_present = input.facts.has_value();
     const bool typing = input.tool == "page_type";
     const bool keying = input.tool == "page_press_key";
@@ -383,8 +384,12 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
     if (rule == GateRule::kNone) return decision;  // kFree
     decision.rule = rule;
     decision.summary = summary;
-    decision.action =
-        HostMatchesTrusted(host, trusted_sites) ? ActionClass::kFree : ActionClass::kConfirm;
+    decision.action = HostMatchesTrusted(decision.host, trusted_sites) ? ActionClass::kFree
+                                                                       : ActionClass::kConfirm;
+    // A hostless page cannot be trusted or granted: one entry would cover every such page.
+    decision.scope = OriginOf(input.page_url);
+    if (rule == GateRule::kForeignNavigation) decision.scope += "->" + OriginOf(input.target_url);
+    if (decision.host.empty() || decision.scope.empty()) decision.trusted_allowed = false;
     return decision;
 }
 

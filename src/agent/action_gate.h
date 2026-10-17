@@ -53,9 +53,13 @@ struct GateInput {
 struct GateDecision {
     ActionClass action = ActionClass::kFree;
     GateRule rule = GateRule::kNone;
-    std::string summary;          // "Click \"Place order\" on shop.example.com"
-    std::string host;             // page host without "www."
-    bool trusted_allowed = true;  // false for card fields, password fields and kUnclassified
+    std::string summary;  // "Click \"Place order\" on shop.example.com"
+    std::string host;     // page host without "www."
+    // false for card fields, password fields, kUnclassified and pages without a host
+    bool trusted_allowed = true;
+    // What an "Allow for this task" grant covers besides host and rule: the page's origin, and for
+    // a foreign navigation the target origin too. Empty when the origin is unknown.
+    std::string scope;
 };
 
 // Lowercase host of an absolute URL without scheme, userinfo, port, trailing dot or leading

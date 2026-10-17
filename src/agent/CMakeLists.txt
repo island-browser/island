@@ -121,4 +121,11 @@ if(TARGET GTest::gtest_main)
     endif()
     add_dependencies(island_agent_tests island_mcp_bridge)
     gtest_discover_tests(island_agent_tests)
+    # Runs the gate's page helpers on DOM stand-ins; skipped where node is absent.
+    find_program(ISLAND_NODE node)
+    if(ISLAND_NODE)
+        add_test(NAME BrowserToolsFactsProbe
+                 COMMAND "${ISLAND_NODE}" "${ISLAND_AGENT_REPO_ROOT}/tests/agent/facts_probe.mjs"
+                         "${ISLAND_AGENT_REPO_ROOT}/src/agent/browser_tools.cc")
+    endif()
 endif()

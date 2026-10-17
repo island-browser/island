@@ -129,12 +129,9 @@ TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
     const agent::ToolResult navigate =
         Call(host, "browser_navigate",
              Value::MakeObject().Set("url", Value::String("https://docs.test/")));
-    // The gate asks first (the temporary host declines); the host's own Plan-tab refusal is then
-    // checked directly.
+    // Refused before the gate asks anyone.
     EXPECT_TRUE(navigate.is_error);
-    const agent::HostStatus refused = host.Navigate(std::nullopt, "https://docs.test/");
-    EXPECT_FALSE(refused.ok);
-    EXPECT_NE(refused.error.find("Plan tab"), std::string::npos);
+    EXPECT_NE(navigate.content[0].text.find("Plan tab"), std::string::npos);
     EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "data:text/html,plan");
 
     for (const char* tool : {"browser_back", "browser_forward", "browser_reload"}) {
@@ -157,7 +154,8 @@ TEST(WindowAgentHostTest, PageToolsRefuseThePlanTabEvenAfterItIsActivated) {
     const Value ref = Value::MakeObject().Set("ref", Value::Int(1));
     const std::vector<std::pair<const char*, Value>> calls = {
         {"page_click", ref},
-        {"page_type", Value::MakeObject().Set("ref", Value::Int(1)).Set("text", Value::String("x"))},
+        {"page_type",
+         Value::MakeObject().Set("ref", Value::Int(1)).Set("text", Value::String("x"))},
         {"page_evaluate", Value::MakeObject().Set("expression", Value::String("1"))},
         {"page_screenshot", Value::MakeObject()},
         {"page_read", Value::MakeObject()},
@@ -169,8 +167,6 @@ TEST(WindowAgentHostTest, PageToolsRefuseThePlanTabEvenAfterItIsActivated) {
             if (with_tab) call_args.Set("tab", Value::Int(0));
             const agent::ToolResult result = Call(host, tool, call_args);
             EXPECT_TRUE(result.is_error) << tool;
-            // page_evaluate asks for confirmation first, which the temporary host declines.
-            if (std::string_view(tool) == "page_evaluate") continue;
             EXPECT_NE(result.content[0].text.find("Plan tab"), std::string::npos)
                 << tool << ": " << result.content[0].text;
         }
@@ -185,8 +181,8 @@ TEST(WindowAgentHostTest, TabAndSpaceToolsDriveTheModel) {
         Call(host, "browser_activate_tab", Value::MakeObject().Set("tab", Value::Int(0))).is_error);
     EXPECT_EQ(ActiveSpace(*window).active_tab_index(), 0U);
     // Closing a tab the person owns asks first; the model update goes through the host.
-    EXPECT_TRUE(Call(host, "browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1)))
-                    .is_error);
+    EXPECT_TRUE(
+        Call(host, "browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1))).is_error);
     EXPECT_TRUE(host.CloseTab(1).ok);
     EXPECT_EQ(ActiveSpace(*window).tab_count(), 1U);
 

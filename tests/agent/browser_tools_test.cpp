@@ -311,6 +311,10 @@ TEST(BrowserToolsTest, ConsequentialClickWaitsForAllow) {
     host.QueueScriptResult(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",
         "text":"Place order","in_form":true,"is_submit":false,
         "page_origin":"https://shop.example.com"}})");
+    // The target is read again after the card, so the page answers twice.
+    host.QueueScriptResult(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",
+        "text":"Place order","in_form":true,"is_submit":false,
+        "page_origin":"https://shop.example.com"}})");
     host.tabs[0].url = "https://shop.example.com/cart";
     host.answers.push_back(ConfirmationAnswer::kAllowOnce);
     ToolResult r = CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(3)));
@@ -382,6 +386,7 @@ TEST(BrowserToolsTest, TrustSiteAnswerAllowsAndIsNotAskedAgainWhenHostTrustsIt) 
     const char* const facts = R"({"ok":true,"x":5,"y":5,"facts":{"tag":"button","text":"Go",
         "in_form":true,"is_submit":true,"page_origin":"https://a.test"}})";
     host.QueueScriptResult(facts);
+    host.QueueScriptResult(facts);  // read again after the card
     EXPECT_FALSE(
         CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
     host.QueueScriptResult(facts);
@@ -405,6 +410,163 @@ TEST(BrowserToolsTest, ForeignNavigationOfPersonTabAsks) {
     host.answers.push_back(ConfirmationAnswer::kAllowOnce);
     EXPECT_FALSE(CallTool(toolbox, "browser_navigate", args).is_error);
     EXPECT_EQ(host.calls, (std::vector<std::string>{"navigate:0:https://evil.test/"}));
+}
+
+TEST(BrowserToolsTest, ForeignNavigationGrantCoversOnlyTheApprovedTarget) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    const auto go = [&](const char* url) {
+        return CallTool(
+            toolbox, "browser_navigate",
+            Value::MakeObject().Set("url", Value::String(url)).Set("tab", Value::Int(0)));
+    };
+    host.answers.push_back(ConfirmationAnswer::kAllowForTask);
+    EXPECT_FALSE(go("https://one.test/").is_error);
+    EXPECT_FALSE(go("https://one.test/other").is_error);
+    EXPECT_EQ(host.confirmations.size(), 1u);
+    EXPECT_TRUE(go("https://two.test/").is_error);  // another target asks again
+    EXPECT_EQ(host.confirmations.size(), 2u);
+}
+
+TEST(BrowserToolsTest, HostlessPageSaysThisPageAndOffersNoGrant) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.tabs[0].url = "about:blank";
+    host.answers.push_back(ConfirmationAnswer::kAllowForTask);
+    host.answers.push_back(ConfirmationAnswer::kAllowForTask);
+    for (int i = 0; i < 2; ++i) {
+        CallTool(toolbox, "page_evaluate",
+                 Value::MakeObject().Set("expression", Value::String("1")));
+    }
+    ASSERT_EQ(host.confirmations.size(), 2u);  // the first "for this task" granted nothing
+    EXPECT_EQ(host.confirmations[0].summary, "Run a script on this page");
+    EXPECT_FALSE(host.confirmations[0].trusted_allowed);
+}
+
+TEST(BrowserToolsTest, PlanTabIsRefusedBeforeAnyoneIsAsked) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.tabs[0].refusal = "That tab is the research Plan tab.";
+    const Value tab0 = Value::MakeObject().Set("tab", Value::Int(0));
+    Value evaluate = tab0;
+    evaluate.Set("expression", Value::String("1"));
+    Value navigate = tab0;
+    navigate.Set("url", Value::String("https://evil.test/"));
+    Value click = tab0;
+    click.Set("ref", Value::Int(1));
+    Value type = click;
+    type.Set("text", Value::String("x"));
+    Value key = tab0;
+    key.Set("key", Value::String("Enter"));
+    for (const auto& [tool, args] :
+         std::vector<std::pair<const char*, Value>>{{"page_evaluate", evaluate},
+                                                    {"browser_navigate", navigate},
+                                                    {"page_click", click},
+                                                    {"page_type", type},
+                                                    {"page_press_key", key}}) {
+        const ToolResult r = CallTool(toolbox, tool, args);
+        EXPECT_TRUE(r.is_error) << tool;
+        EXPECT_EQ(r.content.at(0).text, "That tab is the research Plan tab.") << tool;
+    }
+    EXPECT_TRUE(host.confirmations.empty());
+    EXPECT_TRUE(host.devtools.empty());
+}
+
+TEST(BrowserToolsTest, ClickIsDroppedWhenThePageChangedDuringTheCard) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Place order",
+        "is_submit":true,"page_origin":"https://a.test"}})");
+    host.QueueScriptResult(
+        R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Delete account",
+        "is_submit":true,"page_origin":"https://a.test"}})");
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    const ToolResult r =
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The page changed while waiting; take a fresh snapshot.");
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0);
+}
+
+TEST(BrowserToolsTest, ClickUsesTheFreshPointAfterTheCard) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    const char* const same = R"("facts":{"tag":"button","text":"Place order","is_submit":true,
+        "page_origin":"https://a.test"}})";
+    host.QueueScriptResult(std::string(R"({"ok":true,"x":10,"y":20,)") + same);
+    host.QueueScriptResult(std::string(R"({"ok":true,"x":77,"y":88,)") + same);
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    ASSERT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+    EXPECT_EQ(host.devtools.back().params.FindMember("x")->AsDouble(), 77);
+}
+
+TEST(BrowserToolsTest, TypingIsDroppedWhenFocusMovedDuringTheCard) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text",
+        "autocomplete":"cc-number","page_origin":"https://a.test"}})");
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text",
+        "page_origin":"https://a.test"}})");
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    const ToolResult r =
+        CallTool(toolbox, "page_type",
+                 Value::MakeObject().Set("ref", Value::Int(2)).Set("text", Value::String("4111")));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The page changed while waiting; take a fresh snapshot.");
+    EXPECT_EQ(CountMethod(host, "Input.insertText"), 0);
+}
+
+TEST(BrowserToolsTest, KeyIsDroppedWhenFocusMovedDuringTheCard) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text","in_form":true,
+        "page_origin":"https://a.test"}})");
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"search","in_form":true,
+        "page_origin":"https://a.test"}})");
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    const ToolResult r =
+        CallTool(toolbox, "page_press_key", Value::MakeObject().Set("key", Value::String("Enter")));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchKeyEvent"), 0);
+}
+
+TEST(BrowserToolsTest, SyntheticClickChecksTheElementItClicks) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"synthetic":true,"facts":{"tag":"button","text":"Next",
+        "page_origin":"https://a.test"}})");
+    host.QueueScriptResult(
+        R"({"ok":false,"error":"The page changed while waiting; take a fresh snapshot."})");
+    const ToolResult r =
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("selector", Value::String("b")));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The page changed while waiting; take a fresh snapshot.");
+    const std::string script = host.devtools.back().params.FindMember("expression")->string_val;
+    EXPECT_NE(script.find(R"("text":"Next")"), std::string::npos) << script;
+    EXPECT_NE(script.find("rect.width === 0"), std::string::npos) << script;
+}
+
+TEST(BrowserToolsTest, FactsComeFromTheElementThatReallyHasFocus) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"facts":null})");
+    CallTool(toolbox, "page_type",
+             Value::MakeObject().Set("ref", Value::Int(1)).Set("text", Value::String("x")));
+    CallTool(toolbox, "page_press_key", Value::MakeObject().Set("key", Value::String("Tab")));
+    int checked = 0;
+    for (const auto& call : host.devtools) {
+        if (call.method != "Runtime.evaluate") continue;
+        const std::string script = call.params.FindMember("expression")->string_val;
+        EXPECT_NE(script.find("shadowRoot.activeElement"), std::string::npos);
+        EXPECT_NE(script.find("contentDocument"), std::string::npos);
+        ++checked;
+    }
+    EXPECT_GE(checked, 2);
+    // A null fact set (opaque frame) can neither be trusted nor granted.
+    ASSERT_FALSE(host.confirmations.empty());
+    EXPECT_FALSE(host.confirmations[0].trusted_allowed);
 }
 
 TEST(BrowserToolsTest, NavigationGateJudgesTheResolvedUrlNotTheRawArgument) {
@@ -455,8 +617,7 @@ TEST(BrowserToolsTest, TimeoutReturnsTheTimeoutError) {
     const ToolResult r = CallTool(toolbox, "page_evaluate",
                                   Value::MakeObject().Set("expression", Value::String("1")));
     EXPECT_TRUE(r.is_error);
-    EXPECT_EQ(r.content.at(0).text,
-              "The person did not answer in time; the action was not performed.");
+    EXPECT_EQ(r.content.at(0).text, "No one confirmed this action in time.");
     EXPECT_EQ(CountMethod(host, "Runtime.evaluate"), 0);
 }
 
@@ -498,6 +659,7 @@ TEST(BrowserToolsTest, CardFieldAskedEvenOnTrustedSiteAndNeverGrantedForTask) {
         "autocomplete":"cc-number","page_origin":"https://a.test"}})";
     const Value args =
         Value::MakeObject().Set("ref", Value::Int(2)).Set("text", Value::String("4111"));
+    host.QueueScriptResult(facts);
     host.QueueScriptResult(facts);
     host.answers.push_back(ConfirmationAnswer::kAllowForTask);
     EXPECT_FALSE(CallTool(toolbox, "page_type", args).is_error);
