@@ -910,6 +910,8 @@ class BrowserWindow : public CefClient,
     // it; otherwise it is dropped now.
     void EndLiveResearch(bool turn_open);
     void StartDeferredTask();
+    void PostStartDeferredTask();
+    [[nodiscard]] bool OutsideResearchOwnsTurn() const;
     [[nodiscard]] std::optional<agent::TaskKind> TaskKindOf(std::string_view id) const;
     void ReportQueueProgress();
     // Edge-triggered OnWaiting: a card is open or the research waits for approval.

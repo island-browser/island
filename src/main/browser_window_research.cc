@@ -355,6 +355,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
         SetResearchStatus("cancelled", "Research cancelled.");
         RenderPlanPages();
         EndResearchTask(task_id, false);
+        PostStartDeferredTask();
         return;
     }
     if (outcome.kind == ResearchOutcome::Kind::kAwaitingApproval) {
@@ -370,6 +371,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
         // The task waits for the person (no turn end is reported: the Run that follows is the
         // same task's turn).
         SyncQueueWaiting();
+        PostStartDeferredTask();
         return;
     }
     const ResearchTask task = std::move(*research_);
@@ -380,10 +382,12 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
         case ResearchOutcome::Kind::kCancelled:
             SetResearchStatus("cancelled", outcome.message);
             EndResearchTask(task.task_id, false);
+            PostStartDeferredTask();
             return;
         case ResearchOutcome::Kind::kFailed:
             SetResearchStatus("failed", outcome.message);
             EndResearchTask(task.task_id, false);
+            PostStartDeferredTask();
             return;
         case ResearchOutcome::Kind::kAwaitingApproval:  // handled above
             return;
@@ -407,6 +411,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     RenderStartPages();
     ScheduleLocalPagesRender();
     EndResearchTask(task.task_id, true);
+    PostStartDeferredTask();
 }
 
 // --- Plan tab -------------------------------------------------------------------

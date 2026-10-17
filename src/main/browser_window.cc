@@ -2291,6 +2291,23 @@ bool BrowserWindow::AgentTurnOpen() const {
     return !agent_send_for_test_ && agent_session_ != nullptr && agent_session_->busy();
 }
 
+bool BrowserWindow::OutsideResearchOwnsTurn() const {
+    return research_.has_value() && !research_->awaiting_approval && research_->task_id.empty();
+}
+
+void BrowserWindow::PostStartDeferredTask() {
+    if (!deferred_task_.has_value()) {
+        return;
+    }
+    if (chrome_ == nullptr) {
+        StartDeferredTask();
+        return;
+    }
+    // The session is inside its own event handler: send from a posted task.
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::StartDeferredTask,
+                                                            CefRefPtr<BrowserWindow>(this))));
+}
+
 void BrowserWindow::StartDeferredTask() {
     if (!deferred_task_.has_value() || closing_ || AgentTurnOpen()) {
         return;
@@ -2322,16 +2339,13 @@ void BrowserWindow::FinishInFlightTurn(bool ok) {
 
 void BrowserWindow::CheckInFlightTurn() {
     if (deferred_task_.has_value()) {
-        if (closing_ || AgentTurnOpen() || (agent_send_for_test_ && !agent_busy_for_test_)) {
+        // An outside research owns the turn that just ended: it is classified first, and
+        // CompleteResearch starts the deferred task afterwards.
+        if (closing_ || AgentTurnOpen() || (agent_send_for_test_ && !agent_busy_for_test_) ||
+            OutsideResearchOwnsTurn()) {
             return;
         }
-        if (chrome_ == nullptr) {
-            StartDeferredTask();
-            return;
-        }
-        // The session is inside its own event handler: send from a posted task.
-        CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::StartDeferredTask,
-                                                                CefRefPtr<BrowserWindow>(this))));
+        PostStartDeferredTask();
         return;
     }
     // Research reports its own end (CompleteResearch); the test seam never touches the session.
@@ -2362,7 +2376,8 @@ void BrowserWindow::FinishPostedTurn() {
 }
 
 void BrowserWindow::ReportQueueProgress() {
-    if (in_flight_id_.empty() || agent_session_ == nullptr) {
+    // A deferred task has not reached the agent: the progress on screen is the outside turn's.
+    if (in_flight_id_.empty() || agent_session_ == nullptr || deferred_task_.has_value()) {
         return;
     }
     const std::vector<agent::TranscriptItem>& items = agent_session_->transcript().items();
@@ -2393,8 +2408,8 @@ void BrowserWindow::SyncQueueWaiting() {
         return;
     }
     if (want) {
-        if (in_flight_id_.empty()) {
-            return;  // an external agent's card: no task of ours waits
+        if (in_flight_id_.empty() || deferred_task_.has_value()) {
+            return;  // an external agent's card, or the outside turn's: no running task waits
         }
         waiting_id_ = in_flight_id_;
         queue_waiting_ = true;
@@ -2417,12 +2432,12 @@ void BrowserWindow::StopAgentTask() {
         }
         return;
     }
-    if (agent_session_ != nullptr) {
-        agent_session_->Cancel();
-    }
-    // A deferred task never reached the agent: only the outside turn (cancelled above) runs.
+    // A deferred task never reached the agent: the outside turn is not the person's target.
     const bool deferred = deferred_task_.has_value();
     deferred_task_.reset();
+    if (!deferred && agent_session_ != nullptr) {
+        agent_session_->Cancel();
+    }
     const bool turn_open = !deferred && !in_flight_id_.empty() && AgentTurnOpen();
     EndLiveResearch(turn_open);
     // The queue stops first: withdrawing a card can lift "waiting", and a task that no longer

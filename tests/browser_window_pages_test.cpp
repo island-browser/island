@@ -2517,6 +2517,69 @@ TEST(BrowserWindowPagesTest, ATaskStartedWhileATurnRunsOutsideTheQueueWaitsForTh
     EXPECT_EQ(qw.sent, (std::vector<std::string>{"a", "b"}));
 }
 
+TEST(BrowserWindowPagesTest, ATaskDeferredBehindAnOutsideContinuationStartsAfterItIsClassified) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetResearchTaskForTest("q");  // a plan continuation outside the queue
+    window.SetAgentBusyForTest(true);
+    window.SubmitAgentPromptForTest("chat");
+    ASSERT_TRUE(qw.sent.empty());
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();  // the continuation's turn ended
+    EXPECT_TRUE(qw.sent.empty());       // the chat must not take it over
+    EXPECT_TRUE(window.research_running());
+
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "A step failed";
+    window.CompleteResearch(failed);  // the continuation is classified on its own turn
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "failed");
+    EXPECT_EQ(qw.sent, (std::vector<std::string>{"chat"}));
+}
+
+TEST(BrowserWindowPagesTest, AResearchDeferredBehindAnOutsideContinuationDoesNotReplaceIt) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetAgentBusyForTest(true);
+    ASSERT_EQ(window.StartResearch("new").code, BrowserWindow::ResearchStart::kStarted);
+    window.SetResearchTaskForTest("old");  // the outside continuation, as the session reports it
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();
+    EXPECT_TRUE(qw.sent.empty());
+    EXPECT_EQ(window.research_status().question, "old");
+
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "A step failed";
+    window.CompleteResearch(failed);
+
+    ASSERT_EQ(qw.sent.size(), 1U);  // the old run ended first, then the new research started
+    EXPECT_TRUE(window.research_running());
+    EXPECT_EQ(window.research_status().question, "new");
+}
+
+TEST(BrowserWindowPagesTest, StoppingADeferredTaskLeavesTheOutsideTurnRunning) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetResearchTaskForTest("q");
+    window.SetAgentBusyForTest(true);
+    window.SubmitAgentPromptForTest("chat");
+
+    SendAgent(window, R"({"type":"task_stop"})");
+
+    EXPECT_EQ(window.agent_queue().current(), nullptr);
+    EXPECT_TRUE(window.research_running());  // the continuation was not cancelled
+    EXPECT_TRUE(qw.sent.empty());
+}
+
 TEST(BrowserWindowPagesTest, AResearchRefusedBecauseTheSessionIsBusySaysSo) {
     const ScopedNoAgentEnv no_env;
     const ScopedAgentCommand command("true");
