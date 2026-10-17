@@ -2400,8 +2400,12 @@ void BrowserChrome::ApplyLookStructure() {
             sidebar_->AddChildViewAt(space_switcher_, index_of(sidebar_, rail_footer_));
             // A box-layout flex stays on the view itself across layouts and parents: the
             // switcher row's flex must not make the space bar grow in the rail column.
+            // The same holds for the address row, which the Native toolbar row gives flex 1:
+            // in the vertical rail it would stretch into a tall empty plate.
             if (CefRefPtr<CefBoxLayout> rail = sidebar_->GetLayout()->AsBoxLayout()) {
                 rail->SetFlexForView(space_switcher_, 0);
+                rail->SetFlexForView(navigation_row_, 0);
+                rail->SetFlexForView(address_row_, 0);
             }
             // New Tab sits in the tab strip under Native; detach it before restoring it.
             tab_strip_->RemoveChildView(new_tab_button_);
