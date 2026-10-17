@@ -191,6 +191,7 @@ struct TabStripEntrySnapshot {
 struct SpaceSwitcherEntrySnapshot {
     ArgbColor color;
     std::string name;
+    std::string icon_id;
     bool active = false;
 
     bool operator==(const SpaceSwitcherEntrySnapshot&) const = default;
@@ -521,9 +522,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
                                                                   bool open, bool hovered) {
         if (open) {
-            return {.fill = tokens.accent_soft,
-                    .text = tokens.accent_text,
-                    .sparkle = tokens.accent};
+            return {
+                .fill = tokens.accent_soft, .text = tokens.accent_text, .sparkle = tokens.accent};
         }
         return {.fill = hovered ? tokens.hover : tokens.canvas,
                 .text = tokens.text,
@@ -695,14 +695,13 @@ class BrowserChrome final : public NavigationObserver {
             // Bottom-up the owner's layout reads: the full-width Agent entry at the very bottom,
             // with the switcher row (segments plus the new-space, overview and settings buttons)
             // above it.
-            rail_children.push_back(
-                {ChromeViewId::kRailFooter,
-                 {{ChromeViewId::kRailSwitcherRow,
-                   {{ChromeViewId::kSpaceSwitcher, {}},
-                    {ChromeViewId::kRailNewSpaceButton, {}},
-                    {ChromeViewId::kRailTabsButton, {}},
-                    {ChromeViewId::kRailSettingsButton, {}}}},
-                  {ChromeViewId::kRailAgentButton, {}}}});
+            rail_children.push_back({ChromeViewId::kRailFooter,
+                                     {{ChromeViewId::kRailSwitcherRow,
+                                       {{ChromeViewId::kSpaceSwitcher, {}},
+                                        {ChromeViewId::kRailNewSpaceButton, {}},
+                                        {ChromeViewId::kRailTabsButton, {}},
+                                        {ChromeViewId::kRailSettingsButton, {}}}},
+                                      {ChromeViewId::kRailAgentButton, {}}}});
         } else {
             rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
             rail_children.push_back({ChromeViewId::kRailFooter,
@@ -718,8 +717,8 @@ class BrowserChrome final : public NavigationObserver {
         std::vector<ChromeViewTreeNode> root_children = {
             {ChromeViewId::kRail, std::move(rail_children)}};
         if (native) {
-            root_children.push_back({ChromeViewId::kToolbar,
-                                     {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
+            root_children.push_back(
+                {ChromeViewId::kToolbar, {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
         }
         root_children.push_back(
             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
@@ -787,9 +786,10 @@ class BrowserChrome final : public NavigationObserver {
             switcher != nullptr) {
             switcher->children.reserve(spaces.size());
             for (std::size_t i = 0; i < spaces.size(); ++i) {
-                // Native segments carry only the name: the space color is never shown there.
+                // Arc/Graphite keep the color square only when no icon was chosen. Native never
+                // shows space color.
                 ChromeViewTreeNode segment = {ChromeViewId::kSpaceSwitcherEntry, {}};
-                if (!native) {
+                if (!native && spaces[i].icon_id.empty()) {
                     segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryColorMark, {}});
                 }
                 segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryName, {}});
@@ -811,6 +811,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static std::string TabCloseAccessibleName(const TabStripEntrySnapshot& entry);
     // Inactive space pills show only an initial; the active one shows the name.
     [[nodiscard]] static std::string SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry);
+    [[nodiscard]] static std::string SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& entry,
+                                                       std::size_t space_count, LookPreset look);
     [[nodiscard]] static std::string SpaceEntryAccessibleName(
         const SpaceSwitcherEntrySnapshot& entry);
 

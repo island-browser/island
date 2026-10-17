@@ -30,7 +30,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view kLockHash =
-    "b1bd792383eb448d9bdfffee585fc25b861381b8d1db4b0372409b024e2542a5";
+    "942b9bac7e5b0c61c2697f1a20f175d44aeaada3730523614f87982be1c44106";
 constexpr std::array<int, 4> kDips = {13, 15, 16, 17};
 constexpr std::array<int, 2> kScales = {1, 2};
 
@@ -45,7 +45,7 @@ struct Tone {
     std::string_view hex;
 };
 
-constexpr std::array<Icon, 10> kIcons = {
+constexpr std::array<Icon, 34> kIcons = {
     {{"chevron-left", "chevron-left.svg",
       "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"},
      {"chevron-right", "chevron-right.svg",
@@ -61,7 +61,37 @@ constexpr std::array<Icon, 10> kIcons = {
      {"layout-grid", "layout-grid.svg",
       "b8903f61d09b1d75e55c71158277d26570962f69c2099446a251871e0a2d6678"},
      {"settings", "settings.svg",
-      "0ae27fd0f81999229e3127ac96c5b32edfea448e291d509e76212b917551d66b"}}};
+      "0ae27fd0f81999229e3127ac96c5b32edfea448e291d509e76212b917551d66b"},
+     {"home", "home.svg", "28216c479005731ef5e382e7d8627eda2b129b019eb1f3d9de9f5915576d448e"},
+     {"briefcase", "briefcase.svg",
+      "7c9e6bea85d15affdc5802bacbb7aae548c6031f246e4faef3747f36847365d0"},
+     {"book-open", "book-open.svg",
+      "9b9bed0ff057283d5c5c5a1c71f8d3e927db26a56639603a92fdf7b25961510e"},
+     {"code", "code.svg", "83235d4a0352d74234f949c9fc23f89c65ff165f1b6d54a90e5f0ea5bfc2c3d7"},
+     {"globe", "globe.svg", "72ca6996d7032013268f46e9bcf360652136eb0f75465e3c98687fef784bbd41"},
+     {"plane", "plane.svg", "4c775a62a524be78fe20aed8544933d4bd3802c5eca17cd6923509f87671d6d6"},
+     {"shopping-bag", "shopping-bag.svg",
+      "24a161961b559234b7a31af904dab18b437507336ba2decff3fe6b7772495896"},
+     {"music", "music.svg", "8721b8a3594219c1313c4083049e5a5c049f49c47b1cd93fdb61d52a0803e42b"},
+     {"film", "film.svg", "85cfa80821b34f512bd401a1249957c9f2f612497602ecc31dff39517823ee52"},
+     {"heart", "heart.svg", "70af5f30be9fcb500b852556b38dcdf8c04a4ba81fd262534fb0336bd39b3b52"},
+     {"star", "star.svg", "c59da86b889569387db28e69ad00a89f96af22863ad9eea9aa12c4876a14338c"},
+     {"flask", "flask.svg", "a2ce857c159bef4c128a6d9f0b6dcbd6504ecf1a2a670ee220efd14fd032b561"},
+     {"graduation-cap", "graduation-cap.svg",
+      "326b4a1c18429509a697cbc0c49fdfcf9316da34bcf581569c2fc73cc772b86f"},
+     {"coffee", "coffee.svg", "970595bdafac0df42c00b847d53fd00c2283ecc3b83881274de2aa7dbce2bbc8"},
+     {"camera", "camera.svg", "ebbb3178dd80dfd942770a2237fe7bfc3515c55c7daa9d3666933a656d2790e3"},
+     {"gamepad", "gamepad.svg", "5448d59f3022acee0f8950856bb520d921aa724e70eab0132990b28739ae663f"},
+     {"newspaper", "newspaper.svg",
+      "f5147e2a92a0ca16edea01782b09afeea7f9ebcda029d3f38ae93a3058ed1b78"},
+     {"palette", "palette.svg", "b0a958ba9889f89c40df6e1c168b8a7aa20f6309780e795c5bce00a4bc11bff6"},
+     {"dumbbell", "dumbbell.svg",
+      "058a51e1fd42319d7eee4988a68bee4a23bc94fc69cb8aa1450835246126382d"},
+     {"wallet", "wallet.svg", "76c9596f629a2abf9cfabb573452f3113ed7e9502c699aa811e630f156eb7556"},
+     {"bug", "bug.svg", "c4fddf0d43b4c4f0b8fc52eb8810173c8d8bd25618034a70f162d85e8189d69d"},
+     {"rocket", "rocket.svg", "2b7887d9a5623f2e5e4a5d32716f93829d61b458e03b6eae33a6df648b9eb855"},
+     {"leaf", "leaf.svg", "a6cd15ecfaed579da29311eedc19302209e82515be83bfeca114183b0318a56f"},
+     {"folder", "folder.svg", "f0d92b94b797a8ab7d4c4ae33c3236c47f64068351b4e14bdb5014ee42898a39"}}};
 constexpr std::array<Tone, 3> kTones = {
     {{"text", "18303a"}, {"secondary", "687a7d"}, {"accent", "168c99"}}};
 

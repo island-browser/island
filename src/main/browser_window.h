@@ -26,6 +26,7 @@
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "browser_import.h"
+#include "browser_tools.h"
 #include "cef_content_blocker.h"
 #include "cheatsheet_overlay.h"
 #include "chrome_snapshot.h"
@@ -135,6 +136,7 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool CloseActiveSpaceTabIndex(std::size_t index);
     // Renames the space at |space_index|; an empty name is rejected.
     [[nodiscard]] bool RenameSpace(std::size_t space_index, std::string name);
+    [[nodiscard]] bool SetSpaceIcon(std::size_t space_index, std::string icon_id);
     // Moves the space at |from_index| to |to_index|; the active space follows.
     [[nodiscard]] bool MoveSpace(std::size_t from_index, std::size_t to_index);
 

@@ -3,11 +3,12 @@
 #include <algorithm>
 
 #include "include/cef_request_context_handler.h"
+#include "space_icon.h"
 
 namespace island {
 
-Space::Space(SpaceId id, std::string name, SpaceColor color)
-    : id_(id), name_(std::move(name)), color_(color) {}
+Space::Space(SpaceId id, std::string name, SpaceColor color, std::string icon_id)
+    : id_(id), name_(std::move(name)), color_(color), icon_id_(NormalizeSpaceIconId(icon_id)) {}
 
 SpaceId Space::id() const noexcept { return id_; }
 
@@ -15,9 +16,13 @@ const std::string& Space::name() const noexcept { return name_; }
 
 SpaceColor Space::color() const noexcept { return color_; }
 
+const std::string& Space::icon_id() const noexcept { return icon_id_; }
+
 void Space::Rename(std::string name) { name_ = std::move(name); }
 
 void Space::SetColor(SpaceColor color) { color_ = color; }
+
+void Space::SetIconId(std::string icon_id) { icon_id_ = NormalizeSpaceIconId(icon_id); }
 
 const std::vector<Tab>& Space::tabs() const noexcept { return tabs_; }
 

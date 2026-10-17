@@ -4,9 +4,12 @@
 #include <array>
 #include <fstream>
 #include <iterator>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "space_icon.h"
 
 namespace island {
 namespace {
@@ -90,6 +93,54 @@ std::filesystem::path VariantPath(const std::filesystem::path& root, ChromeIcon 
             std::string(SizeFilename(size)) + "@" + std::string(scale) + "x.png");
 }
 
+std::filesystem::path NamedVariantPath(const std::filesystem::path& root, std::string_view icon_id,
+                                       ChromeIconTone tone, ChromeIconSize size,
+                                       std::string_view scale) {
+    return root / "png" /
+           (std::string(icon_id) + "-" + std::string(ToneFilename(tone)) + "-" +
+            std::string(SizeFilename(size)) + "@" + std::string(scale) + "x.png");
+}
+
+std::optional<CefRefPtr<CefImage>> ReadImagePair(const std::filesystem::path& one_x_path,
+                                                 const std::filesystem::path& two_x_path) {
+    const std::optional<std::vector<char>> one_x = ReadPng(one_x_path);
+    const std::optional<std::vector<char>> two_x = ReadPng(two_x_path);
+    if (!one_x.has_value() || !two_x.has_value()) {
+        return std::nullopt;
+    }
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    if (!image->AddPNG(kOneXScale, one_x->data(), one_x->size()) ||
+        !image->AddPNG(kTwoXScale, two_x->data(), two_x->size())) {
+        return std::nullopt;
+    }
+    return image;
+}
+
+bool AddTintedRepresentation(CefRefPtr<CefImage> source, CefRefPtr<CefImage> destination,
+                             float scale, ArgbColor color) {
+    int width = 0;
+    int height = 0;
+    CefRefPtr<CefBinaryValue> bitmap = source->GetAsBitmap(
+        scale, CEF_COLOR_TYPE_RGBA_8888, CEF_ALPHA_TYPE_POSTMULTIPLIED, width, height);
+    if (bitmap == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+    std::vector<std::uint8_t> pixels(bitmap->GetSize());
+    if (bitmap->GetData(pixels.data(), pixels.size(), 0) != pixels.size()) {
+        return false;
+    }
+    const std::uint8_t red = static_cast<std::uint8_t>((color.argb >> 16U) & 0xFFU);
+    const std::uint8_t green = static_cast<std::uint8_t>((color.argb >> 8U) & 0xFFU);
+    const std::uint8_t blue = static_cast<std::uint8_t>(color.argb & 0xFFU);
+    for (std::size_t offset = 0; offset + 3 < pixels.size(); offset += 4) {
+        pixels[offset] = red;
+        pixels[offset + 1] = green;
+        pixels[offset + 2] = blue;
+    }
+    return destination->AddBitmap(scale, width, height, CEF_COLOR_TYPE_RGBA_8888,
+                                  CEF_ALPHA_TYPE_POSTMULTIPLIED, pixels.data(), pixels.size());
+}
+
 }  // namespace
 
 IconCatalog::IconCatalog(std::filesystem::path resource_root)
@@ -97,20 +148,28 @@ IconCatalog::IconCatalog(std::filesystem::path resource_root)
 
 std::optional<CefRefPtr<CefImage>> IconCatalog::Load(ChromeIcon icon, ChromeIconTone tone,
                                                      ChromeIconSize size) const {
-    const std::optional<std::vector<char>> one_x =
-        ReadPng(VariantPath(resource_root_, icon, tone, size, "1"));
-    const std::optional<std::vector<char>> two_x =
-        ReadPng(VariantPath(resource_root_, icon, tone, size, "2"));
-    if (!one_x.has_value() || !two_x.has_value()) {
-        return std::nullopt;
-    }
+    return ReadImagePair(VariantPath(resource_root_, icon, tone, size, "1"),
+                         VariantPath(resource_root_, icon, tone, size, "2"));
+}
 
-    CefRefPtr<CefImage> image = CefImage::CreateImage();
-    if (!image->AddPNG(kOneXScale, one_x->data(), one_x->size()) ||
-        !image->AddPNG(kTwoXScale, two_x->data(), two_x->size())) {
+std::optional<CefRefPtr<CefImage>> IconCatalog::LoadSpaceIcon(std::string_view icon_id,
+                                                              ArgbColor color,
+                                                              ChromeIconSize size) const {
+    if (!IsKnownSpaceIconId(icon_id)) {
         return std::nullopt;
     }
-    return image;
+    const std::optional<CefRefPtr<CefImage>> source =
+        ReadImagePair(NamedVariantPath(resource_root_, icon_id, ChromeIconTone::kText, size, "1"),
+                      NamedVariantPath(resource_root_, icon_id, ChromeIconTone::kText, size, "2"));
+    if (!source.has_value()) {
+        return std::nullopt;
+    }
+    CefRefPtr<CefImage> tinted = CefImage::CreateImage();
+    if (!AddTintedRepresentation(*source, tinted, kOneXScale, color) ||
+        !AddTintedRepresentation(*source, tinted, kTwoXScale, color)) {
+        return std::nullopt;
+    }
+    return tinted;
 }
 
 }  // namespace island

@@ -1841,6 +1841,22 @@ std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entr
     return initial;
 }
 
+std::string BrowserChrome::SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& entry,
+                                             std::size_t space_count, LookPreset look) {
+    if (look != LookPreset::kNative) {
+        return SpacePillLabel(entry);
+    }
+    if (space_count > 4) {
+        // A chosen icon carries the compact segment by itself; spaces without one retain their
+        // initial so they never become anonymous.
+        return entry.icon_id.empty()
+                   ? SpacePillLabel(
+                         {.color = entry.color, .name = entry.name, .icon_id = {}, .active = false})
+                   : std::string();
+    }
+    return TruncateCollectionTitle(entry.name);
+}
+
 std::string BrowserChrome::ActiveSpaceSectionTitle() const {
     for (const SpaceSwitcherEntrySnapshot& entry : space_entries_) {
         if (entry.active && !entry.name.empty()) {
@@ -2190,10 +2206,9 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         CefRefPtr<CefBoxLayout> pill_layout = views.inner->SetToBoxLayout(pill_settings);
         views.row->AddChildView(views.inner);
 
-        // The color mark is the space's dot: the same size for every chip, so the
-        // active one is told apart by its full name and --text label, not by a box.
-        // Native segments have no dot at all (no space color in Native).
-        if (!native) {
+        // Arc and Graphite retain the color square only as the no-icon fallback. Native never
+        // shows space color; its chosen icon lives on the segment button beside the name.
+        if (!native && entry.icon_id.empty()) {
             const int dot = tokens_.spacing_2_dip;
             views.color_mark = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(dot, dot)));
             views.color_mark->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryColorMark));
@@ -2203,12 +2218,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         CefRefPtr<CollectionButtonDelegate> name_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
         space_button_delegates_.push_back(name_delegate);
-        // Native segments show the full name; with more than four spaces the inactive ones
-        // shrink to their initial so the track still fits the sidebar.
-        const bool shrink = native && entries.size() > 4;
         views.name = CefLabelButton::CreateLabelButton(
-            name_delegate,
-            native && !shrink ? TruncateCollectionTitle(entry.name) : SpacePillLabel(entry));
+            name_delegate, SpaceSegmentLabel(entry, entries.size(), tokens_.look));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
@@ -3184,6 +3195,15 @@ void BrowserChrome::ApplyCollectionTheme() {
             views.color_mark->SetBackgroundColor(entry.color.argb);
         }
         views.name->SetEnabledTextColors(colors.title.argb);
+        if (!entry.icon_id.empty()) {
+            const ArgbColor icon_color =
+                tokens_.look == LookPreset::kNative ? colors.title : entry.color;
+            const std::optional<CefRefPtr<CefImage>> icon =
+                icon_catalog_.LoadSpaceIcon(entry.icon_id, icon_color, ChromeIconSize::k15);
+            SetAllStateImages(views.name, icon.has_value() ? *icon : nullptr);
+        } else {
+            SetAllStateImages(views.name, nullptr);
+        }
     }
 }
 
@@ -3498,20 +3518,33 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
         if (tokens_.look == LookPreset::kNative) {
             const ArgbColor fill = entry.active ? tokens_.fill : rail;
             views.button->SetBackgroundColor(fill.argb);
-            SetAllStateImages(views.button, nullptr);
-            views.button->SetText(
-                SpacePillLabel({.color = entry.color, .name = entry.name, .active = false}));
+            views.button->SetText(entry.icon_id.empty() ? SpacePillLabel({.color = entry.color,
+                                                                          .name = entry.name,
+                                                                          .icon_id = {},
+                                                                          .active = false})
+                                                        : std::string());
             views.button->SetEnabledTextColors(
                 (entry.active ? tokens_.text : tokens_.text_secondary).argb);
             views.button->SetFontList(FontList(
                 12, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
+            const ArgbColor icon_color = entry.active ? tokens_.text : tokens_.text_secondary;
+            const std::optional<CefRefPtr<CefImage>> icon =
+                icon_catalog_.LoadSpaceIcon(entry.icon_id, icon_color, ChromeIconSize::k16);
+            SetAllStateImages(views.button, icon.has_value() ? *icon : nullptr);
         } else {
             views.button->SetText("");
             views.button->SetBackgroundColor(rail.argb);
-            views.button->SetImage(
-                CEF_BUTTON_STATE_NORMAL,
-                MakeSpaceDotImage(entry.color, entry.active ? tokens_.text : tokens_.text_secondary,
-                                  entry.active));
+            const std::optional<CefRefPtr<CefImage>> icon =
+                icon_catalog_.LoadSpaceIcon(entry.icon_id, entry.color, ChromeIconSize::k16);
+            if (icon.has_value()) {
+                SetAllStateImages(views.button, *icon);
+            } else {
+                views.button->SetImage(
+                    CEF_BUTTON_STATE_NORMAL,
+                    MakeSpaceDotImage(entry.color,
+                                      entry.active ? tokens_.text : tokens_.text_secondary,
+                                      entry.active));
+            }
         }
     }
 }

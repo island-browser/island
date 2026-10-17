@@ -3,7 +3,9 @@
 
 #include <filesystem>
 #include <optional>
+#include <string_view>
 
+#include "design_tokens.h"
 #include "include/cef_image.h"
 
 namespace island {
@@ -41,6 +43,11 @@ class IconCatalog {
 
     [[nodiscard]] std::optional<CefRefPtr<CefImage>> Load(ChromeIcon icon, ChromeIconTone tone,
                                                           ChromeIconSize size) const;
+    // Space icons are stored as the same locked monochrome PNGs as chrome icons, then recolored
+    // from their alpha masks so Arc and Graphite can use the exact per-space color.
+    [[nodiscard]] std::optional<CefRefPtr<CefImage>> LoadSpaceIcon(std::string_view icon_id,
+                                                                   ArgbColor color,
+                                                                   ChromeIconSize size) const;
 
   private:
     std::filesystem::path resource_root_;

@@ -15,6 +15,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [0.7.2] - 2026-10-17
 
+### Added
+
+- Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon. The choice persists
+  in the session and appears in the Native, Arc and Graphite switchers and the collapsed rail.
+
 ### Changed
 
 - Selected segments use a neutral raised plate with normal text in every look; blue is reserved

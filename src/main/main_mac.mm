@@ -19,6 +19,7 @@
 #include "island_app.h"
 #include "keymap.h"
 #include "prefs_store.h"
+#include "space_icon.h"
 #include "startup_options.h"
 
 @interface IslandApplication : NSApplication <CefAppProtocol> {
@@ -87,6 +88,7 @@
 - (void)newSpace:(id)sender;
 - (void)closeSpace:(id)sender;
 - (void)beginSpaceRenaming:(id)sender;
+- (void)setActiveSpaceIcon:(id)sender;
 - (void)moveSpaceLeft:(id)sender;
 - (void)moveSpaceRight:(id)sender;
 - (void)toggleSplit:(id)sender;
@@ -151,6 +153,14 @@
     if (app_ != nullptr) {
         app_->BeginSpaceRenaming();
     }
+}
+
+- (void)setActiveSpaceIcon:(id)sender {
+    if (app_ == nullptr || ![sender isKindOfClass:[NSMenuItem class]]) {
+        return;
+    }
+    NSString* icon = [sender representedObject];
+    app_->SetActiveSpaceIcon(icon != nil ? std::string([icon UTF8String]) : std::string());
 }
 
 - (void)moveSpaceLeft:(id)sender {
@@ -305,6 +315,16 @@
 // Stop Loading is enabled only while the page loads. Its Escape twin also
 // needs no overlay, so Escape still reaches palettes, Settings, and fields.
 - (BOOL)validateMenuItem:(NSMenuItem*)item {
+    if ([item action] == @selector(setActiveSpaceIcon:)) {
+        if (app_ == nullptr) {
+            return NO;
+        }
+        NSString* icon = [item representedObject];
+        const std::string selected = app_->ActiveSpaceIconId();
+        const std::string candidate = icon != nil ? std::string([icon UTF8String]) : std::string();
+        [item setState:selected == candidate ? NSControlStateValueOn : NSControlStateValueOff];
+        return YES;
+    }
     if ([item action] != @selector(runKeyAction:)) {
         return YES;
     }
@@ -407,6 +427,11 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
     }
     if (action.compare(0, kNavigate.size(), kNavigate) == 0) {
         app->NavigateActiveTab(action.substr(kNavigate.size()));
+        return true;
+    }
+    if (const std::optional<island::DevSpaceIconAction> space_icon =
+            island::ParseDevSpaceIconAction(action)) {
+        app->SetSpaceIconForDev(space_icon->index, space_icon->icon_id);
         return true;
     }
     constexpr std::string_view kPeek = "peek:";
@@ -815,6 +840,29 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     NSMenuItem* rename_space_menu_item =
         AddBrowserMenuItem(browser_menu, menu_actions, @"Rename Space…",
                            @selector(beginSpaceRenaming:), @"", NSEventModifierFlagCommand, 0);
+    NSMenuItem* space_icon_menu_item = [[NSMenuItem alloc] initWithTitle:@"Icon"
+                                                                  action:nil
+                                                           keyEquivalent:@""];
+    NSMenu* space_icon_menu = [[NSMenu alloc] initWithTitle:@"Icon"];
+    NSMutableArray<NSMenuItem*>* space_icon_items =
+        [NSMutableArray arrayWithCapacity:island::kSpaceIconChoices.size() + 1];
+    NSMenuItem* no_space_icon =
+        AddBrowserMenuItem(space_icon_menu, menu_actions, @"None", @selector(setActiveSpaceIcon:),
+                           @"", NSEventModifierFlagCommand, 0);
+    [no_space_icon setRepresentedObject:@""];
+    [space_icon_items addObject:no_space_icon];
+    [space_icon_menu addItem:[NSMenuItem separatorItem]];
+    for (const island::SpaceIconChoice& choice : island::kSpaceIconChoices) {
+        NSString* label = [NSString stringWithUTF8String:std::string(choice.label).c_str()];
+        NSString* icon_id = [NSString stringWithUTF8String:std::string(choice.id).c_str()];
+        NSMenuItem* item =
+            AddBrowserMenuItem(space_icon_menu, menu_actions, label, @selector(setActiveSpaceIcon:),
+                               @"", NSEventModifierFlagCommand, 0);
+        [item setRepresentedObject:icon_id];
+        [space_icon_items addObject:item];
+    }
+    [space_icon_menu_item setSubmenu:space_icon_menu];
+    [browser_menu addItem:space_icon_menu_item];
     NSMenuItem* move_space_left_menu_item =
         AddBrowserMenuItem(browser_menu, menu_actions, @"Move Space Left",
                            @selector(moveSpaceLeft:), @"", NSEventModifierFlagCommand, 0);
@@ -906,6 +954,11 @@ void InstallMainMenu(IslandMenuActions* menu_actions) {
     [toggle_split_menu_item release];
     [move_space_right_menu_item release];
     [move_space_left_menu_item release];
+    for (NSMenuItem* item in space_icon_items) {
+        [item release];
+    }
+    [space_icon_menu release];
+    [space_icon_menu_item release];
     [rename_space_menu_item release];
     [close_space_menu_item release];
     [new_space_menu_item release];

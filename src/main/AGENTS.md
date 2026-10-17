@@ -39,7 +39,7 @@ platform executable links.
 | `sidebar_state.{h,cc}`, `collapsed_rail.h` | CEF-free expand/collapse state (persistent choice in prefs `sidebar_collapsed`, transient expansion while editing the address from the icon rail) and the icon rail's metrics plus the space-dot raster |
 | `favicon_policy.h` | CEF-free favicon rules: web pages only, 16 DIP downloads, stale-result and clear-on-navigation checks (bookkeeping lives on `Tab`) |
 | `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam |
-| `space.{h,cc}` | Named, colored space owning ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
+| `space.{h,cc}`, `space_icon.h` | Named, colored space with an optional validated Lucide icon id, ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
 | `pages/settings.html` | Settings shell: a section list (`data-pane` items, `aria-current`) over one `<section id=...>` pane at a time, sidebar search over rows, version footer. `settings.appearance.base_look` decides whether Space colors and Sidebar tint show (hidden for Native). Native-side focus requests (`ShowSettingsSection`, dev `settings:<section>`) carry a `focus_seq` from `SettingsFocus` (`settings_focus.h`), so the page opens a repeated section again; they wait until the page has loaded (`LocalPage::loaded()`) |

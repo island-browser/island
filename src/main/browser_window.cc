@@ -347,7 +347,7 @@ bool BrowserWindow::RestoreSessionState(const SessionState& state) {
             continue;
         }
         Space space{SpaceId{space_state.id.value}, space_state.name,
-                    ArgbColor{space_state.color_argb}};
+                    ArgbColor{space_state.color_argb}, space_state.icon_id};
         std::set<TabId> restored_ids;
         for (const TabState& tab_state : space_state.tabs) {
             if (!IsSessionInternalTabUrl(tab_state.url)) {
@@ -437,6 +437,7 @@ SessionState BrowserWindow::BuildSessionState() const {
         space_state.id = space.id();
         space_state.name = space.name();
         space_state.color_argb = space.color().argb;
+        space_state.icon_id = space.icon_id();
         std::set<TabId> saved_ids;
         for (const Tab& tab : space.tabs()) {
             const std::string url = EffectiveUrl(tab);
@@ -2538,6 +2539,16 @@ bool BrowserWindow::RenameSpace(std::size_t space_index, std::string name) {
     return true;
 }
 
+bool BrowserWindow::SetSpaceIcon(std::size_t space_index, std::string icon_id) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_index >= spaces_.size()) {
+        return false;
+    }
+    spaces_[space_index].SetIconId(std::move(icon_id));
+    UpdateChromeCollections();
+    return true;
+}
+
 bool BrowserWindow::MoveSpace(std::size_t from_index, std::size_t to_index) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || from_index >= spaces_.size() || to_index >= spaces_.size() ||
@@ -3864,8 +3875,8 @@ bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
     const Space& space = active_space();
     if (space.split().has_value()) {
         // A pane that changes slot is removed and re-added by the attach, so it leaves.
-        return *attached.tab == (attached.second_slot ? space.split()->second
-                                                      : space.split()->first);
+        return *attached.tab ==
+               (attached.second_slot ? space.split()->second : space.split()->first);
     }
     return *attached.tab == space.active_tab_id();
 }
@@ -4193,6 +4204,7 @@ void BrowserWindow::UpdateChromeCollections() {
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
         spaces.push_back({.color = spaces_[index].color(),
                           .name = spaces_[index].name(),
+                          .icon_id = spaces_[index].icon_id(),
                           .active = index == active_space_index_});
     }
     if (active != nullptr) {

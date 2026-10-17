@@ -98,6 +98,20 @@ TEST(Space, RenamesAndRecolors) {
     EXPECT_EQ(space.color(), ArgbColor{0xFF00FF00U});
 }
 
+TEST(Space, KeepsOnlyKnownOptionalIconIds) {
+    Space space = MakeSpace();
+    EXPECT_TRUE(space.icon_id().empty());
+
+    space.SetIconId("rocket");
+    EXPECT_EQ(space.icon_id(), "rocket");
+
+    space.SetIconId("not-a-space-icon");
+    EXPECT_TRUE(space.icon_id().empty());
+
+    const Space constructed(NextSpaceId(), "Home", kSpaceAccent, "home");
+    EXPECT_EQ(constructed.icon_id(), "home");
+}
+
 TEST(Space, AppendedTabBecomesTheActiveTab) {
     Space space = MakeSpace();
 

@@ -435,16 +435,14 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
     ASSERT_NE(footer, nullptr);
     // Top to bottom: the switcher row, then the full-width Agent button at the very bottom
     // (the brief's bottom-up order: Agent first, then the switcher row above it).
-    EXPECT_EQ(ChildIds(*footer),
-              (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
-                                         ChromeViewId::kRailAgentButton}));
+    EXPECT_EQ(ChildIds(*footer), (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
+                                                            ChromeViewId::kRailAgentButton}));
     const ChromeViewTreeNode* switcher_row = FindChild(*footer, ChromeViewId::kRailSwitcherRow);
     ASSERT_NE(switcher_row, nullptr);
     EXPECT_EQ(ChildIds(*switcher_row),
-              (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcher,
-                                         ChromeViewId::kRailNewSpaceButton,
-                                         ChromeViewId::kRailTabsButton,
-                                         ChromeViewId::kRailSettingsButton}));
+              (std::vector<ChromeViewId>{
+                  ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailNewSpaceButton,
+                  ChromeViewId::kRailTabsButton, ChromeViewId::kRailSettingsButton}));
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailSwitcherRow), 1076);
 }
 
@@ -476,8 +474,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFoll
 
 TEST(BrowserChromeNativeContractTest, GivenNativeSpacesWhenProjectedThenEachSegmentHasNoColorMark) {
     const std::vector<TabStripEntrySnapshot> tabs = {{.title = "Island"}};
-    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
-        {.name = "Default", .active = true}, {.name = "Work"}};
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {{.name = "Default", .active = true},
+                                                            {.name = "Work"}};
     const ChromeViewTreeNode tree =
         BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
     const ChromeViewTreeNode* switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
@@ -489,10 +487,32 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSpacesWhenProjectedThenEachSegm
     }
 }
 
+TEST(BrowserChromeContractTest, GivenAnIconThenItReplacesTheArcColorMark) {
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
+        {.name = "Work", .icon_id = "briefcase", .active = true}};
+    const ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract({}, spaces);
+    const ChromeViewTreeNode* switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
+    ASSERT_NE(switcher, nullptr);
+    ASSERT_EQ(switcher->children.size(), 1U);
+    EXPECT_EQ(ChildIds(switcher->children[0]),
+              (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcherEntryName}));
+}
+
+TEST(BrowserChromeNativeContractTest, GivenCompactSegmentsThenAChosenIconReplacesTheInitial) {
+    const SpaceSwitcherEntrySnapshot icon = {
+        .name = "Work", .icon_id = "briefcase", .active = false};
+    const SpaceSwitcherEntrySnapshot fallback = {.name = "Personal", .active = false};
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kNative), "");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(fallback, 5, LookPreset::kNative), "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 2, LookPreset::kNative), "Work");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kArc), "W");
+}
+
 TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAndClosedDiffer) {
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
-    const auto open = BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
+    const auto open =
+        BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
     EXPECT_EQ(open.fill, light.accent_soft);
     EXPECT_EQ(open.text, light.accent_text);
     const auto closed =

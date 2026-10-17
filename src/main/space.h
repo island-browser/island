@@ -33,7 +33,7 @@ struct SplitPairing {
 // because its Tabs are move-only.
 class Space {
   public:
-    Space(SpaceId id, std::string name, SpaceColor color);
+    Space(SpaceId id, std::string name, SpaceColor color, std::string icon_id = {});
 
     Space(const Space&) = delete;
     Space& operator=(const Space&) = delete;
@@ -44,8 +44,10 @@ class Space {
     [[nodiscard]] SpaceId id() const noexcept;
     [[nodiscard]] const std::string& name() const noexcept;
     [[nodiscard]] SpaceColor color() const noexcept;
+    [[nodiscard]] const std::string& icon_id() const noexcept;
     void Rename(std::string name);
     void SetColor(SpaceColor color);
+    void SetIconId(std::string icon_id);
 
     [[nodiscard]] const std::vector<Tab>& tabs() const noexcept;
     [[nodiscard]] std::vector<Tab>& tabs() noexcept;
@@ -113,6 +115,7 @@ class Space {
     SpaceId id_;
     std::string name_;
     SpaceColor color_;
+    std::string icon_id_;
     std::vector<Tab> tabs_;
     std::size_t active_tab_index_ = 0;
     std::optional<SplitPairing> split_;

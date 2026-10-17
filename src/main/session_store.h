@@ -54,6 +54,8 @@ struct SpaceState {
     std::vector<TabState> tabs;
     std::optional<TabId> active_tab_id;
     std::optional<SplitState> split;
+    // Optional in the file; empty and unknown values both mean no icon.
+    std::string icon_id;
 
     bool operator==(const SpaceState&) const = default;
 };

@@ -76,6 +76,29 @@ TEST(SessionStore, SaveThenLoadRoundTripsASimpleSession) {
     EXPECT_EQ(result.state, original);
 }
 
+TEST(SessionStore, RoundTripsSpaceIconsAndOldOrUnknownIconsLoadAsNone) {
+    SessionState original = BuildSampleState();
+    original.spaces[0].icon_id = "briefcase";
+    const auto path = std::filesystem::temp_directory_path() / "island_test_space_icon.json";
+    ASSERT_EQ(SessionStore::Save(path, original), SessionError::kNone);
+    LoadResult result = SessionStore::Load(path);
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state, original);
+
+    WriteFile(path, R"({"version":1,"spaces":[{"id":1,"name":"Old","color_argb":1,"tabs":[]}]})");
+    result = SessionStore::Load(path);
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_TRUE(result.state.spaces[0].icon_id.empty());
+
+    WriteFile(
+        path,
+        R"({"version":1,"spaces":[{"id":1,"name":"Edited","color_argb":1,"icon":"unknown","tabs":[]}]})");
+    result = SessionStore::Load(path);
+    std::filesystem::remove(path);
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_TRUE(result.state.spaces[0].icon_id.empty());
+}
+
 TEST(SessionStore, RoundTripsPinnedTabsAndLoadsSessionsWithoutThePinnedKey) {
     SessionState original = BuildSampleState();
     original.spaces[0].tabs[0].pinned = true;
