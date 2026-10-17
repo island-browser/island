@@ -2335,7 +2335,7 @@ void BrowserChrome::ApplyLookStructure() {
         const auto index_of = [](const CefRefPtr<CefPanel>& parent,
                                  const CefRefPtr<CefView>& child) {
             for (std::size_t i = 0; i < parent->GetChildViewCount(); ++i) {
-                if (parent->GetChildViewAt(static_cast<int>(i)) == child) {
+                if (parent->GetChildViewAt(static_cast<int>(i))->IsSame(child)) {
                     return static_cast<int>(i);
                 }
             }

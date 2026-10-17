@@ -1357,7 +1357,16 @@ void BrowserWindow::ApplyAppearance() {
 void BrowserWindow::ApplyAppearanceForDev(std::string_view key, std::string_view value) {
     using json::Value;
     Value message = Value::MakeObject();
-    if (key == "space_color") {
+    if (key == "look") {
+        const std::optional<LookPreset> look = ParseLook(value);
+        if (!look.has_value()) {
+            return;
+        }
+        message.Set("type", Value::String("set_look"))
+            .Set("look", Value::String(std::string(LookName(*look))));
+        HandleSettingsMessage(message);
+        return;
+    } else if (key == "space_color") {
         const std::size_t equals = value.find('=');
         if (equals == std::string_view::npos) {
             return;
