@@ -49,8 +49,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Island opens the research space itself (the question's name; a space with that name is reused)
   with the Plan hub as its pinned first tab, so the agent no longer creates one. Pages the agent
   opens during research become indented child rows under the Plan tab, each run of a branch under
-  its own "Branch A" kicker line, and open active (the page shows once the page before it has started loading);
-  selecting their plan node shows the page. Children of the pinned Plan tab start the Tabs
+  its own "Branch A" kicker line, and open active (a freshly created page stays visible until its
+  browser is at least 100 ms old; an older page swaps immediately); selecting their plan node
+  shows the page. Children of the pinned Plan tab start the Tabs
   section, so Favorites stays whole, and they stay together behind their parent when tabs are
   moved or a favourite is unpinned. The final Result opens as a grouped Report tab and the
   sidebar and session keep the grouping. The agent's navigate, back, forward and reload refuse
@@ -116,10 +117,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Research no longer swaps the page view several times in one turn (which crashed CEF a few
   seconds later): the space is made with the Plan tab as its only tab, reusing a space, opening
   the Report and selecting a plan node from another space change the model first and swap the
-  view once. A page view is never removed before it has started loading: pages the agent opens in
-  quick succession load one after the other, and the ones it has already moved past load when
-  you show them. A browser whose tab was closed while it was being created no longer keeps the
-  app from quitting.
+  view once. An attached page view is removed only after its browser exists and is at least 100 ms
+  old; generation-guarded age and fallback tasks cannot release a newer view, the startup view is
+  gated too, and the 2 s cap applies only when a browser is never created. Pages the agent already
+  moved past load when you show them. A browser whose tab was closed while it was being created no
+  longer keeps the app from quitting.
 
 - Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
   for them, and it finds the Import sources and the About list, which were hidden for every

@@ -2,6 +2,7 @@
 #define ISLAND_BROWSER_WINDOW_H_
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -284,16 +285,21 @@ class BrowserWindow : public CefClient,
     void OpenAgentPageStepForDev(int index, int count, int gap_ms);
     // How many times the active tab's view was attached; tests assert one swap per action.
     [[nodiscard]] std::size_t AttachCountForTest() const noexcept { return attach_count_; }
-    // View swaps actually made (attaches the gate let through) and whether one is waiting for the
-    // attached tab's browser. SetBrowserCreatingForTest(true) stands in for "the attached view's
-    // browser does not exist yet"; BrowserCreatedForTest() is the OnBrowserCreated signal.
+    // View swaps actually made (attaches the gate let through) and whether one is waiting for an
+    // attached view to reach the minimum browser age.
     [[nodiscard]] std::size_t ViewSwapCountForTest() const noexcept { return view_swap_count_; }
     [[nodiscard]] bool ViewSwapPendingForTest() const noexcept { return view_swap_pending_; }
-    void SetBrowserCreatingForTest(bool creating) { browser_creating_for_test_ = creating; }
-    void BrowserCreatedForTest() {
-        browser_creating_for_test_ = false;
-        RunPendingViewSwap();
+    // Real-gate seams: headless tests identify the tab represented by the content slot and drive
+    // the same creation-age, generation and fallback callbacks production uses.
+    void SetViewSwapTimeForTest(std::chrono::milliseconds since_epoch);
+    void AdvanceViewSwapTimeForTest(std::chrono::milliseconds elapsed);
+    void SetAttachedViewForSwapTest(TabId tab);
+    void BrowserCreatedForViewSwapTest(TabId tab);
+    [[nodiscard]] std::uint64_t AttachedViewGenerationForTest() const noexcept {
+        return attached_view_generation_;
     }
+    void RecheckPendingViewSwapForTest(std::uint64_t generation);
+    void RunUncreatedViewFallbackForTest(std::uint64_t generation);
     [[nodiscard]] std::size_t BrowserViewSizeChangeCountForDev() const noexcept;
     [[nodiscard]] std::size_t ChromeRelayoutCountForDev() const noexcept;
     // Test seams: the plan page URL, the agent send path (research and plan turns go through
@@ -723,16 +729,25 @@ class BrowserWindow : public CefClient,
     // the collection rows. Both are no-ops while closing.
     void DetachActiveTabObservers();
     void AttachActiveTabObservers();
-    // A tab view that was attached is never removed from the view tree before it has settled
-    // (its browser exists and has started its first navigation; removing it earlier crashes CEF,
-    // measured: a view removed ~10 ms after OnBrowserCreated crashes, one removed after 45 ms
-    // does not). The swap to the then-active tab is recorded and made from OnLoadStart (or
-    // after 2 s, or from the failure and close paths). The model and the address projection
-    // follow every call at once.
-    [[nodiscard]] bool AttachedBrowserStillCreating() const;
+    // A tab view that was attached is never removed until its browser exists and is at least
+    // 100 ms old. Removing one about 10 ms after creation crashed CEF; the age margin is
+    // independent of navigation or commit. A generation-guarded delayed task rechecks at the
+    // age boundary. The 2 s cap applies only if that generation's browser is never created.
+    // The model and address projection still follow every selection immediately.
+    struct AttachedView {
+        CefRefPtr<CefBrowserView> view;
+        TabId tab;
+    };
+    using ViewSwapClock = std::chrono::steady_clock;
+    static constexpr std::chrono::milliseconds kMinimumAttachedViewAge{100};
+    static constexpr std::chrono::milliseconds kUncreatedViewFallbackDelay{2000};
+    [[nodiscard]] ViewSwapClock::time_point ViewSwapNow() const;
+    [[nodiscard]] Tab* TabForAttachedView(const AttachedView& attached) noexcept;
+    [[nodiscard]] bool AttachedBrowserStillCreating();
+    void SetAttachedViews(std::vector<AttachedView> attached);
     void SchedulePendingViewSwap();
-    void SettleAttachedViewsAndSwap();
-    void RunPendingViewSwap();
+    void RunUncreatedViewFallback(std::uint64_t generation);
+    void RunPendingViewSwap(std::uint64_t generation);
     // Selects `tab` of `space` by changing the model first and attaching its view once, so a
     // cross-space activation never creates a view that the next swap removes within the task.
     void SelectTabWithOneAttach(std::size_t space, std::size_t tab);
@@ -988,9 +1003,15 @@ class BrowserWindow : public CefClient,
     bool plan_unapproved_ = false;
     std::size_t view_swap_count_ = 0;
     bool view_swap_pending_ = false;
-    std::optional<bool> browser_creating_for_test_;
-    // The tab views in the content slot (one, or two in split view), as last attached.
-    std::vector<CefRefPtr<CefBrowserView>> attached_views_;
+    std::optional<std::uint64_t> view_swap_pending_generation_;
+    std::optional<std::uint64_t> fallback_timer_generation_;
+    std::optional<std::uint64_t> uncreated_fallback_generation_;
+    // The tab views in the content slot (one, or two in split view), as last attached. Every
+    // replacement advances the generation so delayed work cannot act on a newer attachment.
+    std::vector<AttachedView> attached_views_;
+    std::uint64_t attached_view_generation_ = 0;
+    std::optional<ViewSwapClock::time_point> view_swap_time_for_test_;
+    bool attached_view_for_test_ = false;
     ResearchStatus research_status_;
     // The report whose text the agent session's conversation already holds.
     std::string report_in_session_;

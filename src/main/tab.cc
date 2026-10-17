@@ -35,10 +35,30 @@ const NavigationState& Tab::navigation_state() const noexcept { return navigatio
 
 void Tab::SetBrowserView(CefRefPtr<CefBrowserView> browser_view) {
     browser_view_ = browser_view;
-    settled_ = false;
+    browser_created_at_.reset();
 }
 
 void Tab::SetBrowser(CefRefPtr<CefBrowser> browser) { browser_ = browser; }
+
+void Tab::MarkBrowserCreated(BrowserCreationTime created_at) noexcept {
+    if (!browser_created_at_.has_value()) {
+        browser_created_at_ = created_at;
+    }
+}
+
+std::optional<std::chrono::steady_clock::duration> Tab::BrowserViewAgeAt(
+    BrowserCreationTime now) const noexcept {
+    if (!browser_created_at_.has_value() || now < *browser_created_at_) {
+        return std::nullopt;
+    }
+    return now - *browser_created_at_;
+}
+
+bool Tab::BrowserViewIsOldEnough(BrowserCreationTime now,
+                                 std::chrono::steady_clock::duration minimum_age) const noexcept {
+    const std::optional<std::chrono::steady_clock::duration> age = BrowserViewAgeAt(now);
+    return age.has_value() && *age >= minimum_age;
+}
 
 CefRefPtr<CefBrowserView> Tab::browser_view() const noexcept { return browser_view_; }
 

@@ -2,6 +2,8 @@
 // BrowserWindow. The CEF view types must be complete before browser_window.h.
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -841,8 +843,7 @@ TEST(BrowserWindowPagesTest, ResearchExplainsAMissingOrBlankCustomAgent) {
     SendStart(*window, R"({"type":"research","question":"q"})");
     EXPECT_FALSE(window->research_running());
     EXPECT_EQ(window->research_status().state, "not_installed");
-    EXPECT_NE(window->research_status().message.find("No agent command is set"),
-              std::string::npos);
+    EXPECT_NE(window->research_status().message.find("No agent command is set"), std::string::npos);
     const std::uint64_t first = window->research_status().seq;
 
     SendSettings(*window, R"({"type":"set_agent_command","command":"no-such-agent --acp"})");
@@ -871,7 +872,8 @@ TEST(BrowserWindowPagesTest, AResearchTurnThatNeverEndedBecomesAFailureNotAHang)
     CefRefPtr<BrowserWindow> window = MakeWindow();
     SendSettings(*window, R"({"type":"set_agent_command","command":"\"unbalanced"})");
     SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
-    SendStart(*window, R"({"type":"ask_agent","prompt":"hello"})");  // creates the session (it fails)
+    SendStart(*window,
+              R"({"type":"ask_agent","prompt":"hello"})");  // creates the session (it fails)
     ASSERT_NE(window->agent_session(), nullptr);
     window->SetResearchTaskForTest("q", /*turns_ended_before=*/0);
     window->FinishResearch();
@@ -894,7 +896,8 @@ TEST(BrowserWindowPagesTest, ACompletedResearchStoresTheReportAndOpensItInTheRes
     ASSERT_TRUE(window->SelectSpaceIndex(0));
     ASSERT_EQ(window->active_space_index(), 0U);
     window->SetResearchTaskForTest("what is rust");
-    window->CompleteResearch(ReportOutcome("# Rust in short\n\nA language [site](https://rust-lang.org)."));
+    window->CompleteResearch(
+        ReportOutcome("# Rust in short\n\nA language [site](https://rust-lang.org)."));
 
     EXPECT_FALSE(window->research_running());
     ASSERT_EQ(window->reports().reports.size(), 1U);
@@ -1403,50 +1406,84 @@ TEST(BrowserWindowPagesTest, SelectingANodeInAnotherSpaceSwapsTheViewOnce) {
     EXPECT_EQ(window->active_tab_id(), branch_a);
 }
 
-TEST(BrowserWindowPagesTest, AgentPagesWaitForTheAttachedBrowserBeforeSwappingTheView) {
+TEST(BrowserWindowPagesTest, AViewYoungerThanOneHundredMillisecondsHoldsTheSwap) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
-    window->SetPlanEntriesForTest(agent::SpecPlan());
-    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
-    window->SetBrowserCreatingForTest(true);
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    const TabId attached = window->active_tab_id();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewForSwapTest(attached);
+    window->BrowserCreatedForViewSwapTest(attached);
 
     const std::size_t swaps_before = window->ViewSwapCountForTest();
-    ASSERT_TRUE(window->OpenAgentTab("https://example.com/"));
-    ASSERT_TRUE(window->OpenAgentTab("https://example.org/"));
-    ASSERT_TRUE(window->OpenAgentTab("https://example.net/"));
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
 
-    // The model follows every call; the view in the slot is not removed while its browser is
-    // being created.
     EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
     EXPECT_TRUE(window->ViewSwapPendingForTest());
-    const TabId third = window->active_tab_id();
-    EXPECT_EQ(SpaceAt(*window, window->active_space_index()).FindTab(third)->startup_url(), "https://example.net/");
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(99));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    // Even the 2 s callback cannot release a browser that exists but is still too young.
+    window->RunUncreatedViewFallbackForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
 
-    window->BrowserCreatedForTest();
-
-    // One swap, to the tab that is active now.
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(1));
+    window->RecheckPendingViewSwapForTest(generation);
     EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
     EXPECT_FALSE(window->ViewSwapPendingForTest());
-    EXPECT_EQ(window->active_tab_id(), third);
-
-    // The signal fires once per swap: a late repeat attaches nothing (idle means no attaches).
-    window->BrowserCreatedForTest();
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
 }
 
-TEST(BrowserWindowPagesTest, AgentPagesSwapAtOnceWhenTheAttachedBrowserExists) {
+TEST(BrowserWindowPagesTest, AnAlreadyOldViewSwapsAtOnce) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
-    window->SetPlanEntriesForTest(agent::SpecPlan());
-    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
-    window->SetBrowserCreatingForTest(false);
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    const TabId attached = window->active_tab_id();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewForSwapTest(attached);
+    window->BrowserCreatedForViewSwapTest(attached);
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
 
     const std::size_t swaps_before = window->ViewSwapCountForTest();
-    ASSERT_TRUE(window->OpenAgentTab("https://example.com/"));
-    ASSERT_TRUE(window->OpenAgentTab("https://example.org/"));
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
 
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 2U);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
     EXPECT_FALSE(window->ViewSwapPendingForTest());
+}
+
+TEST(BrowserWindowPagesTest, AStaleFallbackTimerDoesNothingToANewerAttachedView) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    const TabId first = window->active_tab_id();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewForSwapTest(first);
+
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
+    const std::uint64_t stale_generation = window->AttachedViewGenerationForTest();
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+
+    window->BrowserCreatedForViewSwapTest(first);
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(stale_generation);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+
+    const TabId second = window->active_tab_id();
+    window->SetAttachedViewForSwapTest(second);
+    window->BrowserCreatedForViewSwapTest(second);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(2));
+    const std::uint64_t current_generation = window->AttachedViewGenerationForTest();
+    ASSERT_NE(current_generation, stale_generation);
+    ASSERT_TRUE(window->ViewSwapPendingForTest());
+    const std::size_t swaps_before_stale_timer = window->ViewSwapCountForTest();
+
+    window->RunUncreatedViewFallbackForTest(stale_generation);
+
+    EXPECT_EQ(window->ViewSwapCountForTest(), swaps_before_stale_timer);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
 }
 
 TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothing) {

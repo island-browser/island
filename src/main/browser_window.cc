@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -57,8 +56,6 @@
 
 namespace island {
 namespace {
-void CountEvent(const char* what);
-
 constexpr int kVirtualKeyF5 = 0x74;
 constexpr int kVirtualKeyEscape = 0x1B;
 constexpr int kChromeWindowWidth = 1440;
@@ -1088,7 +1085,7 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
     chrome_->AttachBrowserView(page->view());
-    attached_views_.clear();
+    SetAttachedViews({});
     FlushLocalPagesRender();
     page->Focus();
 }
@@ -2717,12 +2714,6 @@ void BrowserWindow::OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<Cef
     if (closing_ || owner == nullptr || !frame->IsMain()) {
         return;
     }
-    if (!owner->settled()) {
-        owner->MarkSettled();
-        CountEvent("settled");
-        SchedulePendingViewSwap();
-    }
-
     // The icon belongs to the page that declared it: leaving the origin (or the web
     // altogether) restores the globe until the new page declares its own.
     const std::string new_url = url.ToString();
@@ -2930,12 +2921,16 @@ void BrowserWindow::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     if (closing_) {
         return;
     }
-    CountEvent("after-created");
     browser_was_created_ = true;
     SchedulePageCardRefresh();
     Tab* owner = FindTabByBrowser(browser);
+    if (owner == nullptr) {
+        owner = FindTabByBrowserView(CefBrowserView::GetForBrowser(browser));
+    }
     if (owner != nullptr) {
         owner->SetBrowser(browser);
+        owner->MarkBrowserCreated(ViewSwapNow());
+        SchedulePendingViewSwap();
     }
 }
 
@@ -3102,6 +3097,11 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     window_->SetToFillLayout();
     chrome_ = std::make_unique<BrowserChrome>(*this, browser_view, ResolvedTokens(theme),
                                               icon_resource_root);
+    if (tab != nullptr) {
+        // BrowserChrome's constructor attached the startup view directly; register it with the
+        // same gate bookkeeping used by later swaps.
+        SetAttachedViews({AttachedView{.view = browser_view, .tab = tab->id()}});
+    }
     chrome_->OnNavigationChanged(tab != nullptr ? tab->navigation_state().snapshot()
                                                 : NavigationSnapshot{});
     chrome_->OnAddressChanged(address_bar_model_.snapshot());
@@ -3179,21 +3179,8 @@ void BrowserWindow::OnWindowDestroyed(CefRefPtr<CefWindow>) {
     CloseNavigationAndQuitMessageLoop();
 }
 
-namespace {
-// ISLAND_DEV_COUNTERS=1 logs the events that can move the content slot, with a timestamp.
-void CountEvent(const char* what) {
-    static const bool enabled = std::getenv("ISLAND_DEV_COUNTERS") != nullptr;
-    if (!enabled) return;
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch())
-                        .count();
-    std::fprintf(stderr, "island-count %lld %s\n", static_cast<long long>(ms % 1000000), what);
-}
-}  // namespace
-
 void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& new_bounds) {
     CEF_REQUIRE_UI_THREAD();
-    CountEvent("window-bounds");
     if (closing_) {
         return;
     }
@@ -3534,8 +3521,8 @@ void BrowserWindow::OnBrowserCreated(CefRefPtr<CefBrowserView> browser_view,
         return;
     }
     browser_was_created_ = true;
-    CountEvent("browser-created");
     owner->SetBrowser(browser);
+    owner->MarkBrowserCreated(ViewSwapNow());
     SchedulePendingViewSwap();
 }
 
@@ -3655,86 +3642,203 @@ void BrowserWindow::AttachActiveTabObservers() {
     UpdateChromeCollections();
     UpdateWindowTitle();
     if (AttachedBrowserStillCreating()) {
-        // The view in the content slot is still settling; it stays until it has started loading
-        // (OnLoadStart), or for 2 s at most when its page never starts.
-        if (!view_swap_pending_ && chrome_ != nullptr) {
-            CefPostDelayedTask(TID_UI,
-                               CefCreateClosureTask(base::BindOnce(
-                                   &BrowserWindow::SettleAttachedViewsAndSwap,
-                                   CefRefPtr<BrowserWindow>(this))),
-                               2000);
+        if (!view_swap_pending_ || view_swap_pending_generation_ != attached_view_generation_) {
+            view_swap_pending_ = true;
+            view_swap_pending_generation_ = attached_view_generation_;
+            fallback_timer_generation_.reset();
+            uncreated_fallback_generation_.reset();
+            SchedulePendingViewSwap();
         }
-        view_swap_pending_ = true;
         return;
     }
     view_swap_pending_ = false;
+    view_swap_pending_generation_.reset();
+    fallback_timer_generation_.reset();
+    uncreated_fallback_generation_.reset();
     ++view_swap_count_;
-    CountEvent("view-swap");
     AttachActiveTabBrowserView();
     FocusBrowserView();
 }
 
-bool BrowserWindow::AttachedBrowserStillCreating() const {
-    if (browser_creating_for_test_.has_value()) {
-        return *browser_creating_for_test_;
+BrowserWindow::ViewSwapClock::time_point BrowserWindow::ViewSwapNow() const {
+    return view_swap_time_for_test_.value_or(ViewSwapClock::now());
+}
+
+Tab* BrowserWindow::TabForAttachedView(const AttachedView& attached) noexcept {
+    Tab* tab = FindTabById(attached.tab);
+    if (tab == nullptr) {
+        return nullptr;
     }
-    if (chrome_ == nullptr || internal_page_.has_value()) {
+    if (attached.view == nullptr) {
+        return attached_view_for_test_ ? tab : nullptr;
+    }
+    if (tab->browser_view() == nullptr || !tab->browser_view()->IsSame(attached.view)) {
+        return nullptr;
+    }
+    return tab;
+}
+
+bool BrowserWindow::AttachedBrowserStillCreating() {
+    if ((chrome_ == nullptr && !attached_view_for_test_) || internal_page_.has_value()) {
         return false;
     }
     const Tab* target = active_tab();
-    const auto is_attached = [this](const CefRefPtr<CefBrowserView>& view) {
-        for (const CefRefPtr<CefBrowserView>& attached : attached_views_) {
-            if (attached != nullptr && view != nullptr && attached->IsSame(view)) return true;
+    for (const AttachedView& attached : attached_views_) {
+        if (target != nullptr && attached.tab == target->id() &&
+            TabForAttachedView(attached) != nullptr) {
+            return false;  // nothing is removed
         }
-        return false;
-    };
-    if (target != nullptr && is_attached(target->browser_view())) {
-        return false;  // nothing is removed
     }
-    for (const CefRefPtr<CefBrowserView>& view : attached_views_) {
-        // A closed tab no longer maps to its view: nothing to wait for.
-        const Tab* tab = const_cast<BrowserWindow*>(this)->FindTabByBrowserView(view);
-        if (tab != nullptr && !tab->settled()) {
-            CountEvent("gate-block");
+    const bool allow_uncreated = uncreated_fallback_generation_.has_value() &&
+                                 *uncreated_fallback_generation_ == attached_view_generation_;
+    const ViewSwapClock::time_point now = ViewSwapNow();
+    for (const AttachedView& attached : attached_views_) {
+        // A closed tab or a tab whose view was replaced no longer owns this attachment.
+        const Tab* tab = TabForAttachedView(attached);
+        if (tab == nullptr) {
+            continue;
+        }
+        if (!tab->browser_was_created()) {
+            if (!allow_uncreated) {
+                return true;
+            }
+            continue;
+        }
+        if (!tab->BrowserViewIsOldEnough(now, kMinimumAttachedViewAge)) {
             return true;
         }
     }
-    CountEvent("gate-pass");
     return false;
 }
 
-void BrowserWindow::SettleAttachedViewsAndSwap() {
+void BrowserWindow::SetAttachedViews(std::vector<AttachedView> attached) {
+    attached_views_ = std::move(attached);
+    ++attached_view_generation_;
+    fallback_timer_generation_.reset();
+    uncreated_fallback_generation_.reset();
+}
+
+void BrowserWindow::RunUncreatedViewFallback(std::uint64_t generation) {
     CEF_REQUIRE_UI_THREAD();
-    for (const CefRefPtr<CefBrowserView>& view : attached_views_) {
-        Tab* tab = FindTabByBrowserView(view);
-        if (tab != nullptr) {
-            tab->MarkSettled();
-        }
+    if (!view_swap_pending_ || view_swap_pending_generation_ != generation ||
+        attached_view_generation_ != generation) {
+        return;
     }
-    RunPendingViewSwap();
+    // This generation has waited the cap. It may ignore only views whose browser still does not
+    // exist; a browser created just before the cap must still reach the 100 ms minimum age.
+    uncreated_fallback_generation_ = generation;
+    RunPendingViewSwap(generation);
 }
 
 void BrowserWindow::SchedulePendingViewSwap() {
-    if (!view_swap_pending_) {
+    if (!view_swap_pending_ || !view_swap_pending_generation_.has_value() ||
+        *view_swap_pending_generation_ != attached_view_generation_) {
         return;
     }
-    // Not from inside the CEF callback that reported the browser: removing its view there
-    // re-enters CEF while it is still setting that browser up.
-    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::RunPendingViewSwap,
-                                                            CefRefPtr<BrowserWindow>(this))));
+    const std::uint64_t generation = attached_view_generation_;
+    const ViewSwapClock::time_point now = ViewSwapNow();
+    ViewSwapClock::duration longest_age_wait = ViewSwapClock::duration::zero();
+    bool has_uncreated_browser = false;
+    for (const AttachedView& attached : attached_views_) {
+        const Tab* tab = TabForAttachedView(attached);
+        if (tab == nullptr) {
+            continue;
+        }
+        const std::optional<ViewSwapClock::duration> age = tab->BrowserViewAgeAt(now);
+        if (!age.has_value()) {
+            has_uncreated_browser = true;
+            continue;
+        }
+        if (*age < kMinimumAttachedViewAge) {
+            longest_age_wait = std::max(longest_age_wait, kMinimumAttachedViewAge - *age);
+        }
+    }
+    if (has_uncreated_browser && fallback_timer_generation_ != generation) {
+        fallback_timer_generation_ = generation;
+        if (!attached_view_for_test_) {
+            CefPostDelayedTask(
+                TID_UI,
+                CefCreateClosureTask(base::BindOnce(&BrowserWindow::RunUncreatedViewFallback,
+                                                    CefRefPtr<BrowserWindow>(this), generation)),
+                kUncreatedViewFallbackDelay.count());
+        }
+    }
+    if (longest_age_wait > ViewSwapClock::duration::zero()) {
+        if (!attached_view_for_test_) {
+            const auto delay = std::chrono::ceil<std::chrono::milliseconds>(longest_age_wait);
+            CefPostDelayedTask(
+                TID_UI,
+                CefCreateClosureTask(base::BindOnce(&BrowserWindow::RunPendingViewSwap,
+                                                    CefRefPtr<BrowserWindow>(this), generation)),
+                std::max<std::int64_t>(1, delay.count()));
+        }
+        return;
+    }
+    if ((!has_uncreated_browser || uncreated_fallback_generation_ == generation) &&
+        !attached_view_for_test_) {
+        // Not from inside the CEF callback that reported the browser: removing its view there
+        // re-enters CEF while it is still setting that browser up.
+        CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::RunPendingViewSwap,
+                                                                CefRefPtr<BrowserWindow>(this),
+                                                                generation)));
+    }
 }
 
-void BrowserWindow::RunPendingViewSwap() {
+void BrowserWindow::RunPendingViewSwap(std::uint64_t generation) {
     CEF_REQUIRE_UI_THREAD();
-    CountEvent("run-pending");
-    if (!view_swap_pending_ || closing_ || AttachedBrowserStillCreating()) {
+    if (!view_swap_pending_ || closing_ || view_swap_pending_generation_ != generation ||
+        attached_view_generation_ != generation) {
+        return;
+    }
+    if (AttachedBrowserStillCreating()) {
+        SchedulePendingViewSwap();
         return;
     }
     view_swap_pending_ = false;
+    view_swap_pending_generation_.reset();
+    fallback_timer_generation_.reset();
+    uncreated_fallback_generation_.reset();
     ++view_swap_count_;
-    CountEvent("view-swap");
     AttachActiveTabBrowserView();
     FocusBrowserView();
+}
+
+void BrowserWindow::SetViewSwapTimeForTest(std::chrono::milliseconds since_epoch) {
+    view_swap_time_for_test_ = ViewSwapClock::time_point(since_epoch);
+}
+
+void BrowserWindow::AdvanceViewSwapTimeForTest(std::chrono::milliseconds elapsed) {
+    if (!view_swap_time_for_test_.has_value()) {
+        view_swap_time_for_test_ = ViewSwapClock::now();
+    }
+    *view_swap_time_for_test_ += elapsed;
+}
+
+void BrowserWindow::SetAttachedViewForSwapTest(TabId tab_id) {
+    Tab* tab = FindTabById(tab_id);
+    if (tab == nullptr) {
+        return;
+    }
+    tab->SetBrowserView(nullptr);
+    attached_view_for_test_ = true;
+    SetAttachedViews({AttachedView{.view = nullptr, .tab = tab_id}});
+}
+
+void BrowserWindow::BrowserCreatedForViewSwapTest(TabId tab_id) {
+    Tab* tab = FindTabById(tab_id);
+    if (tab == nullptr) {
+        return;
+    }
+    tab->MarkBrowserCreated(ViewSwapNow());
+    SchedulePendingViewSwap();
+}
+
+void BrowserWindow::RecheckPendingViewSwapForTest(std::uint64_t generation) {
+    RunPendingViewSwap(generation);
+}
+
+void BrowserWindow::RunUncreatedViewFallbackForTest(std::uint64_t generation) {
+    RunUncreatedViewFallback(generation);
 }
 
 std::size_t BrowserWindow::BrowserViewSizeChangeCountForDev() const noexcept {
@@ -3756,7 +3860,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         LocalPage* page = InternalPageFor(*internal_page_);
         if (keep_internal_page_ && page != nullptr) {
             chrome_->AttachBrowserView(page->view());
-            attached_views_.clear();
+            SetAttachedViews({});
             return;
         }
         internal_page_.reset();
@@ -3770,7 +3874,8 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
             EnsureTabBrowserView(*second)) {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
-            attached_views_ = {first->browser_view(), second->browser_view()};
+            SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
+                              AttachedView{.view = second->browser_view(), .tab = second->id()}});
             return;
         }
     }
@@ -3779,7 +3884,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         return;
     }
     chrome_->AttachBrowserView(tab->browser_view());
-    attached_views_ = {tab->browser_view()};
+    SetAttachedViews({AttachedView{.view = tab->browser_view(), .tab = tab->id()}});
 }
 
 bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
@@ -4763,7 +4868,6 @@ void BrowserWindow::EndTransientSidebarExpand() {
 
 void BrowserWindow::ApplySidebarState() {
     CEF_REQUIRE_UI_THREAD();
-    CountEvent("apply-sidebar-state");
     if (closing_) {
         return;
     }
@@ -4810,7 +4914,6 @@ void BrowserWindow::RefreshPageCards() {
     if (closing_ || chrome_ == nullptr) {
         return;
     }
-    CountEvent("page-card-refresh");
     const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
     const std::vector<void*> handles = NativeContentHandles();
     ApplyPageCardStyle(handles, {.radius_dip = tokens.card_radius_dip,

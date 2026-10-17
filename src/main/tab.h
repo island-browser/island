@@ -1,6 +1,7 @@
 #ifndef ISLAND_TAB_H_
 #define ISLAND_TAB_H_
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -88,10 +89,18 @@ class Tab {
     [[nodiscard]] CefRefPtr<CefBrowserView> browser_view() const noexcept;
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const noexcept;
     [[nodiscard]] bool has_browser() const noexcept;
-    // A fresh view is "settling" until its browser has started its first navigation; removing
-    // the view from the window before that crashes CEF (BrowserWindow gates view swaps on it).
-    [[nodiscard]] bool settled() const noexcept { return settled_; }
-    void MarkSettled() noexcept { settled_ = true; }
+    // A fresh view may be removed only after OnBrowserCreated / OnAfterCreated has supplied its
+    // browser and that browser has been alive for BrowserWindow's minimum view age. A page load
+    // or navigation commit is deliberately not part of this lifecycle gate.
+    using BrowserCreationTime = std::chrono::steady_clock::time_point;
+    void MarkBrowserCreated(BrowserCreationTime created_at) noexcept;
+    [[nodiscard]] std::optional<std::chrono::steady_clock::duration> BrowserViewAgeAt(
+        BrowserCreationTime now) const noexcept;
+    [[nodiscard]] bool BrowserViewIsOldEnough(
+        BrowserCreationTime now, std::chrono::steady_clock::duration minimum_age) const noexcept;
+    [[nodiscard]] bool browser_was_created() const noexcept {
+        return browser_created_at_.has_value();
+    }
 
     void IncrementBlockedRequests() noexcept { ++blocked_requests_; }
     void ResetBlockedRequests() noexcept { blocked_requests_ = 0; }
@@ -124,7 +133,7 @@ class Tab {
     NavigationState navigation_state_;
 
     CefRefPtr<CefBrowserView> browser_view_;
-    bool settled_ = false;
+    std::optional<BrowserCreationTime> browser_created_at_;
     CefRefPtr<CefBrowser> browser_;
     CefRefPtr<CefImage> favicon_;
     std::string pending_favicon_url_;
