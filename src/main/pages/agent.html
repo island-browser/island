@@ -180,6 +180,10 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
   padding: 12px; }
 .card.ask { border-color: var(--text-2); box-shadow: var(--shadow); }
 .card p { margin: 0 0 10px; }
+.confirm-card { margin-bottom: 8px; }
+.confirm-card .host { margin: 0 0 4px; font: 11px/1.4 var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
+.confirm-card .summary { overflow-wrap: anywhere; }
+.confirm-card .actions .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .card .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
   padding: 5px 11px; font-size: 12.5px; font-weight: 500; transition: background .16s, border-color .16s; }
@@ -262,6 +266,7 @@ textarea::placeholder { color: var(--text-2); }
 </header>
 <main id="log" aria-live="polite"></main>
 <footer>
+  <div id="confirmations" role="alertdialog" aria-label="The agent needs your approval" hidden></div>
   <div class="composer">
     <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent" hidden>
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
@@ -279,13 +284,15 @@ textarea::placeholder { color: var(--text-2); }
 (function () {
   var MESSAGE_PREFIX = "\u0001island:";
   var state = { session: { state: "idle", status: "Not running", items: [], busy: false, command: "" },
-                context: null, endpoint: "", theme: null, provider: "", providers: [], env_override: false };
+                context: null, endpoint: "", theme: null, confirmations: [], provider: "", providers: [], env_override: false };
   var includeContext = true;
   var log = document.getElementById("log");
   var input = document.getElementById("input");
   var sendButton = document.getElementById("send");
   var contextButton = document.getElementById("context");
   var renderedSignature = "";
+  var confirmBox = document.getElementById("confirmations");
+  var confirmRendered = "";
 
   function post(message) { console.log(MESSAGE_PREFIX + JSON.stringify(message)); }
 
@@ -374,6 +381,38 @@ textarea::placeholder { color: var(--text-2); }
     });
     node.appendChild(actions);
     return node;
+  }
+
+  // The window owns the pending confirmations (it keeps them while this panel is closed); the card
+  // only renders them and posts the person's answer.
+  function confirmationNode(item) {
+    var node = el("div", "card ask confirm-card");
+    node.appendChild(el("h4", "", "The agent wants to act"));
+    if (item.host) node.appendChild(el("p", "host", item.host));
+    node.appendChild(el("p", "summary", item.summary));
+    var actions = el("div", "actions");
+    function answer(label, value, primary) {
+      var button = el("button", "btn" + (primary ? " primary" : ""), label);
+      button.addEventListener("click", function () {
+        post({ type: "confirm", id: item.id, answer: value });
+      });
+      actions.appendChild(button);
+    }
+    answer("Allow once", "once", true);
+    if (item.trusted_allowed !== false) {
+      answer("Allow for this task", "task", false);
+      answer("Trust this site", "trust", false);
+    }
+    answer("Cancel", "cancel", false);
+    node.appendChild(actions);
+    return node;
+  }
+
+  function cancelFirstConfirmation() {
+    var pending = state.confirmations || [];
+    if (!pending.length) return false;
+    post({ type: "confirm", id: pending[0].id, answer: "cancel" });
+    return true;
   }
 
   function itemNode(item) {
@@ -699,6 +738,20 @@ textarea::placeholder { color: var(--text-2); }
       if (nearBottom || !items.length) log.scrollTop = log.scrollHeight;
     }
 
+    var pending = state.confirmations || [];
+    var confirmSignature = JSON.stringify(pending);
+    if (confirmSignature !== confirmRendered) {
+      var hadCards = confirmBox.childNodes.length > 0;
+      confirmRendered = confirmSignature;
+      confirmBox.textContent = "";
+      pending.forEach(function (item) { confirmBox.appendChild(confirmationNode(item)); });
+      confirmBox.hidden = !pending.length;
+      if (pending.length && !hadCards) {
+        var first = confirmBox.querySelector(".btn");
+        if (first) first.focus();
+      }
+    }
+
     var busy = !!session.busy;
     sendButton.innerHTML = busy ? STOP_ICON : SEND_ICON;
     sendButton.title = busy ? "Stop (Esc)" : "Send (Enter)";
@@ -754,6 +807,13 @@ textarea::placeholder { color: var(--text-2); }
     input.style.height = Math.min(input.scrollHeight, 160) + "px";
   }
 
+  // Esc answers "cancel" to the oldest pending confirmation before anything else uses it.
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && cancelFirstConfirmation()) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
   input.addEventListener("input", function () { autosize(); render(); });
   input.addEventListener("keydown", function (event) {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
@@ -776,6 +836,7 @@ textarea::placeholder { color: var(--text-2); }
     if (next.theme) { state.theme = next.theme; applyTheme(next.theme); }
     if (next.session) state.session = next.session;
     if ("context" in next) state.context = next.context;
+    if ("confirmations" in next) state.confirmations = next.confirmations || [];
     if ("endpoint" in next) state.endpoint = next.endpoint;
     if ("provider" in next) state.provider = next.provider;
     if ("providers" in next) state.providers = next.providers || [];

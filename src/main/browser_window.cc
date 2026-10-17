@@ -1033,7 +1033,8 @@ std::string BrowserWindow::AgentPanelStateJson() const {
             .Set("context", std::move(context))
             .Set("endpoint",
                  json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
-                                                                                : std::string()));
+                                                                                : std::string()))
+            .Set("confirmations", ConfirmationsStateJson());
     json::Value providers = AgentProvidersStateJson();
     for (auto& [key, value] : providers.object_val) {
         if (key == "provider" || key == "providers" || key == "env_override" ||
@@ -1334,6 +1335,7 @@ std::string BrowserWindow::SettingsStateJson() const {
                                .Set("theme", Value::String(reader.theme)))
             .Set("platform", Value::String(platform))
             .Set("agent", std::move(agent))
+            .Set("trusted_sites", TrustedSitesJson())
             .Set("endpoint", std::move(endpoint))
             .Set("shortcuts", std::move(shortcuts))
             .Set("reports", ReportsListJson())
@@ -1622,6 +1624,8 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
             prefs_.reader_theme = settings.theme;
             SavePrefs();
         }
+    } else if (type == "remove_trusted_site") {
+        RemoveTrustedSite(message.StringOr("host", ""));
     } else if (type == "set_agent_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "set_agent_command") {
@@ -2174,6 +2178,10 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         ShowSettingsSection("agent");
         return;
     }
+    if (type == "confirm") {
+        HandleConfirmMessage(message);
+        return;
+    }
     EnsureAgentSession();
     if (type == "send") {
         SubmitAgentPrompt(std::string(message.StringOr("text", "")),
@@ -2444,6 +2452,9 @@ ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
 }
 
 void BrowserWindow::ShutdownAgentHost() {
+    // Every open card is answered "cancel" first, so a tool call waiting on one finishes while
+    // the endpoint can still reply.
+    CancelPendingConfirmations();
     if (agent_host_ != nullptr) {
         agent_host_->Shutdown();
     }
@@ -4734,6 +4745,171 @@ void BrowserWindow::AddTrustedSite(std::string host) {
     ScheduleLocalPagesRender();
 }
 
+std::chrono::steady_clock::time_point BrowserWindow::ConfirmationNow() const {
+    return std::chrono::steady_clock::now() + confirmation_clock_offset_;
+}
+
+void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
+                                     std::function<void(agent::ConfirmationAnswer)> done) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        done(agent::ConfirmationAnswer::kCancel);
+        return;
+    }
+    // The tab the action targets (the active tab when the request names none) is the one marked
+    // "waiting for you".
+    const Space& space = active_space();
+    TabId tab_id;
+    if (request.tab.has_value() && *request.tab < space.tab_count()) {
+        tab_id = space.tabs()[*request.tab].id();
+    } else if (const Tab* active = active_tab(); active != nullptr) {
+        tab_id = active->id();
+    }
+    pending_confirmations_.push_back({.request = std::move(request),
+                                      .done = std::move(done),
+                                      .deadline = ConfirmationNow() + kConfirmationTimeout,
+                                      .tab_id = tab_id});
+    if (!agent_panel_open()) {
+        SetAgentPanelOpen(true);
+    }
+    ArmConfirmationTimer();
+    RefreshConfirmationUi();
+}
+
+void BrowserWindow::ShowConfirmationFixtureForDev() {
+    ShowConfirmation({.id = "dev1",
+                      .tool = "browser_click",
+                      .summary = "Click \"Place order\" and submit the checkout form",
+                      .host = "shop.example",
+                      .tab = std::nullopt,
+                      .trusted_allowed = true},
+                     [](agent::ConfirmationAnswer answer) {
+                         fprintf(stderr, "island-dev: confirmation answered %d\n",
+                                 static_cast<int>(answer));
+                     });
+}
+
+void BrowserWindow::AnswerConfirmation(std::string_view id, agent::ConfirmationAnswer answer) {
+    CEF_REQUIRE_UI_THREAD();
+    for (std::size_t index = 0; index < pending_confirmations_.size(); ++index) {
+        const agent::ConfirmationRequest& request = pending_confirmations_[index].request;
+        if (request.id != id) {
+            continue;
+        }
+        const bool grants = answer == agent::ConfirmationAnswer::kTrustSite ||
+                            answer == agent::ConfirmationAnswer::kAllowForTask;
+        if (grants && !request.trusted_allowed) {
+            answer = agent::ConfirmationAnswer::kCancel;
+        } else if (answer == agent::ConfirmationAnswer::kTrustSite) {
+            AddTrustedSite(request.host);
+        }
+        FinishConfirmation(index, answer);
+        return;
+    }
+}
+
+void BrowserWindow::FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer) {
+    std::function<void(agent::ConfirmationAnswer)> done = std::move(pending_confirmations_[index].done);
+    pending_confirmations_.erase(pending_confirmations_.begin() +
+                                 static_cast<std::ptrdiff_t>(index));
+    RefreshConfirmationUi();
+    if (done) {
+        done(answer);
+    }
+}
+
+void BrowserWindow::CancelPendingConfirmations() {
+    while (!pending_confirmations_.empty()) {
+        FinishConfirmation(pending_confirmations_.size() - 1, agent::ConfirmationAnswer::kCancel);
+    }
+}
+
+void BrowserWindow::ExpireConfirmations() {
+    const std::chrono::steady_clock::time_point now = ConfirmationNow();
+    for (std::size_t index = 0; index < pending_confirmations_.size();) {
+        if (pending_confirmations_[index].deadline <= now) {
+            FinishConfirmation(index, agent::ConfirmationAnswer::kTimeout);
+        } else {
+            ++index;
+        }
+    }
+}
+
+void BrowserWindow::AdvanceConfirmationClockForTest(std::chrono::seconds elapsed) {
+    confirmation_clock_offset_ += elapsed;
+    ExpireConfirmations();
+}
+
+void BrowserWindow::ArmConfirmationTimer() {
+    // Without a chrome there is no running message loop (headless tests drive the clock by hand).
+    if (confirmation_timer_armed_ || pending_confirmations_.empty() || closing_ ||
+        chrome_ == nullptr) {
+        return;
+    }
+    confirmation_timer_armed_ = true;
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(&BrowserWindow::OnConfirmationTick,
+                                                           CefRefPtr<BrowserWindow>(this))),
+                       1000);
+}
+
+void BrowserWindow::OnConfirmationTick() {
+    confirmation_timer_armed_ = false;
+    if (closing_) {
+        return;
+    }
+    ExpireConfirmations();
+    ArmConfirmationTimer();
+}
+
+void BrowserWindow::RefreshConfirmationUi() {
+    if (closing_) {
+        return;
+    }
+    RefreshAddressIndicators();
+    if (chrome_ != nullptr) {
+        chrome_->SetAgentNeedsYou(!pending_confirmations_.empty());
+    }
+    ScheduleLocalPagesRender();
+}
+
+json::Value BrowserWindow::ConfirmationsStateJson() const {
+    json::Value list = json::Value::MakeArray();
+    for (const PendingConfirmation& pending : pending_confirmations_) {
+        list.Push(json::Value::MakeObject()
+                      .Set("id", json::Value::String(pending.request.id))
+                      .Set("summary", json::Value::String(pending.request.summary))
+                      .Set("host", json::Value::String(pending.request.host))
+                      .Set("trusted_allowed", json::Value::Bool(pending.request.trusted_allowed)));
+    }
+    return list;
+}
+
+json::Value BrowserWindow::TrustedSitesJson() const {
+    json::Value list = json::Value::MakeArray();
+    for (const std::string& host : prefs_.agent_trusted_sites) {
+        list.Push(json::Value::String(host));
+    }
+    return list;
+}
+
+void BrowserWindow::HandleConfirmMessage(const json::Value& message) {
+    const std::string_view answer = message.StringOr("answer", "");
+    std::optional<agent::ConfirmationAnswer> parsed;
+    if (answer == "once") {
+        parsed = agent::ConfirmationAnswer::kAllowOnce;
+    } else if (answer == "task") {
+        parsed = agent::ConfirmationAnswer::kAllowForTask;
+    } else if (answer == "trust") {
+        parsed = agent::ConfirmationAnswer::kTrustSite;
+    } else if (answer == "cancel") {
+        parsed = agent::ConfirmationAnswer::kCancel;
+    }
+    if (parsed.has_value()) {
+        AnswerConfirmation(message.StringOr("id", ""), *parsed);
+    }
+}
+
 void BrowserWindow::RemoveTrustedSite(std::string_view host) {
     const std::vector<std::string> normalized = NormalizeTrustedSites({std::string(host)});
     if (normalized.empty() || std::erase(prefs_.agent_trusted_sites, normalized.front()) == 0) {
@@ -4818,6 +4994,15 @@ bool BrowserWindow::ReaderAvailableForActiveTab() const {
 // The agent works on the active tab (the tools default to it), so its state is the window's
 // agent state: a prompt waiting for an answer beats a running turn.
 AgentTabState BrowserWindow::AgentStateForActiveTab() const {
+    // A confirmation card waiting on the active tab beats everything else, even without a session
+    // (an external MCP agent has none).
+    if (const Tab* active = active_tab(); active != nullptr) {
+        for (const PendingConfirmation& pending : pending_confirmations_) {
+            if (pending.tab_id == active->id()) {
+                return AgentTabState::kWaitingForYou;
+            }
+        }
+    }
     if (agent_session_ == nullptr || active_tab() == nullptr || !agent_session_->busy()) {
         return AgentTabState::kIdle;
     }

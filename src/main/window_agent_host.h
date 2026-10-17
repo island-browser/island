@@ -54,8 +54,7 @@ class WindowAgentHost final : public agent::AgentBrowserHost {
     agent::HostStatus RunAction(agent::AgentBrowserAction action) override;
     void DevToolsCall(std::optional<std::size_t> tab, std::string_view method, json::Value params,
                       agent::DevToolsCallback done) override;
-    // The saved trusted sites. Confirmations are still answered "cancel" until the confirmation UI
-    // lands, so a trusted site does not yet skip a prompt.
+    // The saved trusted sites. Confirmations show as a card in the agent panel (BrowserWindow).
     std::vector<std::string> TrustedSites() override;
     void RequestConfirmation(agent::ConfirmationRequest request,
                              std::function<void(agent::ConfirmationAnswer)> done) override;

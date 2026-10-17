@@ -15,6 +15,7 @@
 //       report in a new tab, `plan_fixture` opens a Plan tab with the sample research plan
 //       waiting for approval, `agent_pages:<count>[:<gap>]` opens that many agent pages through
 //       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and `cheatsheet` opens the shortcut cheatsheet.
+//       `agent_fixture:confirm` shows a sample agent confirmation card in the panel.
 //       `settings:<section>` opens Settings on one section (appearance, shortcuts, ...).
 //       `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
 //       density, font,
@@ -56,6 +57,10 @@ struct DevCaptureOptions {
 // The Settings section a `settings:<section>` action opens ("settings:shortcuts" -> "shortcuts"),
 // or "" when the action is not one.
 [[nodiscard]] std::string_view DevSettingsSectionName(std::string_view action);
+
+// The fixture a `agent_fixture:<name>` action shows ("agent_fixture:confirm" -> "confirm"), or ""
+// when the action is not one. `confirm` opens the agent panel with a sample confirmation card.
+[[nodiscard]] std::string_view DevAgentFixtureName(std::string_view action);
 
 }  // namespace island
 

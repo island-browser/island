@@ -23,6 +23,7 @@
 #include "agent_session.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
+#include "browser_tools.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "browser_import.h"
@@ -166,6 +167,19 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] const std::vector<std::string>& trusted_sites() const {
         return prefs_.agent_trusted_sites;
     }
+    // Agent confirmations: the card the person answers before a consequential page action. The
+    // window keeps each request until it is answered, times out after 120 s or the window closes,
+    // and calls `done` exactly once. The card lives in the window, not the panel, so it survives
+    // closing and reopening the panel; showing one opens the panel.
+    void ShowConfirmation(agent::ConfirmationRequest request,
+                          std::function<void(agent::ConfirmationAnswer)> done);
+    // Answers a pending confirmation (unknown ids are ignored). "Trust this site" saves the host
+    // when the card offered it; a trust or task answer to a card that did not offer them is
+    // treated as a cancel.
+    void AnswerConfirmation(std::string_view id, agent::ConfirmationAnswer answer);
+    [[nodiscard]] bool HasPendingConfirmation() const { return !pending_confirmations_.empty(); }
+    // Moves the confirmation clock forward and fires the timeouts that came due.
+    void AdvanceConfirmationClockForTest(std::chrono::seconds elapsed);
     // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
     // The URL NavigateTab would load for `text`, or nullopt when it resolves to no allowed one.
@@ -289,6 +303,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] std::string PlanStateJson() const;
     // Developer capture: opens a Plan tab that shows the sample plan waiting for approval.
     void OpenPlanFixtureTab(bool include_child_tabs = false);
+    // Developer capture only (`agent_fixture:confirm`): a sample confirmation card in the panel.
+    void ShowConfirmationFixtureForDev();
     // Opens `count` agent pages, one UI task each, as an agent calling browser_open_tab in a row
     // does (developer capture `agent_pages:<count>[:<gap>]`). `gap_ms` 0 posts every task at once;
     // a positive gap delays each next page by that many milliseconds; kSerialAgentPages posts the
@@ -732,6 +748,26 @@ class BrowserWindow : public CefClient,
     void DeliverAddressIndicators();
     [[nodiscard]] bool ReaderAvailableForActiveTab() const;
     [[nodiscard]] AgentTabState AgentStateForActiveTab() const;
+
+    struct PendingConfirmation {
+        agent::ConfirmationRequest request;
+        std::function<void(agent::ConfirmationAnswer)> done;
+        std::chrono::steady_clock::time_point deadline;
+        TabId tab_id;
+    };
+    static constexpr std::chrono::seconds kConfirmationTimeout{120};
+    [[nodiscard]] std::chrono::steady_clock::time_point ConfirmationNow() const;
+    // Removes the entry at `index` and reports `answer` to its callback.
+    void FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer);
+    void CancelPendingConfirmations();
+    void ExpireConfirmations();
+    void ArmConfirmationTimer();
+    void OnConfirmationTick();
+    // After the pending list changed: indicators, the Agent button dot, the panel's state.
+    void RefreshConfirmationUi();
+    [[nodiscard]] json::Value ConfirmationsStateJson() const;
+    [[nodiscard]] json::Value TrustedSitesJson() const;
+    void HandleConfirmMessage(const json::Value& message);
     // Navigates the active tab to a stored bookmark URL through the single
     // address-validation path; a URL the allow-list rejects is a no-op.
     void OpenBookmark(const PaletteBookmarkEntry& bookmark);
@@ -1131,6 +1167,9 @@ class BrowserWindow : public CefClient,
     };
     std::optional<ShortcutConflict> shortcut_conflict_;
     std::unique_ptr<agent::AgentSession> agent_session_;
+    std::vector<PendingConfirmation> pending_confirmations_;
+    std::chrono::seconds confirmation_clock_offset_{0};
+    bool confirmation_timer_armed_ = false;
     // Provider availability (see ProviderStatuses) and its test override.
     mutable std::optional<std::vector<agent::AgentProviderStatus>> provider_statuses_;
     mutable std::chrono::steady_clock::time_point provider_statuses_at_;

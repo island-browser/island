@@ -1938,5 +1938,150 @@ TEST(BrowserWindowPagesTest, PlanDevFixtureIsTheSpecPlan) {
     EXPECT_EQ(DevPlanFixture(), agent::SpecPlan());
 }
 
+agent::ConfirmationRequest MakeConfirmation(std::string id, bool trusted_allowed = true) {
+    return {.id = std::move(id),
+            .tool = "browser_click",
+            .summary = "Submit the checkout form",
+            .host = "shop.test",
+            .tab = std::nullopt,
+            .trusted_allowed = trusted_allowed};
+}
+
+std::vector<std::string> ListedConfirmationIds(const BrowserWindow& window) {
+    std::vector<std::string> ids;
+    const std::optional<Value> state = json::Parse(window.AgentPanelStateJson());
+    const Value* list = state ? state->FindMember("confirmations") : nullptr;
+    if (list != nullptr) {
+        for (const Value& item : list->array_val) {
+            ids.emplace_back(item.StringOr("id", ""));
+        }
+    }
+    return ids;
+}
+
+TEST(BrowserWindowPagesTest, ConfirmationShowsInPanelStateAndMarksTheTabWaiting) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+
+    EXPECT_TRUE(window->HasPendingConfirmation());
+    EXPECT_TRUE(answers.empty());
+    const std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    const Value* list = state->FindMember("confirmations");
+    ASSERT_NE(list, nullptr);
+    ASSERT_EQ(list->array_val.size(), 1U);
+    EXPECT_EQ(list->array_val[0].StringOr("id", ""), "c1");
+    EXPECT_EQ(list->array_val[0].StringOr("summary", ""), "Submit the checkout form");
+    EXPECT_EQ(list->array_val[0].StringOr("host", ""), "shop.test");
+    EXPECT_TRUE(list->array_val[0].BoolOr("trusted_allowed", false));
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_TRUE(ListedConfirmationIds(*window).empty());
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
+
+    // An answer for an unknown id changes nothing and calls nothing.
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, AnsweringTrustAddsTheSiteAndAllows) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::optional<agent::ConfirmationAnswer> answer;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answer = a; });
+    SendAgent(*window, R"({"type":"confirm","id":"c1","answer":"trust"})");
+    EXPECT_EQ(answer, agent::ConfirmationAnswer::kTrustSite);
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"shop.test"}));
+}
+
+TEST(BrowserWindowPagesTest, TrustAndTaskAnswersAreCancelWhenTheCardDidNotOfferThem) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<agent::ConfirmationAnswer> answers;
+    for (const char* id : {"c1", "c2"}) {
+        window->ShowConfirmation(MakeConfirmation(id, false),
+                                 [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    }
+    SendAgent(*window, R"({"type":"confirm","id":"c1","answer":"trust"})");
+    SendAgent(*window, R"({"type":"confirm","id":"c2","answer":"task"})");
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
+                                                              agent::ConfirmationAnswer::kCancel}));
+    EXPECT_TRUE(window->trusted_sites().empty());
+    SendAgent(*window, R"({"type":"confirm","id":"nope","answer":"once"})");
+    SendAgent(*window, R"({"type":"confirm","answer":"once"})");
+    EXPECT_EQ(answers.size(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, ConfirmationTimesOutAndWithdrawsTheCard) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    window->AdvanceConfirmationClockForTest(std::chrono::seconds(119));
+    EXPECT_TRUE(answers.empty());
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+
+    window->AdvanceConfirmationClockForTest(std::chrono::seconds(1));
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kTimeout}));
+    EXPECT_TRUE(ListedConfirmationIds(*window).empty());
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
+
+    // A late answer is ignored: the callback already ran.
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, CardSurvivesClosingAndReopeningThePanel) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ShowConfirmation(MakeConfirmation("c1"), [](agent::ConfirmationAnswer) {});
+    window->SetAgentPanelOpen(false);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    window->SetAgentPanelOpen(true);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    EXPECT_TRUE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, RemoveTrustedSiteMessagePersists) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->AddTrustedSite("shop.test");
+    window->AddTrustedSite("docs.test");
+    window->OnLocalPageMessage(
+        LocalPageKind::kSettings,
+        *json::Parse(R"({"type":"remove_trusted_site","host":"WWW.Shop.test"})"));
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"docs.test"}));
+    const std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    const Value* settings = state->FindMember("settings");
+    ASSERT_NE(settings, nullptr);
+    const Value* sites = settings->FindMember("trusted_sites");
+    ASSERT_NE(sites, nullptr);
+    ASSERT_EQ(sites->array_val.size(), 1U);
+    EXPECT_EQ(sites->array_val[0].string_val, "docs.test");
+}
+
+TEST(BrowserWindowPagesTest, ConfirmationsCoexistAndAnswerIndependently) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> log;
+    for (const char* id : {"c1", "c2"}) {
+        window->ShowConfirmation(MakeConfirmation(id), [&log, id](agent::ConfirmationAnswer a) {
+            log.push_back(std::string(id) + ":" + std::to_string(static_cast<int>(a)));
+        });
+    }
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1", "c2"}));
+    window->AnswerConfirmation("c2", agent::ConfirmationAnswer::kCancel);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+    EXPECT_EQ(log, (std::vector<std::string>{"c2:3"}));
+}
+
 }  // namespace
 }  // namespace island

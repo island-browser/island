@@ -526,6 +526,11 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
             </div>
           </div>
           <div class="group">
+            <h3 class="group-title">Trusted sites</h3>
+            <p class="group-note">The agent can submit forms and run scripts on these sites without asking. It never types passwords.</p>
+            <div class="card" id="trusted-sites"></div>
+          </div>
+          <div class="group">
             <h3 class="group-title">Reports</h3>
             <p class="group-note">Finished answers from Research mode on the start page. Open one to read it, copy it, save it, or continue it with the agent. Cmd/Ctrl+K finds them too.</p>
             <div class="card" id="reports-list"></div>
@@ -849,6 +854,25 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
       grid.appendChild(columns[1]);
     }
     applySearch();
+  }
+
+  function renderTrustedSites() {
+    var box = $("trusted-sites");
+    box.textContent = "";
+    var list = state.settings.trusted_sites || [];
+    if (!list.length) {
+      box.appendChild(el("p", "note", "No trusted sites yet. Choose \u201cTrust this site\u201d when the agent asks."));
+      return;
+    }
+    list.forEach(function (host) {
+      var row = el("div", "row");
+      row.appendChild(el("div", "label", host));
+      var remove = el("button", "btn quiet", "Remove");
+      remove.setAttribute("aria-label", "Remove " + host + " from trusted sites");
+      remove.addEventListener("click", function () { post({ type: "remove_trusted_site", host: host }); });
+      row.appendChild(remove);
+      box.appendChild(row);
+    });
   }
 
   function renderReports() {
@@ -1186,6 +1210,7 @@ dd { margin: 0; font-family: var(--mono); font-size: 12px; word-break: break-all
     $("copy-config").disabled = !endpoint.config_json;
     $("bridge-note").textContent = endpoint.bridge_path ? "stdio bridge: " + endpoint.bridge_path : "";
     $("mac-note").hidden = !isMac();
+    renderTrustedSites();
     renderReports();
     renderShortcuts();
     renderSources();

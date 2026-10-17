@@ -180,9 +180,20 @@ TEST(WindowAgentHostTest, TabAndSpaceToolsDriveTheModel) {
     EXPECT_FALSE(
         Call(host, "browser_activate_tab", Value::MakeObject().Set("tab", Value::Int(0))).is_error);
     EXPECT_EQ(ActiveSpace(*window).active_tab_index(), 0U);
-    // Closing a tab the person owns asks first; the model update goes through the host.
-    EXPECT_TRUE(
-        Call(host, "browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1))).is_error);
+    // Closing a tab the person owns asks first: the call waits on a card, and cancelling it
+    // leaves the tab open. The model update itself goes through the host.
+    std::optional<agent::ToolResult> closed;
+    host.toolbox().Call("browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1)),
+                        [&](agent::ToolResult r) { closed = std::move(r); });
+    EXPECT_FALSE(closed.has_value());
+    ASSERT_TRUE(window->HasPendingConfirmation());
+    const Value panel = *json::Parse(window->AgentPanelStateJson());
+    window->AnswerConfirmation(
+        panel.FindMember("confirmations")->array_val[0].StringOr("id", ""),
+        agent::ConfirmationAnswer::kCancel);
+    ASSERT_TRUE(closed.has_value());
+    EXPECT_TRUE(closed->is_error);
+    EXPECT_EQ(ActiveSpace(*window).tab_count(), 2U);
     EXPECT_TRUE(host.CloseTab(1).ok);
     EXPECT_EQ(ActiveSpace(*window).tab_count(), 1U);
 

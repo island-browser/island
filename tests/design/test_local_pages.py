@@ -616,6 +616,62 @@ class SettingsPage(unittest.TestCase):
         self.assertIn("var(--border-2", keycap.group(0))
 
 
+class AgentConfirmationCard(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_renders_the_confirm_card_with_its_four_buttons(self) -> None:
+        self.assertIn("confirm-card", self.html)
+        for label in ("Allow once", "Allow for this task", "Trust this site", "Cancel"):
+            with self.subTest(label=label):
+                self.assertIn('"' + label + '"', self.html)
+
+    def test_trust_and_task_are_offered_only_when_trusted_is_allowed(self) -> None:
+        self.assertIn("trusted_allowed", self.html)
+        self.assertRegex(self.html, r"if \(item\.trusted_allowed[^)]*\)")
+
+    def test_posts_the_documented_confirm_message(self) -> None:
+        self.assertIn('type: "confirm"', self.html)
+        for answer in ("once", "task", "trust", "cancel"):
+            with self.subTest(answer=answer):
+                self.assertIn('"' + answer + '"', self.html)
+
+    def test_escape_cancels_the_card_before_stopping_the_turn(self) -> None:
+        self.assertRegex(
+            self.html, r'post\(\{ type: "confirm", id: pending\[0\]\.id, answer: "cancel" \}\)'
+        )
+        self.assertRegex(
+            self.html,
+            r'event\.key === "Escape" && cancelFirstConfirmation\(\)[\s\S]{0,120}\}, true\)',
+        )
+
+    def test_card_text_is_set_as_text_and_uses_theme_variables_only(self) -> None:
+        node = self.html[self.html.index("function confirmationNode") :][:1200]
+        self.assertNotIn("innerHTML", node)
+        css = self.html[self.html.index(".confirm-card") :][:700]
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(css, r"rgba?\(")
+
+
+class SettingsTrustedSites(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("settings.html")
+
+    def test_lists_trusted_sites_with_remove_buttons_and_the_documented_copy(self) -> None:
+        self.assertIn("Trusted sites", self.html)
+        self.assertIn(
+            "The agent can submit forms and run scripts on these sites without asking. "
+            "It never types passwords.",
+            self.html,
+        )
+        self.assertIn('type: "remove_trusted_site"', self.html)
+        self.assertIn("trusted_sites", self.html)
+
+    def test_remove_buttons_have_accessible_names(self) -> None:
+        window = self.html[self.html.index("renderTrustedSites") :][:1200]
+        self.assertIn("aria-label", window)
+
+
 class AgentMarkdownStatic(unittest.TestCase):
     def test_renderer_escapes_before_emitting_and_allows_three_schemes(self) -> None:
         source = markdown_source()

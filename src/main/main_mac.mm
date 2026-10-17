@@ -462,6 +462,10 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->OpenAgentPagesForDev(std::atoi(rest.c_str()), gap_ms);
         return true;
     }
+    if (island::DevAgentFixtureName(action) == "confirm") {
+        app->ShowConfirmationFixture();
+        return true;
+    }
     if (action == "plan_fixture") {
         app->OpenPlanFixture();
         return true;

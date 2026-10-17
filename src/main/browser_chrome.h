@@ -840,6 +840,10 @@ class BrowserChrome final : public NavigationObserver {
     // or closes the column.
     void SetAgentPanelView(CefRefPtr<CefView> view);
     void SetAgentPanelOpen(bool open);
+    // Marks the Agent entry with a 6 DIP accent dot while a confirmation waits for the person (the
+    // panel may be closed). The dot sits on the entry's icon, the one place a label button can
+    // draw a mark.
+    void SetAgentNeedsYou(bool needs_you);
     [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
     // A short updater notice ("Island 0.5.0 is available"): the rail's
     // Settings button takes the accent tint and carries it in its tooltip
@@ -955,6 +959,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<PanelDelegate> agent_panel_delegate_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
+    bool agent_needs_you_ = false;
     std::string update_notice_;
     CefRefPtr<CefBrowserView> browser_view_;
     // U6 split view state; both stay null while a single view is attached.

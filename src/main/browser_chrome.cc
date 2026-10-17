@@ -250,6 +250,8 @@ CefRefPtr<CefImage> MakeSpaceDotImage(ArgbColor fill, ArgbColor ring, bool activ
 constexpr int kIndicatorDip = 20;
 constexpr int kShieldGlyphDip = 14;
 constexpr int kAgentDotDip = 8;
+// The "needs you" dot on the Agent entry's icon.
+constexpr int kAgentBadgeDip = 6;
 
 // Even-odd point-in-polygon test for the shield outline.
 bool InsidePolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon) {
@@ -343,6 +345,27 @@ ImagePixels PixelsAt(const CefRefPtr<CefImage>& image, int scale) {
     pixels.data.resize(binary->GetSize());
     binary->GetData(pixels.data.data(), pixels.data.size(), 0);
     return pixels;
+}
+
+// `base` with a `kAgentBadgeDip` dot of `color` at its top-right corner (the "needs you" mark).
+CefRefPtr<CefImage> BuildBadgedImage(const CefRefPtr<CefImage>& base, ArgbColor color) {
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        const ImagePixels pixels = PixelsAt(base, scale);
+        if (pixels.width <= 0) {
+            continue;
+        }
+        RasterBitmap bitmap = NewRasterBitmap(pixels.width / scale, pixels.height / scale, scale);
+        CompositePremultiplied(bitmap, pixels.data.data(), pixels.width, pixels.height, 0, 0);
+        FillRoundedRect(bitmap, bitmap.width_px / scale - kAgentBadgeDip, 0, kAgentBadgeDip,
+                        kAgentBadgeDip,
+                        {kAgentBadgeDip / 2, kAgentBadgeDip / 2, kAgentBadgeDip / 2, kAgentBadgeDip / 2},
+                        color);
+        image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
 }
 
 // One edge button's image: an optional rounded fill (the row's selected/hover state), an
@@ -2638,6 +2661,15 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
+void BrowserChrome::SetAgentNeedsYou(bool needs_you) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || needs_you == agent_needs_you_) {
+        return;
+    }
+    agent_needs_you_ = needs_you;
+    ApplyRailButtonTheme();
+}
+
 void BrowserChrome::SetUpdateNotice(std::string notice) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || notice == update_notice_) {
@@ -3081,7 +3113,12 @@ void BrowserChrome::ApplyRailButtonTheme() {
         new_space_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
     }
     if (sparkles.has_value()) {
-        agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *sparkles);
+        // While a confirmation waits, the icon carries the accent dot (also when the panel is
+        // closed, so the person knows to open it).
+        agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL,
+                                agent_needs_you_
+                                    ? BuildBadgedImage(*sparkles, tokens_.accent)
+                                    : *sparkles);
     }
     if (native) {
         const NativeAgentColors agent =

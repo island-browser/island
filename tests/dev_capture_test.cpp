@@ -58,4 +58,15 @@ TEST(DevCaptureActions, SettingsActionOpensANamedSection) {
 }
 
 }  // namespace
+TEST(DevCaptureOptions, ParsesAgentFixtureConfirm) {
+    EXPECT_EQ(DevAgentFixtureName("agent_fixture:confirm"), "confirm");
+    EXPECT_TRUE(DevAgentFixtureName("agent_fixture:").empty());
+    EXPECT_TRUE(DevAgentFixtureName("agent_fixture").empty());
+    EXPECT_TRUE(DevAgentFixtureName("navigate:agent_fixture:confirm").empty());
+    EXPECT_TRUE(DevActionSelectorName("agent_fixture:confirm").empty());
+    const DevCaptureOptions options = ParseArgs(
+        {"--island-dev-actions=theme:light,toggle_agent,agent_fixture:confirm"});
+    EXPECT_EQ(options.actions.back(), "agent_fixture:confirm");
+}
+
 }  // namespace island
