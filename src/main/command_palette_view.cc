@@ -577,7 +577,9 @@ void CommandPaletteView::ProjectResults() {
         result_labels_[index]->SetBackgroundColor(fill.argb);
         result_labels_[index]->SetEnabledTextColors(
             (tokens_.look == LookPreset::kNative ? row_colors.title : tokens_.text).argb);
-        result_labels_[index]->SetFontList(highlighted ? "Geist, Medium 14px" : "Geist, 14px");
+        result_labels_[index]->SetFontList(BrowserChrome::FontListForTokens(
+            tokens_, (tokens_.look == LookPreset::kNative ? 13 : 14),
+            highlighted ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         result_labels_[index]->SetTooltipText(PaletteRowTooltipText(results[index]));
         result_labels_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
         result_kinds_[index]->SetText(PaletteKindLabel(results[index]));
@@ -601,10 +603,12 @@ void CommandPaletteView::ApplySurfaceColors() {
     divider_->GetChildViewAt(0)->SetBackgroundColor(
         ResolvePaletteColor(PaletteSurfaceSlot::kBorder).argb);
     query_field_->SetBackgroundColor(ResolvePaletteColor(PaletteSurfaceSlot::kQueryWell).argb);
-    query_field_->SetFontList("Geist, 15px");
+    query_field_->SetFontList(
+        BrowserChrome::FontListForTokens(tokens_, 15, ChromeFontWeight::kRegular));
     for (const CefRefPtr<CefLabelButton>& label : result_labels_) {
         label->SetEnabledTextColors(tokens_.text.argb);
-        label->SetFontList("Geist, 14px");
+        label->SetFontList(BrowserChrome::FontListForTokens(
+            tokens_, (tokens_.look == LookPreset::kNative ? 13 : 14), ChromeFontWeight::kRegular));
     }
     for (const CefRefPtr<CefLabelButton>& kind : result_kinds_) {
         kind->SetEnabledTextColors(tokens_.text_secondary.argb);
