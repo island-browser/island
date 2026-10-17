@@ -353,6 +353,31 @@ bool BrowserWindow::RestoreSessionState(const SessionState& state) {
                 restored_ids.insert(tab_state.id);
             }
         }
+        // A group parent whose saved page is a `data:` document or no longer validates is a
+        // Plan/Report page from an older build that IsSessionInternalTabUrl does not recognize
+        // (the page text changed). It is not restored pinned with its children: a `data:` parent
+        // is dropped, any other keeps its place unpinned, and its children become ordinary tabs.
+        std::set<TabId> stale_parents;
+        for (const TabState& child : space_state.tabs) {
+            if (!child.group_parent.has_value() || !restored_ids.contains(*child.group_parent)) {
+                continue;
+            }
+            for (const TabState& parent : space_state.tabs) {
+                if (parent.id != *child.group_parent) {
+                    continue;
+                }
+                const ValidatedAddress parent_address = address_validator_
+                                                            ? address_validator_(parent.url)
+                                                            : ParseAndValidate(parent.url);
+                const bool is_data = parent.url.starts_with("data:");
+                if (is_data || !parent_address.is_valid()) {
+                    stale_parents.insert(parent.id);
+                }
+                if (is_data) {
+                    restored_ids.erase(parent.id);
+                }
+            }
+        }
         for (const TabState& tab_state : space_state.tabs) {
             if (!restored_ids.contains(tab_state.id)) {
                 continue;
@@ -367,9 +392,10 @@ bool BrowserWindow::RestoreSessionState(const SessionState& state) {
             if (address.is_valid()) {
                 tab.SetStartupUrl(address.url);
             }
-            tab.SetPinned(tab_state.pinned);
+            tab.SetPinned(tab_state.pinned && !stale_parents.contains(tab_state.id));
             if (tab_state.group_parent.has_value() &&
-                restored_ids.contains(*tab_state.group_parent)) {
+                restored_ids.contains(*tab_state.group_parent) &&
+                !stale_parents.contains(*tab_state.group_parent)) {
                 tab.SetGroupParent(tab_state.group_parent);
                 tab.SetGroupLabel(tab_state.group_label);
             }

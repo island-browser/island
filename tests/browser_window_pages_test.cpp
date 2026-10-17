@@ -1647,6 +1647,33 @@ TEST(BrowserWindowPagesTest, RestoreSessionDropsPlanAndReportTabsAndUngroupsThei
     EXPECT_TRUE(restored.tabs()[0].group_label().empty());
 }
 
+TEST(BrowserWindowPagesTest, RestoreSessionDropsAnOldPlanPageThatNoLongerMatchesTheCurrentOne) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    SessionState saved;
+    saved.active_space_id = SpaceId{20};
+    SpaceState& space = saved.spaces.emplace_back();
+    space.id = SpaceId{20};
+    space.name = "Research";
+    space.color_argb = 0xFF0090FFU;
+    space.tabs = {
+        {.id = TabId{30}, .url = "data:text/html;base64,T0xEUExBTg==", .pinned = true},
+        {.id = TabId{31},
+         .url = "https://developer.apple.com/",
+         .group_parent = TabId{30},
+         .group_label = "Branch A"},
+    };
+    space.active_tab_id = TabId{30};
+
+    ASSERT_TRUE(window->RestoreSessionStateForTest(saved));
+
+    const Space& restored = SpaceAt(*window, 0);
+    ASSERT_EQ(restored.tab_count(), 1U);
+    EXPECT_EQ(restored.tabs()[0].id(), TabId{31});
+    EXPECT_FALSE(restored.tabs()[0].pinned());
+    EXPECT_FALSE(restored.tabs()[0].group_parent().has_value());
+}
+
 TEST(BrowserWindowPagesTest, DeletingThePlansSpaceStopsTheResearch) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
