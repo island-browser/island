@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "browser_view_park.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_callback.h"
 #include "include/cef_task.h"
@@ -1673,13 +1672,15 @@ std::string BrowserChrome::ActiveSpaceSectionTitle() const {
 
 void BrowserChrome::UpdateTabStripPreferredSize() {
     // Native's New Tab row is a row of the list too.
-    const int count =
-        static_cast<int>(tab_entries_.size()) + (tokens_.look == LookPreset::kNative ? 1 : 0);
+    const int count = static_cast<int>(tab_entries_.size()) +
+                      (tokens_.look == LookPreset::kNative ? 1 : 0);
     const int headers =
         (favorites_section_header_ != nullptr ? 1 : 0) + (tabs_section_header_ != nullptr ? 1 : 0);
+    const int kickers = static_cast<int>(group_kickers_.size());
     const int spacing = TabListLayout(tokens_).between_child_spacing;
-    const int children = count + headers;
+    const int children = count + headers + kickers;
     const int height = count * RowHeight() + headers * NativeSectionHeaderHeightDip() +
+                       kickers * GroupedTabKickerHeightDip() +
                        std::max(0, children - 1) * spacing;
     const int width =
         std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
@@ -1703,6 +1704,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     tab_button_delegates_.clear();
     tab_entry_views_.clear();
     tab_entries_ = entries;
+    group_kicker_panels_.clear();
+    group_kickers_.clear();
     favorites_section_header_ = nullptr;
     tabs_section_header_ = nullptr;
     tab_strip_->RemoveAllChildViews();
@@ -1739,10 +1742,34 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         icon_catalog_.Load(ChromeIcon::kPin, ChromeIconTone::kSecondary, ChromeIconSize::k13);
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const TabStripEntrySnapshot& entry = entries[index];
-        if (native && !entry.pinned && !entry.group_parent.has_value() && !tabs_header_added) {
+        if (native && !entry.pinned && !tabs_header_added) {
             tabs_section_header_ =
                 add_section_header(ActiveSpaceSectionTitle(), ChromeViewId::kTabsSectionHeader);
             tabs_header_added = true;
+        }
+        if (native && NeedsGroupKicker(entries, index)) {
+            // The branch label is its own line above the run, indented like the child rows.
+            CefRefPtr<CefPanel> panel = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+            panel->SetID(static_cast<int>(ChromeViewId::kTabGroupKicker));
+            CefBoxLayoutSettings panel_settings;
+            panel_settings.horizontal = static_cast<int>(true);
+            panel_settings.between_child_spacing = 0;
+            panel_settings.inside_border_insets = CefInsets(0, GroupedTabIndentDip(), 0, 0);
+            CefRefPtr<CefBoxLayout> panel_layout = panel->SetToBoxLayout(panel_settings);
+            CefRefPtr<CefLabelButton> kicker =
+                CefLabelButton::CreateLabelButton(button_delegate_, entry.group_label);
+            kicker->SetFocusable(false);
+            kicker->SetEnabled(false);
+            kicker->SetInkDropEnabled(false);
+            kicker->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+            kicker->SetMinimumSize(CefSize(0, GroupedTabKickerHeightDip()));
+            kicker->SetAccessibleName(entry.group_label + " branch");
+            kicker->SetFontList(FontList(GroupedTabKickerFontPx(), ChromeFontWeight::kRegular));
+            panel->AddChildView(kicker);
+            panel_layout->SetFlexForView(kicker, 1);
+            tab_strip_->AddChildView(panel);
+            group_kicker_panels_.push_back(panel);
+            group_kickers_.push_back(kicker);
         }
         TabEntryViews views;
         // The row is the outline (hairline when selected, rail otherwise); the inner
@@ -1775,25 +1802,6 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         }
         views.inner->AddChildView(views.favicon);
 
-        CefRefPtr<CefBoxLayout> text_layout;
-        if (entry.group_parent.has_value()) {
-            views.text = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
-            CefBoxLayoutSettings text_settings;
-            text_settings.horizontal = static_cast<int>(false);
-            text_settings.between_child_spacing = 0;
-            text_layout = views.text->SetToBoxLayout(text_settings);
-            views.kicker = CefLabelButton::CreateLabelButton(button_delegate_, entry.group_label);
-            views.kicker->SetFocusable(false);
-            views.kicker->SetEnabled(false);
-            views.kicker->SetInkDropEnabled(false);
-            views.kicker->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-            views.kicker->SetMinimumSize(
-                CefSize(tokens_.spacing_6_dip * 2, GroupedTabKickerFontPx()));
-            views.kicker->SetFontList(
-                FontList(GroupedTabKickerFontPx(), ChromeFontWeight::kRegular));
-            views.text->AddChildView(views.kicker);
-        }
-
         CefRefPtr<CollectionButtonDelegate> title_delegate =
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateTab, index);
         tab_button_delegates_.push_back(title_delegate);
@@ -1804,20 +1812,11 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         views.title->SetTooltipText(entry.title);
         views.title->SetFocusable(true);
         views.title->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-        views.title->SetMinimumSize(
-            CefSize(tokens_.spacing_6_dip * 2,
-                    slot - (views.kicker != nullptr ? GroupedTabKickerFontPx() : 0)));
+        views.title->SetMinimumSize(CefSize(tokens_.spacing_6_dip * 2, slot));
         views.title->SetFontList(
             FontList(13, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
-        if (views.text != nullptr) {
-            views.text->AddChildView(views.title);
-            text_layout->SetFlexForView(views.title, 1);
-            views.inner->AddChildView(views.text);
-            row_layout->SetFlexForView(views.text, 1);
-        } else {
-            views.inner->AddChildView(views.title);
-            row_layout->SetFlexForView(views.title, 1);
-        }
+        views.inner->AddChildView(views.title);
+        row_layout->SetFlexForView(views.title, 1);
 
         // Regular tabs close; pinned tabs unpin (Arc keeps pinned tabs until
         // they are explicitly released).
@@ -2029,8 +2028,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         // shrink to their initial so the track still fits the sidebar.
         const bool shrink = native && entries.size() > 4;
         views.name = CefLabelButton::CreateLabelButton(
-            name_delegate,
-            native && !shrink ? TruncateCollectionTitle(entry.name) : SpacePillLabel(entry));
+            name_delegate, native && !shrink ? TruncateCollectionTitle(entry.name)
+                                             : SpacePillLabel(entry));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
@@ -2067,28 +2066,6 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     collapsed_rail_->Layout();
 }
 
-namespace {
-
-// Hides a superseded browser view and removes it from the content slot after
-// kParkedBrowserViewRemovalMs, unless it was shown again in the meantime.
-void ParkSupersededBrowserView(CefRefPtr<CefBrowserView> view, CefRefPtr<CefPanel> content) {
-    view->SetVisible(false);
-    CefPostDelayedTask(TID_UI,
-                       CefCreateClosureTask(base::BindOnce(
-                           [](CefRefPtr<CefBrowserView> view, CefRefPtr<CefPanel> content) {
-                               CefRefPtr<CefView> parent = view->GetParentView();
-                               const bool in_content =
-                                   parent != nullptr && parent->IsSame(content);
-                               if (ShouldRemoveParkedView(view->IsVisible(), in_content)) {
-                                   content->RemoveChildView(view);
-                               }
-                           },
-                           view, content)),
-                       kParkedBrowserViewRemovalMs);
-}
-
-}  // namespace
-
 void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || browser_view == nullptr) {
@@ -2106,16 +2083,11 @@ void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
         return;
     }
     if (browser_view_ != nullptr) {
-        // Parked, not removed: see browser_view_park.h.
-        ParkSupersededBrowserView(browser_view_, browser_content_);
+        browser_content_->RemoveChildView(browser_view_);
     }
     browser_view_ = browser_view;
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
-    browser_view_->SetVisible(true);
-    CefRefPtr<CefView> parent = browser_view_->GetParentView();
-    if (parent == nullptr || !parent->IsSame(browser_content_)) {
-        browser_content_->AddChildView(browser_view_);
-    }
+    browser_content_->AddChildView(browser_view_);
     if (browser_content_layout_ != nullptr) {
         browser_content_layout_->SetFlexForView(browser_view_, 1);
     }
@@ -2906,10 +2878,11 @@ void BrowserChrome::ApplyRailButtonTheme() {
         icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
     const bool native = tokens_.look == LookPreset::kNative;
     // Native's sparkle is always the accent; the other looks take it only while the panel is open.
-    const std::optional<CefRefPtr<CefImage>> sparkles = icon_catalog_.Load(
-        ChromeIcon::kSparkles,
-        agent_panel_open_ || native ? ChromeIconTone::kAccent : ChromeIconTone::kSecondary,
-        ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> sparkles =
+        icon_catalog_.Load(ChromeIcon::kSparkles,
+                           agent_panel_open_ || native ? ChromeIconTone::kAccent
+                                                       : ChromeIconTone::kSecondary,
+                           ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> grid =
         icon_catalog_.Load(ChromeIcon::kGrid, ChromeIconTone::kSecondary, ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> gear = icon_catalog_.Load(
@@ -2965,6 +2938,14 @@ void BrowserChrome::ApplyCollectionTheme() {
             header->SetFontList(SectionHeaderFontList(tokens_));
         }
     }
+    for (const CefRefPtr<CefPanel>& panel : group_kicker_panels_) {
+        panel->SetBackgroundColor(tokens_.canvas.argb);
+    }
+    for (const CefRefPtr<CefLabelButton>& kicker : group_kickers_) {
+        kicker->SetBackgroundColor(tokens_.canvas.argb);
+        kicker->SetTextColor(CEF_BUTTON_STATE_DISABLED, tokens_.text_secondary.argb);
+        kicker->SetFontList(FontList(GroupedTabKickerFontPx(), ChromeFontWeight::kRegular));
+    }
     for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
          ++index) {
         ApplyTabRowVisual(index);
@@ -3014,14 +2995,7 @@ void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
         ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
-    if (views.text != nullptr) {
-        views.text->SetBackgroundColor(bg.argb);
-    }
     views.favicon->SetBackgroundColor(bg.argb);
-    if (views.kicker != nullptr) {
-        views.kicker->SetBackgroundColor(bg.argb);
-        views.kicker->SetTextColor(CEF_BUTTON_STATE_DISABLED, tokens_.text_secondary.argb);
-    }
     views.title->SetBackgroundColor(bg.argb);
     views.close->SetBackgroundColor(bg.argb);
     views.title->SetEnabledTextColors(
@@ -3234,8 +3208,8 @@ void BrowserChrome::RefreshRowHover() {
     }
     // Button state callbacks can arrive while the sidebar is still being built, before the
     // Agent entry exists; it has no hover to track until then.
-    const bool agent_hovered =
-        tokens_.look == LookPreset::kNative && agent_button_ != nullptr && over(agent_button_);
+    const bool agent_hovered = tokens_.look == LookPreset::kNative && agent_button_ != nullptr &&
+                               over(agent_button_);
     if (agent_hovered != native_agent_hovered_) {
         native_agent_hovered_ = agent_hovered;
         ApplyRailButtonTheme();

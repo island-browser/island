@@ -30,7 +30,7 @@ void Space::AppendTab(Tab tab) {
     active_tab_index_ = tabs_.size() - 1;
 }
 
-TabId Space::AppendChildTab(TabId parent, Tab tab) {
+TabId Space::AppendChildTab(TabId parent, Tab tab, bool activate) {
     const TabId id = tab.id();
     const std::optional<std::size_t> parent_index = IndexOfTab(parent);
     if (!parent_index.has_value()) {
@@ -39,13 +39,45 @@ TabId Space::AppendChildTab(TabId parent, Tab tab) {
     }
     tab.SetGroupParent(parent);
     std::size_t insert_at = *parent_index + 1;
-    while (insert_at < tabs_.size() && tabs_[insert_at].group_parent() == parent) {
-        ++insert_at;
+    for (std::size_t i = insert_at; i < tabs_.size(); ++i) {
+        if (tabs_[i].group_parent() == parent) {
+            insert_at = i + 1;
+        }
     }
+    // A child is never pinned, so it stays out of the pinned group at the front.
+    insert_at = std::max(insert_at, pinned_count());
+    const bool had_active = has_active_tab();
+    const std::optional<TabId> previous_active =
+        had_active ? std::optional<TabId>(active_tab_id()) : std::nullopt;
     tabs_.insert(tabs_.begin() + static_cast<std::vector<Tab>::difference_type>(insert_at),
                  std::move(tab));
-    active_tab_index_ = insert_at;
+    if (activate || !had_active) {
+        active_tab_index_ = insert_at;
+    } else if (const std::optional<std::size_t> kept = IndexOfTab(*previous_active)) {
+        active_tab_index_ = *kept;
+    }
     return id;
+}
+
+void Space::NormalizeGroups() {
+    const std::size_t pinned = pinned_count();
+    for (std::size_t i = 0; i < tabs_.size(); ++i) {
+        const std::optional<TabId> parent = tabs_[i].group_parent();
+        if (!parent.has_value()) {
+            continue;
+        }
+        const std::optional<std::size_t> parent_index = IndexOfTab(*parent);
+        bool keep = parent_index.has_value() && !tabs_[i].pinned() && *parent_index != i;
+        if (keep) {
+            const bool after_run =
+                i > 0 && (tabs_[i - 1].id() == *parent || tabs_[i - 1].group_parent() == parent);
+            const bool starts_unpinned = tabs_[*parent_index].pinned() && i == pinned;
+            keep = after_run || starts_unpinned;
+        }
+        if (!keep) {
+            tabs_[i].SetGroupParent(std::nullopt);
+        }
+    }
 }
 
 Tab* Space::FindTab(TabId id) {
@@ -154,6 +186,7 @@ bool Space::MoveTab(std::size_t from_index, std::size_t to_index) {
             active_tab_index_ = *new_active_index;
         }
     }
+    NormalizeGroups();
     return true;
 }
 
@@ -166,6 +199,9 @@ bool Space::SetTabPinned(TabId id, bool pinned) {
         return true;
     }
     tabs_[*index].SetPinned(pinned);
+    if (pinned) {
+        tabs_[*index].SetGroupParent(std::nullopt);
+    }
     // pinned_count() now counts the toggled tab when pinning, so the pinned
     // group's last slot is count - 1; when unpinning, the first regular slot
     // (just after the remaining pinned tabs) is count.

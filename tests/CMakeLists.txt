@@ -25,7 +25,6 @@ add_executable(island_tests
     browser_import_test.cpp
     browser_window_test.cpp
     browser_window_pages_test.cpp
-    browser_view_park_test.cpp
     chrome/browser_chrome_contract_test.cpp
     chrome/browser_chrome_style_test.cpp
     appearance_test.cpp

@@ -53,9 +53,15 @@ class Space {
 
     // The appended tab becomes the active tab.
     void AppendTab(Tab tab);
-    // Inserts a one-level grouped tab immediately after the parent's existing children and makes
-    // it active. An unknown parent falls back to a regular append.
-    [[nodiscard]] TabId AppendChildTab(TabId parent, Tab tab);
+    // Inserts a one-level grouped tab immediately after the parent's existing children. The tab
+    // becomes active only when `activate` is true; otherwise the active tab stays selected. A
+    // pinned parent's children never split the pinned group: they start the unpinned tabs, right
+    // after the pinned group. An unknown parent falls back to a regular append.
+    [[nodiscard]] TabId AppendChildTab(TabId parent, Tab tab, bool activate = true);
+    // Ungroups every tab whose parent is missing, or that no longer sits right after its parent
+    // or a sibling (a pinned parent's children start the unpinned tabs). A pinned tab is never
+    // a child. Moves, pinning and session restore run it so an indent cannot drift away.
+    void NormalizeGroups();
     [[nodiscard]] Tab* FindTab(TabId id);
     [[nodiscard]] const Tab* FindTab(TabId id) const;
     [[nodiscard]] std::optional<std::size_t> IndexOfTab(TabId id) const;

@@ -757,12 +757,14 @@ class BrowserWindow : public CefClient,
     // active space, pinned and first.
     void OpenPlanTab();
     // Adds one browser page or result below the Plan tab and records the node -> tab mapping.
+    // A background child (`activate` false) changes neither the selection nor the content view.
+    // Without a Plan tab in the active space it opens as an ordinary tab.
     [[nodiscard]] TabId AppendPlanChildTab(std::string startup_url, std::string node_id,
-                                           std::string label);
+                                           std::string label, bool activate);
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
-    // The agent creates the named research space before opening sources. Move the Plan hub there
-    // so its child pages and final report stay together.
-    void MovePlanTabToActiveResearchSpace();
+    // The address a new tab opens (empty text: the start page), or nullopt when the text is not
+    // an address Island allows.
+    [[nodiscard]] std::optional<std::string> ResolveNewTabTarget(std::string_view text) const;
     // Plan close is asynchronous in the real page and synchronous through the test hook.
     [[nodiscard]] bool ConfirmPlanTabClose(TabId id);
     void ShowPlanCloseConfirmation();
@@ -782,8 +784,9 @@ class BrowserWindow : public CefClient,
     bool SendToAgent(std::string text);
     // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
     // approval, and it becomes the turn the research classifies next. `approves_plan` is true
-    // for a Run, whose turn may end with a plain report.
-    void SendPlanTurn(std::string text, bool approves_plan = false);
+    // for a Run, whose turn may end with a plain report. `continues_run` (a failed-step retry)
+    // is not a plan edit: it skips the approval gate and starts a task when none is in flight.
+    void SendPlanTurn(std::string text, bool approves_plan = false, bool continues_run = false);
     // Turns the agent session has ended so far (0 without a session).
     [[nodiscard]] std::uint64_t TurnsEnded() const;
     void SetResearchStatus(std::string state, std::string message);

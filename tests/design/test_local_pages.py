@@ -437,6 +437,13 @@ class PlanPage(unittest.TestCase):
         self.assertIn('post({ type: "confirm_close", stop: true })', self.html)
         self.assertIn("window.islandConfirmResearchClose = function", self.html)
 
+    def test_plan_close_confirmation_escape_keeps_running_and_traps_focus(self) -> None:
+        keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]
+        modal = keyboard[: keyboard.index('(event.metaKey || event.ctrlKey) && event.key === "Enter"')]
+        self.assertIn('event.key === "Escape"', modal)
+        self.assertIn('$("keep-running").click()', modal)
+        self.assertIn('event.key === "Tab"', modal)
+
     def test_run_shortcut_is_handled_before_inputs_return_early(self) -> None:
         keyboard = self.html[self.html.index('document.addEventListener("keydown"') :]
         shortcut = keyboard.index('(event.metaKey || event.ctrlKey) && event.key === "Enter"')

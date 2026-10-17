@@ -150,6 +150,8 @@ enum class ChromeViewId : int {
     // Native's bottom switcher row (the segment track plus the 24 DIP buttons). Added with the
     // 2026-10-16 Native sidebar; it sits inside kRailFooter in Native only.
     kRailSwitcherRow = 1076,
+    // The branch label above the first grouped (research) tab row of a run; Native only.
+    kTabGroupKicker = 1077,
 };
 
 struct ChromeViewTreeNode {
@@ -174,6 +176,8 @@ struct TabStripEntrySnapshot {
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;
+    // A tab opened by research sits under its parent (the Plan tab) one level deep; the label
+    // names the plan branch and is drawn as a kicker line above the first row of a run.
     std::optional<TabId> group_parent;
     std::string group_label;
 
@@ -334,6 +338,22 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr int NativeSectionHeaderHeightDip() { return 20; }
     [[nodiscard]] static constexpr int GroupedTabIndentDip() { return 16; }
     [[nodiscard]] static constexpr int GroupedTabKickerFontPx() { return 10; }
+    [[nodiscard]] static constexpr int GroupedTabKickerHeightDip() { return 16; }
+    // True when entry `index` is the first row of a run of grouped tabs with one label, which
+    // gets a kicker line above it.
+    [[nodiscard]] static bool NeedsGroupKicker(const std::vector<TabStripEntrySnapshot>& entries,
+                                               std::size_t index) {
+        const TabStripEntrySnapshot& entry = entries[index];
+        if (!entry.group_parent.has_value() || entry.group_label.empty()) {
+            return false;
+        }
+        if (index == 0) {
+            return true;
+        }
+        const TabStripEntrySnapshot& previous = entries[index - 1];
+        return previous.group_parent != entry.group_parent ||
+               previous.group_label != entry.group_label;
+    }
     // The address field's plate: Native draws a `fill` plate with radius 8 and no hairline on the
     // toolbar; the other looks keep the hairline-outlined well on the canvas.
     [[nodiscard]] static AddressPlateStyle AddressPlateStyleFor(const ChromeTokens& tokens);
@@ -468,8 +488,9 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
                                                                   bool open, bool hovered) {
         if (open) {
-            return {
-                .fill = tokens.accent_soft, .text = tokens.accent_text, .sparkle = tokens.accent};
+            return {.fill = tokens.accent_soft,
+                    .text = tokens.accent_text,
+                    .sparkle = tokens.accent};
         }
         return {.fill = hovered ? tokens.hover : tokens.canvas,
                 .text = tokens.text,
@@ -613,13 +634,14 @@ class BrowserChrome final : public NavigationObserver {
             // Bottom-up the owner's layout reads: the full-width Agent entry at the very bottom,
             // with the switcher row (segments plus the new-space, overview and settings buttons)
             // above it.
-            rail_children.push_back({ChromeViewId::kRailFooter,
-                                     {{ChromeViewId::kRailSwitcherRow,
-                                       {{ChromeViewId::kSpaceSwitcher, {}},
-                                        {ChromeViewId::kRailNewSpaceButton, {}},
-                                        {ChromeViewId::kRailTabsButton, {}},
-                                        {ChromeViewId::kRailSettingsButton, {}}}},
-                                      {ChromeViewId::kRailAgentButton, {}}}});
+            rail_children.push_back(
+                {ChromeViewId::kRailFooter,
+                 {{ChromeViewId::kRailSwitcherRow,
+                   {{ChromeViewId::kSpaceSwitcher, {}},
+                    {ChromeViewId::kRailNewSpaceButton, {}},
+                    {ChromeViewId::kRailTabsButton, {}},
+                    {ChromeViewId::kRailSettingsButton, {}}}},
+                  {ChromeViewId::kRailAgentButton, {}}}});
         } else {
             rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
             rail_children.push_back({ChromeViewId::kRailFooter,
@@ -635,8 +657,8 @@ class BrowserChrome final : public NavigationObserver {
         std::vector<ChromeViewTreeNode> root_children = {
             {ChromeViewId::kRail, std::move(rail_children)}};
         if (native) {
-            root_children.push_back(
-                {ChromeViewId::kToolbar, {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
+            root_children.push_back({ChromeViewId::kToolbar,
+                                     {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
         }
         root_children.push_back(
             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
@@ -680,10 +702,12 @@ class BrowserChrome final : public NavigationObserver {
                     tab_strip->children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
                     favorites_header_added = true;
                 }
-                if (native && !tabs[i].pinned && !tabs[i].group_parent.has_value() &&
-                    !tabs_header_added) {
+                if (native && !tabs[i].pinned && !tabs_header_added) {
                     tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
                     tabs_header_added = true;
+                }
+                if (native && NeedsGroupKicker(tabs, i)) {
+                    tab_strip->children.push_back({ChromeViewId::kTabGroupKicker, {}});
                 }
                 tab_strip->children.push_back({ChromeViewId::kTabStripEntry,
                                                {{ChromeViewId::kTabStripEntryFavicon, {}},
@@ -929,6 +953,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> tab_strip_;
     CefRefPtr<CefLabelButton> favorites_section_header_;
     CefRefPtr<CefLabelButton> tabs_section_header_;
+    // Branch labels of grouped tab runs and their indent panels (rebuilt with the tab strip).
+    std::vector<CefRefPtr<CefPanel>> group_kicker_panels_;
+    std::vector<CefRefPtr<CefLabelButton>> group_kickers_;
     // The collapsed icon rail. `collapsed_rail_` is the panel shown instead of `sidebar_`;
     // the tab list scrolls inside `collapsed_tab_scroll_`, the "+" button and the space
     // dots sit in the bottom group.
@@ -958,9 +985,7 @@ class BrowserChrome final : public NavigationObserver {
     struct TabEntryViews {
         CefRefPtr<CefPanel> row;
         CefRefPtr<CefPanel> inner;
-        CefRefPtr<CefPanel> text;
         CefRefPtr<CefLabelButton> favicon;
-        CefRefPtr<CefLabelButton> kicker;
         CefRefPtr<CefLabelButton> title;
         CefRefPtr<CefLabelButton> close;
         // The glyph sources the row's edge-button images are re-rendered from (favicon or the

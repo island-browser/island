@@ -531,5 +531,63 @@ TEST(Space, RemovingTheParentUngroupsChildren) {
     EXPECT_FALSE(space.tabs()[0].group_parent().has_value());
 }
 
+TEST(Space, ChildrenOfAPinnedParentDoNotSplitThePinnedGroup) {
+    Space space = MakeTitledSpace({"plan", "fav", "other"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId fav = space.tabs()[1].id();
+    ASSERT_TRUE(space.SetTabPinned(plan, true));
+    ASSERT_TRUE(space.SetTabPinned(fav, true));
+
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "fav", "c1", "c2", "other"}));
+    EXPECT_EQ(space.pinned_count(), 2U);
+    EXPECT_FALSE(space.tabs()[2].pinned());
+}
+
+TEST(Space, ABackgroundChildKeepsTheActiveTab) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+    ASSERT_TRUE(space.SelectTab(space.tabs()[1].id()));
+    const TabId other = space.active_tab_id();
+
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1"), false));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "other"}));
+    EXPECT_EQ(space.active_tab_id(), other);
+}
+
+TEST(Space, MovingAChildAwayUngroupsIt) {
+    Space space = MakeTitledSpace({"plan", "other", "third"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "other", "third"}));
+
+    ASSERT_TRUE(space.MoveTab(1, 3));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "other", "third", "c1"}));
+    EXPECT_FALSE(space.tabs()[3].group_parent().has_value());
+}
+
+TEST(Space, PinningAChildUngroupsIt) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId child = space.AppendChildTab(plan, MakeTab("c1"));
+
+    ASSERT_TRUE(space.SetTabPinned(child, true));
+
+    EXPECT_FALSE(space.FindTab(child)->group_parent().has_value());
+}
+
+TEST(Space, NormalizeGroupsDropsAnUnknownParent) {
+    Space space = MakeTitledSpace({"a", "b"});
+    space.tabs()[1].SetGroupParent(TabId{987654});
+
+    space.NormalizeGroups();
+
+    EXPECT_FALSE(space.tabs()[1].group_parent().has_value());
+}
+
 }  // namespace
 }  // namespace island

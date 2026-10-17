@@ -341,6 +341,7 @@ bool BrowserWindow::RestoreSession() {
             tab.SetGroupLabel(tab_state.group_label);
             space.AppendTab(std::move(tab));
         }
+        space.NormalizeGroups();
         if (space_state.active_tab_id.has_value()) {
             static_cast<void>(space.SelectTab(*space_state.active_tab_id));
         }
@@ -636,21 +637,23 @@ void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
     AttachActiveTabObservers();
 }
 
+std::optional<std::string> BrowserWindow::ResolveNewTabTarget(std::string_view text) const {
+    if (text.empty()) {
+        return std::string();
+    }
+    return ResolveAgentNavigation(text, address_validator_);
+}
+
 bool BrowserWindow::OpenNewTab(std::string_view text) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return false;
     }
-    std::string url;
-    if (!text.empty()) {
-        const std::optional<std::string> resolved =
-            ResolveAgentNavigation(text, address_validator_);
-        if (!resolved.has_value()) {
-            return false;
-        }
-        url = *resolved;
+    std::optional<std::string> url = ResolveNewTabTarget(text);
+    if (!url.has_value()) {
+        return false;
     }
-    AppendTabToActiveSpace(std::move(url));
+    AppendTabToActiveSpace(std::move(*url));
     return true;
 }
 
@@ -709,9 +712,6 @@ bool BrowserWindow::CreateSpace(std::string_view name) {
     ExecuteCommand(BrowserCommand::kNewSpace);
     if (!name.empty()) {
         static_cast<void>(RenameSpace(active_space_index_, std::string(name)));
-    }
-    if (research_.has_value() && plan_tab_.has_value() && name == research_->space_name) {
-        MovePlanTabToActiveResearchSpace();
     }
     return true;
 }
@@ -3655,7 +3655,12 @@ void BrowserWindow::UpdateChromeCollections() {
     tabs.reserve(active_space().tab_count());
     for (const Tab& tab : active_space().tabs()) {
         const std::string& page_title = tab.navigation_state().snapshot().page_title;
-        tabs.push_back({.title = page_title.empty() ? "Island" : page_title,
+        // A tab whose page was never shown (a background research page) names its address.
+        const bool unshown_web_tab = page_title.empty() && tab.browser_view() == nullptr &&
+                                     tab.startup_url().rfind("http", 0) == 0;
+        tabs.push_back({.title = !page_title.empty() ? page_title
+                                 : unshown_web_tab   ? std::string(tab.startup_url())
+                                                     : "Island",
                         .active = active != nullptr && tab.id() == active->id(),
                         .pinned = tab.pinned(),
                         .favicon = tab.favicon(),

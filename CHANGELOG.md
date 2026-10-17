@@ -45,10 +45,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
   Plain ACP plans open in List view with stable p0, p1, ... step ids, and each research reuses
   its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab.
-- Pages opened while research runs now sit under the Plan tab as indented child rows with their
-  branch label, and selecting their plan node returns to the opened page. The final Result opens
-  as a grouped Report tab. Closing the Plan hub asks whether to stop or keep the research running,
-  and failed plan steps can be retried from the inspector.
+- Pages opened while research runs now open in the background as indented child rows under the
+  Plan tab, each run of a branch under its own "Branch A" kicker line; selecting their plan node
+  loads and shows the page. Children of the pinned Plan tab start the Tabs section, so Favorites
+  stays whole. The final Result opens as a grouped Report tab. Closing the Plan hub asks whether
+  to stop or keep the research running (Escape keeps it running), and failed plan steps can be
+  retried from the inspector while the run goes on or after it ended.
 - ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,
@@ -99,9 +101,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- Opening two tabs in the same UI turn (for example the Plan's grouped pages, or two agent
-  opens) crashed CEF a few seconds later. A tab view that is replaced is now hidden and removed
-  from the window after a short delay instead of at once, so the crash no longer happens.
+- Research no longer swaps the page view several times in one turn (which crashed CEF a few
+  seconds later): the pages it opens stay in the background, and the browser of such a page is
+  created when it is first shown.
 
 - Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
   for them, and it finds the Import sources and the About list, which were hidden for every

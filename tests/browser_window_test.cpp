@@ -294,6 +294,53 @@ TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAre
     EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kRailNewTab);
 }
 
+TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsHeader) {
+    const TabId plan{1};
+    const std::vector<TabStripEntrySnapshot> tabs = {
+        {.title = "Plan", .pinned = true},
+        {.title = "Favourite", .pinned = true},
+        {.title = "A1", .group_parent = plan, .group_label = "Branch A"},
+        {.title = "A2", .group_parent = plan, .group_label = "Branch A"},
+        {.title = "B1", .group_parent = plan, .group_label = "Branch B"},
+        {.title = "Regular"},
+    };
+
+    const ChromeViewTreeNode tree =
+        BrowserChrome::CollectionCountContract(tabs, {}, LookPreset::kNative);
+    const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
+
+    ASSERT_NE(tab_strip, nullptr);
+    std::vector<ChromeViewId> ids;
+    for (const ChromeViewTreeNode& child : tab_strip->children) {
+        ids.push_back(child.id);
+    }
+    const ChromeViewId entry = ChromeViewId::kTabStripEntry;
+    const ChromeViewId kicker = ChromeViewId::kTabGroupKicker;
+    // The children stay out of Favorites and the header precedes the first kicker.
+    EXPECT_EQ(ids, (std::vector<ChromeViewId>{
+                       ChromeViewId::kFavoritesSectionHeader, entry, entry,
+                       ChromeViewId::kTabsSectionHeader, kicker, entry, entry, kicker, entry, entry,
+                       ChromeViewId::kRailNewTab}));
+}
+
+TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesFirst) {
+    const TabId plan{1};
+    const std::vector<TabStripEntrySnapshot> tabs = {
+        {.title = "Plan", .pinned = true},
+        {.title = "A1", .group_parent = plan, .group_label = "Branch A"},
+    };
+
+    const ChromeViewTreeNode tree =
+        BrowserChrome::CollectionCountContract(tabs, {}, LookPreset::kNative);
+    const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
+
+    ASSERT_NE(tab_strip, nullptr);
+    ASSERT_EQ(tab_strip->children.size(), 6U);
+    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabGroupKicker);
+    EXPECT_EQ(tab_strip->children[5].id, ChromeViewId::kRailNewTab);
+}
+
 TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThenInsetDoes) {
     ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     tokens.titlebar_band_dip = BrowserChrome::TrafficLightBandDip();

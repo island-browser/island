@@ -328,9 +328,11 @@ std::uint64_t BrowserWindow::TurnsEnded() const {
     return agent_session_ != nullptr ? agent_session_->transcript().turns_ended() : 0;
 }
 
-void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan) {
+void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan, bool continues_run) {
     CEF_REQUIRE_UI_THREAD();
-    if (!research_.has_value() || !research_->awaiting_approval) {
+    // A plan edit needs the plan to wait for approval; a continuation of the run (retrying a
+    // failed step) does not, and works while the run is going or after it finished.
+    if (!continues_run && (!research_.has_value() || !research_->awaiting_approval)) {
         plan_notice_ = "The agent can change the plan only while it waits for your approval.";
         RenderPlanPages();
         return;
@@ -340,14 +342,25 @@ void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan) {
         RenderPlanPages();
         return;
     }
+    // A finished run has no task any more; the continuation starts a new one for the same plan.
+    const bool started_task = !research_.has_value();
+    if (started_task) {
+        research_ = ResearchTask{.question = research_status_.question,
+                                 .space_name = {},
+                                 .turns_ended_before = TurnsEnded()};
+    }
     // The turn this sends is the one the research waits for.
     research_->awaiting_approval = false;
     research_->plan_approved = approves_plan;
     research_->turns_ended_before = TurnsEnded();
     if (!SendToAgent(std::move(text))) {
         // Refused (the session is busy or cannot start): the plan keeps waiting.
-        research_->awaiting_approval = true;
-        research_->plan_approved = false;
+        if (started_task) {
+            research_.reset();
+        } else if (!continues_run) {
+            research_->awaiting_approval = true;
+            research_->plan_approved = false;
+        }
         plan_notice_ = agent_session_ != nullptr && !agent_session_->error().empty()
                            ? agent_session_->error()
                            : "The agent could not take the plan.";
@@ -456,35 +469,32 @@ std::optional<agent::PlanNode> BrowserWindow::RunningPlanNode() const {
 }
 
 TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string node_id,
-                                        std::string label) {
-    if (!plan_tab_.has_value()) {
+                                        std::string label, bool activate) {
+    const std::optional<std::pair<std::size_t, std::size_t>> location =
+        plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
+    if (!location.has_value() || location->first != active_space_index_) {
+        // The agent tools address the active space, so a Plan hub elsewhere gets no group: the
+        // page opens as an ordinary tab and the view stays where the person left it.
         AppendTabToActiveSpace(std::move(startup_url));
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
-    }
-    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*plan_tab_);
-    if (!location.has_value()) {
-        AppendTabToActiveSpace(std::move(startup_url));
-        return active_tab() != nullptr ? active_tab()->id() : TabId{};
-    }
-    if (active_space_index_ != location->first) {
-        static_cast<void>(SelectSpaceIndex(location->first));
     }
 
     Space& space = active_space();
-    DetachActiveTabObservers();
     Tab tab{NextTabId()};
     const TabId id = tab.id();
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetGroupLabel(std::move(label));
-    static_cast<void>(space.AppendChildTab(*plan_tab_, std::move(tab)));
-    Tab* appended = space.FindTab(id);
-    if (chrome_ != nullptr && appended != nullptr) {
-        CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-            this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
-            space.request_context(), this);
-        appended->SetBrowserView(browser_view);
+    if (activate) {
+        DetachActiveTabObservers();
+        static_cast<void>(space.AppendChildTab(*plan_tab_, std::move(tab), true));
+        // The browser view is created while the tab is attached (EnsureTabBrowserView).
+        AttachActiveTabObservers();
+    } else {
+        // A background page keeps the selection and the content view: its browser is created
+        // when the tab is first shown, so the view tree is not touched.
+        static_cast<void>(space.AppendChildTab(*plan_tab_, std::move(tab), false));
+        UpdateChromeCollections();
     }
-    AttachActiveTabObservers();
     if (!node_id.empty()) {
         plan_node_tabs_[std::move(node_id)] = id;
     }
@@ -496,24 +506,20 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
     if (closing_) {
         return false;
     }
-    std::string url;
-    if (!text.empty()) {
-        const std::optional<std::string> resolved =
-            ResolveAgentNavigation(text, address_validator_);
-        if (!resolved.has_value()) {
-            return false;
-        }
-        url = *resolved;
+    std::optional<std::string> url = ResolveNewTabTarget(text);
+    if (!url.has_value()) {
+        return false;
     }
     if (!research_.has_value() || !plan_tab_.has_value()) {
-        AppendTabToActiveSpace(std::move(url));
+        AppendTabToActiveSpace(std::move(*url));
         return true;
     }
     const std::optional<agent::PlanNode> node = RunningPlanNode();
     const std::string label = node.has_value()
                                   ? (node->branch.empty() ? "Step" : "Branch " + node->branch)
                                   : std::string();
-    static_cast<void>(AppendPlanChildTab(std::move(url), node.has_value() ? node->id : "", label));
+    static_cast<void>(AppendPlanChildTab(std::move(*url), node.has_value() ? node->id : "", label,
+                                         /*activate=*/false));
     return true;
 }
 
@@ -570,41 +576,6 @@ void BrowserWindow::OpenPlanTab() {
     }
     RenderPlanPages();
     HideInternalPage();
-}
-
-void BrowserWindow::MovePlanTabToActiveResearchSpace() {
-    if (!plan_tab_.has_value()) {
-        return;
-    }
-    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*plan_tab_);
-    if (!location.has_value() || location->first == active_space_index_) {
-        return;
-    }
-
-    DetachActiveTabObservers();
-    Space& target = spaces_[active_space_index_];
-    std::optional<Tab> placeholder;
-    if (target.tab_count() == 1) {
-        placeholder = target.RemoveTab(target.tabs()[0].id());
-    }
-    std::optional<Tab> plan = spaces_[location->first].RemoveTab(*plan_tab_);
-    if (!plan.has_value()) {
-        if (placeholder.has_value()) {
-            target.AppendTab(std::move(*placeholder));
-        }
-        AttachActiveTabObservers();
-        return;
-    }
-    target.AppendTab(std::move(*plan));
-    const std::optional<std::size_t> plan_index = target.IndexOfTab(*plan_tab_);
-    if (plan_index.has_value() && *plan_index != 0) {
-        static_cast<void>(target.MoveTab(*plan_index, 0));
-    }
-    static_cast<void>(target.SelectTab(*plan_tab_));
-    AttachActiveTabObservers();
-    if (placeholder.has_value() && placeholder->browser() != nullptr) {
-        placeholder->browser()->GetHost()->CloseBrowser(true);
-    }
 }
 
 bool BrowserWindow::ConfirmPlanTabClose(TabId id) {
@@ -718,12 +689,11 @@ void BrowserWindow::OpenPlanFixtureTab(bool include_child_tabs) {
     SetResearchStatus("awaiting_approval", "Waiting for approval");
     OpenPlanTab();
     if (include_child_tabs && plan_tab_.has_value()) {
-        static_cast<void>(AppendPlanChildTab("https://developer.apple.com/", "a", "Branch A"));
-        static_cast<void>(AppendPlanChildTab("https://support.apple.com/", "b", "Branch B"));
-        if (const std::optional<std::pair<std::size_t, std::size_t>> location =
-                TabLocation(*plan_tab_)) {
-            static_cast<void>(ActivateTabAt(location->first, location->second));
-        }
+        // Background children: the Plan tab, activated once by OpenPlanTab, stays selected.
+        static_cast<void>(AppendPlanChildTab("https://developer.apple.com/", "a", "Branch A",
+                                             /*activate=*/false));
+        static_cast<void>(AppendPlanChildTab("https://support.apple.com/", "b", "Branch B",
+                                             /*activate=*/false));
     }
 }
 
@@ -827,7 +797,7 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
         SendPlanTurn(agent::BuildExpandMessage(id));
         return;
     } else if (type == "retry") {
-        SendPlanTurn(agent::BuildRetryMessage(id), /*approves_plan=*/true);
+        SendPlanTurn(agent::BuildRetryMessage(id), /*approves_plan=*/true, /*continues_run=*/true);
         return;
     }
     RenderPlanPages();
@@ -900,7 +870,7 @@ bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view spac
             }
         }
         static_cast<void>(
-            AppendPlanChildTab(ReportPageUrlFor(id), std::move(result_node), "Result"));
+            AppendPlanChildTab(ReportPageUrlFor(id), std::move(result_node), "Result", true));
     } else {
         AppendTabToActiveSpace(ReportPageUrlFor(id));
     }
