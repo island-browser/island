@@ -16,12 +16,12 @@ Builds are not code-signed or notarized. macOS Gatekeeper and Windows SmartScree
 
 | Platform | Installer | Portable archive |
 | --- | --- | --- |
-| macOS, Apple Silicon | `macosarm64.dmg` | `island_browser-<version>-macosarm64.zip` |
-| macOS, Intel | `macosx64.dmg` | `island_browser-<version>-macosx64.zip` |
-| Windows, x64 | `windows64-setup.exe` | `island_browser-<version>-windows64.zip` |
-| Windows, ARM64 | `windowsarm64-setup.exe` | `island_browser-<version>-windowsarm64.zip` |
-| Linux, x64 | `linux64.deb` | `island_browser-<version>-linux64.tar.gz` |
-| Linux, ARM64 | `linuxarm64.deb` | `island_browser-<version>-linuxarm64.tar.gz` |
+| macOS, Apple Silicon | `island_browser-<version>-macosarm64.dmg` | `island_browser-<version>-macosarm64.zip` |
+| macOS, Intel | `island_browser-<version>-macosx64.dmg` | `island_browser-<version>-macosx64.zip` |
+| Windows, x64 | `island_browser-<version>-windows64-setup.exe` | `island_browser-<version>-windows64.zip` |
+| Windows, ARM64 | `island_browser-<version>-windowsarm64-setup.exe` | `island_browser-<version>-windowsarm64.zip` |
+| Linux, x64 | `island_browser-<version>-linux64.deb` | `island_browser-<version>-linux64.tar.gz` |
+| Linux, ARM64 | `island_browser-<version>-linuxarm64.deb` | `island_browser-<version>-linuxarm64.tar.gz` |
 
 {% hint style="info" %}
 While the repository is private, only people with access to it can see releases and download assets.
@@ -51,14 +51,14 @@ xattr -dr com.apple.quarantine /Applications/Island.app
 
 ## Install on Windows
 
-1. Run `…-setup.exe`. It installs for your user only.
+1. Run `island_browser-<version>-windows64-setup.exe` (or `windowsarm64`). It installs for your user only.
 2. If SmartScreen warns you, click **More info**, then **Run anyway**.
 
 With the `.zip`, extract it anywhere and run the executable inside.
 
 ## Install on Linux
 
-* Debian and Ubuntu: `sudo apt install ./island-…-linux64.deb`. Island installs to `/opt/island-browser`.
+* Debian and Ubuntu: `sudo apt install ./island_browser-<version>-linux64.deb`. Island installs to `/opt/island-browser`.
 * Other distributions: extract the `.tar.gz` and run the executable inside.
 
 ## Update Island
