@@ -1,85 +1,232 @@
-# Island
+<h1 align="center">Island</h1>
 
-Island is a desktop web browser with a built-in AI agent. It is a C++20 application built directly
-on the Chromium Embedded Framework (CEF) and CEF's native `cef_views` toolkit. It is not Electron
-and not a web-based shell: the sidebar, tabs, palettes and overlays are native views.
+<p align="center"><strong>A fast, native web browser with an AI agent that works on your pages, and asks before it does anything that matters.</strong></p>
 
-> **Status:** Island is pre-1.0. Every build is an **unsigned GitHub prerelease**. Only macOS
-> arm64 has local build, run and package evidence. See [Status and limits](#status-and-limits).
+<p align="center">
+  <a href="https://github.com/island-browser/island/releases">Download</a> ·
+  <a href="docs/user-guide/README.md">User guide</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="#keyboard-shortcuts">Shortcuts</a>
+</p>
 
-## What you get
+<p align="center">
+  <img src="docs/images/hero.png" alt="Island with the Native look: a source-list sidebar with four tabs and a Wikipedia article" width="900">
+</p>
 
-**Looks and sidebar**
-- Three looks, switchable live in Settings > Appearance: **Native** (the default: a macOS-style
-  source list, system font, one blue accent), **Arc** (space-tinted canvas and a rounded page
-  card) and **Graphite**.
-- A sidebar on the left or right with pinned tabs, tabs and a space switcher. `Cmd/Ctrl+B`
-  collapses it to a 52 DIP icon rail of tab favicons.
-- Light, dark or system theme; density, corner radius, font and shadow are adjustable.
+> **Status:** pre-1.0. Every build is an **unsigned GitHub prerelease**. Only macOS Apple Silicon
+> (arm64) has been built, run and packaged by hand. See [Status and platforms](#status-and-platforms).
 
-**Tabs, spaces and split view**
-- Spaces group tabs (work, travel, research). Rename, reorder and switch them from the sidebar,
-  menu or keyboard.
-- Pin tabs, reopen closed tabs, and see every space's tabs as searchable cards in **All tabs**
-  (`Cmd/Ctrl+Shift+A`).
-- Split view shows two tabs side by side (`Cmd/Ctrl+Shift+S`) with a keyboard-adjustable divider.
+## Why Island
 
-**Search and palettes**
-- The command palette (`Cmd/Ctrl+K`) finds open tabs, spaces, bookmarks, on-device history,
-  research reports and commands. The search palette (`Cmd/Ctrl+Shift+K`) sends a query to Google,
-  ChatGPT, Perplexity, Claude or Gemini.
-- The start page has three modes: Search, Ask Agent and Research, plus six speed-dial tiles.
+**It is a native browser, not a web page in a wrapper.** Island is C++20 on the Chromium Embedded
+Framework and its native `cef_views` toolkit. The sidebar, tabs, palettes and overlays are native
+views, not an Electron app and not a web-based shell, so it opens fast and sits in the system like
+any other Mac app.
 
-**Agent and research**
-- An [Agent Client Protocol](https://agentclientprotocol.com) agent runs in the sidebar panel
-  (`Cmd/Ctrl+J`): Claude Code (default), Codex, OpenCode, Gemini CLI, Qwen Code, Goose or your own
-  command.
-- **Research** mode asks the agent for a branching plan first. A pinned **Plan** tab shows it as a
-  graph; nothing runs until you approve. Pages the agent opens become grouped child tabs, and the
-  answer lands in a **Report** tab.
-- Island serves browser tools to external agents over **MCP** at `http://127.0.0.1:<port>/mcp`
-  (bearer token). Settings > Agent & tools has a ready-to-paste config.
+**The agent works with your pages.** Run Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Goose
+or your own Agent Client Protocol command in a panel next to your tabs. It can read the page you
+are on, open and switch tabs, navigate, click and type through Island's browser tools. Island does
+not bundle a model: it starts the agent program you already use.
 
-**Privacy**
-- Native ad and tracker blocking on Brave's Rust `adblock` engine with EasyList and EasyPrivacy,
-  with separate controls and a per-site allowlist.
-- On-device history search. History never leaves your computer and can be turned off or cleared.
+**Research you can steer.** Ask a question in Research mode and the agent first proposes a plan.
+You see it as a graph in a pinned Plan tab. You edit it, skip branches, add your own, and nothing
+runs until you press **Run plan**. The plan states its limits up front: it signs in to a site only
+after asking you, and it never purchases, posts or deletes. The agent cannot approve its own plan.
 
-**Reading and pages**
-- Reader view (`Cmd/Ctrl+Alt+R`) and find in page (`Cmd/Ctrl+F`).
-- **Tab sleep** frees memory from inactive tabs. **Peek** shows a link in a floating card
-  (`Cmd/Ctrl+click`).
+**Privacy is built in.** Ads and trackers are blocked natively, before subresources load, on
+Brave's open-source `adblock` engine with EasyList and EasyPrivacy. History search runs on your
+computer and your history never leaves it. Bookmark import is local too.
 
-**Settings, shortcuts and updates**
-- Settings (`Cmd/Ctrl+,`) has General, Appearance, Privacy & blocking, Tabs, Reader, Agent &
-  tools, Shortcuts and About sections, with search.
-- Every shortcut is rebindable. `Cmd/Ctrl+/` shows a cheatsheet of the ten most used.
-- Import bookmarks from Chrome-family browsers, Safari and Firefox, and spaces with pinned tabs
-  from Arc. Nothing leaves the computer.
-- The built-in updater checks GitHub releases, verifies the SHA-256 checksum and swaps the app in
-  on "Restart to update".
+**A calm, Mac-native look.** The default Native look is a macOS-style source list, the system font
+and one blue accent. Prefer something else? Arc and Graphite looks are one setting away, in light
+or dark.
 
-## Install
+## Take the tour
 
-Download a build from [GitHub Releases](https://github.com/island-browser/island/releases):
+### Spaces and a sidebar that stays out of the way
+Group tabs into spaces (work, travel, research), pin what you need, and reorder from the sidebar
+or the menu. `⌘B` collapses the sidebar into a narrow rail of favicons. `⇧⌘A` shows every space's
+tabs as searchable cards. The sidebar can sit on the left or the right.
 
-- `nightly` is a rolling prerelease of the latest `main`.
-- `vX.Y.Z` is one prerelease per version, titled `Island X.Y.Z (unsigned)`.
+<img src="docs/images/hero-dark.png" alt="The same window in dark theme" width="900">
 
-Each release has a portable archive per target (`island_browser-<version>-<target>.zip` for macOS
-and Windows, `.tar.gz` for Linux), installers (`.dmg`, `.deb`, `-setup.exe`) and `SHA256SUMS.txt`.
-Targets are `macosarm64`, `macosx64`, `windows64`, `windowsarm64`, `linux64` and `linuxarm64`.
+### `⌘K`: one palette for everything
+Find open tabs, spaces, bookmarks, on-device history, research reports and commands from one
+field, or type a URL. `⇧⌘K` sends a query to Google, ChatGPT, Perplexity, Claude or Gemini.
 
-Builds are not code-signed or notarized, so macOS Gatekeeper refuses to open them at first. Either
-allow the app in System Settings > Privacy & Security, or remove the quarantine flag:
+<img src="docs/images/palette.png" alt="The command palette open over a page, listing tabs, a space and a command" width="900">
 
-```bash
-xattr -dr com.apple.quarantine /Applications/Island.app
+### Split view
+`⇧⌘S` pairs the active tab with the next one, side by side. On macOS the divider moves with
+`⌥⌘[` and `⌥⌘]` (and the menu), not by dragging.
+
+<img src="docs/images/split.png" alt="Split view with MDN and Wikipedia side by side" width="900">
+
+### A start page with three modes
+Every new tab opens on **Search**, **Ask Agent** or **Research**. Under the field, six
+speed-dial tiles come from the sites you visit most. They come from your on-device history, and
+clearing history clears them.
+
+<img src="docs/images/start.png" alt="The start page: Search, Ask Agent and Research modes and a row of speed-dial tiles" width="900">
+
+### The agent panel
+`⌘J` opens the agent. It shares the current tab as context (you can turn that off), renders
+Markdown replies and offers prompts to start from. Pick the agent in the panel header; the menu
+shows which ones are installed.
+
+<img src="docs/images/agent.png" alt="The agent panel with starter prompts" width="900">
+
+### Research and the Plan tab
+In Research mode the plan is a graph you can read before anything happens: a question, steps,
+branches (up to three levels), joins and a result. Click a step to give it an instruction, branch
+from it, skip it or ask the agent to expand it. When it runs, the pages the agent opens become
+grouped child tabs in the sidebar, and the answer lands in a Report tab you can save, copy or
+continue in the agent panel.
+
+<img src="docs/images/plan.png" alt="The Plan tab: a branching research plan graph with a step inspector and a Run plan button; child tabs are grouped by branch in the sidebar" width="900">
+
+*(The screenshot shows Island's built-in sample plan, with its grouped child tabs.)*
+
+### Privacy
+- **Ad and tracker blocking** with separate controls for ads and trackers, a shield with a count in
+  the address field, and a per-site allowlist.
+- **On-device history search** through the command palette. History can be turned off or cleared.
+
+### Reading and pages
+- **Reader view** (`⌥⌘R`) and **find in page** (`⌘F`).
+- **Tab sleep** releases the browser of tabs you have not used (30 minutes by default; set 15, 30,
+  60 or Never in Settings > Tabs). Sleeping tabs keep their title and place.
+- **Peek** opens a link in a floating card: `⌘`-click, middle-click or the context menu.
+
+### Looks and settings
+Settings (`⌘,`) has General, Appearance, Privacy & blocking, Tabs, Reader, Agent & tools, Shortcuts
+and About, with search. Appearance holds the look preset and theme, sidebar density and position,
+corner radius, font and more. Every shortcut can be rebound.
+
+<img src="docs/images/settings.png" alt="Settings, Appearance: Look, Theme and Layout" width="900">
+
+For contrast, here is the **Arc** look: a space-tinted canvas with a rounded page card.
+
+<img src="docs/images/arc.png" alt="The Arc look: blue tinted canvas, rounded page card" width="900">
+
+## Try it in 2 minutes
+
+1. **Download.** Open [GitHub Releases](https://github.com/island-browser/island/releases) and take
+   `island_browser-<version>-macosarm64.dmg` (or the `.zip`) for an Apple Silicon Mac. Other
+   targets: `island_browser-<version>-macosx64.*`, `-windows64-setup.exe` / `-windows64.zip`,
+   `-windowsarm64-*`, `-linux64.deb` / `-linux64.tar.gz`, `-linuxarm64-*`. Each release has a
+   `SHA256SUMS.txt`. `nightly` is a rolling prerelease of `main`; `vX.Y.Z` is one per version.
+2. **Open it.** Builds are not signed or notarized, so Gatekeeper refuses at first. Drag Island to
+   Applications, then either allow it in System Settings > Privacy & Security or run
+   `xattr -dr com.apple.quarantine /Applications/Island.app`.
+3. **First launch.** A Welcome card asks for a theme and offers to import bookmarks from
+   Chrome-family browsers, Safari, Firefox and Arc. Skip it with **Start browsing**.
+
+Then try five things:
+
+| Try this | Keys |
+|----------|------|
+| Jump anywhere: tabs, history, commands, or type a URL | `⌘K` |
+| Open two pages side by side | `⇧⌘S` |
+| Ask the agent about the page you are on | `⌘J` |
+| Run a Research from the start page and review its plan | `⌘T`, then **Research** |
+| Read without distractions, then find a word | `⌥⌘R`, `⌘F` |
+
+(On Windows and Linux, use `Ctrl` for `⌘` and `Alt` for `⌥`.)
+
+## Examples
+
+**Ask about a page.** Open an article, press `⌘J`, and pick *Summarize this page in five bullet
+points* or type your own request. The current tab is shared as context.
+
+**Run a research.**
+1. Open a new tab and choose **Research**.
+2. Type a question, for example *Which laptop fits my budget and work?*.
+3. Island opens the **Plan** tab. Read the graph, skip a branch, add one, or select a step and
+   write an instruction for it.
+4. Press **Run plan** (or **Run A only** to run one branch). Watch child tabs open, grouped by
+   branch.
+5. Read the answer in the Report tab; save or copy it, or continue in the agent panel.
+
+**Use Island from Claude Code or another MCP client.** Island serves its browser tools at
+`http://127.0.0.1:<port>/mcp` on your machine, protected by a bearer token that changes on every
+launch. **Settings > Agent & tools > MCP endpoint** shows the live config with a Copy button. It
+looks like this:
+
+```json
+{
+  "mcpServers": {
+    "island": {
+      "type": "http",
+      "url": "http://127.0.0.1:<port>/mcp",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
 ```
 
-Windows SmartScreen may also warn. While this repository is private, its releases are visible only
-to people with access to it. The [user guide](docs/user-guide/getting-started/install.md) has the
-step-by-step version.
+Island also writes a discovery file, `agent-endpoint.json`, with the `url`, `token`, `transport`
+(`streamable-http`) and `pid`. It lives next to your preferences:
+
+| OS | Path |
+|----|------|
+| macOS | `~/Library/Application Support/Island/agent-endpoint.json` |
+| Linux | `$XDG_DATA_HOME/Island/` or `~/.local/share/Island/agent-endpoint.json` |
+| Windows | `%APPDATA%\Island\agent-endpoint.json` (no `pid` field) |
+
+For clients that only launch stdio MCP servers, use the bridge that ships next to the browser
+binary (`island_mcp_bridge`, in `Island.app/Contents/MacOS/` on macOS). It finds the endpoint from
+`ISLAND_MCP_URL` and `ISLAND_MCP_TOKEN`, then from `--endpoint-file <path>`, then from the
+discovery file. Island must be running. Island's own agent panel and an external agent use the same
+tools, and neither can approve or edit the Plan tab.
+
+## Keyboard shortcuts
+
+Shortcuts are for macOS; on Windows and Linux use `Ctrl` for `⌘` and `Alt` for `⌥`. Every shortcut
+can be changed in Settings > Shortcuts, and `⌘/` shows a cheatsheet.
+
+| Action | Keys |
+|--------|------|
+| Command palette | `⌘K` |
+| Search palette (Google, ChatGPT, Perplexity, Claude, Gemini) | `⇧⌘K` |
+| Show or hide the agent | `⌘J` |
+| New tab / Close tab / Reopen closed tab | `⌘T` / `⌘W` / `⇧⌘T` |
+| Next / previous tab | `⇧⌘]` / `⇧⌘[` |
+| Select tab 1 to 8 / the last tab | `⌘1`–`⌘8` / `⌘9` |
+| Focus the address field | `⌘L` |
+| Back / Forward / Reload | `⌘[` / `⌘]` / `⌘R` |
+| Toggle sidebar | `⌘B` |
+| All tabs | `⇧⌘A` |
+| Pin or unpin tab | `⌘D` |
+| New space / Rename space | `⌥⌘N` / `F2` |
+| Next / previous space | `⌥⌘↓` / `⌥⌘↑` |
+| Split view with the next tab | `⇧⌘S` |
+| Move split divider left / right | `⌥⌘[` / `⌥⌘]` |
+| Find in page / next / previous | `⌘F` / `⌘G` / `⇧⌘G` |
+| Reader mode | `⌥⌘R` |
+| Zoom in / out / reset | `⌘=` / `⌘-` / `⌘0` |
+| Copy tab URL | `⇧⌘C` |
+| Settings | `⌘,` |
+| Shortcut cheatsheet | `⌘/` |
+
+The full list, with Windows and Linux keys, is in
+[docs/user-guide/reference/keyboard-shortcuts.md](docs/user-guide/reference/keyboard-shortcuts.md).
+
+## Status and platforms
+
+- **Unsigned prereleases only.** Stable public release is blocked until signing and notarization
+  verification exist.
+- **Platforms.** The intended targets are `macosarm64`, `macosx64`, `windows64`, `windowsarm64`,
+  `linux64` and `linuxarm64`. Only macOS arm64 is built, tested and run by hand. The other five
+  need native GitHub Actions evidence before they count as supported; see
+  [docs/supported-platforms.md](docs/supported-platforms.md).
+- **Not in scope:** browser extensions (they need CEF's Chrome runtime; Island uses Alloy), sync,
+  profiles and accounts, and more than one top-level window.
+- **Updates.** The built-in updater checks GitHub releases, verifies the SHA-256 checksum and swaps
+  the app in on "Restart to update".
+- **Visual acceptance** (Phase 3 U10) still needs a human with display access.
 
 ## Build from source
 
@@ -128,18 +275,6 @@ Build-time detail: [AGENTS.md](AGENTS.md), [docs/release-process.md](docs/releas
 | `scripts/`, `deps/`, `cmake/` | Dependency vendoring, packaging, versioning, platform CMake |
 | `docs/` | Process docs, specs and plans, and the [user guide](docs/user-guide/README.md) |
 | `DESIGN.md` | The product and visual design narrative |
-
-## Status and limits
-
-- **Unsigned prereleases only.** Stable public release is blocked until signing and notarization
-  verification exist.
-- **Platform evidence.** Only macOS arm64 is built, tested and run locally. The other five targets
-  need native GitHub Actions evidence before they count as supported; see
-  [docs/supported-platforms.md](docs/supported-platforms.md).
-- **Visual acceptance** (Phase 3 U10) still needs a human with display access.
-- **Not in scope:** browser extensions (they need CEF's Chrome runtime; Island uses Alloy), sync,
-  profiles and accounts, and more than one top-level window.
-- **macOS deviations:** the split divider moves through menu items and shortcuts, not by dragging.
 
 ## Documentation
 

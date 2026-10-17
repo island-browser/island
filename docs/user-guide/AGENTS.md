@@ -16,6 +16,7 @@ task-first, one fact per sentence.
 | `README.md` | Landing page and conventions |
 | `SUMMARY.md` | The full table of contents; every page in the tree must be listed |
 | `getting-started/`, `basics/`, `search/`, `agent/`, `settings/`, `reference/` | Written pages |
+| `../../.gitbook.yaml` | GitBook Git Sync config at the repo root: `root: ./docs/user-guide/`, readme `README.md`, summary `SUMMARY.md`; keep it in step with this folder |
 | `privacy/`, `reading/`, `tabs/`, `troubleshooting.md`, `faq.md` | Planned pages: a heading and a "What this page will cover" list |
 
 ## For AI Agents
