@@ -9,6 +9,7 @@
 #include <limits>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -306,12 +307,32 @@ bool BrowserWindow::RestoreSession() {
     if (loaded.error != SessionError::kNone || loaded.state.spaces.empty()) {
         return false;
     }
+    return RestoreSessionState(loaded.state);
+}
+
+bool BrowserWindow::RestoreSessionStateForTest(const SessionState& state) {
+    spaces_.clear();
+    active_space_index_ = 0;
+    return RestoreSessionState(state);
+}
+
+bool BrowserWindow::IsSessionInternalTabUrl(std::string_view url) const {
+    if ((!plan_page_url_.empty() || persist_session_) && IsPlanPageUrl(url)) {
+        return true;
+    }
+    return (!report_page_url_.empty() || persist_session_) && ReportIdForUrl(url).has_value();
+}
+
+bool BrowserWindow::RestoreSessionState(const SessionState& state) {
+    if (state.spaces.empty()) {
+        return false;
+    }
 
     // Re-reserve persisted identities first so newly allocated ids can never
     // collide with a restored one in this process lifetime.
     std::uint64_t max_tab_id = 0;
     std::uint64_t max_space_id = 0;
-    for (const SpaceState& space_state : loaded.state.spaces) {
+    for (const SpaceState& space_state : state.spaces) {
         max_space_id = std::max(max_space_id, space_state.id.value);
         for (const TabState& tab_state : space_state.tabs) {
             max_tab_id = std::max(max_tab_id, tab_state.id.value);
@@ -320,26 +341,42 @@ bool BrowserWindow::RestoreSession() {
     ReserveTabIdsUpTo(max_tab_id);
     ReserveSpaceIdsUpTo(max_space_id);
 
-    for (const SpaceState& space_state : loaded.state.spaces) {
+    for (const SpaceState& space_state : state.spaces) {
         if (space_state.tabs.empty()) {
             continue;
         }
         Space space{SpaceId{space_state.id.value}, space_state.name,
                     ArgbColor{space_state.color_argb}};
+        std::set<TabId> restored_ids;
         for (const TabState& tab_state : space_state.tabs) {
+            if (!IsSessionInternalTabUrl(tab_state.url)) {
+                restored_ids.insert(tab_state.id);
+            }
+        }
+        for (const TabState& tab_state : space_state.tabs) {
+            if (!restored_ids.contains(tab_state.id)) {
+                continue;
+            }
             Tab tab{TabId{tab_state.id.value}};
             // A restored tab navigates through the same validation path as
             // manual entry: a persisted URL that no longer passes the
             // allow-list falls back to the fixed startup page instead of
             // force-loading.
-            const ValidatedAddress address = ParseAndValidate(tab_state.url);
+            const ValidatedAddress address = address_validator_ ? address_validator_(tab_state.url)
+                                                                : ParseAndValidate(tab_state.url);
             if (address.is_valid()) {
                 tab.SetStartupUrl(address.url);
             }
             tab.SetPinned(tab_state.pinned);
-            tab.SetGroupParent(tab_state.group_parent);
-            tab.SetGroupLabel(tab_state.group_label);
+            if (tab_state.group_parent.has_value() &&
+                restored_ids.contains(*tab_state.group_parent)) {
+                tab.SetGroupParent(tab_state.group_parent);
+                tab.SetGroupLabel(tab_state.group_label);
+            }
             space.AppendTab(std::move(tab));
+        }
+        if (space.tabs().empty()) {
+            continue;
         }
         space.NormalizeGroups();
         if (space_state.active_tab_id.has_value()) {
@@ -355,9 +392,9 @@ bool BrowserWindow::RestoreSession() {
         return false;
     }
 
-    if (loaded.state.active_space_id.has_value()) {
+    if (state.active_space_id.has_value()) {
         for (std::size_t index = 0; index < spaces_.size(); ++index) {
-            if (spaces_[index].id() == *loaded.state.active_space_id) {
+            if (spaces_[index].id() == *state.active_space_id) {
                 active_space_index_ = index;
                 break;
             }
@@ -368,23 +405,49 @@ bool BrowserWindow::RestoreSession() {
 
 SessionState BrowserWindow::BuildSessionState() const {
     SessionState state;
-    state.active_space_id = active_space().id();
     for (const Space& space : spaces_) {
         SpaceState space_state;
         space_state.id = space.id();
         space_state.name = space.name();
         space_state.color_argb = space.color().argb;
+        std::set<TabId> saved_ids;
         for (const Tab& tab : space.tabs()) {
+            const std::string url = EffectiveUrl(tab);
+            if (!IsSessionInternalTabUrl(url)) {
+                saved_ids.insert(tab.id());
+            }
+        }
+        for (const Tab& tab : space.tabs()) {
+            if (!saved_ids.contains(tab.id())) {
+                continue;
+            }
             // A reader view is saved as the page it was made from, never as its data: URL.
+            const std::optional<TabId> group_parent =
+                tab.group_parent().has_value() && saved_ids.contains(*tab.group_parent())
+                    ? tab.group_parent()
+                    : std::nullopt;
             space_state.tabs.push_back(TabState{tab.id(), EffectiveUrl(tab), tab.pinned(),
-                                                tab.group_parent(), tab.group_label()});
+                                                group_parent,
+                                                group_parent.has_value() ? tab.group_label() : ""});
+        }
+        if (space_state.tabs.empty()) {
+            continue;
         }
         space_state.active_tab_id =
-            space.has_active_tab() ? std::optional<TabId>(space.active_tab_id()) : std::nullopt;
-        if (space.split().has_value()) {
+            space.has_active_tab() && saved_ids.contains(space.active_tab_id())
+                ? std::optional<TabId>(space.active_tab_id())
+                : std::nullopt;
+        if (space.split().has_value() && saved_ids.contains(space.split()->first) &&
+            saved_ids.contains(space.split()->second)) {
             space_state.split = SplitState{space.split()->first, space.split()->second};
         }
         state.spaces.push_back(std::move(space_state));
+        if (space.id() == active_space().id()) {
+            state.active_space_id = space.id();
+        }
+    }
+    if (!state.active_space_id.has_value() && !state.spaces.empty()) {
+        state.active_space_id = state.spaces.front().id;
     }
     return state;
 }

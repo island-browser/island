@@ -165,6 +165,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool IsPlanTabIndex(std::optional<std::size_t> index) const;
     // The session as SaveSession would write it.
     [[nodiscard]] SessionState BuildSessionState() const;
+    // Restores an already-loaded session through the production filtering path.
+    // Tests use this to cover legacy internal-page entries without touching HOME.
+    [[nodiscard]] bool RestoreSessionStateForTest(const SessionState& state);
     // The live CefBrowser of a tab of the active space, or nullptr.
     [[nodiscard]] CefRefPtr<CefBrowser> BrowserForTab(std::optional<std::size_t> index) const;
     // kNewSpace plus an optional name.
@@ -886,6 +889,8 @@ class BrowserWindow : public CefClient,
     // unreadable, or schema-invalid file), which the caller treats as the
     // fixed-startup-page fallback.
     bool RestoreSession();
+    bool RestoreSessionState(const SessionState& state);
+    [[nodiscard]] bool IsSessionInternalTabUrl(std::string_view url) const;
     // Writes BuildSessionState() for the next launch. Clean quit only — no
     // autosave, no crash hook.
     void SaveSession() const;

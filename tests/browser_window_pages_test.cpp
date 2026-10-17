@@ -1532,10 +1532,47 @@ TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {
     const SessionState state = window->BuildSessionState();
 
     ASSERT_EQ(state.spaces.size(), 1U);
-    ASSERT_EQ(state.spaces[0].tabs.size(), 4U);
+    ASSERT_EQ(state.spaces[0].tabs.size(), 3U);
     // Never shown, so it has no committed URL yet: the page it would open is what persists.
-    EXPECT_EQ(state.spaces[0].tabs[1].url, "https://developer.apple.com/");
-    EXPECT_EQ(state.spaces[0].tabs[1].group_parent, state.spaces[0].tabs[0].id);
+    EXPECT_EQ(state.spaces[0].tabs[0].url, "https://developer.apple.com/");
+    EXPECT_FALSE(state.spaces[0].tabs[0].group_parent.has_value());
+    EXPECT_EQ(state.spaces[0].tabs[1].url, "https://support.apple.com/");
+    EXPECT_FALSE(state.spaces[0].tabs[1].group_parent.has_value());
+}
+
+TEST(BrowserWindowPagesTest, RestoreSessionDropsPlanAndReportTabsAndUngroupsTheirChildren) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetReportPageUrlForTest("data:text/html,report");
+    SessionState saved;
+    saved.active_space_id = SpaceId{20};
+    SpaceState& space = saved.spaces.emplace_back();
+    space.id = SpaceId{20};
+    space.name = "Research";
+    space.color_argb = 0xFF0090FFU;
+    space.tabs = {
+        {.id = TabId{30}, .url = std::string(kPlanUrl), .pinned = true},
+        {.id = TabId{31},
+         .url = "https://developer.apple.com/",
+         .group_parent = TabId{30},
+         .group_label = "Branch A"},
+        {.id = TabId{32},
+         .url = "data:text/html,report#r1",
+         .group_parent = TabId{30},
+         .group_label = "Result"},
+    };
+    space.active_tab_id = TabId{30};
+
+    ASSERT_TRUE(window->RestoreSessionStateForTest(saved));
+
+    ASSERT_EQ(window->space_count(), 1U);
+    const Space& restored = SpaceAt(*window, 0);
+    ASSERT_EQ(restored.tab_count(), 1U);
+    EXPECT_EQ(restored.tabs()[0].id(), TabId{31});
+    EXPECT_EQ(restored.tabs()[0].startup_url(), "https://developer.apple.com/");
+    EXPECT_FALSE(restored.tabs()[0].pinned());
+    EXPECT_FALSE(restored.tabs()[0].group_parent().has_value());
+    EXPECT_TRUE(restored.tabs()[0].group_label().empty());
 }
 
 TEST(BrowserWindowPagesTest, DeletingThePlansSpaceStopsTheResearch) {
