@@ -58,6 +58,7 @@ island_add_version_target("${ISLAND_AGENT_REPO_ROOT}")
 
 add_library(island_agent STATIC
     acp_client.cc
+    action_gate.cc
     agent_endpoint.cc
     agent_process.cc
     agent_providers.cc
@@ -80,7 +81,7 @@ target_include_directories(island_agent PUBLIC
 )
 target_link_libraries(island_agent PUBLIC Threads::Threads island_version)
 if(MSVC)
-    target_compile_options(island_agent PRIVATE /W4)
+    target_compile_options(island_agent PRIVATE /W4 /utf-8)
 else()
     # Designated initializers leave members defaulted on purpose.
     target_compile_options(island_agent PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
@@ -95,6 +96,7 @@ if(TARGET GTest::gtest_main)
     include(GoogleTest)
     add_executable(island_agent_tests
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/acp_client_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/action_gate_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_endpoint_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_process_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_providers_test.cpp"
