@@ -294,6 +294,8 @@ class BrowserWindow : public CefClient,
         browser_creating_for_test_ = false;
         RunPendingViewSwap();
     }
+    [[nodiscard]] std::size_t BrowserViewSizeChangeCountForDev() const noexcept;
+    [[nodiscard]] std::size_t ChromeRelayoutCountForDev() const noexcept;
     // Test seams: the plan page URL, the agent send path (research and plan turns go through
     // it instead of the agent session), and the plan shown without an agent turn.
     void SetPlanPageUrlForTest(std::string url) { plan_page_url_ = std::move(url); }

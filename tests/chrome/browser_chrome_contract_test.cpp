@@ -217,6 +217,19 @@ TEST(BrowserChromeContractTest, GivenZeroBoundsWhenLaidOutThenEveryChildIsZeroSi
     EXPECT_EQ(geometry.browser_view_bounds, DipRect{});
 }
 
+TEST(BrowserChromeContractTest, GivenAnAlreadyAppliedGeometryWhenLayoutRepeatsThenItIsANoOp) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const ChromeGeometrySnapshot geometry =
+        BrowserChrome::LayoutForBounds({.width = 1440, .height = 900}, tokens);
+
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(std::nullopt, geometry));
+    EXPECT_FALSE(BrowserChrome::NeedsRelayout(geometry, geometry));
+
+    ChromeGeometrySnapshot resized = geometry;
+    ++resized.root_bounds.width;
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(geometry, resized));
+}
+
 TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStable) {
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRoot), 1001);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kBack), 1004);

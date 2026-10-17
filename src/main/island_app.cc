@@ -189,7 +189,11 @@ std::string IslandApp::DevStateReport() const {
     return "spaces=" + std::to_string(browser_window_->space_count()) +
            " tabs=" + std::to_string(tabs) +
            " sleeping=" + std::to_string(browser_window_->sleeping_tab_count()) +
-           " peek=" + (browser_window_->peek_open() ? "open" : "closed");
+           " peek=" + (browser_window_->peek_open() ? "open" : "closed") +
+           " attaches=" + std::to_string(browser_window_->AttachCountForTest()) +
+           " browser_size_changes=" +
+           std::to_string(browser_window_->BrowserViewSizeChangeCountForDev()) +
+           " chrome_relayouts=" + std::to_string(browser_window_->ChromeRelayoutCountForDev());
 }
 
 void IslandApp::FindInPage(const std::string& query) {

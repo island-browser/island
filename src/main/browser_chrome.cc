@@ -778,7 +778,10 @@ class BrowserChrome::SurfacePanelDelegate final : public CefPanelDelegate {
 
 class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
   public:
-    explicit RootPanelDelegate(ChromeTokens tokens) : tokens_(tokens) {}
+    RootPanelDelegate(BrowserChrome* chrome, ChromeTokens tokens)
+        : chrome_(chrome), tokens_(tokens) {}
+
+    void Detach() { chrome_ = nullptr; }
 
     void SetChildren(CefRefPtr<CefPanel> rail, CefRefPtr<CefPanel> collapsed_rail,
                      CefRefPtr<CefPanel> toolbar, CefRefPtr<CefPanel> toolbar_content,
@@ -793,10 +796,19 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
         agent_panel_ = agent_panel;
     }
 
-    void SetTokens(ChromeTokens tokens) { tokens_ = tokens; }
+    void SetTokens(ChromeTokens tokens) {
+        tokens_ = tokens;
+        applied_geometry_.reset();
+    }
 
-    void SetSidebarExpanded(bool expanded) { sidebar_expanded_ = expanded; }
-    void SetAgentPanelOpen(bool open) { agent_panel_open_ = open; }
+    void SetSidebarExpanded(bool expanded) {
+        sidebar_expanded_ = expanded;
+        applied_geometry_.reset();
+    }
+    void SetAgentPanelOpen(bool open) {
+        agent_panel_open_ = open;
+        applied_geometry_.reset();
+    }
 
     void OnLayoutChanged(CefRefPtr<CefView>, const CefRect& new_bounds) override {
         if (rail_ == nullptr || browser_content_ == nullptr) {
@@ -809,6 +821,12 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
                                             .width = new_bounds.width,
                                             .height = new_bounds.height},
                                            tokens_, sidebar_expanded_, agent_panel_open_);
+        if (!BrowserChrome::NeedsRelayout(applied_geometry_, geometry)) {
+            return;
+        }
+        // Layout() below can synchronously re-enter this delegate. Publish the geometry first so
+        // that callback observes an already-applied layout instead of starting a feedback loop.
+        applied_geometry_ = geometry;
         // Only the shown rail (the full sidebar or the icon rail) takes the rail column.
         const CefRefPtr<CefPanel>& shown_rail =
             sidebar_expanded_ || collapsed_rail_ == nullptr ? rail_ : collapsed_rail_;
@@ -836,6 +854,9 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
             ApplyBounds(agent_panel_, geometry.agent_panel_bounds);
             agent_panel_->Layout();
         }
+        if (chrome_ != nullptr) {
+            chrome_->RecordRelayout();
+        }
     }
 
   private:
@@ -855,9 +876,11 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
         bool operator==(const ToolbarRowKey&) const = default;
     };
 
+    BrowserChrome* chrome_;
     ChromeTokens tokens_;
     bool sidebar_expanded_ = kSidebarExpandedByDefault;
     bool agent_panel_open_ = false;
+    std::optional<ChromeGeometrySnapshot> applied_geometry_;
     ToolbarRowKey applied_toolbar_row_;
     CefRefPtr<CefPanel> rail_;
     CefRefPtr<CefPanel> collapsed_rail_;
@@ -999,7 +1022,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
 
     const int control_height = ControlHeight(tokens_);
     applied_control_height_ = control_height;
-    root_delegate_ = new RootPanelDelegate(tokens_);
+    root_delegate_ = new RootPanelDelegate(this, tokens_);
     root_ = CefPanel::CreatePanel(root_delegate_);
     root_->SetID(static_cast<int>(ChromeViewId::kRoot));
 
@@ -1479,6 +1502,18 @@ std::vector<CefRefPtr<CefBrowserView>> BrowserChrome::visible_browser_views() co
         views.push_back(split_view_);
     }
     return views;
+}
+
+void BrowserChrome::RecordRelayout() {
+    ++relayout_count_;
+    std::vector<CefRect> bounds;
+    for (const CefRefPtr<CefBrowserView>& view : visible_browser_views()) {
+        bounds.push_back(view->GetBounds());
+    }
+    if (!last_browser_view_bounds_.empty() && bounds != last_browser_view_bounds_) {
+        ++browser_view_size_change_count_;
+    }
+    last_browser_view_bounds_ = std::move(bounds);
 }
 
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
@@ -2500,6 +2535,7 @@ void BrowserChrome::Detach() {
     detached_ = true;
     host_ = nullptr;
     *alive_ = nullptr;
+    root_delegate_->Detach();
     button_delegate_->Detach();
     textfield_delegate_->Detach();
     for (const CefRefPtr<CollectionButtonDelegate>& delegate : tab_button_delegates_) {

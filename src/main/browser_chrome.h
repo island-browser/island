@@ -574,6 +574,12 @@ class BrowserChrome final : public NavigationObserver {
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
                                                                 bool agent_panel_open);
+    // Root layout callbacks can re-enter while child panels are laid out. Apply a geometry only
+    // once; callers store the new value before touching children so that re-entry is a no-op.
+    [[nodiscard]] static bool NeedsRelayout(const std::optional<ChromeGeometrySnapshot>& applied,
+                                            const ChromeGeometrySnapshot& requested) {
+        return !applied.has_value() || *applied != requested;
+    }
 
     // Insets of the page card (browser_view_bounds inside browser_content_bounds) and of the
     // agent panel's own card, resolved for the same inputs as LayoutForBounds.
@@ -772,6 +778,10 @@ class BrowserChrome final : public NavigationObserver {
     void SetSplitRatio(double ratio);
     [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
     [[nodiscard]] bool split_active() const noexcept { return split_view_ != nullptr; }
+    [[nodiscard]] std::size_t browser_view_size_change_count() const noexcept {
+        return browser_view_size_change_count_;
+    }
+    [[nodiscard]] std::size_t relayout_count() const noexcept { return relayout_count_; }
 
     // Split divider geometry. The divider is keyboard-adjustable through the
     // kMoveDividerLeft/Right commands (drag is a documented deviation: the
@@ -872,6 +882,9 @@ class BrowserChrome final : public NavigationObserver {
     // Re-creates the box layouts whose insets depend on the tokens (sidebar side, titlebar band,
     // card inset, density) and the expand/agent state; a no-op while nothing relevant changed.
     void ApplyLayoutTokens();
+    // Developer diagnostics: record root relayouts and changes to the attached page bounds.
+    // The counters are read only by the existing --island-dev-keep-open SIGUSR2 report.
+    void RecordRelayout();
     // The row/control heights follow the density token; rebuilds the rows when it changes.
     void ApplyDensity();
     void ApplyLookStructure();
@@ -1050,6 +1063,9 @@ class BrowserChrome final : public NavigationObserver {
     std::function<void(const std::vector<CornerPatch>&)> corner_sink_;
     std::vector<CornerPatch> last_patches_;
     bool patch_poll_pending_ = false;
+    std::size_t browser_view_size_change_count_ = 0;
+    std::size_t relayout_count_ = 0;
+    std::vector<CefRect> last_browser_view_bounds_;
 };
 
 }  // namespace island

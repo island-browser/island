@@ -3737,6 +3737,14 @@ void BrowserWindow::RunPendingViewSwap() {
     FocusBrowserView();
 }
 
+std::size_t BrowserWindow::BrowserViewSizeChangeCountForDev() const noexcept {
+    return chrome_ != nullptr ? chrome_->browser_view_size_change_count() : 0;
+}
+
+std::size_t BrowserWindow::ChromeRelayoutCountForDev() const noexcept {
+    return chrome_ != nullptr ? chrome_->relayout_count() : 0;
+}
+
 void BrowserWindow::AttachActiveTabBrowserView() {
     CEF_REQUIRE_UI_THREAD();
     if (chrome_ == nullptr) {

@@ -15,6 +15,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Stop unchanged native-chrome layout callbacks from re-laying out the active page in a loop.
 - The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
   control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
   the most visited sites (from history, one per host, opened in the current tab). Tab and
