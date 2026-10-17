@@ -46,6 +46,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "native_handle.h"
 #include "page_card.h"
 #include "runtime_style.h"
 #include "search_provider.h"
@@ -5081,7 +5082,7 @@ std::vector<void*> BrowserWindow::NativeContentHandles() const {
     for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
         CefRefPtr<CefBrowser> browser = view != nullptr ? view->GetBrowser() : nullptr;
         if (browser != nullptr) {
-            handles.push_back(browser->GetHost()->GetWindowHandle());
+            handles.push_back(NativeHandlePointer(browser->GetHost()->GetWindowHandle()));
         }
     }
     return handles;

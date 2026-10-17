@@ -13,6 +13,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-17
+
+### Fixed
+
+- The Linux builds compile again: native window handles are converted the same way on every
+  platform (0.7.0 failed to build for linux64 and linuxarm64).
+
 ## [0.7.0] - 2026-10-17
 
 ### Changed
@@ -382,7 +389,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/island-browser/island/releases/tag/v0.7.1
 [0.7.0]: https://github.com/island-browser/island/releases/tag/v0.7.0
 [0.6.2]: https://github.com/island-browser/island/releases/tag/v0.6.2
 [0.6.1]: https://github.com/island-browser/island/releases/tag/v0.6.1
