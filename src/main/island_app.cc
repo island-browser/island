@@ -215,10 +215,10 @@ void IslandApp::OpenPlanFixture() {
     }
 }
 
-void IslandApp::OpenAgentPagesForDev(int count) {
+void IslandApp::OpenAgentPagesForDev(int count, int gap_ms) {
     CEF_REQUIRE_UI_THREAD();
     if (browser_window_ != nullptr) {
-        browser_window_->OpenAgentPagesInQuickSuccessionForDev(count);
+        browser_window_->OpenAgentPagesInQuickSuccessionForDev(count, gap_ms);
     }
 }
 

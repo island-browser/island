@@ -43,9 +43,12 @@ bool EndpointDisabled() {
     return value != nullptr && (std::string_view(value) == "off" || std::string_view(value) == "0");
 }
 
-constexpr std::string_view kPlanTabError =
-    "The active tab is the research Plan tab, Island's own page. Open a page with "
-    "browser_open_tab, or activate a page tab first.";
+// Names the tab the caller meant: the active one, or the one it gave an index for.
+std::string PlanTabError(std::optional<std::size_t> tab) {
+    return std::string(tab.has_value() ? "That tab" : "The active tab") +
+           " is the research Plan tab, Island's own page. Open a page with browser_open_tab, or "
+           "address a page tab.";
+}
 
 agent::HostStatus StatusFor(bool ok, std::string error) {
     return ok ? agent::HostStatus::Ok() : agent::HostStatus::Error(std::move(error));
@@ -133,7 +136,7 @@ agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
 
 agent::HostStatus WindowAgentHost::Navigate(std::optional<std::size_t> tab, std::string_view url) {
     if (window_->IsPlanTabIndex(tab)) {
-        return agent::HostStatus::Error(std::string(kPlanTabError));
+        return agent::HostStatus::Error(PlanTabError(tab));
     }
     return StatusFor(window_->NavigateTab(tab, url),
                      "Could not navigate: unknown tab or an address Island does not allow.");
@@ -168,7 +171,7 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
                          action == agent::AgentBrowserAction::kForward ||
                          action == agent::AgentBrowserAction::kReload;
     if (history && window_->IsPlanTabIndex(std::nullopt)) {
-        return agent::HostStatus::Error(std::string(kPlanTabError));
+        return agent::HostStatus::Error(PlanTabError(std::nullopt));
     }
     switch (action) {
         case agent::AgentBrowserAction::kBack:
@@ -197,7 +200,7 @@ void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_v
     if (window_->IsPlanTabIndex(tab)) {
         agent::DevToolsReply reply;
         reply.ok = false;
-        reply.error = std::string(kPlanTabError);
+        reply.error = PlanTabError(tab);
         done(std::move(reply));
         return;
     }

@@ -88,6 +88,10 @@ class Tab {
     [[nodiscard]] CefRefPtr<CefBrowserView> browser_view() const noexcept;
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const noexcept;
     [[nodiscard]] bool has_browser() const noexcept;
+    // A fresh view is "settling" until its browser has started its first navigation; removing
+    // the view from the window before that crashes CEF (BrowserWindow gates view swaps on it).
+    [[nodiscard]] bool settled() const noexcept { return settled_; }
+    void MarkSettled() noexcept { settled_ = true; }
 
     void IncrementBlockedRequests() noexcept { ++blocked_requests_; }
     void ResetBlockedRequests() noexcept { blocked_requests_ = 0; }
@@ -120,6 +124,7 @@ class Tab {
     NavigationState navigation_state_;
 
     CefRefPtr<CefBrowserView> browser_view_;
+    bool settled_ = false;
     CefRefPtr<CefBrowser> browser_;
     CefRefPtr<CefImage> favicon_;
     std::string pending_favicon_url_;

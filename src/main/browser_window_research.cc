@@ -207,7 +207,8 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     plan_node_tabs_.clear();
     plan_view_.reset();
     plan_notice_.clear();
-    plan_unapproved_ = false;
+    // Nothing is approved until a Run goes out; only that clears it.
+    plan_unapproved_ = true;
     SetResearchStatus("running", {});
     OpenResearchSpace(research_->space_name);
     OpenPlanTab();
@@ -521,7 +522,7 @@ std::optional<agent::PlanNode> BrowserWindow::RunningPlanNode() const {
 }
 
 TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string node_id,
-                                        std::string label, bool activate, bool defer_attach) {
+                                        std::string label, bool activate) {
     const std::optional<std::pair<std::size_t, std::size_t>> location =
         plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
     if (!location.has_value() || location->first != active_space_index_) {
@@ -531,12 +532,11 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
     return AppendChildOfPlan(location->first, std::move(startup_url), std::move(node_id),
-                             std::move(label), activate, defer_attach);
+                             std::move(label), activate);
 }
 
 TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string startup_url,
-                                       std::string node_id, std::string label, bool activate,
-                                       bool defer_attach) {
+                                       std::string node_id, std::string label, bool activate) {
     Space& space = spaces_[space_index];
     Tab tab{NextTabId()};
     const TabId id = tab.id();
@@ -548,20 +548,7 @@ TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string star
         DetachActiveTabObservers();
         active_space_index_ = space_index;
         static_cast<void>(space.AppendChildTab(*plan_tab_, std::move(tab), true));
-        if (defer_attach && chrome_ != nullptr) {
-            // Pages opened in a row (each MCP call is its own UI task) would each create a
-            // browser view and remove it again within milliseconds, which crashes CEF a few
-            // seconds later. The model follows every call; the view is attached once.
-            UpdateChromeCollections();
-            if (!agent_attach_posted_) {
-                agent_attach_posted_ = true;
-                CefPostTask(TID_UI, CefCreateClosureTask(
-                                        base::BindOnce(&BrowserWindow::AttachAfterAgentPages,
-                                                       CefRefPtr<BrowserWindow>(this))));
-            }
-        } else {
-            AttachActiveTabObservers();
-        }
+        AttachActiveTabObservers();
     } else {
         // A background page keeps the selection and the content view: its browser is created
         // when the tab is first shown, so the view tree is not touched.
@@ -572,11 +559,6 @@ TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string star
         plan_node_tabs_[std::move(node_id)] = id;
     }
     return id;
-}
-
-void BrowserWindow::AttachAfterAgentPages() {
-    agent_attach_posted_ = false;
-    AttachActiveTabObservers();
 }
 
 bool BrowserWindow::OpenAgentTab(std::string_view text) {
@@ -596,11 +578,12 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
     const std::string label = node.has_value()
                                   ? (node->branch.empty() ? "Step" : "Branch " + node->branch)
                                   : std::string();
-    // The agent reads the page it opens, and its tools address the active tab or a tab with a
-    // live browser: the page opens active so its browser exists when this returns. Each MCP
-    // call is its own UI task, so this is one view swap per turn.
+    // The page opens active and the model follows at once. The content view swaps in when the
+    // previously attached page's browser exists (AttachedBrowserStillCreating), so pages opened
+    // in quick succession are loaded one after the other and the ones the agent has already moved
+    // past are loaded only when shown (page tools then answer "no live page").
     static_cast<void>(AppendPlanChildTab(std::move(*url), node.has_value() ? node->id : "", label,
-                                         /*activate=*/true, /*defer_attach=*/true));
+                                         /*activate=*/true));
     return true;
 }
 
@@ -800,22 +783,45 @@ void BrowserWindow::OpenPlanFixtureTab(bool include_child_tabs) {
     }
 }
 
-void BrowserWindow::OpenAgentPagesInQuickSuccessionForDev(int count) {
+void BrowserWindow::OpenAgentPagesInQuickSuccessionForDev(int count, int gap_ms) {
     CEF_REQUIRE_UI_THREAD();
+    if (gap_ms == 0) {
+        // Every page queued at once.
+        for (int i = 0; i < count; ++i) {
+            OpenAgentPageStepForDev(i, i + 1, 0);
+        }
+        return;
+    }
+    OpenAgentPageStepForDev(0, count, gap_ms);
+}
+
+void BrowserWindow::OpenAgentPageStepForDev(int index, int count, int gap_ms) {
     static constexpr std::array<std::string_view, 4> kPages = {
         "https://example.com/", "https://example.org/", "https://example.net/",
         "https://www.iana.org/"};
-    // One UI task per page, posted back to back: what an agent calling browser_open_tab in a
-    // row produces. Each task takes the same OpenAgentTab path as an MCP call.
-    for (int i = 0; i < count; ++i) {
-        CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
-                                &BrowserWindow::OpenAgentTabForDev, CefRefPtr<BrowserWindow>(this),
-                                std::string(kPages[static_cast<std::size_t>(i) % kPages.size()]))));
-    }
-}
-
-void BrowserWindow::OpenAgentTabForDev(std::string address) {
-    static_cast<void>(OpenAgentTab(address));
+    // One UI task per page: what an agent calling browser_open_tab in a row produces. Each task
+    // takes the same OpenAgentTab path as an MCP call.
+    const std::string address(kPages[static_cast<std::size_t>(index) % kPages.size()]);
+    const bool chained = gap_ms != 0;
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(
+                    [](CefRefPtr<BrowserWindow> window, std::string address, int index, int count,
+                       int gap_ms, bool chained) {
+                        static_cast<void>(window->OpenAgentTab(address));
+                        if (!chained || index + 1 >= count) {
+                            return;
+                        }
+                        // Serial: the reply is written and the next call arrives afterwards.
+                        auto next = base::BindOnce(&BrowserWindow::OpenAgentPageStepForDev, window,
+                                                   index + 1, count, gap_ms);
+                        if (gap_ms == kSerialAgentPages) {
+                            CefPostTask(TID_UI, CefCreateClosureTask(std::move(next)));
+                        } else {
+                            CefPostDelayedTask(TID_UI, CefCreateClosureTask(std::move(next)),
+                                               gap_ms);
+                        }
+                    },
+                    CefRefPtr<BrowserWindow>(this), address, index, count, gap_ms, chained)));
 }
 
 void BrowserWindow::RefreshPlanFromTranscript() {
@@ -990,7 +996,11 @@ bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view spac
         // The newest space with that name is the research space.
         for (std::size_t index = spaces_.size(); index > 0; --index) {
             if (spaces_[index - 1].name() == space_name) {
-                static_cast<void>(SelectSpaceIndex(index - 1));
+                // Model only: the append below attaches the view once.
+                if (index - 1 != active_space_index_) {
+                    DetachActiveTabObservers();
+                    active_space_index_ = index - 1;
+                }
                 break;
             }
         }
@@ -1008,8 +1018,7 @@ bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view spac
         // the view is attached once even when the person is in another space.
         static_cast<void>(AppendChildOfPlan(
             plan_location.has_value() ? plan_location->first : active_space_index_,
-            ReportPageUrlFor(id), std::move(result_node), "Result", /*activate=*/true,
-            /*defer_attach=*/false));
+            ReportPageUrlFor(id), std::move(result_node), "Result", /*activate=*/true));
     } else {
         AppendTabToActiveSpace(ReportPageUrlFor(id));
     }

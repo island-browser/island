@@ -1398,9 +1398,55 @@ TEST(BrowserWindowPagesTest, SelectingANodeInAnotherSpaceSwapsTheViewOnce) {
     const std::size_t attaches_before = window->AttachCountForTest();
     SendPlanMessage(*window, R"({"type":"select","id":"a"})");
 
-    EXPECT_LE(window->AttachCountForTest() - attaches_before, 1U);
+    EXPECT_EQ(window->AttachCountForTest() - attaches_before, 1U);
     EXPECT_EQ(window->active_space_index(), 0U);
     EXPECT_EQ(window->active_tab_id(), branch_a);
+}
+
+TEST(BrowserWindowPagesTest, AgentPagesWaitForTheAttachedBrowserBeforeSwappingTheView) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    window->SetBrowserCreatingForTest(true);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    ASSERT_TRUE(window->OpenAgentTab("https://example.com/"));
+    ASSERT_TRUE(window->OpenAgentTab("https://example.org/"));
+    ASSERT_TRUE(window->OpenAgentTab("https://example.net/"));
+
+    // The model follows every call; the view in the slot is not removed while its browser is
+    // being created.
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const TabId third = window->active_tab_id();
+    EXPECT_EQ(SpaceAt(*window, window->active_space_index()).FindTab(third)->startup_url(), "https://example.net/");
+
+    window->BrowserCreatedForTest();
+
+    // One swap, to the tab that is active now.
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+    EXPECT_EQ(window->active_tab_id(), third);
+
+    // The signal fires once per swap: a late repeat attaches nothing (idle means no attaches).
+    window->BrowserCreatedForTest();
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+}
+
+TEST(BrowserWindowPagesTest, AgentPagesSwapAtOnceWhenTheAttachedBrowserExists) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    window->SetBrowserCreatingForTest(false);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    ASSERT_TRUE(window->OpenAgentTab("https://example.com/"));
+    ASSERT_TRUE(window->OpenAgentTab("https://example.org/"));
+
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 2U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
 }
 
 TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothing) {

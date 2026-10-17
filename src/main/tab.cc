@@ -33,7 +33,10 @@ NavigationState& Tab::navigation_state() noexcept { return navigation_state_; }
 
 const NavigationState& Tab::navigation_state() const noexcept { return navigation_state_; }
 
-void Tab::SetBrowserView(CefRefPtr<CefBrowserView> browser_view) { browser_view_ = browser_view; }
+void Tab::SetBrowserView(CefRefPtr<CefBrowserView> browser_view) {
+    browser_view_ = browser_view;
+    settled_ = false;
+}
 
 void Tab::SetBrowser(CefRefPtr<CefBrowser> browser) { browser_ = browser; }
 
