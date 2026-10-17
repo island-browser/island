@@ -715,9 +715,11 @@ class BrowserChrome::PanelDelegate final : public CefPanelDelegate {
     }
 
     void SetFixedWidth(int width) {
+        const FixedWidthColumn column = BrowserChrome::FixedWidthColumnFor(width);
         preferred_size_.width = width;
-        minimum_size_.width = width;
-        maximum_size_.width = width;
+        preferred_size_.height = std::max(preferred_size_.height, column.min_height);
+        minimum_size_ = CefSize(column.width, column.min_height);
+        maximum_size_ = CefSize(column.width, column.max_height);
     }
 
     void SetPreferredSize(CefSize size) { preferred_size_ = size; }

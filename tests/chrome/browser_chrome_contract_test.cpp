@@ -532,4 +532,15 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelec
 }
 
 }  // namespace
+TEST(BrowserChromeContractTest, GivenAFixedWidthColumnWhenSizedThenNeitherDimensionIsZero) {
+    // CEF ignores a delegate size with a zero dimension, which let the agent panel's content
+    // pick its own width and cover the page.
+    const auto open = BrowserChrome::FixedWidthColumnFor(BrowserChrome::AgentPanelWidthDip());
+    EXPECT_EQ(open.width, BrowserChrome::AgentPanelWidthDip());
+    EXPECT_GT(open.min_height, 0);
+    EXPECT_GT(open.max_height, open.min_height);
+
+    EXPECT_EQ(BrowserChrome::FixedWidthColumnFor(0), BrowserChrome::FixedWidthColumn{});
+}
+
 }  // namespace island

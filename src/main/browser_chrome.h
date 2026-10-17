@@ -585,6 +585,19 @@ class BrowserChrome final : public NavigationObserver {
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
                                                                 bool agent_panel_open);
+    // Heights a fixed-width column reports to the root BoxLayout. CEF ignores a delegate size
+    // with a zero width or height and falls back to the layout's own size, so a width-only size
+    // lets the column's content (the agent panel's web view) pick its width instead.
+    struct FixedWidthColumn {
+        int width = 0;
+        int min_height = 0;
+        int max_height = 0;
+        bool operator==(const FixedWidthColumn&) const = default;
+    };
+    [[nodiscard]] static constexpr FixedWidthColumn FixedWidthColumnFor(int width) {
+        return width > 0 ? FixedWidthColumn{width, 1, 1 << 20} : FixedWidthColumn{};
+    }
+
     // A repeated root snapshot is a no-op only while every managed region remains at its target.
     // The live-bounds input keeps this decision CEF-free and testable.
     [[nodiscard]] static bool NeedsRelayout(const std::optional<ChromeGeometrySnapshot>& applied,
