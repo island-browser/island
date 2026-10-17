@@ -2187,6 +2187,9 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         SubmitAgentPrompt(std::string(message.StringOr("text", "")),
                           message.BoolOr("include_context", true));
     } else if (type == "cancel") {
+        // Cards carry no origin, so Stop withdraws every open card; a stopped turn's action
+        // must not run later.
+        CancelPendingConfirmations();
         agent_session_->Cancel();
     } else if (type == "permission") {
         const json::Value* option = message.FindMember("option_id");
@@ -2196,6 +2199,7 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
                                               : std::nullopt);
         RefreshAddressIndicators();
     } else if (type == "new_chat") {
+        CancelPendingConfirmations();
         agent_session_->NewChat();
     } else if (type == "set_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
@@ -2435,6 +2439,7 @@ void BrowserWindow::CloseAgentPanelAndSession() {
         }
     }
     research_.reset();
+    CancelPendingConfirmations();
     agent_session_.reset();
 }
 
@@ -3752,6 +3757,7 @@ void BrowserWindow::AttachActiveTabObservers() {
         return;
     }
     ++attach_count_;
+    CancelStaleConfirmations();
     // A peek floats over one page; changing the selection dismisses it.
     ClosePeek();
     TouchActiveTabs();
@@ -4115,6 +4121,7 @@ bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
 
 void BrowserWindow::UpdateChromeCollections() {
     CEF_REQUIRE_UI_THREAD();
+    CancelStaleConfirmations();
     if (chrome_ == nullptr || closing_) {
         return;
     }
@@ -4760,6 +4767,7 @@ void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
     // "waiting for you".
     const Space& space = active_space();
     TabId tab_id;
+    SpaceId space_id = space.id();
     if (request.tab.has_value() && *request.tab < space.tab_count()) {
         tab_id = space.tabs()[*request.tab].id();
     } else if (const Tab* active = active_tab(); active != nullptr) {
@@ -4768,10 +4776,9 @@ void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
     pending_confirmations_.push_back({.request = std::move(request),
                                       .done = std::move(done),
                                       .deadline = ConfirmationNow() + kConfirmationTimeout,
-                                      .tab_id = tab_id});
-    if (!agent_panel_open()) {
-        SetAgentPanelOpen(true);
-    }
+                                      .tab_id = tab_id,
+                                      .space_id = space_id});
+    // The panel is not opened: the agent dot and the Agent button dot tell the person.
     ArmConfirmationTimer();
     RefreshConfirmationUi();
 }
@@ -4803,8 +4810,37 @@ void BrowserWindow::AnswerConfirmation(std::string_view id, agent::ConfirmationA
         } else if (answer == agent::ConfirmationAnswer::kTrustSite) {
             AddTrustedSite(request.host);
         }
+        // The action runs with the tab index the request named, so a card whose tab moved is
+        // withdrawn instead of acting on whatever sits at that index now.
+        if (answer != agent::ConfirmationAnswer::kCancel &&
+            !ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
+            answer = agent::ConfirmationAnswer::kCancel;
+        }
         FinishConfirmation(index, answer);
         return;
+    }
+}
+
+bool BrowserWindow::ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const {
+    const Space& space = active_space();
+    if (space.id() != pending.space_id) {
+        return false;
+    }
+    const std::optional<std::size_t>& named = pending.request.tab;
+    if (named.has_value()) {
+        return *named < space.tab_count() && space.tabs()[*named].id() == pending.tab_id;
+    }
+    const Tab* active = active_tab();
+    return active != nullptr && active->id() == pending.tab_id;
+}
+
+void BrowserWindow::CancelStaleConfirmations() {
+    for (std::size_t index = 0; index < pending_confirmations_.size();) {
+        if (ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
+            ++index;
+        } else {
+            FinishConfirmation(index, agent::ConfirmationAnswer::kCancel);
+        }
     }
 }
 

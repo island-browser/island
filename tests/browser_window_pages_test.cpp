@@ -13,6 +13,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "agent/http_server.h"
 #include "agent/plan_fixture.h"
 #include "browser_window.h"
 #include "include/views/cef_overlay_controller.h"
@@ -2042,12 +2043,84 @@ TEST(BrowserWindowPagesTest, ConfirmationTimesOutAndWithdrawsTheCard) {
 TEST(BrowserWindowPagesTest, CardSurvivesClosingAndReopeningThePanel) {
     const ScopedNoAgentEnv no_env;
     CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_FALSE(window->agent_panel_open());
     window->ShowConfirmation(MakeConfirmation("c1"), [](agent::ConfirmationAnswer) {});
-    window->SetAgentPanelOpen(false);
+    // A card never opens the panel: the agent dot and the Agent button dot tell the person.
+    EXPECT_FALSE(window->agent_panel_open());
     EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
     window->SetAgentPanelOpen(true);
     EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    window->SetAgentPanelOpen(false);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
     EXPECT_TRUE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, CardTimeoutIsShorterThanTheHttpHandlerBudget) {
+    // The external caller must see "No one confirmed this action in time.", not a 504.
+    EXPECT_LE(BrowserWindow::kConfirmationTimeout.count() + 15,
+              agent::LoopbackHttpServer::kHandlerTimeoutSeconds);
+}
+
+TEST(BrowserWindowPagesTest, ClosingTheCardsTabWithdrawsTheCard) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->OpenNewTab("https://a.test/"));
+    ASSERT_TRUE(window->OpenNewTab("https://b.test/"));
+    std::vector<agent::ConfirmationAnswer> answers;
+    agent::ConfirmationRequest request = MakeConfirmation("c1");
+    request.tab = 2;
+    window->ShowConfirmation(std::move(request),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    // Closing an earlier tab shifts the index: the card must not act on the tab now at 2.
+    window->CloseTab(0);
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, SwitchingTabsOrSpacesWithdrawsTheCard) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->OpenNewTab("https://a.test/"));
+    std::vector<agent::ConfirmationAnswer> answers;
+    // No tab named: the card targets the active tab, so leaving it withdraws the card.
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    window->SelectTab(0);
+    EXPECT_EQ(answers.size(), 1U);
+
+    window->ShowConfirmation(MakeConfirmation("c2"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    ASSERT_TRUE(window->CreateSpace("Other"));
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
+                                                              agent::ConfirmationAnswer::kCancel}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+
+    // A card on the tab that stays put survives unrelated changes.
+    window->ShowConfirmation(MakeConfirmation("c3"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    ASSERT_TRUE(window->OpenNewTab("https://c.test/"));
+    EXPECT_EQ(answers.size(), 3U);
+}
+
+TEST(BrowserWindowPagesTest, StopAndNewChatWithdrawOpenCards) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    SendSettings(*window, R"({"type":"set_agent_command","command":"\"unbalanced"})");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    SendAgent(*window, R"({"type":"cancel"})");
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+
+    window->ShowConfirmation(MakeConfirmation("c2"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    SendAgent(*window, R"({"type":"new_chat"})");
+    EXPECT_EQ(answers.size(), 2U);
+    EXPECT_FALSE(window->HasPendingConfirmation());
 }
 
 TEST(BrowserWindowPagesTest, RemoveTrustedSiteMessagePersists) {

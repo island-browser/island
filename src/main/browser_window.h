@@ -177,6 +177,9 @@ class BrowserWindow : public CefClient,
     // when the card offered it; a trust or task answer to a card that did not offer them is
     // treated as a cancel.
     void AnswerConfirmation(std::string_view id, agent::ConfirmationAnswer answer);
+    // Shorter than the HTTP handler budget, so an external caller always gets the card's own
+    // timeout message rather than a 504.
+    static constexpr std::chrono::seconds kConfirmationTimeout{120};
     [[nodiscard]] bool HasPendingConfirmation() const { return !pending_confirmations_.empty(); }
     // Moves the confirmation clock forward and fires the timeouts that came due.
     void AdvanceConfirmationClockForTest(std::chrono::seconds elapsed);
@@ -754,12 +757,16 @@ class BrowserWindow : public CefClient,
         std::function<void(agent::ConfirmationAnswer)> done;
         std::chrono::steady_clock::time_point deadline;
         TabId tab_id;
+        SpaceId space_id;
     };
-    static constexpr std::chrono::seconds kConfirmationTimeout{120};
     [[nodiscard]] std::chrono::steady_clock::time_point ConfirmationNow() const;
     // Removes the entry at `index` and reports `answer` to its callback.
     void FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer);
     void CancelPendingConfirmations();
+    // Answers kCancel to every card whose target tab is no longer where it was when the card was
+    // raised (closed, moved, or its space switched away from).
+    void CancelStaleConfirmations();
+    [[nodiscard]] bool ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const;
     void ExpireConfirmations();
     void ArmConfirmationTimer();
     void OnConfirmationTick();

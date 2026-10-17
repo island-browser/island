@@ -17,7 +17,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 - The agent asks before consequential page actions: a confirmation card in the agent panel
   (Allow once, Allow for this task, Trust this site, Cancel; Esc cancels) that waits 120 s, marks
-  the tab and the Agent button with a dot, and survives closing the panel. Settings > Agent &
+  the tab and the Agent button with a dot (it never opens the panel or takes focus), survives
+  closing the panel, and is withdrawn when its tab closes or moves, its space is left, or Stop is pressed. Settings > Agent &
   tools lists the trusted sites with Remove buttons.
 
 ### Changed

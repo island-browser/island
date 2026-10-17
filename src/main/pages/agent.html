@@ -277,7 +277,7 @@ textarea::placeholder { color: var(--text-2); }
       <button class="send" id="send" title="Send (Enter)" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </div>
   </div>
-  <div class="hint"><kbd>&crarr;</kbd> send &middot; <kbd>&#8679;&crarr;</kbd> new line &middot; <kbd>Esc</kbd> stop</div>
+  <div class="hint"><kbd>&crarr;</kbd> send &middot; <kbd>&#8679;&crarr;</kbd> new line &middot; <kbd>Esc</kbd> stop / decline</div>
 </footer>
 <script>
 "use strict";
@@ -387,7 +387,7 @@ textarea::placeholder { color: var(--text-2); }
   // only renders them and posts the person's answer.
   function confirmationNode(item) {
     var node = el("div", "card ask confirm-card");
-    node.appendChild(el("h4", "", "The agent wants to act"));
+    node.appendChild(el("h4", "", "Allow this action?"));
     if (item.host) node.appendChild(el("p", "host", item.host));
     node.appendChild(el("p", "summary", item.summary));
     var actions = el("div", "actions");
@@ -399,6 +399,8 @@ textarea::placeholder { color: var(--text-2); }
       actions.appendChild(button);
     }
     answer("Allow once", "once", true);
+    // Card, password and unclassified fields always ask (plan Global Constraint), so those cards
+    // offer neither "Allow for this task" nor "Trust this site".
     if (item.trusted_allowed !== false) {
       answer("Allow for this task", "task", false);
       answer("Trust this site", "trust", false);
@@ -741,15 +743,12 @@ textarea::placeholder { color: var(--text-2); }
     var pending = state.confirmations || [];
     var confirmSignature = JSON.stringify(pending);
     if (confirmSignature !== confirmRendered) {
-      var hadCards = confirmBox.childNodes.length > 0;
       confirmRendered = confirmSignature;
       confirmBox.textContent = "";
       pending.forEach(function (item) { confirmBox.appendChild(confirmationNode(item)); });
       confirmBox.hidden = !pending.length;
-      if (pending.length && !hadCards) {
-        var first = confirmBox.querySelector(".btn");
-        if (first) first.focus();
-      }
+      // Focus stays where it is: role=alertdialog announces the card, and a key typed into the
+      // composer must never land on Allow.
     }
 
     var busy = !!session.busy;
@@ -809,7 +808,7 @@ textarea::placeholder { color: var(--text-2); }
 
   // Esc answers "cancel" to the oldest pending confirmation before anything else uses it.
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && cancelFirstConfirmation()) {
+    if (event.key === "Escape" && menu.hidden && !event.isComposing && cancelFirstConfirmation()) {
       event.preventDefault();
       event.stopPropagation();
     }

@@ -642,8 +642,14 @@ class AgentConfirmationCard(unittest.TestCase):
         )
         self.assertRegex(
             self.html,
-            r'event\.key === "Escape" && cancelFirstConfirmation\(\)[\s\S]{0,120}\}, true\)',
+            r'event\.key === "Escape" && menu\.hidden && !event\.isComposing'
+            r' && cancelFirstConfirmation\(\)[\s\S]{0,120}\}, true\)',
         )
+
+    def test_card_is_titled_per_spec_and_never_takes_focus(self) -> None:
+        self.assertIn('"Allow this action?"', self.html)
+        render = self.html[self.html.index("confirmSignature !== confirmRendered") :][:700]
+        self.assertNotIn(".focus()", render)
 
     def test_card_text_is_set_as_text_and_uses_theme_variables_only(self) -> None:
         node = self.html[self.html.index("function confirmationNode") :][:1200]

@@ -270,6 +270,7 @@ void BrowserWindow::CancelResearch() {
     if (agent_session_ == nullptr) {
         return;
     }
+    CancelPendingConfirmations();
     agent_session_->Cancel();
 }
 
