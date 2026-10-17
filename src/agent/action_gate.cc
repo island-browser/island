@@ -350,6 +350,13 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
             rule = GateRule::kConsequentialWord;
             summary = ClickSummary(*input.facts, host);
         }
+    } else if (typing && input.submit) {
+        // page_type with submit presses Enter after the text, so it is judged like page_press_key
+        // Enter on the same element. Without facts the unclassified rule above already asked.
+        if (facts_present && input.facts->in_form) {
+            rule = GateRule::kEnterInForm;
+            summary = "Press Enter in a form on " + host;
+        }
     } else if (keying) {
         if (input.key == "Enter" && (!facts_present || input.facts->in_form)) {
             rule = GateRule::kEnterInForm;

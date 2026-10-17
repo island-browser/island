@@ -41,6 +41,7 @@ struct GateInput {
     std::string tool;                   // "page_click", "page_type", ...
     std::optional<ElementFacts> facts;  // target or focused element, when gathered
     std::string key;                    // page_press_key: the key name
+    bool submit = false;                // page_type with submit: Enter follows the typed text
     std::string page_url;               // the tab's current URL
     // browser_navigate: the URL the navigation will actually load, i.e. after the tool layer has
     // resolved and validated the agent's argument (search text becomes a search URL). Never the

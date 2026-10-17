@@ -278,6 +278,40 @@ TEST(ActionGateTest, CardRuleAsksOnUntrustedSitesToo) {
               GateRule::kCardField);
 }
 
+// Fix round 2 (N1): page_type with submit presses Enter, so it is judged like page_press_key Enter.
+TEST(ActionGateTest, TypeWithSubmitInAFormAsksLikeEnter) {
+    GateInput in = Call("page_type", Input("text"));
+    in.submit = true;
+    GateDecision decision = Classify(in, kNone);
+    EXPECT_EQ(decision.action, ActionClass::kConfirm);
+    EXPECT_EQ(decision.rule, GateRule::kEnterInForm);
+    EXPECT_EQ(decision.summary, Classify(in, kNone).summary);
+    GateInput enter = Call("page_press_key", Input("text"));
+    enter.key = "Enter";
+    EXPECT_EQ(decision.summary, Classify(enter, kNone).summary);
+    // Outside a form, Enter is free, and so is typing with submit.
+    ElementFacts loose = Input("text");
+    loose.in_form = false;
+    in.facts = loose;
+    EXPECT_EQ(Classify(in, kNone).action, ActionClass::kFree);
+}
+
+TEST(ActionGateTest, TypeWithSubmitOnTrustedSiteIsFree) {
+    GateInput in = Call("page_type", Input("text"));
+    in.submit = true;
+    EXPECT_EQ(Classify(in, kTrusted).action, ActionClass::kFree);
+    in.submit = false;
+    EXPECT_EQ(Classify(in, kTrusted).action, ActionClass::kFree);
+}
+
+TEST(ActionGateTest, TypeWithSubmitIntoPasswordIsStillBlocked) {
+    GateInput in = Call("page_type", Input("password"));
+    in.submit = true;
+    EXPECT_EQ(Classify(in, kTrusted).action, ActionClass::kBlocked);
+    EXPECT_EQ(Classify(in, kTrusted).rule, GateRule::kPassword);
+    EXPECT_FALSE(Classify(in, kTrusted).trusted_allowed);
+}
+
 // M8: a password field never offers "Trust this site".
 TEST(ActionGateTest, PasswordBlockOffersNoTrust) {
     EXPECT_FALSE(Classify(Call("page_type", Input("password")), kTrusted).trusted_allowed);
