@@ -366,7 +366,7 @@ bool BrowserWindow::RestoreSession() {
     return true;
 }
 
-void BrowserWindow::SaveSession() const {
+SessionState BrowserWindow::BuildSessionState() const {
     SessionState state;
     state.active_space_id = active_space().id();
     for (const Space& space : spaces_) {
@@ -386,9 +386,14 @@ void BrowserWindow::SaveSession() const {
         }
         state.spaces.push_back(std::move(space_state));
     }
+    return state;
+}
+
+void BrowserWindow::SaveSession() const {
     // Spaces currently create their request contexts without a cache path, so
     // there is no storage directory to persist yet.
-    static_cast<void>(SessionStore::Save(SessionStore::DefaultSessionFilePath(), state));
+    static_cast<void>(
+        SessionStore::Save(SessionStore::DefaultSessionFilePath(), BuildSessionState()));
 }
 
 std::string BrowserWindow::StartupUrlForTab(const Tab& tab) const {
@@ -599,9 +604,7 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             const std::size_t created_index = spaces_.size();
             // A monotonic counter, not the vector size, so names stay unique
             // after spaces are removed and recreated.
-            Space& created = spaces_.emplace_back(
-                SpaceId{NextSpaceId()}, "Space " + std::to_string(++created_space_count_),
-                kSpaceColorPalette[created_index % kSpaceColorPalette.size()]);
+            Space& created = AppendSpace("Space " + std::to_string(++created_space_count_));
             created.AppendTab(Tab{NextTabId()});
             active_space_index_ = created_index;
             AttachActiveTabObservers();
@@ -616,6 +619,11 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
             return;
         }
     }
+}
+
+Space& BrowserWindow::AppendSpace(std::string name) {
+    return spaces_.emplace_back(SpaceId{NextSpaceId()}, std::move(name),
+                                kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]);
 }
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
@@ -669,6 +677,9 @@ bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_vi
     if (!index.has_value() && !space.has_active_tab()) {
         return false;
     }
+    if (IsPlanTabIndex(index)) {
+        return false;
+    }
     const std::optional<std::string> url = ResolveAgentNavigation(text, address_validator_);
     if (!url.has_value()) {
         return false;
@@ -690,6 +701,22 @@ bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_vi
         tab.ClearSavedScroll();
     }
     return true;
+}
+
+bool BrowserWindow::IsPlanTabIndex(std::optional<std::size_t> index) const {
+    const Space& space = active_space();
+    if (!index.has_value() && !space.has_active_tab()) {
+        return false;
+    }
+    const std::size_t at = index.value_or(space.active_tab_index());
+    if (at >= space.tab_count()) {
+        return false;
+    }
+    const Tab& tab = space.tabs()[at];
+    if (plan_tab_.has_value() && tab.id() == *plan_tab_) {
+        return true;
+    }
+    return !plan_page_url_.empty() && tab.startup_url() == plan_page_url_;
 }
 
 CefRefPtr<CefBrowser> BrowserWindow::BrowserForTab(std::optional<std::size_t> index) const {
@@ -3654,13 +3681,7 @@ void BrowserWindow::UpdateChromeCollections() {
     std::vector<TabStripEntrySnapshot> tabs;
     tabs.reserve(active_space().tab_count());
     for (const Tab& tab : active_space().tabs()) {
-        const std::string& page_title = tab.navigation_state().snapshot().page_title;
-        // A tab whose page was never shown (a background research page) names its address.
-        const bool unshown_web_tab = page_title.empty() && tab.browser_view() == nullptr &&
-                                     tab.startup_url().rfind("http", 0) == 0;
-        tabs.push_back({.title = !page_title.empty() ? page_title
-                                 : unshown_web_tab   ? std::string(tab.startup_url())
-                                                     : "Island",
+        tabs.push_back({.title = tab.DisplayTitle(),
                         .active = active != nullptr && tab.id() == active->id(),
                         .pinned = tab.pinned(),
                         .favicon = tab.favicon(),
@@ -3699,6 +3720,15 @@ void BrowserWindow::CloseSpaceBrowsers(Space& space) {
 
 Space BrowserWindow::RemoveSpaceAtIndex(std::size_t index) {
     CEF_REQUIRE_UI_THREAD();
+    if (plan_tab_.has_value()) {
+        const std::optional<std::pair<std::size_t, std::size_t>> plan = TabLocation(*plan_tab_);
+        if (plan.has_value() && plan->first == index) {
+            // The research's hub goes with its space, so the research stops with it.
+            const TabId plan_id = *plan_tab_;
+            CancelResearch();
+            ForgetPlanTabMapping(plan_id);
+        }
+    }
     DetachActiveTabObservers();
     Space removed = std::move(spaces_[index]);
     spaces_.erase(spaces_.begin() + static_cast<std::ptrdiff_t>(index));

@@ -52,6 +52,7 @@
 #include "research_prompt.h"
 #include "search_engine.h"
 #include "search_palette.h"
+#include "session_store.h"
 #include "settings_focus.h"
 #include "sidebar_state.h"
 #include "space.h"
@@ -157,7 +158,12 @@ class BrowserWindow : public CefClient,
     // The MCP browser_open_tab path. During research it inserts the page below the Plan tab,
     // labels it with the running branch and remembers which plan node opened it.
     [[nodiscard]] bool OpenAgentTab(std::string_view text);
+    // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
+    // True when the tab of the active space (nullopt = the active tab) is the research Plan tab.
+    [[nodiscard]] bool IsPlanTabIndex(std::optional<std::size_t> index) const;
+    // The session as SaveSession would write it.
+    [[nodiscard]] SessionState BuildSessionState() const;
     // The live CefBrowser of a tab of the active space, or nullptr.
     [[nodiscard]] CefRefPtr<CefBrowser> BrowserForTab(std::optional<std::size_t> index) const;
     // kNewSpace plus an optional name.
@@ -702,6 +708,9 @@ class BrowserWindow : public CefClient,
     // Appends a tab to the active space with `startup_url` (empty = the
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     void AppendTabToActiveSpace(std::string startup_url);
+    // Adds an empty space (next palette color) at the end and returns it; the caller gives it
+    // a tab and makes it active.
+    Space& AppendSpace(std::string name);
     void ShutdownAgentHost();
     // --- Find in page and Reader view (browser_window_find_reader.cc) ---
     void ApplyFindRequest(const FindRequest& request, CefRefPtr<CefBrowser> browser);
@@ -756,6 +765,10 @@ class BrowserWindow : public CefClient,
     // Shows the research's Plan tab: reuses it (and closes other Plan tabs) or opens it in the
     // active space, pinned and first.
     void OpenPlanTab();
+    // Switches to the space named `name` (the newest one), or creates it with the Plan tab as
+    // its only tab. Island makes the research space itself so the Plan hub and every page the
+    // agent opens share one space.
+    void OpenResearchSpace(const std::string& name);
     // Adds one browser page or result below the Plan tab and records the node -> tab mapping.
     // A background child (`activate` false) changes neither the selection nor the content view.
     // Without a Plan tab in the active space it opens as an ordinary tab.
@@ -785,7 +798,8 @@ class BrowserWindow : public CefClient,
     // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
     // approval, and it becomes the turn the research classifies next. `approves_plan` is true
     // for a Run, whose turn may end with a plain report. `continues_run` (a failed-step retry)
-    // is not a plan edit: it skips the approval gate and starts a task when none is in flight.
+    // is not a plan edit: it skips the approval gate, keeps the approval the run had, and starts
+    // a task when none is in flight.
     void SendPlanTurn(std::string text, bool approves_plan = false, bool continues_run = false);
     // Turns the agent session has ended so far (0 without a session).
     [[nodiscard]] std::uint64_t TurnsEnded() const;
@@ -819,7 +833,7 @@ class BrowserWindow : public CefClient,
     // unreadable, or schema-invalid file), which the caller treats as the
     // fixed-startup-page fallback.
     bool RestoreSession();
-    // Serializes the current model for the next launch. Clean quit only — no
+    // Writes BuildSessionState() for the next launch. Clean quit only — no
     // autosave, no crash hook.
     void SaveSession() const;
     // The URL a restored tab's browser view loads: the tab's validated startup

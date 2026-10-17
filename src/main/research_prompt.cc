@@ -134,8 +134,9 @@ std::string BuildResearchPrompt(std::string_view question) {
         "deeper split, or needs the person to sign in or approve, gets needs_you set and asks ";
     prompt += "first. After you send the plan, wait for approval before running it. The person ";
     prompt += "approves in Island; waiting for that is not asking a question.\n\nHow to work:\n";
-    prompt += "1. Create a new space named exactly \"" + space + "\" with browser_new_space, so ";
-    prompt += "everything for this question stays together. Do not touch the user's other spaces.\n";
+    prompt += "1. Island already opened a space named \"" + space + "\" for this question and ";
+    prompt += "switched to it, so everything for this question stays together. Work in it: do ";
+    prompt += "not create, rename or switch spaces, and do not touch the user's other spaces.\n";
     prompt += "2. Search the web for the question, then open at least four relevant and diverse ";
     prompt += "sources (prefer primary sources, official documentation and reputable outlets) ";
     prompt += "with browser_open_tab, one tab each. Keep the tabs open: the user will review ";

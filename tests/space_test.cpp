@@ -570,6 +570,52 @@ TEST(Space, MovingAChildAwayUngroupsIt) {
     EXPECT_FALSE(space.tabs()[3].group_parent().has_value());
 }
 
+TEST(Space, UnpinningAFavouriteKeepsAPinnedParentsRunTogether) {
+    Space space = MakeTitledSpace({"plan", "fav", "other"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId fav = space.tabs()[1].id();
+    ASSERT_TRUE(space.SetTabPinned(plan, true));
+    ASSERT_TRUE(space.SetTabPinned(fav, true));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "fav", "c1", "c2", "other"}));
+
+    ASSERT_TRUE(space.SetTabPinned(fav, false));
+
+    // The run follows the pinned group instead of being ungrouped behind the old favourite.
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "fav", "other"}));
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan);
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+    EXPECT_FALSE(space.tabs()[3].group_parent().has_value());
+}
+
+TEST(Space, DraggingATabIntoARunReplacesTheRunBehindItsParent) {
+    Space space = MakeTitledSpace({"plan", "other", "third"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other", "third"}));
+    const TabId active = space.active_tab_id();
+
+    ASSERT_TRUE(space.MoveTab(4, 1));  // "third" lands between the parent and its children
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "third", "other"}));
+    EXPECT_EQ(space.tabs()[1].group_parent(), plan);
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+    EXPECT_EQ(space.active_tab_id(), active);
+}
+
+TEST(Space, MovingAParentCarriesItsChildren) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+
+    ASSERT_TRUE(space.MoveTab(0, 2));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"other", "plan", "c1"}));
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+}
+
 TEST(Space, PinningAChildUngroupsIt) {
     Space space = MakeTitledSpace({"plan"});
     const TabId plan = space.tabs()[0].id();

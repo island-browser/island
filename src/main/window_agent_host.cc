@@ -43,6 +43,10 @@ bool EndpointDisabled() {
     return value != nullptr && (std::string_view(value) == "off" || std::string_view(value) == "0");
 }
 
+constexpr std::string_view kPlanTabError =
+    "The active tab is the research Plan tab, Island's own page. Open a page with "
+    "browser_open_tab, or activate a page tab first.";
+
 agent::HostStatus StatusFor(bool ok, std::string error) {
     return ok ? agent::HostStatus::Ok() : agent::HostStatus::Error(std::move(error));
 }
@@ -114,7 +118,7 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
         const Tab& tab = space.tabs()[index];
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
         tabs.push_back({.index = index,
-                        .title = nav.page_title.empty() ? std::string("New Tab") : nav.page_title,
+                        .title = tab.DisplayTitle(),
                         .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
                         .active = space.has_active_tab() && index == space.active_tab_index(),
                         .loading = nav.load_phase == LoadPhase::kLoading,
@@ -128,6 +132,9 @@ agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
 }
 
 agent::HostStatus WindowAgentHost::Navigate(std::optional<std::size_t> tab, std::string_view url) {
+    if (window_->IsPlanTabIndex(tab)) {
+        return agent::HostStatus::Error(std::string(kPlanTabError));
+    }
     return StatusFor(window_->NavigateTab(tab, url),
                      "Could not navigate: unknown tab or an address Island does not allow.");
 }
@@ -157,6 +164,12 @@ agent::HostStatus WindowAgentHost::NewSpace(std::string_view name) {
 }
 
 agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
+    const bool history = action == agent::AgentBrowserAction::kBack ||
+                         action == agent::AgentBrowserAction::kForward ||
+                         action == agent::AgentBrowserAction::kReload;
+    if (history && window_->IsPlanTabIndex(std::nullopt)) {
+        return agent::HostStatus::Error(std::string(kPlanTabError));
+    }
     switch (action) {
         case agent::AgentBrowserAction::kBack:
             window_->ExecuteCommand(BrowserCommand::kBack);

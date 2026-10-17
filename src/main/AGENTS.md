@@ -179,12 +179,21 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 
 <!-- MANUAL: -->
 - Content blocker startup: cached lists load and compile on a file thread after the window exists, so requests of tabs restored at launch can pass until the engine is published (a few hundred ms); list downloads use `CefURLRequest` on the UI thread but compile off it, and `CefURLRequest` callbacks hand back a different wrapper object, so never compare it by pointer.
-- Research source tabs use `Tab::group_parent` and open in the background (no activation, no
-  content-view swap, no browser until first shown: `AppendPlanChildTab(..., activate=false)`).
-  Never swap the content view twice in one turn: that crashed CEF a few seconds later. They sit
-  right after the Plan tab's last child; a pinned Plan's children start the unpinned tabs, so the
-  pinned group stays whole (`Space::AppendChildTab`, `NormalizeGroups`). A hub outside the active
-  space gets no group. `BrowserWindow` maps the running `BuildPlanGraph` node id to the opened
-  `TabId`. The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run; every row
-  keeps the fixed row height. Closing the Plan tab while
-  `research_` is active is deferred to the in-content Stop / Keep running confirmation.
+- Research source tabs use `Tab::group_parent`. `StartResearch` makes the research space itself
+  (`OpenResearchSpace`: the newest space with the question's name, else a new one whose only tab
+  is the Plan hub, so the view swaps once) and the research prompt no longer asks the agent to
+  create one. `OpenAgentTab` appends the page as a child and activates it
+  (`AppendPlanChildTab(..., activate=true)`) so the agent's page tools find a live browser: one
+  swap per MCP call. Never swap the content view twice in one turn: that crashed CEF a few
+  seconds later. The dev fixture appends background children (`activate=false`, no browser until
+  first shown; their `Tab::DisplayTitle` is the address and `EffectiveUrl` saves the startup
+  URL). Children sit right after the Plan tab's last child; a pinned Plan's children start the
+  unpinned tabs, so the pinned group stays whole (`Space::AppendChildTab`). `NormalizeGroups`
+  re-places a parent's children behind it after moves, pinning and restore; only the child the
+  person dragged away is ungrouped. A hub outside the active space (an agent that made its own
+  space) gets no group. `BrowserWindow` maps the running `BuildPlanGraph` node id to the opened
+  `TabId`. `NavigateTab` and the agent's back/forward/reload refuse the Plan tab
+  (`IsPlanTabIndex`). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
+  every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
+  deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
+  the page has no live frame; removing the Plan's space stops the research (no dialog).

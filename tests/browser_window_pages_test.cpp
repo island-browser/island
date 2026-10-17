@@ -21,6 +21,8 @@
 #include "keymap.h"
 #include "plan_dev_fixture.h"
 #include "plan_edits.h"
+#include "research_prompt.h"
+#include "session_store.h"
 #include "sha256.h"
 #include "start_tiles.h"
 #include "updater.h"
@@ -1079,9 +1081,10 @@ TEST(BrowserWindowPagesTest, StartingResearchOpensAPinnedPlanTabAndSendsTheResea
     ASSERT_EQ(sent.size(), 1U);
     EXPECT_NE(sent[0].find("why is the sky blue"), std::string::npos);
 
-    // The Plan tab is the first tab of the space and pinned.
-    const Space& space = SpaceAt(*window, 0);
-    ASSERT_EQ(space.tab_count(), 2U);
+    // The Plan tab is the first tab of the research space and pinned.
+    ASSERT_EQ(window->active_space_index(), 1U);
+    const Space& space = SpaceAt(*window, 1);
+    ASSERT_EQ(space.tab_count(), 1U);
     EXPECT_EQ(space.tabs()[0].startup_url(), std::string(kPlanUrl));
     EXPECT_TRUE(space.tabs()[0].pinned());
 }
@@ -1154,7 +1157,7 @@ TEST(BrowserWindowPagesTest, RetryOfAFailedStepContinuesTheRunOutsideTheApproval
     });
     window->SetResearchTaskForTest("q");
     std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
-    plan[0].status = "failed";
+    plan[2].status = "failed";
     window->SetPlanEntriesForTest(std::move(plan));
     // The run ended with the step failed: no research task is left and nothing awaits approval.
     ResearchOutcome failed;
@@ -1180,13 +1183,53 @@ TEST(BrowserWindowPagesTest, RetryWhileTheRunGoesOnIsNotRefusedAsAPlanEdit) {
         return true;
     });
     window->SetResearchTaskForTest("q");  // running: not awaiting approval
-    window->SetPlanEntriesForTest(agent::SpecPlan());
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "failed";
+    window->SetPlanEntriesForTest(std::move(plan));
 
     SendPlanMessage(*window, R"({"type":"retry","id":"a"})");
     SendPlanMessage(*window, R"({"type":"expand","id":"a"})");  // a real plan edit stays gated
 
     ASSERT_EQ(sent.size(), 1U);
     EXPECT_EQ(sent[0], "Retry step a.");
+}
+
+TEST(BrowserWindowPagesTest, RetryIsRefusedWhileThePlanAwaitsApproval) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetResearchTaskForTest("q");
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "failed";
+    window->SetPlanEntriesForTest(std::move(plan));
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    window->CompleteResearch(waiting);
+    ASSERT_EQ(window->research_status().state, "awaiting_approval");
+
+    SendPlanMessage(*window, R"({"type":"retry","id":"a"})");
+
+    // The gate holds: nothing is sent, the plan keeps waiting and stays unapproved.
+    EXPECT_TRUE(sent.empty());
+    EXPECT_EQ(window->research_status().state, "awaiting_approval");
+}
+
+TEST(BrowserWindowPagesTest, RetryOfAStepThatDidNotFailSendsNothing) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetResearchTaskForTest("q");
+    window->SetPlanEntriesForTest(agent::SpecPlan());  // nothing failed
+
+    SendPlanMessage(*window, R"({"type":"retry","id":"a"})");
+
+    EXPECT_TRUE(sent.empty());
 }
 
 TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivatesThem) {
@@ -1205,42 +1248,150 @@ TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivat
     const TabId research_tab = space.tabs()[1].id();
     EXPECT_EQ(space.tabs()[1].group_parent(), plan_id);
     EXPECT_EQ(space.tabs()[1].group_label(), "Branch A");
-    // The page opens in the background: the Plan tab stays selected.
-    EXPECT_EQ(window->active_tab_id(), plan_id);
+    // The agent reads the page it opened, so the page opens active (and gets its browser).
+    EXPECT_EQ(window->active_tab_id(), research_tab);
 
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    ASSERT_EQ(window->active_tab_id(), plan_id);
     SendPlanMessage(*window, R"({"type":"select","id":"a"})");
     EXPECT_EQ(window->active_tab_id(), research_tab);
 }
 
-TEST(BrowserWindowPagesTest, CreatingTheResearchSpaceLeavesThePlanHubAndEverySpaceIntact) {
+TEST(BrowserWindowPagesTest, AnAgentOpenedResearchPageIsTheActiveTabItsToolsRead) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+
+    // page_read with no tab index targets the active tab: it must be the new page, not the Plan.
+    const Space& space = SpaceAt(*window, 0);
+    ASSERT_TRUE(space.has_active_tab());
+    EXPECT_EQ(space.active_tab_index(), 1U);
+    EXPECT_EQ(space.tabs()[1].startup_url(), "https://reviews.test/laptop");
+}
+
+TEST(BrowserWindowPagesTest, NavigatingWithNoTabNeverTouchesThePlanTab) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    ASSERT_EQ(SpaceAt(*window, 0).active_tab_index(), 0U);  // the Plan tab is active
+
+    EXPECT_FALSE(window->NavigateTab(std::nullopt, "https://reviews.test/laptop"));
+    EXPECT_FALSE(window->NavigateTab(0, "https://reviews.test/laptop"));
+
+    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(window->IsPlanTabIndex(std::nullopt));
+    EXPECT_TRUE(window->IsPlanTabIndex(0));
+}
+
+TEST(BrowserWindowPagesTest, StartingResearchOpensTheResearchSpaceAndGroupsTheAgentsPages) {
     const ScopedAgentCommand command("true");
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
     window->SetAgentSendForTest([](std::string) { return true; });
     ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
-    const std::size_t plan_tabs = SpaceAt(*window, 0).tab_count();
 
-    ASSERT_TRUE(window->CreateSpace("Research topic"));
-
-    // The Plan hub is not moved, so no space is left without a tab.
+    // Island made the space, not the agent: the Plan hub is its first and only tab.
     ASSERT_EQ(window->space_count(), 2U);
-    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), plan_tabs);
-    EXPECT_EQ(SpaceAt(*window, 1).tab_count(), 1U);
-    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), std::string(kPlanUrl));
+    ASSERT_EQ(window->active_space_index(), 1U);
+    const Space& research = SpaceAt(*window, 1);
+    EXPECT_EQ(research.name(), ResearchSpaceName("Research topic"));
+    ASSERT_EQ(research.tab_count(), 1U);
+    EXPECT_EQ(research.tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(research.tabs()[0].pinned());
+    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 1U);  // the person's space is untouched
+
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "in_progress";
+    window->SetPlanEntriesForTest(std::move(plan));
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+
+    ASSERT_EQ(research.tab_count(), 2U);
+    EXPECT_EQ(research.tabs()[1].group_parent(), research.tabs()[0].id());
+    EXPECT_EQ(research.tabs()[1].group_label(), "Branch A");
+    // The node mapping was recorded: selecting the node on the Plan page shows the page.
+    const TabId child = research.tabs()[1].id();
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    SendPlanMessage(*window, R"({"type":"select","id":"a"})");
+    EXPECT_EQ(window->active_tab_id(), child);
 }
 
-TEST(BrowserWindowPagesTest, APageOpenedWhilePlanSpaceIsInactiveIsAnOrdinaryTab) {
+TEST(BrowserWindowPagesTest, StartingResearchReusesASpaceWithTheResearchName) {
+    const ScopedAgentCommand command("true");
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
-    window->OpenPlanFixtureTab();
-    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_TRUE(window->CreateSpace(ResearchSpaceName("Research topic")));
     ASSERT_EQ(window->space_count(), 2U);
+
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+
+    EXPECT_EQ(window->space_count(), 2U);
+    const Space& research = SpaceAt(*window, 1);
+    EXPECT_EQ(window->active_space_index(), 1U);
+    ASSERT_EQ(research.tab_count(), 2U);  // the space's own tab and the Plan hub
+    EXPECT_EQ(research.tabs()[0].startup_url(), std::string(kPlanUrl));
+}
+
+TEST(BrowserWindowPagesTest, AnAgentThatCreatesItsOwnSpaceStillGetsOrdinaryTabs) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+    ASSERT_TRUE(window->CreateSpace("Agent's own"));
+    const std::size_t plan_space_tabs = SpaceAt(*window, 1).tab_count();
 
     ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
 
-    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 2U);
-    ASSERT_EQ(SpaceAt(*window, 1).tab_count(), 2U);
-    EXPECT_FALSE(SpaceAt(*window, 1).tabs()[1].group_parent().has_value());
+    // The hub stays in the research space; the page is an ordinary tab of the active space.
+    EXPECT_EQ(SpaceAt(*window, 1).tab_count(), plan_space_tabs);
+    ASSERT_EQ(SpaceAt(*window, 2).tab_count(), 2U);
+    EXPECT_FALSE(SpaceAt(*window, 2).tabs()[1].group_parent().has_value());
+}
+
+TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+
+    const SessionState state = window->BuildSessionState();
+
+    ASSERT_EQ(state.spaces.size(), 1U);
+    ASSERT_EQ(state.spaces[0].tabs.size(), 4U);
+    // Never shown, so it has no committed URL yet: the page it would open is what persists.
+    EXPECT_EQ(state.spaces[0].tabs[1].url, "https://developer.apple.com/");
+    EXPECT_EQ(state.spaces[0].tabs[1].group_parent, state.spaces[0].tabs[0].id);
+}
+
+TEST(BrowserWindowPagesTest, DeletingThePlansSpaceStopsTheResearch) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    ASSERT_TRUE(window->research_running());
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    ASSERT_TRUE(window->SelectSpaceIndex(0));
+
+    window->ExecuteCommand(BrowserCommand::kCloseSpace);
+
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "cancelled");
+    EXPECT_EQ(window->space_count(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, ClosingAPlanTabWithNoLivePageStopsTheResearchAndCloses) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->OpenPlanFixtureTab();
+    ASSERT_EQ(SpaceAt(*window, 0).tab_count(), 2U);
+    ASSERT_TRUE(window->research_running());
+
+    // No confirmation hook and no browser: there is no page to ask, so Cmd+W must not stall.
+    EXPECT_TRUE(window->CloseActiveSpaceTabIndex(0));
+
+    EXPECT_EQ(SpaceAt(*window, 0).tab_count(), 1U);
+    EXPECT_FALSE(window->research_running());
 }
 
 TEST(BrowserWindowPagesTest, ResearchResultOpensAsAGroupedReportTab) {
@@ -1382,9 +1533,19 @@ TEST(BrowserWindowPagesTest, ConsecutiveResearchReusesThePlanTab) {
     ASSERT_EQ(window->StartResearch("second question").code,
               BrowserWindow::ResearchStart::kStarted);
 
-    EXPECT_EQ(PlanTabCount(*window), 1U);
-    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), std::string(kPlanUrl));
-    EXPECT_TRUE(SpaceAt(*window, 0).tabs()[0].pinned());
+    // One hub: it moved to the second question's own space and the first one's was dropped.
+    std::size_t hubs = 0;
+    for (std::size_t index = 0; index < window->space_count(); ++index) {
+        for (const Tab& tab : SpaceAt(*window, index).tabs()) {
+            hubs += CurrentTabUrl(tab) == std::string(kPlanUrl) ? 1 : 0;
+        }
+    }
+    EXPECT_EQ(hubs, 1U);
+    ASSERT_EQ(window->space_count(), 3U);
+    ASSERT_EQ(window->active_space_index(), 2U);
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), std::string(kPlanUrl));
+    EXPECT_TRUE(SpaceAt(*window, 2).tabs()[0].pinned());
+    EXPECT_EQ(SpaceAt(*window, 1).tab_count(), 1U);  // the first space keeps a fresh tab
 }
 
 TEST(BrowserWindowPagesTest, StalePlanCleanupKeepsItsSpaceAndClosedTabHistory) {

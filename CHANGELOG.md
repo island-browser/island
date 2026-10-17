@@ -45,65 +45,24 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
   Plain ACP plans open in List view with stable p0, p1, ... step ids, and each research reuses
   its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab.
-- Pages opened while research runs now open in the background as indented child rows under the
-  Plan tab, each run of a branch under its own "Branch A" kicker line; selecting their plan node
-  loads and shows the page. Children of the pinned Plan tab start the Tabs section, so Favorites
-  stays whole. The final Result opens as a grouped Report tab. Closing the Plan hub asks whether
-  to stop or keep the research running (Escape keeps it running), and failed plan steps can be
-  retried from the inspector while the run goes on or after it ended.
-- ⌘/ (Ctrl+/ on Windows and Linux, also Help > Keyboard Shortcuts) opens a shortcut cheatsheet:
-  a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
-  (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,
-  Reader view, Settings, Cheatsheet) with their current keys. ⌘/ again, Esc, its close button
-  or a click outside closes it, and the shortcut is configurable in Settings like the others.
-- Settings > Keyboard shortcuts records a new shortcut when you click a row: the row shows an
-  accent outline and "Press keys…", and Esc cancels. A chord another action already uses is not
-  taken silently: an amber banner says "⌘B is already used by Toggle sidebar." with Replace
-  (moves the chord and unbinds the other action) and Cancel. Bindings show as keycaps, unbound
-  actions offer "Add shortcut", and "Reset all" restores every default.
-- The Native address field shows page state as 20 DIP indicators instead of a status bar: a
-  shield with the blocked-request count at the left edge (capped at "9999+", hidden at 0; click
-  opens Settings > Privacy), Reader at the right edge only on pages that have a reader view, and
-  an agent dot (blue while the agent works, orange while it waits for an answer; click opens the
-  agent panel). Each has an accessible name and a full-text tooltip, and the indicators follow
-  the active tab.
-- The Native look now uses a 248 DIP source-list sidebar and a 52 DIP page toolbar with 28 DIP
-  navigation buttons, a centered idle address field, Share and Agent actions, sentence-case
-  section labels, system-blue selected rows with white text, and space switchers without space
-  colors. Arc and Graphite keep their existing chrome. The Native address field is a rounded
-  (radius 8) fill plate without an outline, and Back/Forward stay clear of the window buttons
-  when the sidebar is on the right or collapsed to the icon rail.
-- Local pages now receive every Native look color slot, including selection, warning, status,
-  and plan-branch colors, as live CSS variables in light and dark themes.
-- Settings > Appearance now starts with a Look preset menu for Native, Arc, and Graphite. Native
-  is the default for new profiles; changing any individual appearance control labels the result
-  Custom, and existing profiles without a saved look keep their Arc appearance.
-- Native look color tokens: neutral source-list surfaces, system blue selection, accessible
-  secondary/warning text pairs, and four plan-branch colors in light and dark themes. Native
-  customization ignores space color so its canvas and accent stay fixed.
-- Arc-style look. On macOS the window is frameless: no title bar or title text, the traffic lights
-  sit over the top-left of the sidebar, and the sidebar's top band (and the canvas strip above the
-  page) drags the window. The sidebar and the window margin are one canvas tinted in the active
-  space's color (stronger than before), the page sits on a card inset 8 DIP with rounded corners
-  and one soft shadow, the selected and hovered tab rows and the address pill are soft rounded
-  fills, and favicons sit on a small rounded plate so dark ones stay visible on a dark sidebar, in
-  the 52 DIP icon rail as well. CEF views cannot round or shadow anything, so on macOS a native
-  overlay (`macos/page_card_mac.mm`) paints the corners and the shadow; other platforms keep
-  square corners and the platform frame.
-- Settings > Appearance, applied live and saved in the prefs: per-space color (ten presets or a
-  custom hex), sidebar tint intensity, sidebar on the left or right, page corner radius
-  (0/6/10/14), density (comfortable/compact), interface font (Geist, System, or any installed
-  family), the page card's shadow and "full bleed" (no inset, no rounding, no shadow). Theme stays
-  System/Light/Dark.
-- Research mode asks the agent for a branching plan first: each step is an ACP plan entry with
-  `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
-  until you approve the plan.
-
-### Fixed
-
+- Island opens the research space itself (the question's name; a space with that name is reused)
+  with the Plan hub as its pinned first tab, so the agent no longer creates one. Pages the agent
+  opens during research become indented child rows under the Plan tab, each run of a branch under
+  its own "Branch A" kicker line, and open active so the agent can read them right away;
+  selecting their plan node shows the page. Children of the pinned Plan tab start the Tabs
+  section, so Favorites stays whole, and they stay together behind their parent when tabs are
+  moved or a favourite is unpinned. The final Result opens as a grouped Report tab and the
+  sidebar and session keep the grouping. The agent's navigate, back, forward and reload refuse
+  the Plan tab with a clear error.
+- Closing the Plan hub asks whether to stop or keep the research running (Escape keeps it
+  running); with no live page to ask it stops the research and closes the tab. Deleting the
+  space that holds the Plan tab stops the research. Failed plan steps can be retried from the
+  inspector while the run goes on or after it ended, never while the plan awaits approval.
+- Pages the research opened but you have not shown yet keep their address in the saved session
+  and show it as their name in the sidebar and in the agent's tab list.
 - Research no longer swaps the page view several times in one turn (which crashed CEF a few
-  seconds later): the pages it opens stay in the background, and the browser of such a page is
-  created when it is first shown.
+  seconds later): the space is made with the Plan tab as its only tab, and each page the agent
+  opens is one swap.
 
 - Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
   for them, and it finds the Import sources and the About list, which were hidden for every

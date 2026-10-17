@@ -10,6 +10,17 @@ void Tab::SetStartupUrl(std::string url) { startup_url_ = std::move(url); }
 
 const std::string& Tab::startup_url() const noexcept { return startup_url_; }
 
+std::string Tab::DisplayTitle() const {
+    const std::string& page_title = navigation_state_.snapshot().page_title;
+    if (!page_title.empty()) {
+        return page_title;
+    }
+    if (browser_view_ == nullptr && startup_url_.rfind("http", 0) == 0) {
+        return startup_url_;
+    }
+    return "Island";
+}
+
 void Tab::SetGroupParent(std::optional<TabId> parent) { group_parent_ = parent; }
 
 std::optional<TabId> Tab::group_parent() const noexcept { return group_parent_; }

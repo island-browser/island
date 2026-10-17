@@ -207,9 +207,30 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     plan_view_.reset();
     plan_notice_.clear();
     SetResearchStatus("running", {});
+    OpenResearchSpace(research_->space_name);
     OpenPlanTab();
     SetAgentPanelOpen(true);
     return {ResearchStart::kStarted, {}};
+}
+
+void BrowserWindow::OpenResearchSpace(const std::string& name) {
+    // The newest space with that name is the research's own (a repeated question reuses it).
+    for (std::size_t index = spaces_.size(); index > 0; --index) {
+        if (spaces_[index - 1].name() == name) {
+            static_cast<void>(SelectSpaceIndex(index - 1));
+            return;
+        }
+    }
+    // A new space starts with the Plan hub as its only tab, so the view is swapped once and no
+    // blank tab with a browser of its own is left behind.
+    DetachActiveTabObservers();
+    const std::size_t created_index = spaces_.size();
+    Space& created = AppendSpace(name);
+    Tab plan{NextTabId()};
+    plan.SetStartupUrl(PlanPageUrl());
+    created.AppendTab(std::move(plan));
+    active_space_index_ = created_index;
+    AttachActiveTabObservers();
 }
 
 void BrowserWindow::CancelResearch() {
@@ -349,9 +370,14 @@ void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan, bool cont
                                  .space_name = {},
                                  .turns_ended_before = TurnsEnded()};
     }
-    // The turn this sends is the one the research waits for.
+    // The turn this sends is the one the research waits for. A continuation keeps the approval
+    // it had; a new task for a finished run follows steps that could only fail once approved.
     research_->awaiting_approval = false;
-    research_->plan_approved = approves_plan;
+    if (!continues_run) {
+        research_->plan_approved = approves_plan;
+    } else if (started_task) {
+        research_->plan_approved = true;
+    }
     research_->turns_ended_before = TurnsEnded();
     if (!SendToAgent(std::move(text))) {
         // Refused (the session is busy or cannot start): the plan keeps waiting.
@@ -518,8 +544,11 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
     const std::string label = node.has_value()
                                   ? (node->branch.empty() ? "Step" : "Branch " + node->branch)
                                   : std::string();
+    // The agent reads the page it opens, and its tools address the active tab or a tab with a
+    // live browser: the page opens active so its browser exists when this returns. Each MCP
+    // call is its own UI task, so this is one view swap per turn.
     static_cast<void>(AppendPlanChildTab(std::move(*url), node.has_value() ? node->id : "", label,
-                                         /*activate=*/false));
+                                         /*activate=*/true));
     return true;
 }
 
@@ -538,12 +567,23 @@ void BrowserWindow::OpenPlanTab() {
             if (shown == PlanPageUrl()) plan_tabs.push_back(tab.id());
         }
     }
+    // The hub lives in the research space: a Plan tab elsewhere (an earlier research) is stale.
+    const auto in_active_space = [this](TabId id) {
+        const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(id);
+        return location.has_value() && location->first == active_space_index_;
+    };
     std::optional<TabId> keep;
     if (plan_tab_.has_value() &&
-        std::find(plan_tabs.begin(), plan_tabs.end(), *plan_tab_) != plan_tabs.end()) {
+        std::find(plan_tabs.begin(), plan_tabs.end(), *plan_tab_) != plan_tabs.end() &&
+        in_active_space(*plan_tab_)) {
         keep = plan_tab_;
-    } else if (!plan_tabs.empty()) {
-        keep = plan_tabs.front();
+    } else {
+        for (const TabId candidate : plan_tabs) {
+            if (in_active_space(candidate)) {
+                keep = candidate;
+                break;
+            }
+        }
     }
     for (const TabId stale : plan_tabs) {
         if (keep.has_value() && stale == *keep) continue;
@@ -592,6 +632,16 @@ bool BrowserWindow::ConfirmPlanTabClose(TabId id) {
             CancelResearch();
         }
         return stop;
+    }
+    // The confirmation lives in the Plan page: without a live page there is nothing to ask,
+    // so closing the tab stops the research instead of doing nothing.
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(id);
+    const Tab* plan =
+        location.has_value() ? &spaces_[location->first].tabs()[location->second] : nullptr;
+    if (plan == nullptr || plan->browser() == nullptr ||
+        plan->browser()->GetMainFrame() == nullptr) {
+        CancelResearch();
+        return true;
     }
     ShowPlanCloseConfirmation();
     return false;
@@ -797,7 +847,17 @@ void BrowserWindow::HandlePlanPageMessage(const json::Value& message,
         SendPlanTurn(agent::BuildExpandMessage(id));
         return;
     } else if (type == "retry") {
-        SendPlanTurn(agent::BuildRetryMessage(id), /*approves_plan=*/true, /*continues_run=*/true);
+        // Only a step that failed can be retried, and never before the plan is approved.
+        const agent::PlanGraph graph = agent::BuildPlanGraph(plan_entries_, plan_edits_.skipped);
+        const bool failed =
+            std::any_of(graph.nodes.begin(), graph.nodes.end(), [&id](const agent::PlanNode& node) {
+                return node.id == id && node.state == agent::PlanNodeState::kFailed;
+            });
+        if (!failed || (research_.has_value() && research_->awaiting_approval)) {
+            return;
+        }
+        SendPlanTurn(agent::BuildRetryMessage(id), /*approves_plan=*/false,
+                     /*continues_run=*/true);
         return;
     }
     RenderPlanPages();
@@ -851,7 +911,11 @@ bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view spac
     if (closing_ || ReportStore::Find(reports_, id) == nullptr) {
         return false;
     }
-    if (!space_name.empty()) {
+    const std::optional<std::pair<std::size_t, std::size_t>> plan_location =
+        group_with_plan && plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
+    if (plan_location.has_value()) {
+        static_cast<void>(SelectSpaceIndex(plan_location->first));
+    } else if (!space_name.empty()) {
         // The newest space with that name is the one the agent just created.
         for (std::size_t index = spaces_.size(); index > 0; --index) {
             if (spaces_[index - 1].name() == space_name) {

@@ -78,5 +78,19 @@ TEST(Tab, StoresItsOptionalGroupParentAndBranchLabel) {
     EXPECT_FALSE(tab.group_parent().has_value());
 }
 
+TEST(Tab, DisplayTitleNamesTheAddressOfAnUnshownWebPage) {
+    Tab tab(NextTabId());
+    EXPECT_EQ(tab.DisplayTitle(), "Island");
+
+    tab.SetStartupUrl("data:text/html,x");
+    EXPECT_EQ(tab.DisplayTitle(), "Island");
+
+    tab.SetStartupUrl("https://docs.test/a");
+    EXPECT_EQ(tab.DisplayTitle(), "https://docs.test/a");
+
+    tab.navigation_state().OnTitleChange("Docs");
+    EXPECT_EQ(tab.DisplayTitle(), "Docs");
+}
+
 }  // namespace
 }  // namespace island

@@ -58,10 +58,12 @@ class Space {
     // pinned parent's children never split the pinned group: they start the unpinned tabs, right
     // after the pinned group. An unknown parent falls back to a regular append.
     [[nodiscard]] TabId AppendChildTab(TabId parent, Tab tab, bool activate = true);
-    // Ungroups every tab whose parent is missing, or that no longer sits right after its parent
-    // or a sibling (a pinned parent's children start the unpinned tabs). A pinned tab is never
-    // a child. Moves, pinning and session restore run it so an indent cannot drift away.
-    void NormalizeGroups();
+    // Keeps the groups well formed. A tab whose parent is missing (or is itself a child) or that
+    // is pinned is ungrouped, and so is the `moved` tab (the one the person just dragged) when it
+    // no longer follows its parent or a sibling. The other children are re-placed right after
+    // their parent, or after the pinned group when the parent is pinned. Moves, pinning and
+    // session restore run it so an indent cannot drift away.
+    void NormalizeGroups(std::optional<TabId> moved = std::nullopt);
     [[nodiscard]] Tab* FindTab(TabId id);
     [[nodiscard]] const Tab* FindTab(TabId id) const;
     [[nodiscard]] std::optional<std::size_t> IndexOfTab(TabId id) const;

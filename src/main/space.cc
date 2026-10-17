@@ -59,16 +59,20 @@ TabId Space::AppendChildTab(TabId parent, Tab tab, bool activate) {
     return id;
 }
 
-void Space::NormalizeGroups() {
+void Space::NormalizeGroups(std::optional<TabId> moved) {
     const std::size_t pinned = pinned_count();
+    // A child is dropped when it cannot be one: its parent is gone, is itself a child, or it is
+    // pinned. A tab the person moved by hand also leaves its group when it no longer follows
+    // the parent or a sibling.
     for (std::size_t i = 0; i < tabs_.size(); ++i) {
         const std::optional<TabId> parent = tabs_[i].group_parent();
         if (!parent.has_value()) {
             continue;
         }
         const std::optional<std::size_t> parent_index = IndexOfTab(*parent);
-        bool keep = parent_index.has_value() && !tabs_[i].pinned() && *parent_index != i;
-        if (keep) {
+        bool keep = parent_index.has_value() && !tabs_[i].pinned() && *parent_index != i &&
+                    !tabs_[*parent_index].group_parent().has_value();
+        if (keep && moved == tabs_[i].id()) {
             const bool after_run =
                 i > 0 && (tabs_[i - 1].id() == *parent || tabs_[i - 1].group_parent() == parent);
             const bool starts_unpinned = tabs_[*parent_index].pinned() && i == pinned;
@@ -76,6 +80,47 @@ void Space::NormalizeGroups() {
         }
         if (!keep) {
             tabs_[i].SetGroupParent(std::nullopt);
+        }
+    }
+
+    // The other children are re-placed: right after their parent, or after the pinned group
+    // when the parent is pinned. Nothing moves when the run is already in place.
+    std::vector<std::size_t> order;
+    order.reserve(tabs_.size());
+    const auto push_children = [this, &order](std::size_t parent_index) {
+        for (std::size_t i = 0; i < tabs_.size(); ++i) {
+            if (tabs_[i].group_parent() == tabs_[parent_index].id()) {
+                order.push_back(i);
+            }
+        }
+    };
+    const std::size_t pinned_end = std::min(pinned, tabs_.size());
+    for (std::size_t i = 0; i < pinned_end; ++i) {
+        order.push_back(i);
+    }
+    for (std::size_t i = 0; i < pinned_end; ++i) {
+        push_children(i);
+    }
+    for (std::size_t i = pinned_end; i < tabs_.size(); ++i) {
+        if (!tabs_[i].group_parent().has_value()) {
+            order.push_back(i);
+            push_children(i);
+        }
+    }
+    if (order.size() != tabs_.size() || std::is_sorted(order.begin(), order.end())) {
+        return;
+    }
+    const std::optional<TabId> active =
+        has_active_tab() ? std::optional<TabId>(active_tab_id()) : std::nullopt;
+    std::vector<Tab> ordered;
+    ordered.reserve(tabs_.size());
+    for (const std::size_t index : order) {
+        ordered.push_back(std::move(tabs_[index]));
+    }
+    tabs_ = std::move(ordered);
+    if (active.has_value()) {
+        if (const std::optional<std::size_t> index = IndexOfTab(*active)) {
+            active_tab_index_ = *index;
         }
     }
 }
@@ -175,6 +220,7 @@ bool Space::MoveTab(std::size_t from_index, std::size_t to_index) {
     }
 
     const TabId active_id = active_tab_id();
+    const TabId moved_id = tabs_[from_index].id();
     Tab moved = std::move(tabs_[from_index]);
     tabs_.erase(tabs_.begin() + static_cast<std::vector<Tab>::difference_type>(from_index));
     tabs_.insert(tabs_.begin() + static_cast<std::vector<Tab>::difference_type>(to_index),
@@ -186,7 +232,7 @@ bool Space::MoveTab(std::size_t from_index, std::size_t to_index) {
             active_tab_index_ = *new_active_index;
         }
     }
-    NormalizeGroups();
+    NormalizeGroups(moved_id);
     return true;
 }
 

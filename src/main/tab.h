@@ -42,6 +42,10 @@ class Tab {
     void SetStartupUrl(std::string url);
     [[nodiscard]] const std::string& startup_url() const noexcept;
 
+    // The row title everyone shows (sidebar, agent tab list): the page title, else a never-shown
+    // web page (a background research page) names its address, else "Island".
+    [[nodiscard]] std::string DisplayTitle() const;
+
     // Arc-style pinned tabs sit in their own group at the top of the sidebar
     // and persist with the session. Ordering is the Space's job (SetTabPinned).
     void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
