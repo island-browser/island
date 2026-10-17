@@ -275,6 +275,12 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] std::string PlanStateJson() const;
     // Developer capture: opens a Plan tab that shows the sample plan waiting for approval.
     void OpenPlanFixtureTab(bool include_child_tabs = false);
+    // Opens `count` agent pages back to back, one UI task each and no delay, as an agent calling
+    // browser_open_tab in a row does (developer capture `agent_pages:<count>`).
+    void OpenAgentPagesInQuickSuccessionForDev(int count);
+    void OpenAgentTabForDev(std::string address);
+    // How many times the active tab's view was attached; tests assert one swap per action.
+    [[nodiscard]] std::size_t AttachCountForTest() const noexcept { return attach_count_; }
     // Test seams: the plan page URL, the agent send path (research and plan turns go through
     // it instead of the agent session), and the plan shown without an agent turn.
     void SetPlanPageUrlForTest(std::string url) { plan_page_url_ = std::move(url); }
@@ -702,6 +708,9 @@ class BrowserWindow : public CefClient,
     // the collection rows. Both are no-ops while closing.
     void DetachActiveTabObservers();
     void AttachActiveTabObservers();
+    // Selects `tab` of `space` by changing the model first and attaching its view once, so a
+    // cross-space activation never creates a view that the next swap removes within the task.
+    void SelectTabWithOneAttach(std::size_t space, std::size_t tab);
     void AttachActiveTabBrowserView();
     void UpdateChromeCollections();
     [[nodiscard]] static Space CreateDefaultSpace();
@@ -773,7 +782,14 @@ class BrowserWindow : public CefClient,
     // A background child (`activate` false) changes neither the selection nor the content view.
     // Without a Plan tab in the active space it opens as an ordinary tab.
     [[nodiscard]] TabId AppendPlanChildTab(std::string startup_url, std::string node_id,
-                                           std::string label, bool activate);
+                                           std::string label, bool activate,
+                                           bool defer_attach = false);
+    // The part of AppendPlanChildTab that needs the Plan's space: an activated child makes that
+    // space active and is selected with one attach, wherever the person was.
+    TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
+                            std::string label, bool activate, bool defer_attach);
+    // Attaches the view of the active tab once for the agent pages opened since it was posted.
+    void AttachAfterAgentPages();
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
     // The address a new tab opens (empty text: the start page), or nullopt when the text is not
     // an address Island allows.
@@ -944,6 +960,11 @@ class BrowserWindow : public CefClient,
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;
+    std::size_t attach_count_ = 0;
+    // The plan on show was proposed and the person has not approved it (set when it starts to
+    // wait, cleared by an approving Run); a cancelled wait keeps it so Retry cannot start a run.
+    bool plan_unapproved_ = false;
+    bool agent_attach_posted_ = false;
     ResearchStatus research_status_;
     // The report whose text the agent session's conversation already holds.
     std::string report_in_session_;

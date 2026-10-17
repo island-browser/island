@@ -447,6 +447,12 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->OpenNewestReport();
         return true;
     }
+    // `agent_pages:<count>` opens that many agent pages back to back (after `plan_fixture`).
+    constexpr std::string_view kAgentPages = "agent_pages:";
+    if (action.compare(0, kAgentPages.size(), kAgentPages) == 0) {
+        app->OpenAgentPagesForDev(std::atoi(action.c_str() + kAgentPages.size()));
+        return true;
+    }
     if (action == "plan_fixture") {
         app->OpenPlanFixture();
         return true;

@@ -1774,9 +1774,7 @@ bool BrowserWindow::ActivateTabAt(std::size_t space, std::size_t tab) {
     if (closing_ || space >= spaces_.size() || tab >= spaces_[space].tab_count()) {
         return false;
     }
-    if (!SelectSpaceIndex(space) || !SelectActiveSpaceTabIndex(tab)) {
-        return false;
-    }
+    SelectTabWithOneAttach(space, tab);
     HideInternalPage();
     return true;
 }
@@ -2348,6 +2346,19 @@ bool BrowserWindow::SelectActiveSpaceTabIndex(std::size_t index) {
     BreakSplitIfSelectionLeftPair(space, space.active_tab_id());
     AttachActiveTabObservers();
     return true;
+}
+
+void BrowserWindow::SelectTabWithOneAttach(std::size_t space, std::size_t tab) {
+    Space& target = spaces_[space];
+    if (space == active_space_index_ && target.has_active_tab() &&
+        target.active_tab_index() == tab) {
+        return;
+    }
+    DetachActiveTabObservers();
+    active_space_index_ = space;
+    target.SelectTabIndex(tab);
+    BreakSplitIfSelectionLeftPair(target, target.active_tab_id());
+    AttachActiveTabObservers();
 }
 
 bool BrowserWindow::SelectSpaceIndex(std::size_t index) {
@@ -3591,6 +3602,7 @@ void BrowserWindow::AttachActiveTabObservers() {
     if (closing_) {
         return;
     }
+    ++attach_count_;
     // A peek floats over one page; changing the selection dismisses it.
     ClosePeek();
     TouchActiveTabs();

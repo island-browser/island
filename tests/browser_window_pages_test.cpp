@@ -1334,6 +1334,96 @@ TEST(BrowserWindowPagesTest, StartingResearchReusesASpaceWithTheResearchName) {
     EXPECT_EQ(research.tabs()[0].startup_url(), std::string(kPlanUrl));
 }
 
+TEST(BrowserWindowPagesTest, StartingResearchFromAnotherSwapsTheViewOnceIntoTheReusedSpace) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_TRUE(window->CreateSpace(ResearchSpaceName("Research topic")));
+    ASSERT_TRUE(window->CreateSpace("Elsewhere"));
+    ASSERT_EQ(window->active_space_index(), 2U);
+
+    const std::size_t attaches_before = window->AttachCountForTest();
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+
+    EXPECT_EQ(window->AttachCountForTest() - attaches_before, 1U);
+    EXPECT_EQ(window->space_count(), 3U);
+    ASSERT_EQ(window->active_space_index(), 1U);
+    const Space& research = SpaceAt(*window, 1);
+    std::size_t plan_tabs = 0;
+    for (const Tab& tab : research.tabs()) {
+        if (tab.startup_url() == std::string(kPlanUrl)) ++plan_tabs;
+    }
+    EXPECT_EQ(plan_tabs, 1U);
+    ASSERT_TRUE(research.has_active_tab());
+    EXPECT_EQ(research.tabs()[research.active_tab_index()].startup_url(), std::string(kPlanUrl));
+}
+
+TEST(BrowserWindowPagesTest, OpeningTheReportFromAnotherSpaceSwapsTheViewOnce) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetReportPageUrlForTest("data:text/html,report");
+    window->SetAgentSendForTest([](std::string) { return true; });
+    const auto path = std::filesystem::temp_directory_path() / "island_report_other_space.json";
+    std::filesystem::remove(path);
+    window->SetReportsFileForTest(path);
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+    ASSERT_TRUE(window->CreateSpace("Elsewhere"));
+    ASSERT_EQ(window->active_space_index(), 2U);
+
+    const std::size_t attaches_before = window->AttachCountForTest();
+    ResearchOutcome report;
+    report.kind = ResearchOutcome::Kind::kReport;
+    report.markdown = "# Other space\n\nDone.";
+    window->CompleteResearch(report);
+
+    EXPECT_EQ(window->AttachCountForTest() - attaches_before, 1U);
+    ASSERT_EQ(window->active_space_index(), 1U);
+    const Space& research = SpaceAt(*window, 1);
+    ASSERT_TRUE(research.has_active_tab());
+    EXPECT_EQ(research.tabs()[research.active_tab_index()].group_label(), "Result");
+    std::filesystem::remove(path);
+}
+
+TEST(BrowserWindowPagesTest, SelectingANodeInAnotherSpaceSwapsTheViewOnce) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    const TabId branch_a = SpaceAt(*window, 0).tabs()[1].id();
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    ASSERT_TRUE(window->CreateSpace("Elsewhere"));
+
+    const std::size_t attaches_before = window->AttachCountForTest();
+    SendPlanMessage(*window, R"({"type":"select","id":"a"})");
+
+    EXPECT_LE(window->AttachCountForTest() - attaches_before, 1U);
+    EXPECT_EQ(window->active_space_index(), 0U);
+    EXPECT_EQ(window->active_tab_id(), branch_a);
+}
+
+TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothing) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SetResearchTaskForTest("q");
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "failed";
+    window->SetPlanEntriesForTest(std::move(plan));
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    window->CompleteResearch(waiting);
+    window->CancelResearch();  // the plan was never approved
+
+    SendPlanMessage(*window, R"({"type":"retry","id":"a"})");
+
+    EXPECT_TRUE(sent.empty());
+}
+
 TEST(BrowserWindowPagesTest, AnAgentThatCreatesItsOwnSpaceStillGetsOrdinaryTabs) {
     const ScopedAgentCommand command("true");
     CefRefPtr<BrowserWindow> window = MakeWindow();

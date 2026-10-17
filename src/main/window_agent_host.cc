@@ -192,6 +192,15 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
 
 void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_view method,
                                    json::Value params, agent::DevToolsCallback done) {
+    // Every page tool (read, snapshot, click, type, evaluate, screenshot) comes through here.
+    // The Plan tab is Island's own page: an agent could press Run on it and approve its own plan.
+    if (window_->IsPlanTabIndex(tab)) {
+        agent::DevToolsReply reply;
+        reply.ok = false;
+        reply.error = std::string(kPlanTabError);
+        done(std::move(reply));
+        return;
+    }
     CefRefPtr<CefBrowser> browser = window_->BrowserForTab(tab);
     if (browser == nullptr) {
         agent::DevToolsReply reply;
