@@ -67,7 +67,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   shows the page. Children of the pinned Plan tab start the Tabs
   section, so Favorites stays whole, and they stay together behind their parent when tabs are
   moved or a favourite is unpinned. The final Result opens as a grouped Report tab and the
-  sidebar and session keep the grouping. The agent's navigate, back, forward and reload refuse
+  sidebar keeps the grouping. Plan and Report tabs are not restored after a restart; their pages
+  come back as ordinary tabs. The agent's navigate, back, forward and reload refuse
   the Plan tab with a clear error, and so do its page tools (read, snapshot, click, type,
   evaluate, screenshot): the plan can only be approved by you.
 - Closing the Plan hub asks whether to stop or keep the research running (Escape keeps it
@@ -81,7 +82,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,
   Reader view, Settings, Cheatsheet) with their current keys. ⌘/ again, Esc, its close button
-  or a click outside (macOS only) closes it, and the shortcut is configurable in Settings like the others.
+  or a click outside (macOS only) closes it, and the shortcut is configurable in Settings like
+  the others.
 - Settings > Keyboard shortcuts records a new shortcut when you click a row: the row shows an
   accent outline and "Press keys…", and Esc cancels. A chord another action already uses is not
   taken silently: an amber banner says "⌘B is already used by Toggle sidebar." with Replace
@@ -123,6 +125,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   until you approve the plan.
 
 ### Fixed
+
+- Opening Settings or All tabs right after a new tab, or switching split panes quickly, no longer
+  risks a crash.
 - Research no longer swaps the page view several times in one turn (which crashed CEF a few
   seconds later): the space is made with the Plan tab as its only tab, reusing a space, opening
   the Report and selecting a plan node from another space change the model first and swap the
