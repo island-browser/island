@@ -47,8 +47,9 @@ binding; §9.3 and §9.4 were confirmed by the owner on 2026-10-17).
 1. A page that relabels its submit button after the facts were read (text changes between facts and
    click): the gate must classify from facts read in the same evaluation that returns the click
    point — Task 2 test `FactsAndClickPointComeFromOneEvaluation`.
-2. Look-alike hosts (`example.com.evil.net`, `evil-example.com`, `EXAMPLE.com.`) must not match a
-   trusted `example.com` — Task 1 test `LookAlikeHostsDoNotMatch`.
+2. Look-alike hosts (`example.com.evil.net`, `evil-example.com`) must not match a
+   trusted `example.com` (while `EXAMPLE.com.` normalizes to it and does match) — Task 1 test
+   `LookAlikeHostsDoNotMatch`.
 3. The panel is closed and an external MCP client waits for a card: the card must still be there
    when the panel opens and must disappear after the 120 s timeout — Task 4 test
    `ConfirmationTimesOutAndWithdrawsTheCard`.
