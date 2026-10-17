@@ -297,6 +297,7 @@ class BrowserWindow : public CefClient,
     void SetViewSwapTimeForTest(std::chrono::milliseconds since_epoch);
     void AdvanceViewSwapTimeForTest(std::chrono::milliseconds elapsed);
     void SetAttachedViewForSwapTest(TabId tab);
+    void SetAttachedViewsForSwapTest(std::vector<TabId> tabs);
     void BrowserCreatedForViewSwapTest(TabId tab);
     [[nodiscard]] std::uint64_t AttachedViewGenerationForTest() const noexcept {
         return attached_view_generation_;
@@ -376,6 +377,7 @@ class BrowserWindow : public CefClient,
         provider_statuses_.reset();
     }
     void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) override;
+    void OnLocalPageBrowserCreated(LocalPageKind kind) override;
 
     // Built-in pages shown in the content area (Settings, the all-tabs
     // overview). Toggling the shown page hides it; selecting any tab hides it
@@ -739,18 +741,26 @@ class BrowserWindow : public CefClient,
     // The model and address projection still follow every selection immediately.
     struct AttachedView {
         CefRefPtr<CefBrowserView> view;
-        TabId tab;
+        std::optional<TabId> tab;
+        LocalPage* local_page = nullptr;
     };
     using ViewSwapClock = std::chrono::steady_clock;
     static constexpr std::chrono::milliseconds kMinimumAttachedViewAge{100};
     static constexpr std::chrono::milliseconds kUncreatedViewFallbackDelay{2000};
     [[nodiscard]] ViewSwapClock::time_point ViewSwapNow() const;
     [[nodiscard]] Tab* TabForAttachedView(const AttachedView& attached) noexcept;
+    [[nodiscard]] bool AttachedViewWillRemain(const AttachedView& attached) const;
+    [[nodiscard]] bool AttachedViewIsLive(const AttachedView& attached);
+    [[nodiscard]] bool AttachedViewBrowserWasCreated(const AttachedView& attached);
+    [[nodiscard]] std::optional<ViewSwapClock::duration> AttachedViewAgeAt(
+        const AttachedView& attached, ViewSwapClock::time_point now);
     [[nodiscard]] bool AttachedBrowserStillCreating();
     void SetAttachedViews(std::vector<AttachedView> attached);
     void SchedulePendingViewSwap();
     void RunUncreatedViewFallback(std::uint64_t generation);
     void RunPendingViewSwap(std::uint64_t generation);
+    void RequestViewSwap();
+    void FocusAttachedContent();
     // Selects `tab` of `space` by changing the model first and attaching its view once, so a
     // cross-space activation never creates a view that the next swap removes within the task.
     void SelectTabWithOneAttach(std::size_t space, std::size_t tab);
@@ -1095,6 +1105,7 @@ class BrowserWindow : public CefClient,
     // Set while an overview action mutates tabs, so the re-attach that
     // follows keeps the overview on screen instead of the active tab.
     bool keep_internal_page_ = false;
+    bool show_internal_page_ = false;
     // A one-shot notice for the Settings page (import results, errors).
     std::string settings_message_;
     // A recorded chord that is already taken, waiting for Replace or Cancel

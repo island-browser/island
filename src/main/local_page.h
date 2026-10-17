@@ -8,6 +8,7 @@
 // carrying a fixed prefix, which only these pages' client listens to. The
 // pages never navigate away; links are handed to the delegate as "open_url".
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -42,6 +43,7 @@ class LocalPageDelegate {
     virtual ~LocalPageDelegate() = default;
     // One decoded {"type": ...} message from a page (UI thread).
     virtual void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) = 0;
+    virtual void OnLocalPageBrowserCreated(LocalPageKind kind) {}
 };
 
 class LocalPage final {
@@ -59,6 +61,9 @@ class LocalPage final {
     void Render(const std::string& state_json);
     // True once the page has loaded; state rendered before that is only queued.
     [[nodiscard]] bool loaded() const;
+    [[nodiscard]] bool browser_was_created() const;
+    [[nodiscard]] std::optional<std::chrono::steady_clock::duration> BrowserViewAgeAt(
+        std::chrono::steady_clock::time_point now) const;
     // Focuses the page and asks it to focus its primary input.
     void Focus();
     // Stops delivering messages and closes the page's browser.

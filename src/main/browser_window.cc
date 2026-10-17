@@ -1073,6 +1073,13 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
     }
 }
 
+void BrowserWindow::OnLocalPageBrowserCreated(LocalPageKind) {
+    CEF_REQUIRE_UI_THREAD();
+    if (view_swap_pending_) {
+        SchedulePendingViewSwap();
+    }
+}
+
 json::Value BrowserWindow::ThemeJson() const {
     const ChromeTokens tokens = ResolvedTokens(chrome_snapshot_.theme);
     json::Value branch = json::Value::MakeArray();
@@ -1147,10 +1154,9 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     // Settings and All tabs replace the page the find bar was searching.
     CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
-    chrome_->AttachBrowserView(page->view());
-    SetAttachedViews({});
+    show_internal_page_ = true;
+    RequestViewSwap();
     FlushLocalPagesRender();
-    page->Focus();
 }
 
 void BrowserWindow::HideInternalPage() {
@@ -1158,8 +1164,8 @@ void BrowserWindow::HideInternalPage() {
         return;
     }
     internal_page_.reset();
-    AttachActiveTabBrowserView();
-    FocusBrowserView();
+    show_internal_page_ = false;
+    RequestViewSwap();
 }
 
 std::string BrowserWindow::SettingsStateJson() const {
@@ -3713,6 +3719,11 @@ void BrowserWindow::AttachActiveTabObservers() {
     tab->navigation_state().SetObserver(this);
     UpdateChromeCollections();
     UpdateWindowTitle();
+    show_internal_page_ = keep_internal_page_ && internal_page_.has_value();
+    RequestViewSwap();
+}
+
+void BrowserWindow::RequestViewSwap() {
     if (AttachedBrowserStillCreating()) {
         if (!view_swap_pending_ || view_swap_pending_generation_ != attached_view_generation_) {
             view_swap_pending_ = true;
@@ -3729,6 +3740,16 @@ void BrowserWindow::AttachActiveTabObservers() {
     uncreated_fallback_generation_.reset();
     ++view_swap_count_;
     AttachActiveTabBrowserView();
+    FocusAttachedContent();
+}
+
+void BrowserWindow::FocusAttachedContent() {
+    if (show_internal_page_ && internal_page_.has_value()) {
+        if (LocalPage* page = InternalPageFor(*internal_page_)) {
+            page->Focus();
+            return;
+        }
+    }
     FocusBrowserView();
 }
 
@@ -3737,7 +3758,10 @@ BrowserWindow::ViewSwapClock::time_point BrowserWindow::ViewSwapNow() const {
 }
 
 Tab* BrowserWindow::TabForAttachedView(const AttachedView& attached) noexcept {
-    Tab* tab = FindTabById(attached.tab);
+    if (!attached.tab.has_value()) {
+        return nullptr;
+    }
+    Tab* tab = FindTabById(*attached.tab);
     if (tab == nullptr) {
         return nullptr;
     }
@@ -3750,33 +3774,68 @@ Tab* BrowserWindow::TabForAttachedView(const AttachedView& attached) noexcept {
     return tab;
 }
 
-bool BrowserWindow::AttachedBrowserStillCreating() {
-    if ((chrome_ == nullptr && !attached_view_for_test_) || internal_page_.has_value()) {
+bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
+    if (show_internal_page_ && internal_page_.has_value()) {
+        return attached.local_page != nullptr &&
+               attached.local_page == InternalPageFor(*internal_page_);
+    }
+    if (!attached.tab.has_value()) {
         return false;
     }
-    const Tab* target = active_tab();
-    for (const AttachedView& attached : attached_views_) {
-        if (target != nullptr && attached.tab == target->id() &&
-            TabForAttachedView(attached) != nullptr) {
-            return false;  // nothing is removed
-        }
+    const Space& space = active_space();
+    if (space.split().has_value()) {
+        return *attached.tab == space.split()->first || *attached.tab == space.split()->second;
+    }
+    return *attached.tab == space.active_tab_id();
+}
+
+bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
+    if (attached.local_page != nullptr) {
+        return attached.local_page == settings_page_.get() ||
+               attached.local_page == overview_page_.get();
+    }
+    // A closed tab or a tab whose view was replaced no longer owns this attachment.
+    return TabForAttachedView(attached) != nullptr;
+}
+
+bool BrowserWindow::AttachedViewBrowserWasCreated(const AttachedView& attached) {
+    if (attached.local_page != nullptr) {
+        return attached.local_page->browser_was_created();
+    }
+    Tab* tab = attached.tab.has_value() ? FindTabById(*attached.tab) : nullptr;
+    return tab != nullptr && tab->browser_was_created();
+}
+
+std::optional<BrowserWindow::ViewSwapClock::duration> BrowserWindow::AttachedViewAgeAt(
+    const AttachedView& attached, ViewSwapClock::time_point now) {
+    if (attached.local_page != nullptr) {
+        return attached.local_page->BrowserViewAgeAt(now);
+    }
+    Tab* tab = attached.tab.has_value() ? FindTabById(*attached.tab) : nullptr;
+    return tab != nullptr ? tab->BrowserViewAgeAt(now) : std::nullopt;
+}
+
+bool BrowserWindow::AttachedBrowserStillCreating() {
+    if (chrome_ == nullptr && !attached_view_for_test_) {
+        return false;
     }
     const bool allow_uncreated = uncreated_fallback_generation_.has_value() &&
                                  *uncreated_fallback_generation_ == attached_view_generation_;
     const ViewSwapClock::time_point now = ViewSwapNow();
     for (const AttachedView& attached : attached_views_) {
-        // A closed tab or a tab whose view was replaced no longer owns this attachment.
-        const Tab* tab = TabForAttachedView(attached);
-        if (tab == nullptr) {
+        // Only a view that leaves the hierarchy needs a settled browser (a remaining one is not
+        // removed, so a split that drops one pane waits for that pane alone).
+        if (!AttachedViewIsLive(attached) || AttachedViewWillRemain(attached)) {
             continue;
         }
-        if (!tab->browser_was_created()) {
+        if (!AttachedViewBrowserWasCreated(attached)) {
             if (!allow_uncreated) {
                 return true;
             }
             continue;
         }
-        if (!tab->BrowserViewIsOldEnough(now, kMinimumAttachedViewAge)) {
+        const std::optional<ViewSwapClock::duration> age = AttachedViewAgeAt(attached, now);
+        if (!age.has_value() || *age < kMinimumAttachedViewAge) {
             return true;
         }
     }
@@ -3812,11 +3871,10 @@ void BrowserWindow::SchedulePendingViewSwap() {
     ViewSwapClock::duration longest_age_wait = ViewSwapClock::duration::zero();
     bool has_uncreated_browser = false;
     for (const AttachedView& attached : attached_views_) {
-        const Tab* tab = TabForAttachedView(attached);
-        if (tab == nullptr) {
+        if (!AttachedViewIsLive(attached) || AttachedViewWillRemain(attached)) {
             continue;
         }
-        const std::optional<ViewSwapClock::duration> age = tab->BrowserViewAgeAt(now);
+        const std::optional<ViewSwapClock::duration> age = AttachedViewAgeAt(attached, now);
         if (!age.has_value()) {
             has_uncreated_browser = true;
             continue;
@@ -3872,7 +3930,7 @@ void BrowserWindow::RunPendingViewSwap(std::uint64_t generation) {
     uncreated_fallback_generation_.reset();
     ++view_swap_count_;
     AttachActiveTabBrowserView();
-    FocusBrowserView();
+    FocusAttachedContent();
 }
 
 void BrowserWindow::SetViewSwapTimeForTest(std::chrono::milliseconds since_epoch) {
@@ -3894,6 +3952,20 @@ void BrowserWindow::SetAttachedViewForSwapTest(TabId tab_id) {
     tab->SetBrowserView(nullptr);
     attached_view_for_test_ = true;
     SetAttachedViews({AttachedView{.view = nullptr, .tab = tab_id}});
+}
+
+void BrowserWindow::SetAttachedViewsForSwapTest(std::vector<TabId> tabs) {
+    std::vector<AttachedView> attached;
+    for (const TabId tab_id : tabs) {
+        Tab* tab = FindTabById(tab_id);
+        if (tab == nullptr) {
+            continue;
+        }
+        tab->SetBrowserView(nullptr);
+        attached.push_back(AttachedView{.view = nullptr, .tab = tab_id});
+    }
+    attached_view_for_test_ = true;
+    SetAttachedViews(std::move(attached));
 }
 
 void BrowserWindow::BrowserCreatedForViewSwapTest(TabId tab_id) {
@@ -3930,12 +4002,13 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         // An overview action mutating tabs keeps the overview on screen; any
         // other selection change returns to the page content.
         LocalPage* page = InternalPageFor(*internal_page_);
-        if (keep_internal_page_ && page != nullptr) {
+        if (show_internal_page_ && page != nullptr) {
             chrome_->AttachBrowserView(page->view());
-            SetAttachedViews({});
+            SetAttachedViews({AttachedView{.view = page->view(), .local_page = page}});
             return;
         }
         internal_page_.reset();
+        show_internal_page_ = false;
     }
     Space& space = active_space();
     if (space.split().has_value()) {

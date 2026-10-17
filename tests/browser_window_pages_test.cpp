@@ -1436,6 +1436,31 @@ TEST(BrowserWindowPagesTest, AViewYoungerThanOneHundredMillisecondsHoldsTheSwap)
     EXPECT_FALSE(window->ViewSwapPendingForTest());
 }
 
+TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(2));
+    const TabId staying = SpaceAt(*window, 0).tabs()[0].id();
+    const TabId leaving = SpaceAt(*window, 0).tabs()[1].id();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewsForSwapTest({staying, leaving});
+    window->BrowserCreatedForViewSwapTest(staying);
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->BrowserCreatedForViewSwapTest(leaving);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+
+    // The target is still attached, but the young second pane is removed with the divider.
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+}
+
 TEST(BrowserWindowPagesTest, AnAlreadyOldViewSwapsAtOnce) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->ExecuteCommand(BrowserCommand::kNewTab);

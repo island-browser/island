@@ -1810,16 +1810,15 @@ std::string BrowserChrome::ActiveSpaceSectionTitle() const {
 
 void BrowserChrome::UpdateTabStripPreferredSize() {
     // Native's New Tab row is a row of the list too.
-    const int count = static_cast<int>(tab_entries_.size()) +
-                      (tokens_.look == LookPreset::kNative ? 1 : 0);
+    const int count =
+        static_cast<int>(tab_entries_.size()) + (tokens_.look == LookPreset::kNative ? 1 : 0);
     const int headers =
         (favorites_section_header_ != nullptr ? 1 : 0) + (tabs_section_header_ != nullptr ? 1 : 0);
     const int kickers = static_cast<int>(group_kickers_.size());
     const int spacing = TabListLayout(tokens_).between_child_spacing;
     const int children = count + headers + kickers;
     const int height = count * RowHeight() + headers * NativeSectionHeaderHeightDip() +
-                       kickers * GroupedTabKickerHeightDip() +
-                       std::max(0, children - 1) * spacing;
+                       kickers * GroupedTabKickerHeightDip() + std::max(0, children - 1) * spacing;
     const int width =
         std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
     if (tab_strip_delegate_ != nullptr) {
@@ -2166,8 +2165,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         // shrink to their initial so the track still fits the sidebar.
         const bool shrink = native && entries.size() > 4;
         views.name = CefLabelButton::CreateLabelButton(
-            name_delegate, native && !shrink ? TruncateCollectionTitle(entry.name)
-                                             : SpacePillLabel(entry));
+            name_delegate,
+            native && !shrink ? TruncateCollectionTitle(entry.name) : SpacePillLabel(entry));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);
@@ -2239,9 +2238,10 @@ void BrowserChrome::AttachSplitBrowserViews(CefRefPtr<CefBrowserView> first,
     if (detached_ || first == nullptr || second == nullptr || first->IsSame(second)) {
         return;
     }
-    // Detach whatever single view is attached; a same-view single attach is the
-    // common toggle path, so no same-view short-circuit here. The divider panel
-    // is reused across splits, only moved in and out of the view tree.
+    // Keep the first pane in place when it is already the attached single view. Removing and
+    // immediately re-adding a newly created CefBrowserView can crash CEF while OnAfterCreated is
+    // still settling it. The divider panel is reused across splits.
+    const bool first_already_attached = browser_view_ != nullptr && browser_view_->IsSame(first);
     if (split_view_ != nullptr) {
         browser_content_->RemoveChildView(split_view_);
         split_view_ = nullptr;
@@ -2249,7 +2249,7 @@ void BrowserChrome::AttachSplitBrowserViews(CefRefPtr<CefBrowserView> first,
     if (split_divider_ != nullptr) {
         browser_content_->RemoveChildView(split_divider_);
     }
-    if (browser_view_ != nullptr) {
+    if (browser_view_ != nullptr && !first_already_attached) {
         browser_content_->RemoveChildView(browser_view_);
     }
     if (split_divider_ == nullptr) {
@@ -2267,7 +2267,9 @@ void BrowserChrome::AttachSplitBrowserViews(CefRefPtr<CefBrowserView> first,
     browser_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
     split_view_->SetID(static_cast<int>(ChromeViewId::kBrowserView));
     const int first_flex = SplitFlexForRatio(split_ratio_);
-    browser_content_->AddChildView(browser_view_);
+    if (!first_already_attached) {
+        browser_content_->AddChildView(browser_view_);
+    }
     browser_content_->AddChildView(split_divider_);
     browser_content_->AddChildView(split_view_);
     if (browser_content_layout_ != nullptr) {
@@ -3018,11 +3020,10 @@ void BrowserChrome::ApplyRailButtonTheme() {
         icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
     const bool native = tokens_.look == LookPreset::kNative;
     // Native's sparkle is always the accent; the other looks take it only while the panel is open.
-    const std::optional<CefRefPtr<CefImage>> sparkles =
-        icon_catalog_.Load(ChromeIcon::kSparkles,
-                           agent_panel_open_ || native ? ChromeIconTone::kAccent
-                                                       : ChromeIconTone::kSecondary,
-                           ChromeIconSize::k16);
+    const std::optional<CefRefPtr<CefImage>> sparkles = icon_catalog_.Load(
+        ChromeIcon::kSparkles,
+        agent_panel_open_ || native ? ChromeIconTone::kAccent : ChromeIconTone::kSecondary,
+        ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> grid =
         icon_catalog_.Load(ChromeIcon::kGrid, ChromeIconTone::kSecondary, ChromeIconSize::k16);
     const std::optional<CefRefPtr<CefImage>> gear = icon_catalog_.Load(
@@ -3348,8 +3349,8 @@ void BrowserChrome::RefreshRowHover() {
     }
     // Button state callbacks can arrive while the sidebar is still being built, before the
     // Agent entry exists; it has no hover to track until then.
-    const bool agent_hovered = tokens_.look == LookPreset::kNative && agent_button_ != nullptr &&
-                               over(agent_button_);
+    const bool agent_hovered =
+        tokens_.look == LookPreset::kNative && agent_button_ != nullptr && over(agent_button_);
     if (agent_hovered != native_agent_hovered_) {
         native_agent_hovered_ = agent_hovered;
         ApplyRailButtonTheme();
