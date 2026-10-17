@@ -113,13 +113,13 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
         state.reader_size =
             static_cast<int>(std::clamp<std::int64_t>(reader_size->int_val, 1, 1000));
     }
-    // Every valid prefs file predating look presets is an existing Arc profile. New profiles use
-    // the native in-memory default and new saves write appearance.look explicitly.
-    state.appearance = ApplyLookPreset(LookPreset::kArc);
     if (const json::Value* appearance = root.FindMember("appearance")) {
         if (!appearance->IsObject()) {
             return Fail(PrefsError::kSchemaError);
         }
+        // Arc-era development profiles wrote appearance knobs before the Look key existed.
+        // Released 0.6.x profiles have no appearance object and keep the Native default.
+        state.appearance = ApplyLookPreset(LookPreset::kArc);
         AppearanceSettings& a = state.appearance;
         if (const json::Value* look = appearance->FindMember("look")) {
             if (!look->IsString()) {

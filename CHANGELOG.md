@@ -32,9 +32,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 ### Added
 
 - Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
-  system-blue accent for selection and focus, a source-list sidebar and no space color. Existing
-  profiles without a saved look keep Arc. Appearance > Look switches between Native, Arc and
-  Graphite, and changing any other control there shows "Custom".
+  system-blue accent for selection and focus, a source-list sidebar and no space color. Released
+  profiles without Appearance settings use Native; Arc-era profiles with Appearance settings but
+  no saved look keep Arc. Appearance > Look switches between Native, Arc and Graphite, and changing
+  any other control there shows "Custom".
 - The Native sidebar bottom is redesigned: one full-width Agent button (sparkle, 32 DIP)
   sits at the very bottom of the sidebar and is tinted while the agent panel is open; the toolbar
   Agent button is gone under Native (the address-field agent dot shows agent state).
@@ -93,7 +94,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   and plan-branch colors, as live CSS variables in light and dark themes.
 - Settings > Appearance now starts with a Look preset menu for Native, Arc, and Graphite. Native
   is the default for new profiles; changing any individual appearance control labels the result
-  Custom, and existing profiles without a saved look keep their Arc appearance.
+  Custom. Profiles with an Appearance object but no saved look keep their Arc appearance.
 - Native look color tokens: neutral source-list surfaces, system blue selection, accessible
   secondary/warning text pairs, and four plan-branch colors in light and dark themes. Native
   customization ignores space color so its canvas and accent stay fixed.

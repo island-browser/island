@@ -53,7 +53,7 @@ TEST(PrefsStoreTest, GivenACustomizedNativeLookWhenSavedThenEveryKnobRoundTrips)
     EXPECT_EQ(loaded.state.appearance, state.appearance);
 }
 
-TEST(PrefsStoreTest, GivenLegacyAppearanceWithoutLookWhenLoadedThenItStaysArc) {
+TEST(PrefsStoreTest, GivenAppearanceObjectWithoutLookWhenLoadedThenItStaysArc) {
     const std::filesystem::path path = TempPath("legacy_appearance.json");
     WriteFile(
         path,
@@ -65,9 +65,15 @@ TEST(PrefsStoreTest, GivenLegacyAppearanceWithoutLookWhenLoadedThenItStaysArc) {
     EXPECT_EQ(loaded.state.appearance.card_radius_dip, 14);
     EXPECT_EQ(loaded.state.appearance.font_family, "Avenir Next");
     EXPECT_EQ(AppearanceSettings{}, ApplyLookPreset(LookPreset::kNative));
+}
 
+TEST(PrefsStoreTest, GivenReleasedPrefsWithoutAppearanceWhenLoadedThenTheyUseNative) {
+    const std::filesystem::path path = TempPath("released_without_appearance.json");
     WriteFile(path, R"({"version":1,"onboarding_completed":true,"theme":"dark"})");
-    EXPECT_EQ(PrefsStore::Load(path).state.appearance, ApplyLookPreset(LookPreset::kArc));
+    const PrefsLoadResult loaded = PrefsStore::Load(path);
+    ASSERT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.appearance, AppearanceSettings{});
+    EXPECT_EQ(loaded.state.appearance, ApplyLookPreset(LookPreset::kNative));
 }
 
 TEST(PrefsStoreTest, GivenAnUnknownLookWhenLoadedThenStoredKnobsStayCustom) {
