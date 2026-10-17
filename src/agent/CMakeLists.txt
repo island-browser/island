@@ -63,6 +63,7 @@ add_library(island_agent STATIC
     agent_process.cc
     agent_providers.cc
     agent_session.cc
+    agent_task_queue.cc
     agent_transcript.cc
     browser_tools.cc
     http_client.cc
@@ -101,6 +102,7 @@ if(TARGET GTest::gtest_main)
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_process_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_providers_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_session_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_task_queue_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_transcript_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/browser_tools_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/json_util_test.cpp"
