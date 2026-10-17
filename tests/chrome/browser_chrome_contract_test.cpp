@@ -217,6 +217,43 @@ TEST(BrowserChromeContractTest, GivenZeroBoundsWhenLaidOutThenEveryChildIsZeroSi
     EXPECT_EQ(geometry.browser_view_bounds, DipRect{});
 }
 
+TEST(BrowserChromeContractTest, GivenAnAlreadyAppliedGeometryWhenLayoutRepeatsThenItIsANoOp) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const ChromeGeometrySnapshot geometry =
+        BrowserChrome::LayoutForBounds({.width = 1440, .height = 900}, tokens);
+
+    const ManagedChromeBounds actual = {
+        .rail = geometry.rail_bounds,
+        .toolbar = geometry.toolbar_bounds,
+        .browser_content = geometry.browser_content_bounds,
+        .agent_panel = geometry.agent_panel_bounds,
+    };
+
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(std::nullopt, geometry, actual));
+    EXPECT_FALSE(BrowserChrome::NeedsRelayout(geometry, geometry, actual));
+
+    ChromeGeometrySnapshot resized = geometry;
+    ++resized.root_bounds.width;
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(geometry, resized, actual));
+}
+
+TEST(BrowserChromeContractTest, GivenClobberedChildBoundsWhenGeometryRepeatsThenItIsReapplied) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const ChromeGeometrySnapshot geometry =
+        BrowserChrome::LayoutForBounds({.width = 1440, .height = 900}, tokens);
+    ManagedChromeBounds actual = {
+        .rail = geometry.rail_bounds,
+        .toolbar = geometry.toolbar_bounds,
+        .browser_content = geometry.browser_content_bounds,
+        .agent_panel = geometry.agent_panel_bounds,
+    };
+
+    EXPECT_FALSE(BrowserChrome::NeedsRelayout(geometry, geometry, actual));
+
+    actual.browser_content = geometry.root_bounds;
+    EXPECT_TRUE(BrowserChrome::NeedsRelayout(geometry, geometry, actual));
+}
+
 TEST(BrowserChromeContractTest, GivenTheChromeIdsWhenComparedThenTheyRemainStable) {
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRoot), 1001);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kBack), 1004);
@@ -487,6 +524,11 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelec
     EXPECT_EQ(idle.fill, light.fill);
     EXPECT_EQ(idle.title, light.text_secondary);
     EXPECT_EQ(idle.track, light.fill);
+
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const auto dark_active = BrowserChrome::NativeSegmentColors(dark, /*active=*/true);
+    EXPECT_EQ(dark_active.fill.argb, 0xFF636366U);
+    EXPECT_NE(dark_active.fill, dark.fill);
 }
 
 }  // namespace

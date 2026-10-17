@@ -8,10 +8,9 @@
 #include <vector>
 
 #include "design_tokens.h"
+#include "include/cef_request_context.h"
 #include "tab.h"
 #include "tab_id.h"
-
-#include "include/cef_request_context.h"
 
 namespace island {
 
@@ -54,6 +53,17 @@ class Space {
 
     // The appended tab becomes the active tab.
     void AppendTab(Tab tab);
+    // Inserts a one-level grouped tab immediately after the parent's existing children. The tab
+    // becomes active only when `activate` is true; otherwise the active tab stays selected. A
+    // pinned parent's children never split the pinned group: they start the unpinned tabs, right
+    // after the pinned group. An unknown parent falls back to a regular append.
+    [[nodiscard]] TabId AppendChildTab(TabId parent, Tab tab, bool activate = true);
+    // Keeps the groups well formed. A tab whose parent is missing (or is itself a child) or that
+    // is pinned is ungrouped, and so is the `moved` tab (the one the person just dragged) when it
+    // no longer follows its parent or a sibling. The other children are re-placed right after
+    // their parent, or after the pinned group when the parent is pinned. Moves, pinning and
+    // session restore run it so an indent cannot drift away.
+    void NormalizeGroups(std::optional<TabId> moved = std::nullopt);
     [[nodiscard]] Tab* FindTab(TabId id);
     [[nodiscard]] const Tab* FindTab(TabId id) const;
     [[nodiscard]] std::optional<std::size_t> IndexOfTab(TabId id) const;
@@ -71,7 +81,8 @@ class Space {
     // Returns the removed tab and keeps the active-tab invariant: removing a tab
     // before the active one keeps the same active tab; removing the active tab
     // selects its right neighbor, or the left neighbor at the end; removing the
-    // only tab leaves no active tab. Unknown ids remove nothing.
+    // only tab leaves no active tab. Removing a group parent ungroups its children; closing one
+    // child leaves the rest of the group intact. Unknown ids remove nothing.
     std::optional<Tab> RemoveTab(TabId id);
 
     // Reorders; the active tab keeps its identity. Rejects out-of-range positions.

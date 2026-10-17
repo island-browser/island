@@ -55,6 +55,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenNewestReport();
     // Developer capture only: a Plan tab showing the sample plan waiting for approval.
     void OpenPlanFixture();
+    // Developer capture only: `count` agent pages opened back to back during the plan fixture.
+    void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
     void ToggleSettings();

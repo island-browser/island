@@ -31,6 +31,7 @@
 #include "page_card.h"
 #include "row_raster.h"
 #include "sidebar_state.h"
+#include "tab_id.h"
 
 class CefBoxLayout;
 class CefView;
@@ -149,6 +150,8 @@ enum class ChromeViewId : int {
     // Native's bottom switcher row (the segment track plus the 24 DIP buttons). Added with the
     // 2026-10-16 Native sidebar; it sits inside kRailFooter in Native only.
     kRailSwitcherRow = 1076,
+    // The branch label above the first grouped (research) tab row of a run; Native only.
+    kTabGroupKicker = 1077,
 };
 
 struct ChromeViewTreeNode {
@@ -173,6 +176,10 @@ struct TabStripEntrySnapshot {
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;
+    // A tab opened by research sits under its parent (the Plan tab) one level deep; the label
+    // names the plan branch and is drawn as a kicker line above the first row of a run.
+    std::optional<TabId> group_parent;
+    std::string group_label;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -200,6 +207,17 @@ struct ChromeGeometrySnapshot {
     DipRect agent_panel_bounds;
 
     bool operator==(const ChromeGeometrySnapshot&) const = default;
+};
+
+// Bounds of the four chrome regions managed by RootPanelDelegate. A layout pass may overwrite
+// these without changing the requested ChromeGeometrySnapshot.
+struct ManagedChromeBounds {
+    DipRect rail;
+    DipRect toolbar;
+    DipRect browser_content;
+    DipRect agent_panel;
+
+    bool operator==(const ManagedChromeBounds&) const = default;
 };
 
 struct AddressSelectionSnapshot {
@@ -329,6 +347,24 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr int NativeAddressHeightDip() { return 30; }
     [[nodiscard]] static constexpr int NativeAddressRadiusDip() { return 8; }
     [[nodiscard]] static constexpr int NativeSectionHeaderHeightDip() { return 20; }
+    [[nodiscard]] static constexpr int GroupedTabIndentDip() { return 16; }
+    [[nodiscard]] static constexpr int GroupedTabKickerFontPx() { return 10; }
+    [[nodiscard]] static constexpr int GroupedTabKickerHeightDip() { return 16; }
+    // True when entry `index` is the first row of a run of grouped tabs with one label, which
+    // gets a kicker line above it.
+    [[nodiscard]] static bool NeedsGroupKicker(const std::vector<TabStripEntrySnapshot>& entries,
+                                               std::size_t index) {
+        const TabStripEntrySnapshot& entry = entries[index];
+        if (!entry.group_parent.has_value() || entry.group_label.empty()) {
+            return false;
+        }
+        if (index == 0) {
+            return true;
+        }
+        const TabStripEntrySnapshot& previous = entries[index - 1];
+        return previous.group_parent != entry.group_parent ||
+               previous.group_label != entry.group_label;
+    }
     // The address field's plate: Native draws a `fill` plate with radius 8 and no hairline on the
     // toolbar; the other looks keep the hairline-outlined well on the canvas.
     [[nodiscard]] static AddressPlateStyle AddressPlateStyleFor(const ChromeTokens& tokens);
@@ -481,7 +517,7 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
                                                             bool active) {
         return {.track = tokens.fill,
-                .fill = active ? tokens.surface : tokens.fill,
+                .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
     // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP
@@ -549,6 +585,16 @@ class BrowserChrome final : public NavigationObserver {
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
                                                                 bool agent_panel_open);
+    // A repeated root snapshot is a no-op only while every managed region remains at its target.
+    // The live-bounds input keeps this decision CEF-free and testable.
+    [[nodiscard]] static bool NeedsRelayout(const std::optional<ChromeGeometrySnapshot>& applied,
+                                            const ChromeGeometrySnapshot& requested,
+                                            const ManagedChromeBounds& actual) {
+        return !applied.has_value() || *applied != requested ||
+               actual.rail != requested.rail_bounds || actual.toolbar != requested.toolbar_bounds ||
+               actual.browser_content != requested.browser_content_bounds ||
+               actual.agent_panel != requested.agent_panel_bounds;
+    }
 
     // Insets of the page card (browser_view_bounds inside browser_content_bounds) and of the
     // agent panel's own card, resolved for the same inputs as LayoutForBounds.
@@ -681,6 +727,9 @@ class BrowserChrome final : public NavigationObserver {
                     tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
                     tabs_header_added = true;
                 }
+                if (native && NeedsGroupKicker(tabs, i)) {
+                    tab_strip->children.push_back({ChromeViewId::kTabGroupKicker, {}});
+                }
                 tab_strip->children.push_back({ChromeViewId::kTabStripEntry,
                                                {{ChromeViewId::kTabStripEntryFavicon, {}},
                                                 {ChromeViewId::kTabStripEntryTitle, {}},
@@ -744,6 +793,10 @@ class BrowserChrome final : public NavigationObserver {
     void SetSplitRatio(double ratio);
     [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
     [[nodiscard]] bool split_active() const noexcept { return split_view_ != nullptr; }
+    [[nodiscard]] std::size_t browser_view_size_change_count() const noexcept {
+        return browser_view_size_change_count_;
+    }
+    [[nodiscard]] std::size_t relayout_count() const noexcept { return relayout_count_; }
 
     // Split divider geometry. The divider is keyboard-adjustable through the
     // kMoveDividerLeft/Right commands (drag is a documented deviation: the
@@ -844,6 +897,9 @@ class BrowserChrome final : public NavigationObserver {
     // Re-creates the box layouts whose insets depend on the tokens (sidebar side, titlebar band,
     // card inset, density) and the expand/agent state; a no-op while nothing relevant changed.
     void ApplyLayoutTokens();
+    // Developer diagnostics: record root relayouts and changes to the attached page bounds.
+    // The counters are read only by the existing --island-dev-keep-open SIGUSR2 report.
+    void RecordRelayout();
     // The row/control heights follow the density token; rebuilds the rows when it changes.
     void ApplyDensity();
     void ApplyLookStructure();
@@ -879,8 +935,14 @@ class BrowserChrome final : public NavigationObserver {
     std::shared_ptr<BrowserChrome*> alive_;
     bool theme_reapply_pending_ = false;
     CefRefPtr<CefPanel> root_;
+    CefRefPtr<CefBoxLayout> root_layout_;
+    CefRefPtr<CefPanel> rail_host_;
+    CefRefPtr<PanelDelegate> rail_host_delegate_;
+    CefRefPtr<CefPanel> content_column_;
+    CefRefPtr<CefBoxLayout> content_column_layout_;
     CefRefPtr<CefPanel> sidebar_;
     CefRefPtr<CefPanel> browser_content_;
+    CefRefPtr<PanelDelegate> browser_content_delegate_;
     CefRefPtr<CefPanel> toolbar_;
     CefRefPtr<CefPanel> toolbar_content_;
     CefRefPtr<CefPanel> toolbar_hairline_;
@@ -890,6 +952,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefBoxLayout> rail_layout_;
     CefRefPtr<CefBoxLayout> collapsed_layout_;
     CefRefPtr<CefPanel> agent_panel_;
+    CefRefPtr<PanelDelegate> agent_panel_delegate_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
     std::string update_notice_;
@@ -925,6 +988,9 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> tab_strip_;
     CefRefPtr<CefLabelButton> favorites_section_header_;
     CefRefPtr<CefLabelButton> tabs_section_header_;
+    // Branch labels of grouped tab runs and their indent panels (rebuilt with the tab strip).
+    std::vector<CefRefPtr<CefPanel>> group_kicker_panels_;
+    std::vector<CefRefPtr<CefLabelButton>> group_kickers_;
     // The collapsed icon rail. `collapsed_rail_` is the panel shown instead of `sidebar_`;
     // the tab list scrolls inside `collapsed_tab_scroll_`, the "+" button and the space
     // dots sit in the bottom group.
@@ -1019,6 +1085,9 @@ class BrowserChrome final : public NavigationObserver {
     std::function<void(const std::vector<CornerPatch>&)> corner_sink_;
     std::vector<CornerPatch> last_patches_;
     bool patch_poll_pending_ = false;
+    std::size_t browser_view_size_change_count_ = 0;
+    std::size_t relayout_count_ = 0;
+    std::vector<CefRect> last_browser_view_bounds_;
 };
 
 }  // namespace island

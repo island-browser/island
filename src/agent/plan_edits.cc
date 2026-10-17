@@ -94,6 +94,10 @@ std::string BuildBranchFromMessage(std::string_view node_id) {
     return "Add a branch after step " + std::string(node_id);
 }
 
+std::string BuildRetryMessage(std::string_view node_id) {
+    return "Retry step " + std::string(node_id) + ".";
+}
+
 PlanEdits CarryEditsOver(const PlanEdits& edits, const std::vector<AcpPlanEntry>& next_plan) {
     const std::vector<std::string> ids = PlanEntryIds(next_plan);
     const std::set<std::string> present(ids.begin(), ids.end());

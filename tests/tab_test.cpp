@@ -61,5 +61,36 @@ TEST(Tab, KeepsItsIdAcrossMovesIndependentOfAnyCollectionPosition) {
     EXPECT_EQ(moved.navigation_state().snapshot().url, "https://example.test/");
 }
 
+TEST(Tab, StoresItsOptionalGroupParentAndBranchLabel) {
+    Tab tab(NextTabId());
+    const TabId parent = NextTabId();
+
+    EXPECT_FALSE(tab.group_parent().has_value());
+    EXPECT_TRUE(tab.group_label().empty());
+
+    tab.SetGroupParent(parent);
+    tab.SetGroupLabel("Branch A");
+
+    EXPECT_EQ(tab.group_parent(), parent);
+    EXPECT_EQ(tab.group_label(), "Branch A");
+
+    tab.SetGroupParent(std::nullopt);
+    EXPECT_FALSE(tab.group_parent().has_value());
+}
+
+TEST(Tab, DisplayTitleNamesTheAddressOfAnUnshownWebPage) {
+    Tab tab(NextTabId());
+    EXPECT_EQ(tab.DisplayTitle(), "Island");
+
+    tab.SetStartupUrl("data:text/html,x");
+    EXPECT_EQ(tab.DisplayTitle(), "Island");
+
+    tab.SetStartupUrl("https://docs.test/a");
+    EXPECT_EQ(tab.DisplayTitle(), "https://docs.test/a");
+
+    tab.navigation_state().OnTitleChange("Docs");
+    EXPECT_EQ(tab.DisplayTitle(), "Docs");
+}
+
 }  // namespace
 }  // namespace island

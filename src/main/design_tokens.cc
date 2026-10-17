@@ -70,12 +70,13 @@ bool SameLookKnobs(const AppearanceSettings& a, const AppearanceSettings& b) {
            a.full_bleed == b.full_bleed;
 }
 
-ChromeTokens CompleteNativeTokens(ChromeTokens tokens) {
+ChromeTokens CompleteNativeTokens(ChromeTokens tokens, ArgbColor segment_selected = {}) {
     tokens.canvas = tokens.background;
     tokens.selected = tokens.selection;
     tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
     tokens.well = tokens.fill;
     tokens.plate = tokens.surface;
+    tokens.segment_selected = segment_selected.argb != 0 ? segment_selected : tokens.surface;
     tokens.ui_font_family = "system";
     tokens.look = LookPreset::kNative;
     return tokens;
@@ -99,30 +100,32 @@ ChromeTokens ChromeTokens::ForTheme(ChromeTheme theme) noexcept {
 ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept {
     if (look == LookPreset::kNative) {
         if (theme == ChromeTheme::kDark) {
-            return CompleteNativeTokens(ChromeTokens{
-                .background = {.argb = 0xFF2A2A2DU},
-                .surface = {.argb = 0xFF1E1E20U},
-                .surface_secondary = {.argb = 0xFF252527U},
-                .fill = {.argb = 0xFF3A3A3DU},
-                .text = {.argb = 0xFFF5F5F7U},
-                .text_secondary = {.argb = 0xFF98989DU},
-                .text_tertiary = {.argb = 0xFF6E6E73U},
-                .border = {.argb = 0xFF38383AU},
-                .border_strong = {.argb = 0xFF48484AU},
-                .accent = {.argb = 0xFF0A84FFU},
-                .selection = {.argb = 0xFF0A6FE0U},
-                .accent_soft = {.argb = 0xFF16324FU},
-                .accent_text = {.argb = 0xFF64B5FFU},
-                .warning_bg = {.argb = 0xFF3A2E12U},
-                .warning_border = {.argb = 0xFF6B5420U},
-                .warning_text = {.argb = 0xFFFFD60AU},
-                .success = {.argb = 0xFF30D158U},
-                .danger = {.argb = 0xFFFF453AU},
-                .branch = {{{.argb = 0xFF0A84FFU},
-                            {.argb = 0xFFBF5AF2U},
-                            {.argb = 0xFFFF9F0AU},
-                            {.argb = 0xFF40C8A0U}}},
-            });
+            return CompleteNativeTokens(
+                ChromeTokens{
+                    .background = {.argb = 0xFF2A2A2DU},
+                    .surface = {.argb = 0xFF1E1E20U},
+                    .surface_secondary = {.argb = 0xFF252527U},
+                    .fill = {.argb = 0xFF3A3A3DU},
+                    .text = {.argb = 0xFFF5F5F7U},
+                    .text_secondary = {.argb = 0xFF98989DU},
+                    .text_tertiary = {.argb = 0xFF6E6E73U},
+                    .border = {.argb = 0xFF38383AU},
+                    .border_strong = {.argb = 0xFF48484AU},
+                    .accent = {.argb = 0xFF0A84FFU},
+                    .selection = {.argb = 0xFF0A6FE0U},
+                    .accent_soft = {.argb = 0xFF16324FU},
+                    .accent_text = {.argb = 0xFF64B5FFU},
+                    .warning_bg = {.argb = 0xFF3A2E12U},
+                    .warning_border = {.argb = 0xFF6B5420U},
+                    .warning_text = {.argb = 0xFFFFD60AU},
+                    .success = {.argb = 0xFF30D158U},
+                    .danger = {.argb = 0xFFFF453AU},
+                    .branch = {{{.argb = 0xFF0A84FFU},
+                                {.argb = 0xFFBF5AF2U},
+                                {.argb = 0xFFFF9F0AU},
+                                {.argb = 0xFF40C8A0U}}},
+                },
+                ArgbColor{.argb = 0xFF636366U});
         }
 
         return CompleteNativeTokens(ChromeTokens{

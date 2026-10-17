@@ -142,6 +142,11 @@ TEST(BrowserWindowTest, GivenNativeRowStatesWhenResolvedThenHoverAndSleepUseThei
     EXPECT_EQ(slept.title, tokens.text_tertiary);
 }
 
+TEST(BrowserWindowTest, GivenAGroupedTabThenItsSidebarMetricsMatchThePlanSpec) {
+    EXPECT_EQ(BrowserChrome::GroupedTabIndentDip(), 16);
+    EXPECT_EQ(BrowserChrome::GroupedTabKickerFontPx(), 10);
+}
+
 TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAndToolbarMetrics) {
     const ChromeTokens tokens =
         ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight)
@@ -162,14 +167,14 @@ TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAn
     EXPECT_EQ(geometry.browser_view_bounds, geometry.browser_content_bounds);
 }
 
-TEST(BrowserWindowTest, GivenNativeAddressWhenStyledThenItIsARoundedFillPlateWithoutAnOutline) {
+TEST(BrowserWindowTest, GivenNativeAddressWhenStyledThenItIsARoundedFillPlateWithATwoDipRingInset) {
     const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
 
     const AddressPlateStyle style = BrowserChrome::AddressPlateStyleFor(tokens);
 
     EXPECT_EQ(style.fill, tokens.fill);
     EXPECT_EQ(style.outside, tokens.surface_secondary);
-    EXPECT_EQ(style.outline_dip, 0);
+    EXPECT_EQ(style.outline_dip, 2);
     EXPECT_EQ(style.radius_dip, 8);
 }
 
@@ -204,12 +209,12 @@ TEST(BrowserWindowTest, GivenArcAddressWhenPatchedThenItKeepsTheRailPillOnlyWhil
         BrowserChrome::AddressCornerPatch(tokens, address, /*sidebar_expanded=*/false).has_value());
 }
 
-TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenNoHairlineOrRingIsPainted) {
+TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPainted) {
     const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
 
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/false), native.fill);
-    EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/true), native.fill);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(native, /*focused=*/true), native.accent);
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/false), arc.border);
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
@@ -287,6 +292,53 @@ TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAre
     EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
     EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
     EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kRailNewTab);
+}
+
+TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsHeader) {
+    const TabId plan{1};
+    const std::vector<TabStripEntrySnapshot> tabs = {
+        {.title = "Plan", .pinned = true},
+        {.title = "Favourite", .pinned = true},
+        {.title = "A1", .group_parent = plan, .group_label = "Branch A"},
+        {.title = "A2", .group_parent = plan, .group_label = "Branch A"},
+        {.title = "B1", .group_parent = plan, .group_label = "Branch B"},
+        {.title = "Regular"},
+    };
+
+    const ChromeViewTreeNode tree =
+        BrowserChrome::CollectionCountContract(tabs, {}, LookPreset::kNative);
+    const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
+
+    ASSERT_NE(tab_strip, nullptr);
+    std::vector<ChromeViewId> ids;
+    for (const ChromeViewTreeNode& child : tab_strip->children) {
+        ids.push_back(child.id);
+    }
+    const ChromeViewId entry = ChromeViewId::kTabStripEntry;
+    const ChromeViewId kicker = ChromeViewId::kTabGroupKicker;
+    // The children stay out of Favorites and the header precedes the first kicker.
+    EXPECT_EQ(ids, (std::vector<ChromeViewId>{
+                       ChromeViewId::kFavoritesSectionHeader, entry, entry,
+                       ChromeViewId::kTabsSectionHeader, kicker, entry, entry, kicker, entry, entry,
+                       ChromeViewId::kRailNewTab}));
+}
+
+TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesFirst) {
+    const TabId plan{1};
+    const std::vector<TabStripEntrySnapshot> tabs = {
+        {.title = "Plan", .pinned = true},
+        {.title = "A1", .group_parent = plan, .group_label = "Branch A"},
+    };
+
+    const ChromeViewTreeNode tree =
+        BrowserChrome::CollectionCountContract(tabs, {}, LookPreset::kNative);
+    const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
+
+    ASSERT_NE(tab_strip, nullptr);
+    ASSERT_EQ(tab_strip->children.size(), 6U);
+    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabGroupKicker);
+    EXPECT_EQ(tab_strip->children[5].id, ChromeViewId::kRailNewTab);
 }
 
 TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThenInsetDoes) {
@@ -419,6 +471,39 @@ TEST(BrowserWindowTest, GivenMultipleTabsWhenCloseTabExecutesThenTheFallbackNeig
     ASSERT_TRUE(window->CloseActiveSpaceTabIndex(0));
     EXPECT_EQ(ActiveSpaceTabIds(*window), (std::vector<TabId>{original[2]}));
     EXPECT_EQ(window->active_tab_id(), original[2]);
+}
+
+TEST(BrowserWindowTest, ClosingThePlanTabConfirmsWhetherResearchStops) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->OpenPlanFixtureTab();
+    ASSERT_TRUE(window->research_running());
+    ASSERT_EQ(ActiveSpace(*window).tab_count(), 2U);
+
+    int confirmations = 0;
+    window->SetPlanCloseConfirmationForTest([&confirmations](std::string_view title,
+                                                             std::string_view stop,
+                                                             std::string_view keep_running) {
+        ++confirmations;
+        EXPECT_EQ(title, "Stop the research?");
+        EXPECT_EQ(stop, "Stop");
+        EXPECT_EQ(keep_running, "Keep running");
+        return false;
+    });
+    EXPECT_FALSE(window->CloseActiveSpaceTabIndex(0));
+    EXPECT_EQ(confirmations, 1);
+    EXPECT_EQ(ActiveSpace(*window).tab_count(), 2U);
+    EXPECT_TRUE(window->research_running());
+
+    window->SetPlanCloseConfirmationForTest(
+        [&confirmations](std::string_view, std::string_view, std::string_view) {
+            ++confirmations;
+            return true;
+        });
+    EXPECT_TRUE(window->CloseActiveSpaceTabIndex(0));
+    EXPECT_EQ(confirmations, 2);
+    EXPECT_EQ(ActiveSpace(*window).tab_count(), 1U);
+    EXPECT_FALSE(window->research_running());
 }
 
 TEST(BrowserWindowTest,

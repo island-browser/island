@@ -1,7 +1,9 @@
 #ifndef ISLAND_TAB_H_
 #define ISLAND_TAB_H_
 
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -41,10 +43,22 @@ class Tab {
     void SetStartupUrl(std::string url);
     [[nodiscard]] const std::string& startup_url() const noexcept;
 
+    // The row title everyone shows (sidebar, agent tab list): the page title, else a never-shown
+    // web page (a background research page) names its address, else "Island".
+    [[nodiscard]] std::string DisplayTitle() const;
+
     // Arc-style pinned tabs sit in their own group at the top of the sidebar
     // and persist with the session. Ordering is the Space's job (SetTabPinned).
     void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
     [[nodiscard]] bool pinned() const noexcept { return pinned_; }
+
+    // Research pages are ordinary tabs grouped one level below their Plan tab. The optional
+    // parent is a stable TabId so reordering never breaks the relationship; the label is the
+    // small branch kicker shown above the child title in the sidebar.
+    void SetGroupParent(std::optional<TabId> parent);
+    [[nodiscard]] std::optional<TabId> group_parent() const noexcept;
+    void SetGroupLabel(std::string label);
+    [[nodiscard]] const std::string& group_label() const noexcept;
 
     // The page's downloaded favicon (null until one arrives).
     void SetFavicon(CefRefPtr<CefImage> favicon) { favicon_ = std::move(favicon); }
@@ -75,6 +89,18 @@ class Tab {
     [[nodiscard]] CefRefPtr<CefBrowserView> browser_view() const noexcept;
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const noexcept;
     [[nodiscard]] bool has_browser() const noexcept;
+    // A fresh view may be removed only after OnBrowserCreated / OnAfterCreated has supplied its
+    // browser and that browser has been alive for BrowserWindow's minimum view age. A page load
+    // or navigation commit is deliberately not part of this lifecycle gate.
+    using BrowserCreationTime = std::chrono::steady_clock::time_point;
+    void MarkBrowserCreated(BrowserCreationTime created_at) noexcept;
+    [[nodiscard]] std::optional<std::chrono::steady_clock::duration> BrowserViewAgeAt(
+        BrowserCreationTime now) const noexcept;
+    [[nodiscard]] bool BrowserViewIsOldEnough(
+        BrowserCreationTime now, std::chrono::steady_clock::duration minimum_age) const noexcept;
+    [[nodiscard]] bool browser_was_created() const noexcept {
+        return browser_created_at_.has_value();
+    }
 
     void IncrementBlockedRequests() noexcept { ++blocked_requests_; }
     void ResetBlockedRequests() noexcept { blocked_requests_ = 0; }
@@ -102,9 +128,12 @@ class Tab {
     double saved_scroll_y_ = 0.0;
     std::string startup_url_;
     bool pinned_ = false;
+    std::optional<TabId> group_parent_;
+    std::string group_label_;
     NavigationState navigation_state_;
 
     CefRefPtr<CefBrowserView> browser_view_;
+    std::optional<BrowserCreationTime> browser_created_at_;
     CefRefPtr<CefBrowser> browser_;
     CefRefPtr<CefImage> favicon_;
     std::string pending_favicon_url_;

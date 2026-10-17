@@ -33,6 +33,9 @@ struct TabState {
     std::string url;
     // Optional in the file (absent = false), so older sessions still load.
     bool pinned = false;
+    // Research grouping is optional so older sessions remain valid.
+    std::optional<TabId> group_parent;
+    std::string group_label;
 
     bool operator==(const TabState&) const = default;
 };

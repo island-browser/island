@@ -60,6 +60,10 @@ platform executable links.
 | `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers, Safari, Firefox (`.jsonlz4` bookmark backups) and Arc (spaces + pinned tabs) |
 | `tab_sleep_policy.h`, `peek_state.h` | CEF-free models: tab sleep decisions (injected clock, per-tab last-active time, exclusions as inputs; `Expired` for the timed sweep, `AllEligible` for "Sleep inactive tabs now") and the peek card's state (open/replace/close/open-as-tab/Escape, generation counter for stale callbacks) |
 | `peek_overlay.{h,cc}` | The peek card: an overlay of the one `CefWindow`, created in `Open` and released in `Close` (see `overlay_lifetime.h`), covering only the card, holding a title bar and its own `CefBrowserView` with its own client (popups load in the card, Escape claimed in `OnPreKeyEvent`) |
+| `overlay_lifetime.h`, `overlay_card.h` | CEF-free overlay rule (an overlay exists only while its surface is shown, because a live `CefWindow` overlay blocks mouse input on macOS) and the solid-color `OverlayFillDelegate` that re-asserts its color on theme change |
+| `browser_window_research.cc`, `research_prompt.{h,cc}`, `report_store.{h,cc}` | Research mode in `BrowserWindow` (start, cancel and finish, the Plan hub, the Report tab with save/copy/continue); the CEF-free prompt, research space name and report extraction; and the Reports list persisted as `reports.json` |
+| `plan_dev_fixture.h` | The developer capture's sample research plan (`--island-dev-actions=plan_fixture`), kept equal to the test fixture by a unit test |
+| `pages/plan.html`, `pages/report.html`, `pages/markdown.js` | The Plan tab's graph and list page, the Report tab page, and the shared safe Markdown renderer both use (inlined where a page carries `// @@ISLAND_MARKDOWN@@`) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
 
@@ -179,3 +183,21 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 
 <!-- MANUAL: -->
 - Content blocker startup: cached lists load and compile on a file thread after the window exists, so requests of tabs restored at launch can pass until the engine is published (a few hundred ms); list downloads use `CefURLRequest` on the UI thread but compile off it, and `CefURLRequest` callbacks hand back a different wrapper object, so never compare it by pointer.
+- Research source tabs use `Tab::group_parent`. `StartResearch` makes the research space itself
+  (`OpenResearchSpace`: the newest space with the question's name, else a new one whose only tab
+  is the Plan hub, so the view swaps once) and the research prompt no longer asks the agent to
+  create one. `OpenAgentTab` appends the page as a child and activates it
+  (`AppendPlanChildTab(..., activate=true)`) so the agent's page tools find a live browser: one
+  swap per MCP call. Never swap the content view twice in one turn: that crashed CEF a few
+  seconds later. The dev fixture appends background children (`activate=false`, no browser until
+  first shown; their `Tab::DisplayTitle` is the address and `EffectiveUrl` saves the startup
+  URL). Children sit right after the Plan tab's last child; a pinned Plan's children start the
+  unpinned tabs, so the pinned group stays whole (`Space::AppendChildTab`). `NormalizeGroups`
+  re-places a parent's children behind it after moves, pinning and restore; only the child the
+  person dragged away is ungrouped. A hub outside the active space (an agent that made its own
+  space) gets no group. `BrowserWindow` maps the running `BuildPlanGraph` node id to the opened
+  `TabId`. `NavigateTab` and the agent's back/forward/reload refuse the Plan tab
+  (`IsPlanTabIndex`). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
+  every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
+  deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
+  the page has no live frame; removing the Plan's space stops the research (no dialog).

@@ -31,12 +31,13 @@
   Appearance (per-space color, tint, sidebar side, radius, density, font, shadow, full bleed;
   prefs `appearance`). CEF views cannot round or shadow, so `src/main/macos/page_card_mac.mm`
   overlays native corner/shadow layers on macOS only; see DESIGN.md §5 and its Accepted Debt.
-- Next iteration (2026-10-16, project owner's request): the "Native" look (macOS-style source
-  list, system font, one blue, address-field indicators, no space color) as the default, and
-  Research as an editable plan graph in a Plan tab. Spec:
+- The "Native" look is in and is the default (2026-10-16 spec, project owner's request): a
+  macOS-style source list, system font, one blue accent, the 52 DIP toolbar with the address field
+  and its indicators, and no space color. Settings > Appearance has a Look preset (Native, Arc,
+  Graphite); Arc and Graphite are kept. Research shows an editable plan graph in a pinned Plan tab,
+  with grouped child tabs and at most 3 branch levels. Spec:
   `docs/superpowers/specs/2026-10-16-island-macos-native-design.md`; plan:
-  `docs/superpowers/plans/2026-10-16-island-macos-native.md`. Work on branch
-  `design/macos-native-spec`.
+  `docs/superpowers/plans/2026-10-16-island-macos-native.md`.
 - Read `docs/superpowers/specs/2026-08-09-island-browser-phase3-design.md` and
   `docs/superpowers/plans/2026-08-09-island-browser-phase3.md` (plus the 2026-08-12 sidebar/palette
   spec and plan) before implementing anything. The Phase 0/1/2 design and plan documents remain

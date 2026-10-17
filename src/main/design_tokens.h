@@ -102,6 +102,8 @@ struct ChromeTokens {
     ArgbColor hover;
     ArgbColor well;
     ArgbColor plate;
+    // Native: the selected segment of a segmented control (the surface in light; lighter in dark).
+    ArgbColor segment_selected{};
     int rail_width_dip = 286;
     int card_radius_dip = 10;
     // Inset of the page card from the window edge on its three free sides.

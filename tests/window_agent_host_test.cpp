@@ -107,6 +107,72 @@ TEST(WindowAgentHostTest, NavigateUpdatesTheTargetTab) {
                     .is_error);
 }
 
+TEST(WindowAgentHostTest, ListTabsTitlesAnUnshownPageLikeTheSidebar) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_FALSE(Call(host, "browser_open_tab",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/a")))
+                     .is_error);
+
+    const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
+    const auto& listed = tabs.FindMember("tabs")->array_val;
+    ASSERT_EQ(listed.size(), 2U);
+    EXPECT_EQ(listed[1].StringOr("title", ""), ActiveSpace(*window).tabs()[1].DisplayTitle());
+    EXPECT_EQ(listed[1].StringOr("title", ""), "https://docs.test/a");
+}
+
+TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->OpenPlanFixtureTab();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(window->IsPlanTabIndex(std::nullopt));
+
+    const agent::ToolResult navigate =
+        Call(host, "browser_navigate",
+             Value::MakeObject().Set("url", Value::String("https://docs.test/")));
+    EXPECT_TRUE(navigate.is_error);
+    EXPECT_NE(navigate.content[0].text.find("Plan tab"), std::string::npos);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "data:text/html,plan");
+
+    for (const char* tool : {"browser_back", "browser_forward", "browser_reload"}) {
+        const agent::ToolResult result = Call(host, tool);
+        EXPECT_TRUE(result.is_error) << tool;
+        EXPECT_NE(result.content[0].text.find("Plan tab"), std::string::npos) << tool;
+    }
+}
+
+TEST(WindowAgentHostTest, PageToolsRefuseThePlanTabEvenAfterItIsActivated) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->OpenPlanFixtureTab();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(window->IsPlanTabIndex(std::nullopt));
+
+    // Activating the Plan tab is allowed; the page tools still never act on it.
+    EXPECT_FALSE(
+        Call(host, "browser_activate_tab", Value::MakeObject().Set("tab", Value::Int(0))).is_error);
+    const Value ref = Value::MakeObject().Set("ref", Value::Int(1));
+    const std::vector<std::pair<const char*, Value>> calls = {
+        {"page_click", ref},
+        {"page_type", Value::MakeObject().Set("ref", Value::Int(1)).Set("text", Value::String("x"))},
+        {"page_evaluate", Value::MakeObject().Set("expression", Value::String("1"))},
+        {"page_screenshot", Value::MakeObject()},
+        {"page_read", Value::MakeObject()},
+        {"page_snapshot", Value::MakeObject()},
+    };
+    for (const auto& [tool, args] : calls) {
+        for (const bool with_tab : {false, true}) {
+            Value call_args = args;
+            if (with_tab) call_args.Set("tab", Value::Int(0));
+            const agent::ToolResult result = Call(host, tool, call_args);
+            EXPECT_TRUE(result.is_error) << tool;
+            EXPECT_NE(result.content[0].text.find("Plan tab"), std::string::npos)
+                << tool << ": " << result.content[0].text;
+        }
+    }
+}
+
 TEST(WindowAgentHostTest, TabAndSpaceToolsDriveTheModel) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     WindowAgentHost host(*window);

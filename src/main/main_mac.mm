@@ -447,6 +447,21 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->OpenNewestReport();
         return true;
     }
+    // `agent_pages:<count>[:<gap>]` opens that many agent pages (after `plan_fixture`); `<gap>` is
+    // `serial` (the next page after the previous task returned) or a delay in milliseconds.
+    constexpr std::string_view kAgentPages = "agent_pages:";
+    if (action.compare(0, kAgentPages.size(), kAgentPages) == 0) {
+        const std::string rest = action.substr(kAgentPages.size());
+        const std::size_t colon = rest.find(':');
+        int gap_ms = 0;
+        if (colon != std::string::npos) {
+            const std::string gap = rest.substr(colon + 1);
+            // -1 is BrowserWindow::kSerialAgentPages.
+            gap_ms = gap == "serial" ? -1 : std::atoi(gap.c_str());
+        }
+        app->OpenAgentPagesForDev(std::atoi(rest.c_str()), gap_ms);
+        return true;
+    }
     if (action == "plan_fixture") {
         app->OpenPlanFixture();
         return true;

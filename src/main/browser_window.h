@@ -2,6 +2,7 @@
 #define ISLAND_BROWSER_WINDOW_H_
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <map>
@@ -52,6 +53,7 @@
 #include "research_prompt.h"
 #include "search_engine.h"
 #include "search_palette.h"
+#include "session_store.h"
 #include "settings_focus.h"
 #include "sidebar_state.h"
 #include "space.h"
@@ -147,14 +149,25 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool SetSplitRatio(double ratio);
     [[nodiscard]] double split_ratio() const noexcept { return split_ratio_; }
 
-    // Agent seams (src/agent tools). OpenNewTab appends a tab to the active
+    // Agent seams (src/agent tools). OpenNewTab appends a regular tab to the active
     // space and loads `text` resolved through ResolveAgentNavigation (blank
     // text opens the startup page). NavigateTab targets a tab of the active
     // space (std::nullopt = the active tab); a tab without a live browser
     // keeps the URL as its startup URL. Both return false when closing, for
     // an unknown tab, or for text that resolves to no allowed URL.
     [[nodiscard]] bool OpenNewTab(std::string_view text);
+    // The MCP browser_open_tab path. During research it inserts the page below the Plan tab,
+    // labels it with the running branch and remembers which plan node opened it.
+    [[nodiscard]] bool OpenAgentTab(std::string_view text);
+    // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
+    // True when the tab of the active space (nullopt = the active tab) is the research Plan tab.
+    [[nodiscard]] bool IsPlanTabIndex(std::optional<std::size_t> index) const;
+    // The session as SaveSession would write it.
+    [[nodiscard]] SessionState BuildSessionState() const;
+    // Restores an already-loaded session through the production filtering path.
+    // Tests use this to cover legacy internal-page entries without touching HOME.
+    [[nodiscard]] bool RestoreSessionStateForTest(const SessionState& state);
     // The live CefBrowser of a tab of the active space, or nullptr.
     [[nodiscard]] CefRefPtr<CefBrowser> BrowserForTab(std::optional<std::size_t> index) const;
     // kNewSpace plus an optional name.
@@ -261,17 +274,47 @@ class BrowserWindow : public CefClient,
     // holds the plan (the newest plan the research agent sent), the person's edits and the
     // view; plan.html shows them and sends its edits back as messages.
     // Applies one plan page message from the tab `source` (nullptr in tests).
-    void HandlePlanPageMessage(const json::Value& message,
-                               CefRefPtr<CefBrowser> source = nullptr);
+    void HandlePlanPageMessage(const json::Value& message, CefRefPtr<CefBrowser> source = nullptr);
     // The state plan.html renders, exposed for tests.
     [[nodiscard]] std::string PlanStateJson() const;
     // Developer capture: opens a Plan tab that shows the sample plan waiting for approval.
-    void OpenPlanFixtureTab();
+    void OpenPlanFixtureTab(bool include_child_tabs = false);
+    // Opens `count` agent pages, one UI task each, as an agent calling browser_open_tab in a row
+    // does (developer capture `agent_pages:<count>[:<gap>]`). `gap_ms` 0 posts every task at once;
+    // a positive gap delays each next page by that many milliseconds; kSerialAgentPages posts the
+    // next page only after the previous task returned, as the serial stdio MCP bridge does.
+    static constexpr int kSerialAgentPages = -1;
+    void OpenAgentPagesInQuickSuccessionForDev(int count, int gap_ms = 0);
+    void OpenAgentPageStepForDev(int index, int count, int gap_ms);
+    // How many times the active tab's view was attached; tests assert one swap per action.
+    [[nodiscard]] std::size_t AttachCountForTest() const noexcept { return attach_count_; }
+    // View swaps actually made (attaches the gate let through) and whether one is waiting for an
+    // attached view to reach the minimum browser age.
+    [[nodiscard]] std::size_t ViewSwapCountForTest() const noexcept { return view_swap_count_; }
+    [[nodiscard]] bool ViewSwapPendingForTest() const noexcept { return view_swap_pending_; }
+    // Real-gate seams: headless tests identify the tab represented by the content slot and drive
+    // the same creation-age, generation and fallback callbacks production uses.
+    void SetViewSwapTimeForTest(std::chrono::milliseconds since_epoch);
+    void AdvanceViewSwapTimeForTest(std::chrono::milliseconds elapsed);
+    void SetAttachedViewForSwapTest(TabId tab);
+    void SetAttachedViewsForSwapTest(std::vector<TabId> tabs);
+    void BrowserCreatedForViewSwapTest(TabId tab);
+    [[nodiscard]] std::uint64_t AttachedViewGenerationForTest() const noexcept {
+        return attached_view_generation_;
+    }
+    void RecheckPendingViewSwapForTest(std::uint64_t generation);
+    void RunUncreatedViewFallbackForTest(std::uint64_t generation);
+    [[nodiscard]] std::size_t BrowserViewSizeChangeCountForDev() const noexcept;
+    [[nodiscard]] std::size_t ChromeRelayoutCountForDev() const noexcept;
     // Test seams: the plan page URL, the agent send path (research and plan turns go through
     // it instead of the agent session), and the plan shown without an agent turn.
     void SetPlanPageUrlForTest(std::string url) { plan_page_url_ = std::move(url); }
     void SetAgentSendForTest(std::function<bool(std::string)> send) {
         agent_send_for_test_ = std::move(send);
+    }
+    void SetPlanCloseConfirmationForTest(
+        std::function<bool(std::string_view, std::string_view, std::string_view)> confirm) {
+        plan_close_confirmation_for_test_ = std::move(confirm);
     }
     void SetPlanEntriesForTest(std::vector<agent::AcpPlanEntry> entries) {
         plan_entries_ = std::move(entries);
@@ -334,6 +377,7 @@ class BrowserWindow : public CefClient,
         provider_statuses_.reset();
     }
     void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) override;
+    void OnLocalPageBrowserCreated(LocalPageKind kind) override;
 
     // Built-in pages shown in the content area (Settings, the all-tabs
     // overview). Toggling the shown page hides it; selecting any tab hides it
@@ -690,12 +734,47 @@ class BrowserWindow : public CefClient,
     // the collection rows. Both are no-ops while closing.
     void DetachActiveTabObservers();
     void AttachActiveTabObservers();
+    // A tab view that was attached is never removed until its browser exists and is at least
+    // 100 ms old. Removing one about 10 ms after creation crashed CEF; the age margin is
+    // independent of navigation or commit. A generation-guarded delayed task rechecks at the
+    // age boundary. The 2 s cap applies only if that generation's browser is never created.
+    // The model and address projection still follow every selection immediately.
+    struct AttachedView {
+        CefRefPtr<CefBrowserView> view;
+        std::optional<TabId> tab;
+        LocalPage* local_page = nullptr;
+        // The view sits in the split's second slot (BrowserChrome::split_view_).
+        bool second_slot = false;
+    };
+    using ViewSwapClock = std::chrono::steady_clock;
+    static constexpr std::chrono::milliseconds kMinimumAttachedViewAge{100};
+    static constexpr std::chrono::milliseconds kUncreatedViewFallbackDelay{2000};
+    [[nodiscard]] ViewSwapClock::time_point ViewSwapNow() const;
+    [[nodiscard]] Tab* TabForAttachedView(const AttachedView& attached) noexcept;
+    [[nodiscard]] bool AttachedViewWillRemain(const AttachedView& attached) const;
+    [[nodiscard]] bool AttachedViewIsLive(const AttachedView& attached);
+    [[nodiscard]] bool AttachedViewBrowserWasCreated(const AttachedView& attached);
+    [[nodiscard]] std::optional<ViewSwapClock::duration> AttachedViewAgeAt(
+        const AttachedView& attached, ViewSwapClock::time_point now);
+    [[nodiscard]] bool AttachedBrowserStillCreating();
+    void SetAttachedViews(std::vector<AttachedView> attached);
+    void SchedulePendingViewSwap();
+    void RunUncreatedViewFallback(std::uint64_t generation);
+    void RunPendingViewSwap(std::uint64_t generation);
+    void RequestViewSwap();
+    void FocusAttachedContent();
+    // Selects `tab` of `space` by changing the model first and attaching its view once, so a
+    // cross-space activation never creates a view that the next swap removes within the task.
+    void SelectTabWithOneAttach(std::size_t space, std::size_t tab);
     void AttachActiveTabBrowserView();
     void UpdateChromeCollections();
     [[nodiscard]] static Space CreateDefaultSpace();
     // Appends a tab to the active space with `startup_url` (empty = the
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     void AppendTabToActiveSpace(std::string startup_url);
+    // Adds an empty space (next palette color) at the end and returns it; the caller gives it
+    // a tab and makes it active.
+    Space& AppendSpace(std::string name);
     void ShutdownAgentHost();
     // --- Find in page and Reader view (browser_window_find_reader.cc) ---
     void ApplyFindRequest(const FindRequest& request, CefRefPtr<CefBrowser> browser);
@@ -750,6 +829,28 @@ class BrowserWindow : public CefClient,
     // Shows the research's Plan tab: reuses it (and closes other Plan tabs) or opens it in the
     // active space, pinned and first.
     void OpenPlanTab();
+    // Switches to the space named `name` (the newest one), or creates it with the Plan tab as
+    // its only tab. Island makes the research space itself so the Plan hub and every page the
+    // agent opens share one space.
+    void OpenResearchSpace(const std::string& name);
+    // Adds one browser page or result below the Plan tab and records the node -> tab mapping.
+    // A background child (`activate` false) changes neither the selection nor the content view.
+    // Without a Plan tab in the active space it opens as an ordinary tab.
+    [[nodiscard]] TabId AppendPlanChildTab(std::string startup_url, std::string node_id,
+                                           std::string label, bool activate);
+    // The part of AppendPlanChildTab that needs the Plan's space: an activated child makes that
+    // space active and is selected with one attach, wherever the person was.
+    TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
+                            std::string label, bool activate);
+    [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
+    // The address a new tab opens (empty text: the start page), or nullopt when the text is not
+    // an address Island allows.
+    [[nodiscard]] std::optional<std::string> ResolveNewTabTarget(std::string_view text) const;
+    // Plan close is asynchronous in the real page and synchronous through the test hook.
+    [[nodiscard]] bool ConfirmPlanTabClose(TabId id);
+    void ShowPlanCloseConfirmation();
+    void CompletePlanCloseConfirmation(bool stop);
+    void ForgetPlanTabMapping(TabId id);
     // Drops a duplicate Plan document without adding it to Reopen Closed Tab. A one-tab space
     // receives a fresh start tab instead of disappearing.
     void RemoveStalePlanTabAt(std::size_t space, std::size_t tab);
@@ -764,13 +865,16 @@ class BrowserWindow : public CefClient,
     bool SendToAgent(std::string text);
     // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
     // approval, and it becomes the turn the research classifies next. `approves_plan` is true
-    // for a Run, whose turn may end with a plain report.
-    void SendPlanTurn(std::string text, bool approves_plan = false);
+    // for a Run, whose turn may end with a plain report. `continues_run` (a failed-step retry)
+    // is not a plan edit: it skips the approval gate, keeps the approval the run had, and starts
+    // a task when none is in flight.
+    void SendPlanTurn(std::string text, bool approves_plan = false, bool continues_run = false);
     // Turns the agent session has ended so far (0 without a session).
     [[nodiscard]] std::uint64_t TurnsEnded() const;
     void SetResearchStatus(std::string state, std::string message);
     void OnAgentSessionChanged();
     void SaveReports() const;
+    bool OpenReportTabImpl(std::string_view id, std::string_view space_name, bool group_with_plan);
     // The "Continue in agent panel" button: opens the panel and, when its
     // conversation does not hold the report yet, hands the report to the agent.
     void ContinueReportInAgent(const ResearchReport& report, CefRefPtr<CefBrowser> source);
@@ -797,7 +901,9 @@ class BrowserWindow : public CefClient,
     // unreadable, or schema-invalid file), which the caller treats as the
     // fixed-startup-page fallback.
     bool RestoreSession();
-    // Serializes the current model for the next launch. Clean quit only — no
+    bool RestoreSessionState(const SessionState& state);
+    [[nodiscard]] bool IsSessionInternalTabUrl(std::string_view url) const;
+    // Writes BuildSessionState() for the next launch. Clean quit only — no
     // autosave, no crash hook.
     void SaveSession() const;
     // The URL a restored tab's browser view loads: the tab's validated startup
@@ -886,9 +992,14 @@ class BrowserWindow : public CefClient,
     std::string plan_selected_;
     // The Plan tab of the current research (one per research).
     std::optional<TabId> plan_tab_;
+    // Plan node ids come from BuildPlanGraph, matching the ids plan.html posts.
+    std::map<std::string, TabId> plan_node_tabs_;
+    bool closing_plan_after_confirmation_ = false;
     // Why the last plan action was refused (depth limit, agent busy); empty when none.
     std::string plan_notice_;
     std::function<bool(std::string)> agent_send_for_test_;
+    std::function<bool(std::string_view, std::string_view, std::string_view)>
+        plan_close_confirmation_for_test_;
     // The research task in flight: what was asked, the space the agent was told
     // to create, and how many turns had ended before the prompt went out.
     struct ResearchTask {
@@ -903,6 +1014,21 @@ class BrowserWindow : public CefClient,
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;
+    std::size_t attach_count_ = 0;
+    // The plan on show was proposed and the person has not approved it (set when it starts to
+    // wait, cleared by an approving Run); a cancelled wait keeps it so Retry cannot start a run.
+    bool plan_unapproved_ = false;
+    std::size_t view_swap_count_ = 0;
+    bool view_swap_pending_ = false;
+    std::optional<std::uint64_t> view_swap_pending_generation_;
+    std::optional<std::uint64_t> fallback_timer_generation_;
+    std::optional<std::uint64_t> uncreated_fallback_generation_;
+    // The tab views in the content slot (one, or two in split view), as last attached. Every
+    // replacement advances the generation so delayed work cannot act on a newer attachment.
+    std::vector<AttachedView> attached_views_;
+    std::uint64_t attached_view_generation_ = 0;
+    std::optional<ViewSwapClock::time_point> view_swap_time_for_test_;
+    bool attached_view_for_test_ = false;
     ResearchStatus research_status_;
     // The report whose text the agent session's conversation already holds.
     std::string report_in_session_;
@@ -981,6 +1107,7 @@ class BrowserWindow : public CefClient,
     // Set while an overview action mutates tabs, so the re-attach that
     // follows keeps the overview on screen instead of the active tab.
     bool keep_internal_page_ = false;
+    bool show_internal_page_ = false;
     // A one-shot notice for the Settings page (import results, errors).
     std::string settings_message_;
     // A recorded chord that is already taken, waiting for Replace or Cancel

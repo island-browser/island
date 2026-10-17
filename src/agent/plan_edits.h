@@ -26,6 +26,7 @@ struct PlanEdits {
                                               std::optional<std::string> only_branch);
 [[nodiscard]] std::string BuildExpandMessage(std::string_view node_id);
 [[nodiscard]] std::string BuildBranchFromMessage(std::string_view node_id);
+[[nodiscard]] std::string BuildRetryMessage(std::string_view node_id);
 // Keeps the person's skips across a fresh plan update: drops ids no longer present.
 [[nodiscard]] PlanEdits CarryEditsOver(const PlanEdits& edits,
                                        const std::vector<AcpPlanEntry>& next_plan);

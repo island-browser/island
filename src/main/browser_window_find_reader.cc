@@ -264,7 +264,10 @@ std::string BrowserWindow::EffectiveUrl(const Tab& tab) const {
     if (ReaderActiveFor(tab)) {
         return reader_sessions_.at(tab.id()).origin_url;
     }
-    return tab.navigation_state().snapshot().url;
+    // A page that never loaded (a background research page) has no committed URL yet: the page
+    // it would open is what the session keeps.
+    const std::string& committed = tab.navigation_state().snapshot().url;
+    return committed.empty() ? tab.startup_url() : committed;
 }
 
 void BrowserWindow::UpdateReaderButton() {

@@ -56,8 +56,11 @@ TEST(ResearchSpaceNameTest, NeverSplitsAMultiByteCharacter) {
 TEST(BuildResearchPromptTest, CarriesTheQuestionTheSpaceAndTheReportContract) {
     const std::string prompt = BuildResearchPrompt("Why is the sky blue?");
     EXPECT_NE(prompt.find("Why is the sky blue?"), std::string::npos);
-    EXPECT_NE(prompt.find("browser_new_space"), std::string::npos);
-    EXPECT_NE(prompt.find("named exactly \"Why is the sky blue?\""), std::string::npos);
+    // Island opens the space itself: the agent is told it exists, not asked to create it.
+    EXPECT_NE(prompt.find("already opened a space named \"Why is the sky blue?\""),
+              std::string::npos);
+    EXPECT_EQ(prompt.find("browser_new_space"), std::string::npos);
+    EXPECT_EQ(prompt.find("Create a new space"), std::string::npos);
     EXPECT_NE(prompt.find("browser_open_tab"), std::string::npos);
     EXPECT_NE(prompt.find("page_read"), std::string::npos);
     EXPECT_NE(prompt.find("Compare the sources"), std::string::npos);
