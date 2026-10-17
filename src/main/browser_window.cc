@@ -4760,7 +4760,7 @@ void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
                                      std::function<void(agent::ConfirmationAnswer)> done) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
-        done(agent::ConfirmationAnswer::kCancel);
+        done(agent::ConfirmationAnswer::kWithdrawn);
         return;
     }
     // The tab the action targets (the active tab when the request names none) is the one marked
@@ -4803,18 +4803,18 @@ void BrowserWindow::AnswerConfirmation(std::string_view id, agent::ConfirmationA
         if (request.id != id) {
             continue;
         }
+        // The action runs with the tab index the request named, so a card whose tab moved is
+        // withdrawn instead of acting on whatever sits at that index now. This check comes first:
+        // a withdrawn card must not save a trusted site either.
         const bool grants = answer == agent::ConfirmationAnswer::kTrustSite ||
                             answer == agent::ConfirmationAnswer::kAllowForTask;
-        if (grants && !request.trusted_allowed) {
+        if (answer != agent::ConfirmationAnswer::kCancel &&
+            !ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
+            answer = agent::ConfirmationAnswer::kWithdrawn;
+        } else if (grants && !request.trusted_allowed) {
             answer = agent::ConfirmationAnswer::kCancel;
         } else if (answer == agent::ConfirmationAnswer::kTrustSite) {
             AddTrustedSite(request.host);
-        }
-        // The action runs with the tab index the request named, so a card whose tab moved is
-        // withdrawn instead of acting on whatever sits at that index now.
-        if (answer != agent::ConfirmationAnswer::kCancel &&
-            !ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
-            answer = agent::ConfirmationAnswer::kCancel;
         }
         FinishConfirmation(index, answer);
         return;
@@ -4839,7 +4839,7 @@ void BrowserWindow::CancelStaleConfirmations() {
         if (ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
             ++index;
         } else {
-            FinishConfirmation(index, agent::ConfirmationAnswer::kCancel);
+            FinishConfirmation(index, agent::ConfirmationAnswer::kWithdrawn);
         }
     }
 }
@@ -4856,7 +4856,8 @@ void BrowserWindow::FinishConfirmation(std::size_t index, agent::ConfirmationAns
 
 void BrowserWindow::CancelPendingConfirmations() {
     while (!pending_confirmations_.empty()) {
-        FinishConfirmation(pending_confirmations_.size() - 1, agent::ConfirmationAnswer::kCancel);
+        FinishConfirmation(pending_confirmations_.size() - 1,
+                           agent::ConfirmationAnswer::kWithdrawn);
     }
 }
 

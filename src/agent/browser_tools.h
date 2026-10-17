@@ -81,6 +81,9 @@ enum class ConfirmationAnswer : std::uint8_t {
     kTrustSite,
     kCancel,
     kTimeout,
+    // The card was withdrawn without an answer: the tab changed, the task stopped, or the window
+    // closed. Not a refusal, so the caller is told to ask again.
+    kWithdrawn,
 };
 
 // A page action the gate wants the person to approve before it runs.

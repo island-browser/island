@@ -621,6 +621,18 @@ TEST(BrowserToolsTest, TimeoutReturnsTheTimeoutError) {
     EXPECT_EQ(CountMethod(host, "Runtime.evaluate"), 0);
 }
 
+TEST(BrowserToolsTest, WithdrawnCardSaysAskAgainNotDeclined) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.answers.push_back(ConfirmationAnswer::kWithdrawn);
+    const ToolResult r = CallTool(toolbox, "page_evaluate",
+                                  Value::MakeObject().Set("expression", Value::String("1")));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text,
+              "The tab changed or the task stopped before the action was confirmed; ask again.");
+    EXPECT_EQ(CountMethod(host, "Runtime.evaluate"), 0);
+}
+
 TEST(BrowserToolsTest, TypingWithoutFactsAsksAndCannotBeTrusted) {
     FakeBrowserHost host;
     BrowserToolbox toolbox(host);

@@ -763,8 +763,8 @@ class BrowserWindow : public CefClient,
     // Removes the entry at `index` and reports `answer` to its callback.
     void FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer);
     void CancelPendingConfirmations();
-    // Answers kCancel to every card whose target tab is no longer where it was when the card was
-    // raised (closed, moved, or its space switched away from).
+    // Answers kWithdrawn to every card whose target tab is no longer where it was when the card
+    // was raised (closed, moved, or its space switched away from).
     void CancelStaleConfirmations();
     [[nodiscard]] bool ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const;
     void ExpireConfirmations();

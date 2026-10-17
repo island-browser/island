@@ -81,6 +81,10 @@ class LoopbackHttpServer {
     // a confirmation card (120 s), so the budget exceeds that by a margin: the caller gets the
     // card's own timeout message, never a 504 while the card can still be approved.
     static constexpr int kHandlerTimeoutSeconds = 150;
+    // How long a loopback client (the stdio MCP bridge) waits for a response. It must exceed the
+    // handler budget, or the client gives up while a card can still be approved and the action
+    // then runs after the caller was told the call failed.
+    static constexpr int kClientTimeoutSeconds = kHandlerTimeoutSeconds + 10;
 
   private:
     struct Shared;

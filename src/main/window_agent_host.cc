@@ -138,7 +138,7 @@ std::vector<std::string> WindowAgentHost::TrustedSites() { return window_->trust
 void WindowAgentHost::RequestConfirmation(agent::ConfirmationRequest request,
                                           std::function<void(agent::ConfirmationAnswer)> done) {
     // Tool calls already run on the UI thread (the endpoint hops them there), so the window takes
-    // the card directly; it owns the 120 s timeout and answers kCancel when it closes.
+    // the card directly; it owns the 120 s timeout and answers kWithdrawn when it closes.
     window_->ShowConfirmation(std::move(request), std::move(done));
 }
 

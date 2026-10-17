@@ -66,10 +66,10 @@ std::optional<HttpResponse> LoopbackHttpRequest(int port, std::string_view metho
     int one = 1;
     ::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
 #endif
-    // A wedged peer must not hang the caller forever; tool calls such as
-    // screenshots finish well within this.
+    // A wedged peer must not hang the caller forever. The budget exceeds the server's handler
+    // budget, so a card can still be approved while this client waits.
     timeval timeout{};
-    timeout.tv_sec = 120;
+    timeout.tv_sec = LoopbackHttpServer::kClientTimeoutSeconds;
     ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     sockaddr_in address{};
     address.sin_family = AF_INET;

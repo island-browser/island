@@ -934,6 +934,11 @@ void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
                 case ConfirmationAnswer::kTimeout:
                     done(ToolResult::Error("No one confirmed this action in time."));
                     return;
+                case ConfirmationAnswer::kWithdrawn:
+                    done(
+                        ToolResult::Error("The tab changed or the task stopped before the action "
+                                          "was confirmed; ask again."));
+                    return;
                 case ConfirmationAnswer::kCancel:
                     break;
             }

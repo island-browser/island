@@ -1980,7 +1980,8 @@ TEST(BrowserWindowPagesTest, ConfirmationShowsInPanelStateAndMarksTheTabWaiting)
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
 
     window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
     EXPECT_FALSE(window->HasPendingConfirmation());
     EXPECT_TRUE(ListedConfirmationIds(*window).empty());
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
@@ -2059,6 +2060,9 @@ TEST(BrowserWindowPagesTest, CardTimeoutIsShorterThanTheHttpHandlerBudget) {
     // The external caller must see "No one confirmed this action in time.", not a 504.
     EXPECT_LE(BrowserWindow::kConfirmationTimeout.count() + 15,
               agent::LoopbackHttpServer::kHandlerTimeoutSeconds);
+    // The stdio bridge gives up after the server's handler budget, never before it.
+    EXPECT_GE(agent::LoopbackHttpServer::kClientTimeoutSeconds,
+              agent::LoopbackHttpServer::kHandlerTimeoutSeconds + 10);
 }
 
 TEST(BrowserWindowPagesTest, ClosingTheCardsTabWithdrawsTheCard) {
@@ -2073,7 +2077,8 @@ TEST(BrowserWindowPagesTest, ClosingTheCardsTabWithdrawsTheCard) {
                              [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
     // Closing an earlier tab shifts the index: the card must not act on the tab now at 2.
     window->CloseTab(0);
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
     EXPECT_FALSE(window->HasPendingConfirmation());
     window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
     EXPECT_EQ(answers.size(), 1U);
@@ -2093,15 +2098,39 @@ TEST(BrowserWindowPagesTest, SwitchingTabsOrSpacesWithdrawsTheCard) {
     window->ShowConfirmation(MakeConfirmation("c2"),
                              [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
     ASSERT_TRUE(window->CreateSpace("Other"));
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
-                                                              agent::ConfirmationAnswer::kCancel}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn,
+                                                      agent::ConfirmationAnswer::kWithdrawn}));
     EXPECT_FALSE(window->HasPendingConfirmation());
 
-    // A card on the tab that stays put survives unrelated changes.
+    // c3 names no tab, so it targets the active tab. Opening a new tab activates it, which
+    // withdraws c3.
     window->ShowConfirmation(MakeConfirmation("c3"),
                              [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
     ASSERT_TRUE(window->OpenNewTab("https://c.test/"));
-    EXPECT_EQ(answers.size(), 3U);
+    ASSERT_EQ(answers.size(), 3U);
+    EXPECT_EQ(answers.back(), agent::ConfirmationAnswer::kWithdrawn);
+    EXPECT_FALSE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, NamedBackgroundTabCardSurvivesTabSwitches) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    // Tab 1 is active; the card names tab 0, which stays in the background.
+    ASSERT_TRUE(window->OpenNewTab("https://a.test/"));
+    std::vector<agent::ConfirmationAnswer> answers;
+    agent::ConfirmationRequest request = MakeConfirmation("c1");
+    request.tab = 0;
+    window->ShowConfirmation(std::move(request),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    window->SelectTab(0);
+    window->SelectTab(1);
+    EXPECT_TRUE(answers.empty());
+    EXPECT_TRUE(window->HasPendingConfirmation());
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
 }
 
 TEST(BrowserWindowPagesTest, StopAndNewChatWithdrawOpenCards) {
@@ -2113,7 +2142,8 @@ TEST(BrowserWindowPagesTest, StopAndNewChatWithdrawOpenCards) {
     window->ShowConfirmation(MakeConfirmation("c1"),
                              [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
     SendAgent(*window, R"({"type":"cancel"})");
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
     EXPECT_FALSE(window->HasPendingConfirmation());
 
     window->ShowConfirmation(MakeConfirmation("c2"),
