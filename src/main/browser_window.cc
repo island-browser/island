@@ -1165,6 +1165,7 @@ void BrowserWindow::HideInternalPage() {
     }
     internal_page_.reset();
     show_internal_page_ = false;
+    shortcut_conflict_.reset();
     RequestViewSwap();
 }
 
@@ -4009,6 +4010,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         }
         internal_page_.reset();
         show_internal_page_ = false;
+        shortcut_conflict_.reset();
     }
     Space& space = active_space();
     if (space.split().has_value()) {
