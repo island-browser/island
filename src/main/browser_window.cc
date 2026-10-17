@@ -931,9 +931,10 @@ bool BrowserWindow::SetAgentProvider(std::string_view id) {
             // ISLAND_AGENT_COMMAND pins the command: nothing to restart.
             agent_session_->Configure(std::move(config));
         } else {
-            static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
             // The old agent's turn end never arrives.
-            AbandonInFlightTurn();
+            AbandonInFlightTurn([this, &config] {
+                static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
+            });
         }
     }
     ScheduleLocalPagesRender();
@@ -2205,8 +2206,7 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         RefreshAddressIndicators();
     } else if (type == "new_chat") {
         // The new conversation drops the live turn without an end event.
-        agent_session_->NewChat();
-        AbandonInFlightTurn();
+        AbandonInFlightTurn([this] { agent_session_->NewChat(); });
         CancelPendingConfirmations();
     } else if (type == "set_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
@@ -2253,6 +2253,14 @@ void BrowserWindow::StartQueuedTask(const agent::AgentTask& task) {
         if (agent_host_ != nullptr) {
             agent_host_->toolbox().ResetTaskGrants();
         }
+        if (!queue_fixture_ && AgentTurnOpen()) {
+            // A turn runs outside the queue (plan continuation): the task is live and sent when
+            // that turn ends.
+            deferred_task_ = task;
+            in_flight_id_ = task.id;
+            in_flight_is_chat_ = false;
+            return;
+        }
         task_items_base_ = agent_session_->transcript().items().size();
         if (queue_fixture_) {
             started = true;  // dev capture: the task is live, nothing is sent
@@ -2272,7 +2280,24 @@ void BrowserWindow::StartQueuedTask(const agent::AgentTask& task) {
         return;
     }
     in_flight_id_ = task.id;
+    in_flight_is_chat_ = task.kind != agent::TaskKind::kResearch;
     SyncQueueWaiting();
+}
+
+bool BrowserWindow::AgentTurnOpen() const {
+    if (agent_busy_for_test_.has_value()) {
+        return *agent_busy_for_test_;
+    }
+    return !agent_send_for_test_ && agent_session_ != nullptr && agent_session_->busy();
+}
+
+void BrowserWindow::StartDeferredTask() {
+    if (!deferred_task_.has_value() || closing_ || AgentTurnOpen()) {
+        return;
+    }
+    const agent::AgentTask task = std::move(*deferred_task_);
+    deferred_task_.reset();
+    StartQueuedTask(task);
 }
 
 std::optional<agent::TaskKind> BrowserWindow::TaskKindOf(std::string_view id) const {
@@ -2296,10 +2321,23 @@ void BrowserWindow::FinishInFlightTurn(bool ok) {
 }
 
 void BrowserWindow::CheckInFlightTurn() {
+    if (deferred_task_.has_value()) {
+        if (closing_ || AgentTurnOpen() || (agent_send_for_test_ && !agent_busy_for_test_)) {
+            return;
+        }
+        if (chrome_ == nullptr) {
+            StartDeferredTask();
+            return;
+        }
+        // The session is inside its own event handler: send from a posted task.
+        CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::StartDeferredTask,
+                                                                CefRefPtr<BrowserWindow>(this))));
+        return;
+    }
     // Research reports its own end (CompleteResearch); the test seam never touches the session.
-    if (in_flight_id_.empty() || turn_finish_posted_ || agent_send_for_test_ || closing_ ||
-        agent_session_ == nullptr || agent_session_->busy() ||
-        TaskKindOf(in_flight_id_) != agent::TaskKind::kChat) {
+    if (in_flight_id_.empty() || turn_finish_posted_ ||
+        (agent_send_for_test_ && !agent_busy_for_test_) || closing_ || agent_session_ == nullptr ||
+        AgentTurnOpen() || !in_flight_is_chat_) {
         return;
     }
     if (chrome_ == nullptr) {
@@ -2315,8 +2353,8 @@ void BrowserWindow::CheckInFlightTurn() {
 
 void BrowserWindow::FinishPostedTurn() {
     turn_finish_posted_ = false;
-    if (in_flight_id_.empty() || closing_ || agent_session_ == nullptr || agent_session_->busy() ||
-        TaskKindOf(in_flight_id_) != agent::TaskKind::kChat) {
+    if (in_flight_id_.empty() || closing_ || agent_session_ == nullptr || AgentTurnOpen() ||
+        !in_flight_is_chat_) {
         return;
     }
     // A dead agent reports no turn end; the failed state is the end.
@@ -2382,8 +2420,11 @@ void BrowserWindow::StopAgentTask() {
     if (agent_session_ != nullptr) {
         agent_session_->Cancel();
     }
-    const bool turn_open = !in_flight_id_.empty() && !agent_send_for_test_ &&
-                           agent_session_ != nullptr && agent_session_->busy();
+    // A deferred task never reached the agent: only the outside turn (cancelled above) runs.
+    const bool deferred = deferred_task_.has_value();
+    deferred_task_.reset();
+    const bool turn_open = !deferred && !in_flight_id_.empty() && AgentTurnOpen();
+    EndLiveResearch(turn_open);
     // The queue stops first: withdrawing a card can lift "waiting", and a task that no longer
     // is live ignores it.
     queue_waiting_ = false;
@@ -2398,12 +2439,33 @@ void BrowserWindow::StopAgentTask() {
     ScheduleLocalPagesRender();
 }
 
-void BrowserWindow::AbandonInFlightTurn() {
+void BrowserWindow::AbandonInFlightTurn(const std::function<void()>& reset_session) {
+    // Cleared before the session is replaced: its events must not report the old turn.
     in_flight_id_.clear();
+    deferred_task_.reset();
     queue_waiting_ = false;
     waiting_id_.clear();
+    EndLiveResearch(/*turn_open=*/false);
+    if (reset_session) {
+        reset_session();
+    }
     agent_queue_.StopCurrentAndAdvanceNow();
     ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::EndLiveResearch(bool turn_open) {
+    const agent::AgentTask* live = agent_queue_.current();
+    if (!research_.has_value() || live == nullptr || research_->task_id != live->id) {
+        return;
+    }
+    if (turn_open) {
+        research_->stopped = true;
+        return;
+    }
+    research_.reset();
+    research_finish_posted_ = false;
+    SetResearchStatus("cancelled", "Research cancelled.");
+    RenderPlanPages();
 }
 
 void BrowserWindow::HandleTaskMessage(std::string_view type, const json::Value& message) {

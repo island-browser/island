@@ -2359,6 +2359,178 @@ TEST(BrowserWindowPagesTest, ClosingThePanelKeepsTheTaskRunning) {
     EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"long job:running", "after:queued"}));
 }
 
+// Review round 1 (Task 6): research and queue handover.
+
+struct QueueWindow {
+    CefRefPtr<BrowserWindow> window;
+    std::vector<std::string> sent;
+};
+
+QueueWindow MakeQueueWindow() {
+    QueueWindow qw;
+    qw.window = MakeWindow();
+    qw.window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    qw.window->SetAgentSendForTest([sent = &qw.sent](std::string text) {
+        sent->push_back(std::move(text));
+        return true;
+    });
+    return qw;
+}
+
+ResearchOutcome AwaitingOutcome() {
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    return waiting;
+}
+
+TEST(BrowserWindowPagesTest, StoppingAResearchThatAwaitsApprovalEndsItAndTheNextTaskRuns) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+    window.SubmitAgentPromptForTest("c");
+    window.SetPlanEntriesForTest(agent::SpecPlan());
+    window.CompleteResearch(AwaitingOutcome());
+    ASSERT_EQ(window.agent_queue().current()->state, agent::TaskState::kWaitingForYou);
+
+    SendAgent(window, R"({"type":"task_stop"})");
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "cancelled");
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+    EXPECT_EQ(window.agent_queue().current()->state, agent::TaskState::kRunning);
+    window.FinishAgentTurnForTest(true);
+    ASSERT_EQ(qw.sent.size(), 3U);
+    EXPECT_EQ(qw.sent[2], "c");
+}
+
+TEST(BrowserWindowPagesTest, NewChatWhileAResearchAwaitsApprovalEndsTheResearch) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("\"unbalanced");  // Start fails without a process
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+    window.SetPlanEntriesForTest(agent::SpecPlan());
+    window.CompleteResearch(AwaitingOutcome());
+
+    SendAgent(window, R"({"type":"new_chat"})");
+
+    EXPECT_FALSE(window.research_running());
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+    EXPECT_EQ(window.agent_queue().current()->state, agent::TaskState::kRunning);
+}
+
+TEST(BrowserWindowPagesTest, NewChatWhileAResearchRunsDoesNotLetTheNextChatBecomeItsReport) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("\"unbalanced");  // Start fails without a process
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+
+    SendAgent(window, R"({"type":"new_chat"})");
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "cancelled");
+    ASSERT_EQ(qw.sent.size(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, AStoppedResearchWhoseTurnStillEndsWithAPlanIsNotLeftWaiting) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+    window.SetAgentBusyForTest(true);  // the turn is open when Stop arrives
+    SendAgent(window, R"({"type":"task_stop"})");
+    EXPECT_EQ(qw.sent.size(), 1U);  // the next task waits for the stopped turn's end
+
+    window.SetAgentBusyForTest(false);
+    window.SetPlanEntriesForTest(agent::SpecPlan());
+    window.CompleteResearch(AwaitingOutcome());  // the cancel lost the race
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "cancelled");
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+}
+
+TEST(BrowserWindowPagesTest, ClearingFinishedWhileAStoppedChatTurnIsOpenStillReportsItsEnd) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SubmitAgentPromptForTest("a");
+    window.SubmitAgentPromptForTest("b");
+    window.SetAgentBusyForTest(true);
+    SendAgent(window, R"({"type":"task_stop"})");
+    SendAgent(window, R"({"type":"tasks_clear_finished"})");
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();  // the cancelled turn ends
+
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+}
+
+TEST(BrowserWindowPagesTest, ARetryOutsideTheQueueIsRefusedWhileTheQueueHasWork) {
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetResearchTaskForTest("q");
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "failed";
+    window.SetPlanEntriesForTest(std::move(plan));
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "A step failed";
+    window.CompleteResearch(failed);
+    window.SubmitAgentPromptForTest("chat");
+    ASSERT_EQ(qw.sent.size(), 1U);
+
+    SendPlanMessage(window, R"({"type":"retry","id":"a"})");
+
+    EXPECT_EQ(qw.sent.size(), 1U);
+    EXPECT_FALSE(window.research_running());
+}
+
+TEST(BrowserWindowPagesTest, ATaskStartedWhileATurnRunsOutsideTheQueueWaitsForThatTurn) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetAgentBusyForTest(true);  // a plan continuation holds the session
+    window.SubmitAgentPromptForTest("a");
+    window.SubmitAgentPromptForTest("b");
+    EXPECT_TRUE(qw.sent.empty());
+    EXPECT_EQ(window.agent_queue().current()->state, agent::TaskState::kRunning);
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();
+
+    EXPECT_EQ(qw.sent, (std::vector<std::string>{"a"}));
+    window.FinishAgentTurnForTest(true);
+    EXPECT_EQ(qw.sent, (std::vector<std::string>{"a", "b"}));
+}
+
+TEST(BrowserWindowPagesTest, AResearchRefusedBecauseTheSessionIsBusySaysSo) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([&window](std::string) {
+        window->SetAgentBusyForTest(true);  // the session took a turn in the meantime
+        return false;
+    });
+    const BrowserWindow::ResearchStartResult result = window->StartResearch("q");
+    EXPECT_EQ(result.code, BrowserWindow::ResearchStart::kFailed);
+    EXPECT_NE(result.message.find("busy"), std::string::npos) << result.message;
+}
+
 TEST(BrowserWindowPagesTest, AChatThatCannotBeSentEndsFailedAndTheQueueMovesOn) {
     const ScopedNoAgentEnv no_env;
     CefRefPtr<BrowserWindow> window = MakeWindow();

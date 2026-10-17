@@ -207,7 +207,8 @@ bool BrowserWindow::StartResearchTask(const agent::AgentTask& queued) {
     task.task_id = queued.id;
     // The page context would only distract the researcher: it works from the question.
     if (!SendToAgent(BuildResearchPrompt(asked))) {
-        start_error_ = agent_session_->error().empty()
+        start_error_ = AgentTurnOpen() ? "The agent is busy. Try again when it finishes."
+                       : agent_session_->error().empty()
                            ? "The agent could not be started. Check Settings."
                            : agent_session_->error();
         research_status_.question = asked;
@@ -286,6 +287,8 @@ void BrowserWindow::CancelResearch() {
         if (!id.empty() && live != nullptr && live->id == id) {
             StopAgentTask();
         }
+        // Whatever the research held the queue for is released in every case.
+        SyncQueueWaiting();
         return;
     }
     if (agent_session_ == nullptr) {
@@ -313,7 +316,7 @@ void BrowserWindow::OnAgentSessionChanged() {
     ReportQueueProgress();
     CheckInFlightTurn();
     if (!research_.has_value() || research_->awaiting_approval || research_finish_posted_ ||
-        closing_ || agent_session_ == nullptr || agent_session_->busy()) {
+        closing_ || agent_session_ == nullptr || agent_session_->busy() || AgentTurnOpen()) {
         return;
     }
     if (chrome_ == nullptr) {
@@ -331,7 +334,7 @@ void BrowserWindow::OnAgentSessionChanged() {
 void BrowserWindow::FinishResearch() {
     research_finish_posted_ = false;
     if (closing_ || !research_.has_value() || research_->awaiting_approval ||
-        agent_session_ == nullptr || agent_session_->busy()) {
+        agent_session_ == nullptr || agent_session_->busy() || AgentTurnOpen()) {
         return;
     }
     CompleteResearch(ClassifyResearchTurn(agent_session_->transcript(),
@@ -342,6 +345,16 @@ void BrowserWindow::FinishResearch() {
 void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     CEF_REQUIRE_UI_THREAD();
     if (!research_.has_value()) {
+        return;
+    }
+    if (research_->stopped) {
+        // Stopped while its turn was open: whatever that turn ended with is the end.
+        const std::string task_id = research_->task_id;
+        research_.reset();
+        research_finish_posted_ = false;
+        SetResearchStatus("cancelled", "Research cancelled.");
+        RenderPlanPages();
+        EndResearchTask(task_id, false);
         return;
     }
     if (outcome.kind == ResearchOutcome::Kind::kAwaitingApproval) {
@@ -422,8 +435,16 @@ void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan, bool cont
         RenderPlanPages();
         return;
     }
-    if (!agent_send_for_test_ && (agent_session_ == nullptr || agent_session_->busy())) {
+    if ((!agent_send_for_test_ && (agent_session_ == nullptr || agent_session_->busy())) ||
+        AgentTurnOpen()) {
         plan_notice_ = "The agent is busy. Try again when it finishes.";
+        RenderPlanPages();
+        return;
+    }
+    // Sent outside the queue, so it waits for the queue to be empty as well as the session.
+    if (!research_.has_value() &&
+        (agent_queue_.current() != nullptr || agent_queue_.queued_count() > 0)) {
+        plan_notice_ = "The agent is working through its task queue. Try again when it is free.";
         RenderPlanPages();
         return;
     }

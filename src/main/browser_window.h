@@ -345,6 +345,9 @@ class BrowserWindow : public CefClient,
     }
     // Ends the turn of the task the window started last, as the session would (chat tasks).
     void FinishAgentTurnForTest(bool ok) { FinishInFlightTurn(ok); }
+    // Makes the session count as busy (or idle) for the queue; unset follows the real session.
+    void SetAgentBusyForTest(bool busy) { agent_busy_for_test_ = busy; }
+    void CheckInFlightTurnForTest() { CheckInFlightTurn(); }
     bool SubmitAgentPromptForTest(std::string text) {
         return SubmitAgentPrompt(std::move(text), /*include_context=*/false);
     }
@@ -899,7 +902,14 @@ class BrowserWindow : public CefClient,
     void EndResearchTask(const std::string& task_id, bool ok);
     // For paths that drop the live turn without an end event (new chat, agent switch, teardown):
     // the live task is cancelled and the queue moves on at once.
-    void AbandonInFlightTurn();
+    // Drops the live task without a turn end; `reset_session` replaces the conversation first
+    // (while no turn is in flight, so its events report nothing), then the queue advances.
+    void AbandonInFlightTurn(const std::function<void()>& reset_session = {});
+    [[nodiscard]] bool AgentTurnOpen() const;
+    // Ends the research that runs as the live task. With `turn_open` the turn's end completes
+    // it; otherwise it is dropped now.
+    void EndLiveResearch(bool turn_open);
+    void StartDeferredTask();
     [[nodiscard]] std::optional<agent::TaskKind> TaskKindOf(std::string_view id) const;
     void ReportQueueProgress();
     // Edge-triggered OnWaiting: a card is open or the research waits for approval.
@@ -1105,6 +1115,9 @@ class BrowserWindow : public CefClient,
         bool plan_approved = false;
         // The queue task this research runs as ("" when none, as in tests that set it directly).
         std::string task_id;
+        // Stop arrived while the turn was open: whatever that turn ends with is the end of
+        // the research (a cancel the agent did not honor in time must not wait for approval).
+        bool stopped = false;
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;
@@ -1218,6 +1231,13 @@ class BrowserWindow : public CefClient,
         [this](const agent::AgentTask& task) { StartQueuedTask(task); }};
     // The task whose prompt the session accepted; its turn end is reported with this id.
     std::string in_flight_id_;
+    // The in-flight task is a chat turn (reported by the window); research reports itself. Kept
+    // beside the id because "Clear finished" can drop the task from the list.
+    bool in_flight_is_chat_ = false;
+    // A task the queue started while a turn ran outside it (plan continuation): it is sent when
+    // that turn ends.
+    std::optional<agent::AgentTask> deferred_task_;
+    std::optional<bool> agent_busy_for_test_;
     bool turn_finish_posted_ = false;
     bool queue_waiting_ = false;
     std::string waiting_id_;   // the task OnWaiting(…, true) was last sent for
