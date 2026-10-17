@@ -36,6 +36,14 @@ Two independent test systems live side by side here:
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |
 | `prefs_store_test.cpp` | Preferences round-trip, optional keys (history, agent provider, shortcuts, update checks), agent-command migration, schema errors |
 | `session_store_test.cpp` | Session JSON round-trip — **not currently listed in `CMakeLists.txt`**, so it has never run (PR #27 in flight) |
+| `address_indicators_test.cpp` | Address-field shield count, its 9999+ cap and tooltip |
+| `appearance_test.cpp` | Appearance prefs round-trip and the Native look written by default |
+| `content_blocker_policy_test.cpp`, `content_blocker_test.cpp`, `content_blocker_stub_test.cpp` | Blocker request types, bypasses and refresh policy; Rust adblock matching; the disabled build that always allows requests |
+| `favicon_policy_test.cpp`, `find_bar_model_test.cpp`, `peek_state_test.cpp`, `reader_mode_test.cpp`, `start_tiles_test.cpp`, `tab_sleep_policy_test.cpp` | Favicon rules, find-bar state, the peek card state, Reader eligibility and settings, start-page speed-dial tiles, and tab sleep decisions |
+| `overlay_lifetime_test.cpp`, `settings_focus_test.cpp`, `report_store_test.cpp`, `research_prompt_test.cpp` | Overlay create/destroy rules, repeated Settings section focus, the Reports list, and the research prompt, space name and report extraction |
+| `chrome/collapsed_rail_test.cpp` | Icon rail metrics: buttons and scrollbar fit 52 DIP, list height with gaps and separator |
+| `agent/plan_graph_test.cpp`, `agent/plan_edits_test.cpp` (fixture `agent/plan_fixture.h`) | Plan graph building and layout (branches, joins, depth), and the plan edit messages |
+| `design/test_native_look_contract.py`, `design/test_reader_extract.py` | Native look color drift guard (pytest); Reader extraction heuristic run against `reader_extract.js` (pytest) |
 
 ## Test targets
 

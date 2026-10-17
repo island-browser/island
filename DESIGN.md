@@ -313,6 +313,25 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   macOS a mouse-transparent native frame view lays a canvas-colored ring (the hole carries the
   rounded corners) and the shadow over the card (`ApplyPageCardStyle`); other platforms keep a
   square card.
+- **Address-field indicators (Native):** 20 DIP glyph buttons inside the 30 DIP address field, at
+  its edges, in `text_secondary`, each shown only when it has something to say (spec §3).
+  Left: a shield with the count of blocked requests, hidden at 0 and capped at `9999+`; click opens
+  Settings > Privacy. Right: Reader, only on pages that have a reader view, and the agent dot,
+  `accent` while the agent reads the tab and `warning_text` while it waits for the person; click
+  opens the agent panel. The dot is never the only cue: each indicator has an accessible name and
+  a tooltip with the full text ("14 trackers blocked"). A slept tab shows its state in its sidebar
+  row, not in the field (`address_indicators.h`, `BrowserChrome::SetAddressIndicators`).
+- **Plan graph nodes (Native, `pages/plan.html`):** 148 × 92 DIP, radius 10, drawn as real
+  buttons over an inline SVG of edges. Kinds: **Question** (`accent_soft` fill, the root),
+  **Step** (`surface`, `border_strong` outline, 3 DIP stripe in its branch color), **Needs you**
+  (`warning_bg`/`warning_border`, "Asks first" chip), **Join** ("Joins A + B" chip), **Result**
+  (kicker "Result"; opens as a Report tab). Skipped is a state of any node, not a kind:
+  `surface_secondary`, dashed `text_tertiary` outline, struck title, "Skipped by you" chip. Run
+  states: queued at 60 % opacity; running with an `accent` ring; done with a `success` tick in the
+  kicker; waiting with one pulse of the `warning_border` outline; failed with a `danger` outline.
+  The dashed "+ Add a branch" ghost hangs off a branching step. Edges are cubic Béziers in the
+  branch color (trunk `text_tertiary`), dashed into skipped nodes. Branches stop at 3 levels.
+  Branch labels ("Branch A") always accompany the color.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground; the accent marks focus and the

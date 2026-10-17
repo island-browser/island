@@ -15,9 +15,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
-- Keep the Native sidebar and toolbar visible through deferred page swaps by replacing the root
-  fill layout with an explicit rail/content/agent box layout, without restoring idle relayouts.
-- Stop unchanged native-chrome layout callbacks from re-laying out the active page in a loop.
 - The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
   control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
   the most visited sites (from history, one per host, opened in the current tab). Tab and
@@ -34,6 +31,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
+  system-blue accent for selection and focus, a source-list sidebar and no space color. Existing
+  profiles without a saved look keep Arc. Appearance > Look switches between Native, Arc and
+  Graphite, and changing any other control there shows "Custom".
 - The Native sidebar bottom is redesigned: one full-width Agent button (sparkle, 32 DIP)
   sits at the very bottom of the sidebar and is tinted while the agent panel is open; the toolbar
   Agent button is gone under Native (the address-field agent dot shows agent state).
@@ -116,6 +117,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- The window no longer re-lays out the page in a loop while idle, and the Native sidebar and
+  toolbar stay visible when a page swap is deferred, for example when pages open in the background.
 - Research no longer swaps the page view several times in one turn (which crashed CEF a few
   seconds later): the space is made with the Plan tab as its only tab, reusing a space, opening
   the Report and selecting a plan node from another space change the model first and swap the

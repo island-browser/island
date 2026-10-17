@@ -33,6 +33,8 @@ agent panel) lives in `src/main/`.
 | `agent_providers.{h,cc}` | Provider registry (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Goose, custom): command, required executable, install hint, docs URL; PATH availability detection (`ExecutableSearchDirs`, `FindExecutable`); `ResolveAgentCommand` (`ISLAND_AGENT_COMMAND` > provider preset or custom command) |
 | `agent_process.{h,cc}` | fork/exec of the agent with stdio pipes, line reader, stderr tail, EOF→SIGTERM→SIGKILL shutdown of the process group |
 | `agent_transcript.{h,cc}` | Folds ACP events into the panel's conversation model; `ToJson()` feeds the view |
+| `plan_graph.{h,cc}` | The research plan as a graph, built from ACP plan entries and their `_meta.island` (node kinds question/step/needs_you/join/result, states, at most 3 branch levels), validated, ordered and laid out on a grid; `plan.html` draws its `PlanGraphJson` |
+| `plan_edits.{h,cc}` | The person's plan edits (skips, edited instructions) and the messages that send them back to the agent (`BuildPlanRunMessage`, `BuildExpandMessage`) |
 | `mcp_bridge_main.cc` | `island_mcp_bridge` executable |
 
 ## For AI Agents
