@@ -358,9 +358,6 @@ struct RowImageSpec {
 };
 
 constexpr int kFaviconPlateDip = 22;
-// Native's bottom controls (2026-10-16 owner request): the Agent entry is 30-36 DIP tall. The
-// switcher row's sizes come from BrowserChrome::NativeSwitcherSizes().
-constexpr int kNativeAgentHeightDip = 32;
 constexpr int kNativeSegmentRadiusDip = 6;
 constexpr int kFaviconPlateRadiusDip = 6;
 constexpr int kRowFillRadiusDip = 8;
@@ -1356,7 +1353,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     sidebar_->AddChildView(space_switcher_);
 
     // Native's bottom switcher row: the segment track, then New Space, overview and settings as
-    // 24 DIP buttons. ApplyLookStructure parents it inside the footer for Native only.
+    // same-height ghost buttons. ApplyLookStructure parents it inside the footer for Native only.
     CefRefPtr<SurfacePanelDelegate> switcher_row_delegate =
         new SurfacePanelDelegate(this, SurfaceSlot::kRail);
     surface_delegates_.push_back(switcher_row_delegate);
@@ -2429,8 +2426,8 @@ void BrowserChrome::ApplyLookStructure() {
             toolbar_content_->AddChildViewAt(navigation_row_, 0);
             toolbar_content_->AddChildViewAt(address_row_, 1);
             // Native: New Tab moves into the tab list (SetTabStripEntries), the segments and
-            // the three buttons move into the switcher row, and the footer stacks it under the
-            // Agent entry.
+            // the three buttons move into the switcher row, and the footer stacks that row over
+            // the Agent entry. kDivider is the footer's hairline, immediately above this panel.
             sidebar_->RemoveChildView(new_tab_button_);
             sidebar_->RemoveChildView(space_switcher_);
             for (const CefRefPtr<CefLabelButton>& button :
@@ -2444,7 +2441,7 @@ void BrowserChrome::ApplyLookStructure() {
             rail_footer_->AddChildViewAt(switcher_row_, 0);
             CefBoxLayoutSettings footer_settings;
             footer_settings.horizontal = static_cast<int>(false);
-            footer_settings.between_child_spacing = tokens_.spacing_1_dip;
+            footer_settings.between_child_spacing = NativeSwitcherSizes().footer_gap_dip;
             CefRefPtr<CefBoxLayout> native_footer_layout =
                 rail_footer_->SetToBoxLayout(footer_settings);
             // The flex the Arc footer row gave the Agent entry stays on the view (box-layout
@@ -2530,15 +2527,15 @@ void BrowserChrome::ApplyLookStructure() {
     // switcher buttons have their own sizes.
     const int control = tokens_.control_height_dip;
     if (native) {
-        // The footer's fixed height (Agent entry, gap, switcher row) keeps the box layout from
-        // stretching the Agent entry down the rail.
-        const int footer_height = BrowserChrome::NativeSwitcherSizes().row_dip +
-                                  tokens_.spacing_1_dip + kNativeAgentHeightDip;
+        // The fixed height keeps the vertical box layout from stretching the Agent entry down
+        // the rail. The divider immediately above this panel supplies the one-DIP hairline.
+        const NativeSwitcherMetrics metrics = BrowserChrome::NativeSwitcherSizes();
+        const int footer_height = metrics.row_dip + metrics.footer_gap_dip + metrics.agent_dip;
         rail_footer_delegate_->SetPreferredSize(CefSize(0, footer_height));
-        agent_button_->SetMinimumSize(CefSize(0, kNativeAgentHeightDip));
+        agent_button_->SetMinimumSize(CefSize(0, metrics.agent_dip));
         for (const CefRefPtr<CefLabelButton>& button :
              {tabs_button_, settings_button_, new_space_button_}) {
-            const int size = BrowserChrome::NativeSwitcherSizes().button_dip;
+            const int size = metrics.button_dip;
             button->SetMinimumSize(CefSize(size, size));
         }
     } else {

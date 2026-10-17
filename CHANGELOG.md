@@ -55,6 +55,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Polished the Native sidebar footer into one aligned, hairline-separated control group with a
+  raised space track, same-height ghost actions, and a quieter tinted Agent row.
 - Native's Back and Forward buttons now share one continuous toolbar surface, removing the thin
   rail-colored seams beside the ghost-button group.
 - The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research

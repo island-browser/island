@@ -433,8 +433,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
                                          ChromeViewId::kRailFooter, ChromeViewId::kActivePage}));
     const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
     ASSERT_NE(footer, nullptr);
-    // Top to bottom: the switcher row, then the full-width Agent button at the very bottom
-    // (the brief's bottom-up order: Agent first, then the switcher row above it).
+    // kDivider is the one-DIP hairline immediately above the footer. Top to bottom inside it:
+    // the switcher row, then the aligned Agent row at the very bottom.
     EXPECT_EQ(ChildIds(*footer), (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
                                                             ChromeViewId::kRailAgentButton}));
     const ChromeViewTreeNode* switcher_row = FindChild(*footer, ChromeViewId::kRailSwitcherRow);
@@ -513,7 +513,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const auto open =
         BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
-    EXPECT_EQ(open.fill, light.accent_soft);
+    EXPECT_EQ(open.fill, light.canvas);
     EXPECT_EQ(open.text, light.accent_text);
     const auto closed =
         BrowserChrome::NativeAgentEntryColors(light, /*open=*/false, /*hovered=*/false);
@@ -527,11 +527,13 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
 
 TEST(BrowserChromeNativeContractTest, GivenNativeSwitcherWhenSizedThenSegmentsFitTheTrack) {
     const BrowserChrome::NativeSwitcherMetrics sizes = BrowserChrome::NativeSwitcherSizes();
-    // Spec §3: a 24 DIP track and 24 DIP icon buttons; the segments sit inside its 2 DIP inset.
-    EXPECT_EQ(sizes.row_dip, 24);
-    EXPECT_EQ(sizes.button_dip, 24);
+    // Footer polish: same-height controls on an 8 DIP rhythm; segments inset in the track.
+    EXPECT_EQ(sizes.row_dip, 28);
+    EXPECT_EQ(sizes.button_dip, sizes.row_dip);
+    EXPECT_EQ(sizes.agent_dip, sizes.row_dip);
+    EXPECT_EQ(sizes.footer_gap_dip, 8);
     EXPECT_EQ(sizes.track_inset_dip, 2);
-    EXPECT_EQ(sizes.segment_dip, 20);
+    EXPECT_EQ(sizes.segment_dip, 24);
     EXPECT_EQ(sizes.segment_dip + 2 * sizes.track_inset_dip, sizes.row_dip);
 }
 
@@ -539,6 +541,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const auto active = BrowserChrome::NativeSegmentColors(light, /*active=*/true);
     EXPECT_EQ(active.fill.argb, 0xFFE3E3E8U);
+    EXPECT_EQ(active.outline, active.fill);
     EXPECT_EQ(active.title, light.text);
     const auto idle = BrowserChrome::NativeSegmentColors(light, /*active=*/false);
     EXPECT_EQ(idle.fill, light.fill);
@@ -548,6 +551,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const auto dark_active = BrowserChrome::NativeSegmentColors(dark, /*active=*/true);
     EXPECT_EQ(dark_active.fill.argb, 0xFF3A3A3DU);
+    EXPECT_EQ(dark_active.outline, dark.border_strong);
     EXPECT_NE(dark_active.fill, dark.accent);
 }
 

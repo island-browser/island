@@ -511,9 +511,8 @@ class BrowserChrome final : public NavigationObserver {
                 tokens.look == LookPreset::kNative && active ? row.title : tokens.text_secondary,
         };
     }
-    // Native's Agent entry (2026-10-16): full width at the sidebar bottom. Open takes the
-    // accent_soft fill with accent_text; closed is the bare sidebar with an accent sparkle, and
-    // hover takes the hover token.
+    // Native's Agent entry (2026-10-17): a quiet footer row. The open state tints the label and
+    // sparkle instead of laying a white/accent slab across the footer; hover alone paints ink.
     struct NativeAgentColors {
         ArgbColor fill;
         ArgbColor text;
@@ -521,24 +520,29 @@ class BrowserChrome final : public NavigationObserver {
     };
     [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
                                                                   bool open, bool hovered) {
-        if (open) {
-            return {
-                .fill = tokens.accent_soft, .text = tokens.accent_text, .sparkle = tokens.accent};
-        }
         return {.fill = hovered ? tokens.hover : tokens.canvas,
-                .text = tokens.text,
+                .text = open ? tokens.accent_text : tokens.text,
                 .sparkle = tokens.accent};
     }
     // Native's space segmented control: a `fill` track, the selected segment on its neutral plate,
-    // the selected name in `text` and the others in `text_secondary`.
+    // the selected name in `text` and the others in `text_secondary`. Dark mode gives the
+    // selected plate a subtle outline so it remains legible without a shadow.
     struct SegmentPalette {
         ArgbColor track;
+        ArgbColor outline;
         ArgbColor fill;
         ArgbColor title;
     };
     [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
                                                             bool active) {
+        const std::uint32_t surface = tokens.surface.argb;
+        const int brightness = static_cast<int>((surface >> 16U) & 0xFFU) * 299 +
+                               static_cast<int>((surface >> 8U) & 0xFFU) * 587 +
+                               static_cast<int>(surface & 0xFFU) * 114;
+        const bool dark = brightness < 128000;
         return {.track = tokens.fill,
+                .outline = active && dark ? tokens.border_strong
+                                          : (active ? tokens.segment_selected : tokens.fill),
                 .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
@@ -547,16 +551,23 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static ArgbColor NavigationRowSurface(const ChromeTokens& tokens) {
         return tokens.look == LookPreset::kNative ? tokens.surface_secondary : tokens.canvas;
     }
-    // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP
-    // icon buttons share one row; the segments sit inside the track's 2 DIP inset.
+    // Native's bottom switcher/footer (2026-10-17 owner polish): every control shares a 28 DIP
+    // height, the rows use an 8 DIP vertical rhythm, and segments sit inside a 2 DIP track inset.
     struct NativeSwitcherMetrics {
         int row_dip;
         int button_dip;
+        int agent_dip;
+        int footer_gap_dip;
         int track_inset_dip;
         int segment_dip;
     };
     [[nodiscard]] static constexpr NativeSwitcherMetrics NativeSwitcherSizes() {
-        return {.row_dip = 24, .button_dip = 24, .track_inset_dip = 2, .segment_dip = 20};
+        return {.row_dip = 28,
+                .button_dip = 28,
+                .agent_dip = 28,
+                .footer_gap_dip = 8,
+                .track_inset_dip = 2,
+                .segment_dip = 24};
     }
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
     // active chip, carry the state); the active chip's label takes --text. Native segments
@@ -566,7 +577,7 @@ class BrowserChrome final : public NavigationObserver {
         if (tokens.look == LookPreset::kNative) {
             const SegmentPalette segment = NativeSegmentColors(tokens, active);
             return {
-                .outline = segment.fill,
+                .outline = segment.outline,
                 .fill = segment.fill,
                 .title = segment.title,
                 .trailing = tokens.text_secondary,
