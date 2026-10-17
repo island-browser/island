@@ -14,10 +14,13 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "action_gate.h"
 #include "json_util.h"
 
 namespace island::agent {
@@ -29,6 +32,7 @@ struct AgentTabInfo {
     bool active = false;
     bool loading = false;
     bool pinned = false;
+    bool opened_by_agent = false;  // the agent opened this tab, so it may navigate it freely
 };
 
 struct AgentSpaceInfo {
@@ -66,6 +70,25 @@ struct DevToolsReply {
 };
 using DevToolsCallback = std::function<void(DevToolsReply)>;
 
+// The person's answer to a ConfirmationRequest.
+enum class ConfirmationAnswer : std::uint8_t {
+    kAllowOnce,
+    kAllowForTask,
+    kTrustSite,
+    kCancel,
+    kTimeout,
+};
+
+// A page action the gate wants the person to approve before it runs.
+struct ConfirmationRequest {
+    std::string id;  // "c1", "c2", ... unique per toolbox
+    std::string tool;
+    std::string summary;
+    std::string host;
+    std::optional<std::size_t> tab;
+    bool trusted_allowed = true;  // false: the prompt must not offer "Trust this site"
+};
+
 // Browser operations the tool layer needs. Tab indices are positions in the
 // active space's tab list; std::nullopt means "the active tab".
 class AgentBrowserHost {
@@ -86,6 +109,15 @@ class AgentBrowserHost {
     // reply exactly once (possibly synchronously).
     virtual void DevToolsCall(std::optional<std::size_t> tab, std::string_view method,
                               json::Value params, DevToolsCallback done) = 0;
+    // Sites the person trusts for agent actions (lowercase, no "www.").
+    virtual std::vector<std::string> TrustedSites() = 0;
+    // Asks the person to approve an action and reports the answer exactly once, possibly
+    // synchronously. The host owns timeouts and reports kTimeout.
+    virtual void RequestConfirmation(ConfirmationRequest request,
+                                     std::function<void(ConfirmationAnswer)> done) = 0;
+    // The URL browser_navigate would load for `text` (search text becomes a search URL), or
+    // nullopt when it resolves to no allowed address.
+    virtual std::optional<std::string> ResolveNavigationTarget(std::string_view text) = 0;
 };
 
 // One MCP content block of a tool result.
@@ -127,6 +159,9 @@ class BrowserToolbox {
     // arguments report an error result rather than failing the call.
     void Call(std::string_view name, const json::Value& arguments, ToolCallback done);
 
+    // Forgets the "Allow for this task" grants; the task queue calls it when a task starts.
+    void ResetTaskGrants();
+
     // Page text is clipped to this many bytes unless the caller asks for less.
     static constexpr std::size_t kDefaultMaxPageChars = 20000;
     static constexpr std::size_t kMaxPageChars = 200000;
@@ -137,6 +172,17 @@ class BrowserToolbox {
 
     void ReadPage(const json::Value& args, ToolCallback done);
     void Snapshot(const json::Value& args, ToolCallback done);
+    // Classifies `input` and runs `run` when allowed, asking the person first when the gate says
+    // so. `done` receives the error result when the action is blocked, declined or times out.
+    // `run` receives `done` and finishes the action.
+    void Gate(GateInput input, std::optional<std::size_t> tab,
+              std::function<void(ToolCallback)> run, ToolCallback done);
+    // The info of `tab` (the active tab when nullopt); nullopt for an unknown tab.
+    [[nodiscard]] std::optional<AgentTabInfo> FindTab(std::optional<std::size_t> tab);
+    // Reads the focused element's facts with one evaluation; nullopt when the evaluation failed
+    // or nothing is focused.
+    void ReadFocusedFacts(std::optional<std::size_t> tab,
+                          std::function<void(std::optional<ElementFacts>)> done);
     void Click(const json::Value& args, ToolCallback done);
     void TypeText(const json::Value& args, ToolCallback done);
     void PressKey(const json::Value& args, ToolCallback done);
@@ -146,6 +192,8 @@ class BrowserToolbox {
 
     AgentBrowserHost& host_;
     std::vector<ToolDefinition> definitions_;
+    std::set<std::pair<std::string, GateRule>> task_grants_;
+    std::uint64_t next_confirmation_ = 1;
 };
 
 // Builds the JS expression that resolves an element from a snapshot ref or a

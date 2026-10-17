@@ -792,6 +792,10 @@ bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_vi
     return true;
 }
 
+std::optional<std::string> BrowserWindow::ResolveNavigationTarget(std::string_view text) const {
+    return ResolveAgentNavigation(text, address_validator_);
+}
+
 bool BrowserWindow::IsPlanTabIndex(std::optional<std::size_t> index) const {
     const Space& space = active_space();
     if (!index.has_value() && !space.has_active_tab()) {

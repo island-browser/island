@@ -161,6 +161,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool OpenAgentTab(std::string_view text);
     // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
+    // The URL NavigateTab would load for `text`, or nullopt when it resolves to no allowed one.
+    [[nodiscard]] std::optional<std::string> ResolveNavigationTarget(std::string_view text) const;
     // True when the tab of the active space (nullopt = the active tab) is the research Plan tab.
     [[nodiscard]] bool IsPlanTabIndex(std::optional<std::size_t> index) const;
     // The session as SaveSession would write it.

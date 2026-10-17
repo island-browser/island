@@ -130,6 +130,17 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
     return tabs;
 }
 
+std::vector<std::string> WindowAgentHost::TrustedSites() { return {}; }
+
+void WindowAgentHost::RequestConfirmation(agent::ConfirmationRequest /*request*/,
+                                          std::function<void(agent::ConfirmationAnswer)> done) {
+    done(agent::ConfirmationAnswer::kCancel);
+}
+
+std::optional<std::string> WindowAgentHost::ResolveNavigationTarget(std::string_view text) {
+    return window_->ResolveNavigationTarget(text);
+}
+
 agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
     return StatusFor(window_->OpenAgentTab(url), "Could not open that address.");
 }

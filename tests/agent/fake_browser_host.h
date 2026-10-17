@@ -1,6 +1,7 @@
 #ifndef ISLAND_TESTS_AGENT_FAKE_BROWSER_HOST_H_
 #define ISLAND_TESTS_AGENT_FAKE_BROWSER_HOST_H_
 
+#include <algorithm>
 #include <deque>
 #include <optional>
 #include <string>
@@ -31,6 +32,9 @@ class FakeBrowserHost : public AgentBrowserHost {
     std::vector<std::string> calls;
     std::vector<DevToolsRecord> devtools;
     std::deque<DevToolsReply> replies;
+    std::vector<std::string> trusted;
+    std::vector<ConfirmationRequest> confirmations;
+    std::deque<ConfirmationAnswer> answers;  // empty answers kCancel
 
     std::vector<AgentSpaceInfo> ListSpaces() override { return spaces; }
     std::vector<AgentTabInfo> ListTabs() override { return tabs; }
@@ -80,6 +84,25 @@ class FakeBrowserHost : public AgentBrowserHost {
             replies.pop_front();
         }
         done(std::move(reply));
+    }
+
+    std::vector<std::string> TrustedSites() override { return trusted; }
+    void RequestConfirmation(ConfirmationRequest request,
+                             std::function<void(ConfirmationAnswer)> done) override {
+        const std::string host = request.host;
+        confirmations.push_back(std::move(request));
+        ConfirmationAnswer answer = ConfirmationAnswer::kCancel;
+        if (!answers.empty()) {
+            answer = answers.front();
+            answers.pop_front();
+        }
+        if (answer == ConfirmationAnswer::kTrustSite) trusted.push_back(host);
+        done(answer);
+    }
+    std::optional<std::string> ResolveNavigationTarget(std::string_view text) override {
+        if (text.empty()) return std::nullopt;
+        if (text.find("://") != std::string_view::npos) return std::string(text);
+        return "https://" + std::string(text);
     }
 
     // Queues a Runtime.evaluate reply whose value is `json_text` as a string,

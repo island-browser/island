@@ -2,6 +2,7 @@
 
 #include <array>
 #include <memory>
+#include <set>
 #include <utility>
 
 namespace island::agent {
@@ -148,20 +149,49 @@ std::string SnapshotScript(std::size_t limit) {
 })())JS";
 }
 
+// Defines __islandFacts(el): what the action gate needs to know about an element. The page cannot
+// influence the gate's decision beyond describing itself here, and the field values of password
+// inputs are never read.
+constexpr std::string_view kFactsJs = R"JS(
+  const __islandFacts = (el) => {
+    const tag = el.tagName.toLowerCase();
+    const type = String(el.type || '').toLowerCase();
+    const clip = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const labelled = tag === 'input' && ['submit', 'button', 'reset', 'image'].includes(type);
+    const submitter = (tag === 'button' && (type === 'submit' || type === '')) ||
+      (tag === 'input' && (type === 'submit' || type === 'image'));
+    return {tag, type, autocomplete: clip(el.getAttribute('autocomplete')), name: clip(el.name),
+      id: clip(el.id), aria_label: clip(el.getAttribute('aria-label')),
+      text: clip(labelled ? el.value : el.innerText),
+      in_form: !!el.form || !!(el.closest && el.closest('form')),
+      is_submit: submitter && !!el.form, page_origin: location.origin};
+  };)JS";
+
 std::string ClickTargetScript(const std::string& locator) {
-    return "(() => { const el = " + locator +
-           R"JS(;
+    return "(() => { const el = " + locator + ";" + std::string(kFactsJs) +
+           R"JS(
   if (!el) return JSON.stringify({ok: false, error: 'element not found; call page_snapshot for fresh refs'});
   el.scrollIntoView({block: 'center', inline: 'center'});
   const rect = el.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) { el.click(); return JSON.stringify({ok: true, synthetic: true}); }
-  return JSON.stringify({ok: true, x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2)});
+  const facts = __islandFacts(el);
+  if (rect.width === 0 || rect.height === 0) return JSON.stringify({ok: true, synthetic: true, facts});
+  return JSON.stringify({ok: true, x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2), facts});
+})())JS";
+}
+
+// Clicks a box-less element with element.click() once the gate has allowed it.
+std::string SyntheticClickScript(const std::string& locator) {
+    return "(() => { const el = " + locator +
+           R"JS(;
+  if (!el) return JSON.stringify({ok: false, error: 'element not found; call page_snapshot for fresh refs'});
+  el.click();
+  return JSON.stringify({ok: true});
 })())JS";
 }
 
 std::string FocusScript(const std::string& locator, bool clear) {
     return "(() => { const el = " + locator + "; const clear = " + (clear ? "true" : "false") +
-           R"JS(;
+           ";" + std::string(kFactsJs) + R"JS(
   if (!el) return JSON.stringify({ok: false, error: 'element not found; call page_snapshot for fresh refs'});
   el.scrollIntoView({block: 'center'});
   el.focus();
@@ -169,7 +199,16 @@ std::string FocusScript(const std::string& locator, bool clear) {
     if (typeof el.select === 'function') el.select();
     else if (el.isContentEditable) document.execCommand('selectAll');
   }
-  return JSON.stringify({ok: document.activeElement === el || el.contains(document.activeElement)});
+  return JSON.stringify({ok: document.activeElement === el || el.contains(document.activeElement), facts: __islandFacts(el)});
+})())JS";
+}
+
+// The focused element's facts, for page_type without a locator and page_press_key.
+std::string ActiveElementScript() {
+    return "(() => {" + std::string(kFactsJs) +
+           R"JS(
+  const el = document.activeElement;
+  return JSON.stringify({ok: true, facts: el && el !== document.body && el !== document.documentElement ? __islandFacts(el) : null});
 })())JS";
 }
 
@@ -264,6 +303,56 @@ std::optional<Value> ParseScriptJson(const Value& value) {
     std::optional<Value> parsed = json::Parse(value.string_val);
     if (!parsed || !parsed->IsObject()) return std::nullopt;
     return parsed;
+}
+
+// The element facts a script reported, or nullopt when it reported none.
+std::optional<ElementFacts> ParseFacts(const Value& script_result) {
+    const Value* facts = script_result.FindMember("facts");
+    if (facts == nullptr || !facts->IsObject()) return std::nullopt;
+    ElementFacts out;
+    out.tag = std::string(facts->StringOr("tag", ""));
+    out.type = std::string(facts->StringOr("type", ""));
+    out.autocomplete = std::string(facts->StringOr("autocomplete", ""));
+    out.name = std::string(facts->StringOr("name", ""));
+    out.id = std::string(facts->StringOr("id", ""));
+    out.aria_label = std::string(facts->StringOr("aria_label", ""));
+    out.text = std::string(facts->StringOr("text", ""));
+    out.in_form = facts->BoolOr("in_form", false);
+    out.is_submit = facts->BoolOr("is_submit", false);
+    out.page_origin = std::string(facts->StringOr("page_origin", ""));
+    return out;
+}
+
+// A real left click at (x, y): move, press, release.
+void SendClick(AgentBrowserHost& host, std::optional<std::size_t> tab, double x, double y,
+               ToolCallback done) {
+    auto shared_done = std::make_shared<ToolCallback>(std::move(done));
+    host.DevToolsCall(
+        tab, "Input.dispatchMouseEvent", MouseParams("mouseMoved", x, y),
+        [&host, tab, x, y, shared_done](DevToolsReply moved) {
+            if (!moved.ok) {
+                (*shared_done)(ToolResult::Error("page_click failed: " + moved.error));
+                return;
+            }
+            host.DevToolsCall(
+                tab, "Input.dispatchMouseEvent", MouseParams("mousePressed", x, y),
+                [&host, tab, x, y, shared_done](DevToolsReply pressed) {
+                    if (!pressed.ok) {
+                        (*shared_done)(ToolResult::Error("page_click failed: " + pressed.error));
+                        return;
+                    }
+                    host.DevToolsCall(
+                        tab, "Input.dispatchMouseEvent", MouseParams("mouseReleased", x, y),
+                        [shared_done](DevToolsReply released) {
+                            if (!released.ok) {
+                                (*shared_done)(
+                                    ToolResult::Error("page_click failed: " + released.error));
+                                return;
+                            }
+                            (*shared_done)(ToolResult::Text("Clicked."));
+                        });
+                });
+        });
 }
 
 }  // namespace
@@ -523,20 +612,51 @@ void BrowserToolbox::Call(std::string_view name, const json::Value& raw_argument
             done(ToolResult::Error("'url' is required."));
             return;
         }
-        done(StatusResult(host_.Navigate(tab_arg.tab, url),
-                          "Navigation started: " + std::string(url)));
+        const std::optional<AgentTabInfo> info = FindTab(tab_arg.tab);
+        const std::optional<std::string> target = host_.ResolveNavigationTarget(url);
+        const std::string requested(url);
+        auto navigate = [this, tab = tab_arg.tab, requested](ToolCallback finish) {
+            finish(
+                StatusResult(host_.Navigate(tab, requested), "Navigation started: " + requested));
+        };
+        if (!info || !target) {
+            // An unknown tab or an address Island refuses: the host reports it, nothing loads.
+            navigate(std::move(done));
+            return;
+        }
+        Gate({.tool = "browser_navigate",
+              .page_url = info->url,
+              .target_url = *target,
+              .tab_opened_by_agent = info->opened_by_agent},
+             tab_arg.tab, std::move(navigate), std::move(done));
         return;
     }
-    if (name == "browser_activate_tab" || name == "browser_close_tab") {
+    if (name == "browser_activate_tab") {
         if (!tab_arg.tab) {
             done(ToolResult::Error("'tab' is required."));
             return;
         }
-        if (name == "browser_activate_tab") {
-            done(StatusResult(host_.ActivateTab(*tab_arg.tab), "Tab activated."));
-        } else {
-            done(StatusResult(host_.CloseTab(*tab_arg.tab), "Tab closed."));
+        done(StatusResult(host_.ActivateTab(*tab_arg.tab), "Tab activated."));
+        return;
+    }
+    if (name == "browser_close_tab") {
+        if (!tab_arg.tab) {
+            done(ToolResult::Error("'tab' is required."));
+            return;
         }
+        const std::size_t index = *tab_arg.tab;
+        auto close = [this, index](ToolCallback finish) {
+            finish(StatusResult(host_.CloseTab(index), "Tab closed."));
+        };
+        const std::optional<AgentTabInfo> info = FindTab(index);
+        if (!info) {
+            close(std::move(done));
+            return;
+        }
+        Gate({.tool = "browser_close_tab",
+              .page_url = info->url,
+              .tab_opened_by_agent = info->opened_by_agent},
+             index, std::move(close), std::move(done));
         return;
     }
     if (name == "browser_pin_tab") {
@@ -671,6 +791,74 @@ void BrowserToolbox::Snapshot(const json::Value& args, ToolCallback done) {
              });
 }
 
+void BrowserToolbox::ResetTaskGrants() { task_grants_.clear(); }
+
+std::optional<AgentTabInfo> BrowserToolbox::FindTab(std::optional<std::size_t> tab) {
+    for (const AgentTabInfo& info : host_.ListTabs()) {
+        if (tab ? info.index == *tab : info.active) return info;
+    }
+    return std::nullopt;
+}
+
+void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
+                          std::function<void(ToolCallback)> run, ToolCallback done) {
+    // The page's own origin, as the page reports it, beats the tab list's URL, which can lag a
+    // navigation; an origin without a host (data:, sandboxed) matches no trusted site.
+    if (input.facts && !input.facts->page_origin.empty()) input.page_url = input.facts->page_origin;
+    const GateDecision decision = Classify(input, host_.TrustedSites());
+    if (decision.action == ActionClass::kFree) {
+        run(std::move(done));
+        return;
+    }
+    if (decision.action == ActionClass::kBlocked) {
+        done(ToolResult::Error("The agent cannot type into password fields."));
+        return;
+    }
+    const std::pair<std::string, GateRule> grant{decision.host, decision.rule};
+    if (decision.trusted_allowed && task_grants_.count(grant) > 0) {
+        run(std::move(done));
+        return;
+    }
+    ConfirmationRequest request;
+    request.id = "c" + std::to_string(next_confirmation_++);
+    request.tool = input.tool;
+    request.summary = decision.summary;
+    request.host = decision.host;
+    request.tab = tab;
+    request.trusted_allowed = decision.trusted_allowed;
+    const bool grantable = decision.trusted_allowed;
+    host_.RequestConfirmation(
+        std::move(request), [this, grant, grantable, run = std::move(run),
+                             done = std::move(done)](ConfirmationAnswer answer) mutable {
+            switch (answer) {
+                case ConfirmationAnswer::kAllowOnce:
+                case ConfirmationAnswer::kTrustSite:
+                    run(std::move(done));
+                    return;
+                case ConfirmationAnswer::kAllowForTask:
+                    if (grantable) task_grants_.insert(grant);
+                    run(std::move(done));
+                    return;
+                case ConfirmationAnswer::kTimeout:
+                    done(ToolResult::Error(
+                        "The person did not answer in time; the action was not performed."));
+                    return;
+                case ConfirmationAnswer::kCancel:
+                    break;
+            }
+            done(ToolResult::Error("The person declined this action."));
+        });
+}
+
+void BrowserToolbox::ReadFocusedFacts(std::optional<std::size_t> tab,
+                                      std::function<void(std::optional<ElementFacts>)> done) {
+    Evaluate(tab, ActiveElementScript(),
+             [done = std::move(done)](bool ok, Value value, std::string /*error*/) {
+                 std::optional<Value> result = ok ? ParseScriptJson(value) : std::nullopt;
+                 done(result ? ParseFacts(*result) : std::nullopt);
+             });
+}
+
 void BrowserToolbox::Click(const json::Value& args, ToolCallback done) {
     const std::string locator = ElementLocatorScript(args);
     if (locator.empty()) {
@@ -679,7 +867,8 @@ void BrowserToolbox::Click(const json::Value& args, ToolCallback done) {
     }
     const std::optional<std::size_t> tab = ReadTabArg(args).tab;
     Evaluate(tab, ClickTargetScript(locator),
-             [this, tab, done = std::move(done)](bool ok, Value value, std::string error) mutable {
+             [this, tab, locator, done = std::move(done)](bool ok, Value value,
+                                                          std::string error) mutable {
                  if (!ok) {
                      done(ToolResult::Error("page_click failed: " + error));
                      return;
@@ -693,47 +882,38 @@ void BrowserToolbox::Click(const json::Value& args, ToolCallback done) {
                      done(ToolResult::Error(std::string(target->StringOr("error", "Not found."))));
                      return;
                  }
-                 if (target->BoolOr("synthetic", false)) {
-                     done(ToolResult::Text("Clicked (element has no box; used element.click())."));
-                     return;
+                 const bool synthetic = target->BoolOr("synthetic", false);
+                 double x = 0;
+                 double y = 0;
+                 if (!synthetic) {
+                     const Value* xv = target->FindMember("x");
+                     const Value* yv = target->FindMember("y");
+                     if (xv == nullptr || yv == nullptr || !xv->IsNumber() || !yv->IsNumber()) {
+                         done(ToolResult::Error("page_click could not locate the element center."));
+                         return;
+                     }
+                     x = xv->AsDouble();
+                     y = yv->AsDouble();
                  }
-                 const Value* xv = target->FindMember("x");
-                 const Value* yv = target->FindMember("y");
-                 if (xv == nullptr || yv == nullptr || !xv->IsNumber() || !yv->IsNumber()) {
-                     done(ToolResult::Error("page_click could not locate the element center."));
-                     return;
-                 }
-                 const double x = xv->AsDouble();
-                 const double y = yv->AsDouble();
-                 auto shared_done = std::make_shared<ToolCallback>(std::move(done));
-                 host_.DevToolsCall(
-                     tab, "Input.dispatchMouseEvent", MouseParams("mouseMoved", x, y),
-                     [this, tab, x, y, shared_done](DevToolsReply moved) {
-                         if (!moved.ok) {
-                             (*shared_done)(ToolResult::Error("page_click failed: " + moved.error));
+                 GateInput input{.tool = "page_click", .facts = ParseFacts(*target)};
+                 if (const std::optional<AgentTabInfo> info = FindTab(tab))
+                     input.page_url = info->url;
+                 Gate(
+                     std::move(input), tab,
+                     [this, tab, locator, synthetic, x, y](ToolCallback finish) {
+                         if (!synthetic) {
+                             SendClick(host_, tab, x, y, std::move(finish));
                              return;
                          }
-                         host_.DevToolsCall(
-                             tab, "Input.dispatchMouseEvent", MouseParams("mousePressed", x, y),
-                             [this, tab, x, y, shared_done](DevToolsReply pressed) {
-                                 if (!pressed.ok) {
-                                     (*shared_done)(
-                                         ToolResult::Error("page_click failed: " + pressed.error));
-                                     return;
-                                 }
-                                 host_.DevToolsCall(
-                                     tab, "Input.dispatchMouseEvent",
-                                     MouseParams("mouseReleased", x, y),
-                                     [shared_done](DevToolsReply released) {
-                                         if (!released.ok) {
-                                             (*shared_done)(ToolResult::Error(
-                                                 "page_click failed: " + released.error));
-                                             return;
-                                         }
-                                         (*shared_done)(ToolResult::Text("Clicked."));
-                                     });
+                         Evaluate(
+                             tab, SyntheticClickScript(locator),
+                             [finish = std::move(finish)](bool clicked, Value, std::string err) {
+                                 finish(clicked ? ToolResult::Text("Clicked (element has no box; "
+                                                                   "used element.click()).")
+                                                : ToolResult::Error("page_click failed: " + err));
                              });
-                     });
+                     },
+                     std::move(done));
              });
 }
 
@@ -767,15 +947,24 @@ void BrowserToolbox::TypeText(const json::Value& args, ToolCallback done) {
                         });
             });
     };
+    auto gate_typing = [this, tab, submit, type_into_focus](std::optional<ElementFacts> facts,
+                                                            ToolCallback finish) {
+        GateInput input{.tool = "page_type", .facts = std::move(facts), .submit = submit};
+        if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+        Gate(std::move(input), tab, type_into_focus, std::move(finish));
+    };
 
     if (locator.empty()) {
         // No target: type into whatever currently has focus.
-        type_into_focus(std::move(done));
+        ReadFocusedFacts(
+            tab, [gate_typing, done = std::move(done)](std::optional<ElementFacts> facts) mutable {
+                gate_typing(std::move(facts), std::move(done));
+            });
         return;
     }
     Evaluate(
         tab, FocusScript(locator, args.BoolOr("clear", true)),
-        [type_into_focus, done = std::move(done)](bool ok, Value value, std::string error) mutable {
+        [gate_typing, done = std::move(done)](bool ok, Value value, std::string error) mutable {
             if (!ok) {
                 done(ToolResult::Error("page_type failed: " + error));
                 return;
@@ -790,7 +979,7 @@ void BrowserToolbox::TypeText(const json::Value& args, ToolCallback done) {
                 done(ToolResult::Error(std::string(focus_error)));
                 return;
             }
-            type_into_focus(std::move(done));
+            gate_typing(ParseFacts(*focused), std::move(done));
         });
 }
 
@@ -801,11 +990,22 @@ void BrowserToolbox::PressKey(const json::Value& args, ToolCallback done) {
         return;
     }
     const std::string key(spec->key);
-    SendKey(host_, ReadTabArg(args).tab, *spec,
-            [key, done = std::move(done)](bool ok, std::string error) {
-                done(ok ? ToolResult::Text("Pressed " + key + ".")
-                        : ToolResult::Error("page_press_key failed: " + error));
-            });
+    const std::optional<std::size_t> tab = ReadTabArg(args).tab;
+    ReadFocusedFacts(tab, [this, tab, spec, key,
+                           done = std::move(done)](std::optional<ElementFacts> facts) mutable {
+        GateInput input{.tool = "page_press_key", .facts = std::move(facts), .key = key};
+        if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+        Gate(
+            std::move(input), tab,
+            [this, tab, spec, key](ToolCallback finish) {
+                SendKey(host_, tab, *spec,
+                        [key, finish = std::move(finish)](bool ok, std::string error) {
+                            finish(ok ? ToolResult::Text("Pressed " + key + ".")
+                                      : ToolResult::Error("page_press_key failed: " + error));
+                        });
+            },
+            std::move(done));
+    });
 }
 
 void BrowserToolbox::Scroll(const json::Value& args, ToolCallback done) {
@@ -831,14 +1031,22 @@ void BrowserToolbox::EvaluateTool(const json::Value& args, ToolCallback done) {
         done(ToolResult::Error("'expression' is required."));
         return;
     }
-    Evaluate(ReadTabArg(args).tab, std::string(expression),
-             [done = std::move(done)](bool ok, Value value, std::string error) {
-                 if (!ok) {
-                     done(ToolResult::Error("Evaluation failed: " + error));
-                     return;
-                 }
-                 done(ToolResult::Json(Value::MakeObject().Set("value", std::move(value))));
-             });
+    const std::optional<std::size_t> tab = ReadTabArg(args).tab;
+    GateInput input{.tool = "page_evaluate"};
+    if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+    Gate(
+        std::move(input), tab,
+        [this, tab, script = std::string(expression)](ToolCallback finish) {
+            Evaluate(
+                tab, script, [finish = std::move(finish)](bool ok, Value value, std::string error) {
+                    if (!ok) {
+                        finish(ToolResult::Error("Evaluation failed: " + error));
+                        return;
+                    }
+                    finish(ToolResult::Json(Value::MakeObject().Set("value", std::move(value))));
+                });
+        },
+        std::move(done));
 }
 
 void BrowserToolbox::Screenshot(const json::Value& args, ToolCallback done) {

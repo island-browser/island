@@ -75,6 +75,7 @@ TEST(BrowserToolsTest, ListSpacesFormatsColors) {
 
 TEST(BrowserToolsTest, WindowToolsDispatchToHost) {
     FakeBrowserHost host;
+    host.tabs[1].opened_by_agent = true;
     BrowserToolbox toolbox(host);
     EXPECT_FALSE(CallTool(toolbox, "browser_open_tab",
                           Value::MakeObject().Set("url", Value::String("example.com")))
@@ -158,6 +159,7 @@ TEST(BrowserToolsTest, EvaluateSurfacesPageExceptions) {
                  Value::MakeObject().Set("description",
                                          Value::String("ReferenceError: x is not defined"))));
     host.replies.push_back(reply);
+    host.trusted = {"island.test"};
     BrowserToolbox toolbox(host);
     const ToolResult result = CallTool(toolbox, "page_evaluate",
                                        Value::MakeObject().Set("expression", Value::String("x")));
@@ -173,6 +175,7 @@ TEST(BrowserToolsTest, EvaluateReturnsValue) {
         "result",
         Value::MakeObject().Set("type", Value::String("number")).Set("value", Value::Int(42)));
     host.replies.push_back(reply);
+    host.trusted = {"docs.test"};
     BrowserToolbox toolbox(host);
     const ToolResult result = CallTool(
         toolbox, "page_evaluate",
@@ -184,7 +187,8 @@ TEST(BrowserToolsTest, EvaluateReturnsValue) {
 
 TEST(BrowserToolsTest, ClickUsesTrustedMouseEventsAtElementCenter) {
     FakeBrowserHost host;
-    host.QueueScriptResult(R"({"ok":true,"x":120,"y":48})");
+    host.QueueScriptResult(R"({"ok":true,"x":120,"y":48,"facts":{"tag":"a","text":"Next",
+        "page_origin":"https://island.test"}})");
     BrowserToolbox toolbox(host);
     const ToolResult result =
         CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(7)));
@@ -215,7 +219,8 @@ TEST(BrowserToolsTest, ClickReportsMissingElement) {
 
 TEST(BrowserToolsTest, TypeFocusesInsertsTextAndSubmits) {
     FakeBrowserHost host;
-    host.QueueScriptResult(R"({"ok":true})");
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text","in_form":false,
+        "page_origin":"https://island.test"}})");
     BrowserToolbox toolbox(host);
     const ToolResult result = CallTool(toolbox, "page_type",
                                        Value::MakeObject()
@@ -234,12 +239,15 @@ TEST(BrowserToolsTest, TypeFocusesInsertsTextAndSubmits) {
 
 TEST(BrowserToolsTest, TypeWithoutTargetTypesIntoFocus) {
     FakeBrowserHost host;
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text",
+        "page_origin":"https://island.test"}})");
     BrowserToolbox toolbox(host);
     const ToolResult result =
         CallTool(toolbox, "page_type", Value::MakeObject().Set("text", Value::String("abc")));
     ASSERT_FALSE(result.is_error);
-    ASSERT_EQ(host.devtools.size(), 1U);
-    EXPECT_EQ(host.devtools[0].method, "Input.insertText");
+    ASSERT_EQ(host.devtools.size(), 2U);
+    EXPECT_EQ(host.devtools[0].method, "Runtime.evaluate");
+    EXPECT_EQ(host.devtools[1].method, "Input.insertText");
 }
 
 TEST(BrowserToolsTest, DevToolsFailureBecomesToolError) {
@@ -270,6 +278,8 @@ TEST(BrowserToolsTest, ScreenshotReturnsImageContent) {
 
 TEST(BrowserToolsTest, PressKeyAndScroll) {
     FakeBrowserHost host;
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text",
+        "page_origin":"https://island.test"}})");
     BrowserToolbox toolbox(host);
     EXPECT_FALSE(
         CallTool(toolbox, "page_press_key", Value::MakeObject().Set("key", Value::String("Escape")))
@@ -281,10 +291,219 @@ TEST(BrowserToolsTest, PressKeyAndScroll) {
     const ToolResult scrolled = CallTool(
         toolbox, "page_scroll", Value::MakeObject().Set("direction", Value::String("down")));
     ASSERT_FALSE(scrolled.is_error);
-    ASSERT_EQ(host.devtools.size(), 3U);
-    EXPECT_EQ(host.devtools[0].params.FindMember("windowsVirtualKeyCode")->int_val, 27);
-    EXPECT_NE(host.devtools[2].params.StringOr("expression", "").find("scrollBy(0, "),
+    ASSERT_EQ(host.devtools.size(), 4U);
+    EXPECT_EQ(host.devtools[1].params.FindMember("windowsVirtualKeyCode")->int_val, 27);
+    EXPECT_NE(host.devtools[3].params.StringOr("expression", "").find("scrollBy(0, "),
               std::string_view::npos);
+}
+
+// ---- the action gate ---------------------------------------------------------------
+
+int CountMethod(const FakeBrowserHost& host, std::string_view method) {
+    int count = 0;
+    for (const auto& call : host.devtools) count += call.method == method;
+    return count;
+}
+
+TEST(BrowserToolsTest, ConsequentialClickWaitsForAllow) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",
+        "text":"Place order","in_form":true,"is_submit":false,
+        "page_origin":"https://shop.example.com"}})");
+    host.tabs[0].url = "https://shop.example.com/cart";
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    ToolResult r = CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(3)));
+    EXPECT_FALSE(r.is_error);
+    ASSERT_EQ(host.confirmations.size(), 1u);
+    EXPECT_EQ(host.confirmations[0].id, "c1");
+    EXPECT_EQ(host.confirmations[0].summary, "Click \"Place order\" on shop.example.com");
+    EXPECT_EQ(host.devtools.back().method, "Input.dispatchMouseEvent");
+}
+
+TEST(BrowserToolsTest, CancelledClickDispatchesNoInput) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"x":1,"y":1,"facts":{"tag":"button","text":"Delete",
+        "page_origin":"https://a.test"}})");
+    ToolResult r = CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The person declined this action.");
+    for (const auto& call : host.devtools) EXPECT_NE(call.method, "Input.dispatchMouseEvent");
+}
+
+TEST(BrowserToolsTest, PasswordTypingNeverReachesInsertText) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.trusted = {"a.test"};
+    host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"password",
+        "page_origin":"https://a.test"}})");
+    ToolResult r = CallTool(
+        toolbox, "page_type",
+        Value::MakeObject().Set("ref", Value::Int(2)).Set("text", Value::String("hunter2")));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The agent cannot type into password fields.");
+    EXPECT_TRUE(host.confirmations.empty());
+    for (const auto& call : host.devtools) EXPECT_NE(call.method, "Input.insertText");
+}
+
+TEST(BrowserToolsTest, AllowForTaskCoversSameHostAndRuleOnly) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.tabs[0].url = "https://a.test/";
+    host.answers.push_back(ConfirmationAnswer::kAllowForTask);
+    CallTool(toolbox, "page_evaluate", Value::MakeObject().Set("expression", Value::String("1")));
+    CallTool(toolbox, "page_evaluate", Value::MakeObject().Set("expression", Value::String("2")));
+    EXPECT_EQ(host.confirmations.size(), 1u);
+    // Another host is a different grant.
+    host.tabs[0].url = "https://b.test/";
+    CallTool(toolbox, "page_evaluate", Value::MakeObject().Set("expression", Value::String("2")));
+    EXPECT_EQ(host.confirmations.size(), 2u);
+    host.tabs[0].url = "https://a.test/";
+    toolbox.ResetTaskGrants();
+    CallTool(toolbox, "page_evaluate", Value::MakeObject().Set("expression", Value::String("3")));
+    EXPECT_EQ(host.confirmations.size(), 3u);
+}
+
+TEST(BrowserToolsTest, FactsAndClickPointComeFromOneEvaluation) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(R"({"ok":true,"x":5,"y":5,"facts":{"tag":"a","text":"Next",
+        "page_origin":"https://a.test"}})");
+    CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+    EXPECT_EQ(CountMethod(host, "Runtime.evaluate"), 1);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+}
+
+TEST(BrowserToolsTest, TrustSiteAnswerAllowsAndIsNotAskedAgainWhenHostTrustsIt) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.answers.push_back(ConfirmationAnswer::kTrustSite);
+    const char* const facts = R"({"ok":true,"x":5,"y":5,"facts":{"tag":"button","text":"Go",
+        "in_form":true,"is_submit":true,"page_origin":"https://a.test"}})";
+    host.QueueScriptResult(facts);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    host.QueueScriptResult(facts);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    EXPECT_EQ(host.confirmations.size(), 1u);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 6);
+}
+
+TEST(BrowserToolsTest, ForeignNavigationOfPersonTabAsks) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    const Value args = Value::MakeObject()
+                           .Set("url", Value::String("https://evil.test/"))
+                           .Set("tab", Value::Int(0));
+    EXPECT_TRUE(CallTool(toolbox, "browser_navigate", args).is_error);
+    ASSERT_EQ(host.confirmations.size(), 1u);
+    EXPECT_EQ(host.confirmations[0].summary, "Open evil.test in your tab");
+    EXPECT_EQ(host.confirmations[0].tab, std::optional<std::size_t>(0));
+    EXPECT_TRUE(host.calls.empty());
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    EXPECT_FALSE(CallTool(toolbox, "browser_navigate", args).is_error);
+    EXPECT_EQ(host.calls, (std::vector<std::string>{"navigate:0:https://evil.test/"}));
+}
+
+TEST(BrowserToolsTest, NavigationGateJudgesTheResolvedUrlNotTheRawArgument) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    // Search text resolves to another origin than the tab's: it must ask even though the raw
+    // argument names no host.
+    EXPECT_TRUE(CallTool(toolbox, "browser_navigate",
+                         Value::MakeObject().Set("url", Value::String("island.test/next")))
+                    .is_error == false);
+    EXPECT_TRUE(host.confirmations.empty());  // same origin as https://island.test/
+    EXPECT_TRUE(CallTool(toolbox, "browser_navigate",
+                         Value::MakeObject().Set("url", Value::String("other.test")))
+                    .is_error);
+    EXPECT_EQ(host.confirmations.size(), 1u);
+}
+
+TEST(BrowserToolsTest, AgentTabNavigatesFreely) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.tabs[1].opened_by_agent = true;
+    EXPECT_FALSE(CallTool(toolbox, "browser_navigate",
+                          Value::MakeObject()
+                              .Set("url", Value::String("https://evil.test/"))
+                              .Set("tab", Value::Int(1)))
+                     .is_error);
+    EXPECT_FALSE(
+        CallTool(toolbox, "browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1)))
+            .is_error);
+    EXPECT_TRUE(host.confirmations.empty());
+}
+
+TEST(BrowserToolsTest, ClosingAPersonTabAsks) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    EXPECT_TRUE(
+        CallTool(toolbox, "browser_close_tab", Value::MakeObject().Set("tab", Value::Int(0)))
+            .is_error);
+    ASSERT_EQ(host.confirmations.size(), 1u);
+    EXPECT_EQ(host.confirmations[0].summary, "Close your tab on island.test");
+    EXPECT_TRUE(host.calls.empty());
+}
+
+TEST(BrowserToolsTest, TimeoutReturnsTheTimeoutError) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.answers.push_back(ConfirmationAnswer::kTimeout);
+    const ToolResult r = CallTool(toolbox, "page_evaluate",
+                                  Value::MakeObject().Set("expression", Value::String("1")));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text,
+              "The person did not answer in time; the action was not performed.");
+    EXPECT_EQ(CountMethod(host, "Runtime.evaluate"), 0);
+}
+
+TEST(BrowserToolsTest, TypingWithoutFactsAsksAndCannotBeTrusted) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.trusted = {"island.test"};
+    // No scripted reply: the focused-element evaluation yields no facts.
+    EXPECT_TRUE(CallTool(toolbox, "page_type", Value::MakeObject().Set("text", Value::String("x")))
+                    .is_error);
+    ASSERT_EQ(host.confirmations.size(), 1u);
+    EXPECT_FALSE(host.confirmations[0].trusted_allowed);
+    EXPECT_EQ(CountMethod(host, "Input.insertText"), 0);
+}
+
+TEST(BrowserToolsTest, EnterInAFormAsksButEscapeDoesNot) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    const char* const facts = R"({"ok":true,"facts":{"tag":"input","type":"text","in_form":true,
+        "page_origin":"https://a.test"}})";
+    host.QueueScriptResult(facts);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_press_key", Value::MakeObject().Set("key", Value::String("Escape")))
+            .is_error);
+    EXPECT_TRUE(host.confirmations.empty());
+    host.QueueScriptResult(facts);
+    EXPECT_TRUE(
+        CallTool(toolbox, "page_press_key", Value::MakeObject().Set("key", Value::String("Enter")))
+            .is_error);
+    ASSERT_EQ(host.confirmations.size(), 1u);
+    EXPECT_EQ(host.confirmations[0].summary, "Press Enter in a form on a.test");
+}
+
+TEST(BrowserToolsTest, CardFieldAskedEvenOnTrustedSiteAndNeverGrantedForTask) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.trusted = {"a.test"};
+    const char* const facts = R"({"ok":true,"facts":{"tag":"input","type":"text",
+        "autocomplete":"cc-number","page_origin":"https://a.test"}})";
+    const Value args =
+        Value::MakeObject().Set("ref", Value::Int(2)).Set("text", Value::String("4111"));
+    host.QueueScriptResult(facts);
+    host.answers.push_back(ConfirmationAnswer::kAllowForTask);
+    EXPECT_FALSE(CallTool(toolbox, "page_type", args).is_error);
+    host.QueueScriptResult(facts);
+    EXPECT_TRUE(CallTool(toolbox, "page_type", args).is_error);
+    EXPECT_EQ(host.confirmations.size(), 2u);
 }
 
 TEST(BrowserToolsTest, LocatorScriptsEscapeSelectors) {
