@@ -156,12 +156,10 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
         return {ResearchStart::kFailed, "Ask a question to research."};
     }
     EnsureAgentSession();
-    if (research_.has_value()) {
+    // A research the queue does not know (a plan continuation outside it) blocks a new one;
+    // queued research waits behind the queue's own live task instead.
+    if (research_.has_value() && agent_queue_.current() == nullptr) {
         return {ResearchStart::kBusy, "A research task is already running."};
-    }
-    if (agent_session_->busy()) {
-        return {ResearchStart::kBusy,
-                "The agent is busy with another task. Try again when it finishes."};
     }
     // ISLAND_AGENT_COMMAND pins the command, so its availability is not ours to judge.
     const agent::ResolvedAgentCommand resolved = ResolvedAgent();
@@ -186,18 +184,35 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
         }
     }
 
+    // The question is the task's title and prompt; the research prompt is built when it starts.
+    const agent::AgentTask queued = agent_queue_.Enqueue(agent::TaskKind::kResearch, asked, asked,
+                                                         static_cast<std::int64_t>(NowMs()));
+    ScheduleLocalPagesRender();
+    switch (queued.state) {
+        case agent::TaskState::kQueued:
+            return {ResearchStart::kQueued, "Queued: it starts when the agent finishes its task."};
+        case agent::TaskState::kFailed:
+            return {ResearchStart::kFailed, start_error_};
+        default:
+            return {ResearchStart::kStarted, {}};
+    }
+}
+
+bool BrowserWindow::StartResearchTask(const agent::AgentTask& queued) {
+    const std::string& asked = queued.context;
     ResearchTask task;
     task.question = asked;
     task.space_name = ResearchSpaceName(asked);
     task.turns_ended_before = agent_session_->transcript().turns_ended();
+    task.task_id = queued.id;
     // The page context would only distract the researcher: it works from the question.
     if (!SendToAgent(BuildResearchPrompt(asked))) {
-        const std::string message = agent_session_->error().empty()
-                                        ? "The agent could not be started. Check Settings."
-                                        : agent_session_->error();
+        start_error_ = agent_session_->error().empty()
+                           ? "The agent could not be started. Check Settings."
+                           : agent_session_->error();
         research_status_.question = asked;
-        SetResearchStatus("failed", message);
-        return {ResearchStart::kFailed, message};
+        SetResearchStatus("failed", start_error_);
+        return false;
     }
     research_ = std::move(task);
     research_status_.question = asked;
@@ -213,7 +228,7 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     OpenResearchSpace(research_->space_name);
     OpenPlanTab();
     SetAgentPanelOpen(true);
-    return {ResearchStart::kStarted, {}};
+    return true;
 }
 
 void BrowserWindow::OpenResearchSpace(const std::string& name) {
@@ -262,16 +277,32 @@ void BrowserWindow::CancelResearch() {
         return;
     }
     if (research_->awaiting_approval) {
-        // Nothing runs while the plan waits, so there is no turn to cancel.
+        // Nothing runs while the plan waits, so there is no turn to cancel: the queue moves on
+        // at once.
+        const std::string id = research_->task_id;
         research_.reset();
         SetResearchStatus("cancelled", "Research cancelled.");
+        const agent::AgentTask* live = agent_queue_.current();
+        if (!id.empty() && live != nullptr && live->id == id) {
+            StopAgentTask();
+        }
         return;
     }
     if (agent_session_ == nullptr) {
         return;
     }
-    CancelPendingConfirmations();
-    agent_session_->Cancel();
+    StopAgentTask();
+}
+
+void BrowserWindow::EndResearchTask(const std::string& task_id, bool ok) {
+    if (task_id.empty()) {
+        return;
+    }
+    if (in_flight_id_ == task_id) {
+        in_flight_id_.clear();
+    }
+    agent_queue_.OnTurnFinished(task_id, ok);
+    ScheduleLocalPagesRender();
 }
 
 void BrowserWindow::OnAgentSessionChanged() {
@@ -279,6 +310,8 @@ void BrowserWindow::OnAgentSessionChanged() {
     RefreshAddressIndicators();
     RefreshPlanFromTranscript();
     RenderPlanPages();
+    ReportQueueProgress();
+    CheckInFlightTurn();
     if (!research_.has_value() || research_->awaiting_approval || research_finish_posted_ ||
         closing_ || agent_session_ == nullptr || agent_session_->busy()) {
         return;
@@ -321,6 +354,9 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
         research_finish_posted_ = false;
         SetResearchStatus("awaiting_approval", outcome.message);
         RenderPlanPages();
+        // The task waits for the person (no turn end is reported: the Run that follows is the
+        // same task's turn).
+        SyncQueueWaiting();
         return;
     }
     const ResearchTask task = std::move(*research_);
@@ -330,9 +366,11 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     switch (outcome.kind) {
         case ResearchOutcome::Kind::kCancelled:
             SetResearchStatus("cancelled", outcome.message);
+            EndResearchTask(task.task_id, false);
             return;
         case ResearchOutcome::Kind::kFailed:
             SetResearchStatus("failed", outcome.message);
+            EndResearchTask(task.task_id, false);
             return;
         case ResearchOutcome::Kind::kAwaitingApproval:  // handled above
             return;
@@ -355,6 +393,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     OpenReportTabImpl(id, task.space_name, /*group_with_plan=*/true);
     RenderStartPages();
     ScheduleLocalPagesRender();
+    EndResearchTask(task.task_id, true);
 }
 
 // --- Plan tab -------------------------------------------------------------------
@@ -363,11 +402,11 @@ namespace {
 constexpr std::size_t kMaxPlanInstructionBytes = 1000;
 }  // namespace
 
-bool BrowserWindow::SendToAgent(std::string text) {
+bool BrowserWindow::SendToAgent(std::string text, std::string context) {
     if (agent_send_for_test_) {
         return agent_send_for_test_(std::move(text));
     }
-    return agent_session_ != nullptr && agent_session_->Send(std::move(text), {});
+    return agent_session_ != nullptr && agent_session_->Send(std::move(text), std::move(context));
 }
 
 std::uint64_t BrowserWindow::TurnsEnded() const {
@@ -422,6 +461,7 @@ void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan, bool cont
     if (!continues_run && approves_plan) {
         plan_unapproved_ = false;
     }
+    SyncQueueWaiting();  // the plan no longer waits: the task is running again
     SetResearchStatus("running", {});
     RenderPlanPages();
 }
@@ -1156,7 +1196,9 @@ void BrowserWindow::ContinueReportInAgent(const ResearchReport& report,
     if (in_conversation) {
         return;
     }
-    if (agent_session_->busy()) {
+    // Sent outside the queue, so it waits for the queue to be empty as well as the session.
+    if (agent_session_->busy() || agent_queue_.current() != nullptr ||
+        agent_queue_.queued_count() > 0) {
         ReportPageResult(source, "error",
                          "The agent is busy. The panel is open; send the report once it is free.");
         return;

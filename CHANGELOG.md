@@ -15,6 +15,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Agent work runs from a visible task queue: prompts sent while a task runs (chat, Ask agent,
+  Research) are queued instead of refused, shown in a Tasks strip at the top of the agent panel
+  (move up/down, remove, Stop, Clear finished) and as "Queued · #n" under the message. A task that
+  waits for a confirmation card or a research plan approval holds the queue; Stop withdraws its
+  card and starts the next task. The Agent button reads `Agent · 3/7` (plan progress) or
+  `Agent · 2 queued`, and the command palette has "Agent tasks". Closing the panel keeps the task
+  running; each task start clears "Allow for this task" grants.
 - The agent asks before consequential page actions: a confirmation card in the agent panel
   (Allow once, Allow for this task, Trust this site, Cancel; Esc cancels) that waits 120 s, marks
   the tab and the Agent button with a dot (it never opens the panel or takes focus), survives

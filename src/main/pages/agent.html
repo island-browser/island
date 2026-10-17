@@ -228,6 +228,33 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .setup .copy-row { margin-top: 6px; }
 .endpoint code { display: block; margin-top: 6px; padding: 6px 8px; word-break: break-all; }
 
+/* Tasks strip: the live task, the queue, and what finished */
+#tasks { flex: none; margin: 0 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface); }
+#tasks .tasks-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px 10px; }
+#tasks h2 { margin: 0; flex: 1; font: 500 10.5px/1.4 var(--mono); text-transform: uppercase;
+  letter-spacing: .08em; color: var(--text-2); }
+#tasks ul { list-style: none; margin: 0; padding: 0 4px 4px; max-height: 148px; overflow-y: auto; }
+.task { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--radius-sm);
+  font-size: 12.5px; min-height: 28px; }
+.task[data-state="running"], .task[data-state="waiting"] { background: var(--accent-soft); }
+.task .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task[data-state="done"] .title, .task[data-state="cancelled"] .title { color: var(--text-2); }
+.task[data-state="failed"] .title { color: var(--danger); }
+.task .meta { flex: none; font: 11px/1.4 var(--mono); color: var(--text-2); }
+.task[data-state="waiting"] .meta { color: var(--accent); }
+.task .tbtn { width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  background: transparent; color: var(--text-2); display: grid; place-items: center; flex: none;
+  font-size: 13px; line-height: 1; padding: 0; }
+.task .tbtn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.task .tbtn:disabled { opacity: .3; cursor: default; }
+.task .tbtn.stop { width: auto; padding: 0 8px; font-size: 12px; }
+.link-btn { border: 0; background: transparent; color: var(--text-2); font: 11px/1.4 var(--mono);
+  padding: 2px 4px; border-radius: 4px; }
+.link-btn:hover { color: var(--text); background: var(--surface-2); }
+.queued-tag { font: 11px/1.4 var(--mono); color: var(--text-2); text-align: right; margin-top: 3px; }
+.user.queued .bubble { opacity: .65; border-style: dashed; }
+
 /* Composer */
 footer { flex: none; padding: 8px 12px 10px; }
 .composer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -264,6 +291,7 @@ textarea::placeholder { color: var(--text-2); }
   <button class="icon-btn" id="close" title="Hide panel" aria-label="Hide agent panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
   <div class="menu" id="provider-menu" role="menu" aria-label="Choose an agent" hidden></div>
 </header>
+<section id="tasks" aria-label="Agent tasks" hidden></section>
 <main id="log" aria-live="polite"></main>
 <footer>
   <div id="confirmations" role="alertdialog" aria-label="The agent needs your approval" hidden></div>
@@ -284,7 +312,7 @@ textarea::placeholder { color: var(--text-2); }
 (function () {
   var MESSAGE_PREFIX = "\u0001island:";
   var state = { session: { state: "idle", status: "Not running", items: [], busy: false, command: "" },
-                context: null, endpoint: "", theme: null, confirmations: [], provider: "", providers: [], env_override: false };
+                context: null, endpoint: "", theme: null, confirmations: [], tasks: [], provider: "", providers: [], env_override: false };
   var includeContext = true;
   var log = document.getElementById("log");
   var input = document.getElementById("input");
@@ -293,6 +321,8 @@ textarea::placeholder { color: var(--text-2); }
   var renderedSignature = "";
   var confirmBox = document.getElementById("confirmations");
   var confirmRendered = "";
+  var tasksBox = document.getElementById("tasks");
+  var tasksRendered = "";
 
   function post(message) { console.log(MESSAGE_PREFIX + JSON.stringify(message)); }
 
@@ -415,6 +445,86 @@ textarea::placeholder { color: var(--text-2); }
     if (!pending.length) return false;
     post({ type: "confirm", id: pending[0].id, answer: "cancel" });
     return true;
+  }
+
+  var TASK_STATE = { queued: "Queued", running: "Running", waiting: "Needs you", done: "Done",
+                     failed: "Failed", cancelled: "Stopped" };
+
+  function taskButton(label, text, onClick, disabled, extra) {
+    var button = el("button", "tbtn" + (extra ? " " + extra : ""), text);
+    button.type = "button";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.disabled = !!disabled;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function taskNode(task, queuedIndex, queuedCount) {
+    var row = el("li", "task");
+    row.setAttribute("data-state", task.state);
+    row.appendChild(el("span", "title", task.title));
+    var meta = TASK_STATE[task.state] || task.state;
+    if ((task.state === "running" || task.state === "waiting") && task.total > 0) {
+      meta = (task.state === "waiting" ? "Needs you \u00b7 " : "") + task.done + "/" + task.total;
+    } else if (task.state === "queued") {
+      meta = "#" + task.position;
+    }
+    row.appendChild(el("span", "meta", meta));
+    if (task.state === "queued") {
+      row.appendChild(taskButton("Move up", "\u2191", function () {
+        post({ type: "task_move", id: task.id, dir: "up" });
+      }, queuedIndex === 0));
+      row.appendChild(taskButton("Move down", "\u2193", function () {
+        post({ type: "task_move", id: task.id, dir: "down" });
+      }, queuedIndex === queuedCount - 1));
+      row.appendChild(taskButton("Remove from the queue", "\u2715", function () {
+        post({ type: "task_remove", id: task.id });
+      }));
+    } else if (task.state === "running" || task.state === "waiting") {
+      row.appendChild(taskButton("Stop this task", "Stop", function () {
+        post({ type: "task_stop" });
+      }, false, "stop"));
+    }
+    return row;
+  }
+
+  function renderTasks(tasks) {
+    var signature = JSON.stringify(tasks);
+    if (signature === tasksRendered) return;
+    tasksRendered = signature;
+    tasksBox.textContent = "";
+    tasksBox.hidden = !tasks.length;
+    if (!tasks.length) return;
+    var head = el("div", "tasks-head");
+    head.appendChild(el("h2", "", "Tasks"));
+    var finished = tasks.some(function (t) { return t.state === "done" || t.state === "failed" || t.state === "cancelled"; });
+    if (finished) {
+      var clear = el("button", "link-btn", "Clear finished");
+      clear.type = "button";
+      clear.addEventListener("click", function () { post({ type: "tasks_clear_finished" }); });
+      head.appendChild(clear);
+    }
+    tasksBox.appendChild(head);
+    var list = el("ul");
+    var queuedCount = tasks.filter(function (t) { return t.state === "queued"; }).length;
+    var queuedIndex = 0;
+    tasks.forEach(function (task) {
+      list.appendChild(taskNode(task, task.state === "queued" ? queuedIndex : -1, queuedCount));
+      if (task.state === "queued") queuedIndex += 1;
+    });
+    tasksBox.appendChild(list);
+  }
+
+  // A queued chat prompt is not in the transcript yet: it shows under the conversation, dimmed,
+  // with its place in the queue.
+  function queuedMessageNode(task) {
+    var wrap = el("div", "item");
+    var line = el("div", "user queued");
+    line.appendChild(el("div", "bubble", task.prompt || task.title));
+    wrap.appendChild(line);
+    wrap.appendChild(el("div", "queued-tag", "Queued \u00b7 #" + task.position));
+    return wrap;
   }
 
   function itemNode(item) {
@@ -715,6 +825,12 @@ textarea::placeholder { color: var(--text-2); }
     if (!menu.hidden && !menu.contains(event.target) && !menuButton.contains(event.target)) closeMenu(false);
   });
 
+  function isBusy() {
+    return !!(state.session && state.session.busy) || (state.tasks || []).some(function (t) {
+      return t.state === "running" || t.state === "waiting";
+    });
+  }
+
   function render() {
     var session = state.session || {};
     document.getElementById("agent-name").textContent = providerName();
@@ -728,15 +844,19 @@ textarea::placeholder { color: var(--text-2); }
 
     var items = session.items || [];
     var showSetup = session.state === "failed" || (session.state === "idle" && !!session.error);
-    var logSignature = JSON.stringify([items, showSetup, session.error, session.command, state.endpoint,
+    var tasks = state.tasks || [];
+    renderTasks(tasks);
+    var queuedMessages = tasks.filter(function (t) { return t.state === "queued" && t.prompt; });
+    var logSignature = JSON.stringify([items, queuedMessages, showSetup, session.error, session.command, state.endpoint,
                                        state.provider, state.providers, state.env_override]);
     if (logSignature !== renderedSignature) {
       var nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
       renderedSignature = logSignature;
       log.textContent = "";
-      if (!items.length && !showSetup) log.appendChild(heroNode());
+      if (!items.length && !showSetup && !queuedMessages.length) log.appendChild(heroNode());
       items.forEach(function (item) { log.appendChild(itemNode(item)); });
       if (showSetup) log.appendChild(setupNode(session));
+      queuedMessages.forEach(function (task) { log.appendChild(queuedMessageNode(task)); });
       if (nearBottom || !items.length) log.scrollTop = log.scrollHeight;
     }
 
@@ -751,11 +871,13 @@ textarea::placeholder { color: var(--text-2); }
       // composer must never land on Allow.
     }
 
-    var busy = !!session.busy;
+    // While a task runs, text in the composer queues a new one; an empty composer stops it.
+    var hasText = !!input.value.trim();
+    var busy = isBusy() && !hasText;  // nothing to queue: the button stops the task
     sendButton.innerHTML = busy ? STOP_ICON : SEND_ICON;
-    sendButton.title = busy ? "Stop (Esc)" : "Send (Enter)";
-    sendButton.setAttribute("aria-label", busy ? "Stop" : "Send");
-    sendButton.disabled = !busy && !input.value.trim();
+    sendButton.title = busy ? "Stop (Esc)" : isBusy() ? "Queue (Enter)" : "Send (Enter)";
+    sendButton.setAttribute("aria-label", busy ? "Stop" : isBusy() ? "Queue" : "Send");
+    sendButton.disabled = !busy && !hasText;
 
     if (state.context && state.context.url) {
       contextButton.hidden = false;
@@ -817,15 +939,15 @@ textarea::placeholder { color: var(--text-2); }
   input.addEventListener("keydown", function (event) {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      if (!(state.session && state.session.busy)) submit(input.value);
+      submit(input.value);
     } else if (event.key === "Escape") {
-      if (state.session && state.session.busy) post({ type: "cancel" });
+      if (isBusy()) post({ type: "cancel" });
       else post({ type: "close_panel" });
     }
   });
   sendButton.addEventListener("click", function () {
-    if (state.session && state.session.busy) post({ type: "cancel" });
-    else submit(input.value);
+    if (input.value.trim()) submit(input.value);
+    else if (isBusy()) post({ type: "cancel" });
   });
   contextButton.addEventListener("click", function () { includeContext = !includeContext; render(); });
   document.getElementById("new-chat").addEventListener("click", function () { post({ type: "new_chat" }); });
@@ -835,6 +957,7 @@ textarea::placeholder { color: var(--text-2); }
     if (next.theme) { state.theme = next.theme; applyTheme(next.theme); }
     if (next.session) state.session = next.session;
     if ("context" in next) state.context = next.context;
+    if ("tasks" in next) state.tasks = next.tasks || [];
     if ("confirmations" in next) state.confirmations = next.confirmations || [];
     if ("endpoint" in next) state.endpoint = next.endpoint;
     if ("provider" in next) state.provider = next.provider;

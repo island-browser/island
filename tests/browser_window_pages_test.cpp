@@ -2,6 +2,7 @@
 // BrowserWindow. The CEF view types must be complete before browser_window.h.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -858,6 +859,7 @@ TEST(BrowserWindowPagesTest, ResearchExplainsAMissingOrBlankCustomAgent) {
 TEST(BrowserWindowPagesTest, ASecondResearchOrAnAgentTurnInFlightIsRefusedNotQueued) {
     const ScopedNoAgentEnv no_env;
     CefRefPtr<BrowserWindow> window = MakeWindow();
+    // A research task the queue does not know (a continuation outside it) still blocks a new one.
     window->SetResearchTaskForTest("first question");
     const BrowserWindow::ResearchStartResult result = window->StartResearch("second question");
     EXPECT_EQ(result.code, BrowserWindow::ResearchStart::kBusy);
@@ -2184,6 +2186,223 @@ TEST(BrowserWindowPagesTest, ConfirmationsCoexistAndAnswerIndependently) {
     EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
     EXPECT_EQ(log, (std::vector<std::string>{"c2:3"}));
+}
+
+// --- Agent task queue ---------------------------------------------------------------------
+
+std::vector<std::string> TaskStates(const BrowserWindow& window) {
+    std::vector<std::string> states;
+    const std::optional<Value> state = json::Parse(window.AgentPanelStateJson());
+    const Value* tasks = state ? state->FindMember("tasks") : nullptr;
+    if (tasks != nullptr) {
+        for (const Value& task : tasks->array_val) {
+            states.push_back(std::string(task.StringOr("title", "")) + ":" +
+                             std::string(task.StringOr("state", "")));
+        }
+    }
+    return states;
+}
+
+TEST(BrowserWindowPagesTest, ChatWhileATaskRunsIsQueued) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    SendAgent(*window, R"({"type":"send","text":"first","include_context":false})");
+    SendAgent(*window, R"({"type":"send","text":"second","include_context":false})");
+    EXPECT_EQ(sent, (std::vector<std::string>{"first"}));
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"first:running", "second:queued"}));
+    const std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    const Value& queued = state->FindMember("tasks")->array_val[1];
+    EXPECT_EQ(queued.IntOr("position", 0), 1);
+    EXPECT_EQ(queued.StringOr("prompt", ""), "second");
+
+    // The turn end starts the next task; a failed turn does not stop the queue.
+    window->FinishAgentTurnForTest(false);
+    EXPECT_EQ(sent, (std::vector<std::string>{"first", "second"}));
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"second:running", "first:failed"}));
+
+    SendAgent(*window, R"({"type":"tasks_clear_finished"})");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"second:running"}));
+}
+
+TEST(BrowserWindowPagesTest, QueuedTasksMoveAndAreRemovedFromThePanel) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    for (const char* text : {"a", "b", "c", "d"}) {
+        window->SubmitAgentPromptForTest(text);
+    }
+    SendAgent(*window, R"({"type":"task_move","id":"t4","dir":"up"})");
+    SendAgent(*window, R"({"type":"task_remove","id":"t2"})");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"a:running", "d:queued", "c:queued"}));
+    // The live task cannot be removed.
+    SendAgent(*window, R"({"type":"task_remove","id":"t1"})");
+    EXPECT_EQ(TaskStates(*window).size(), 3U);
+}
+
+TEST(BrowserWindowPagesTest, ResearchEntersTheQueue) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SubmitAgentPromptForTest("chat first");
+    const BrowserWindow::ResearchStartResult queued = window->StartResearch("why is the sky blue");
+    EXPECT_EQ(queued.code, BrowserWindow::ResearchStart::kQueued);
+    EXPECT_EQ(sent, (std::vector<std::string>{"chat first"}));
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->agent_queue().tasks()[1].kind, agent::TaskKind::kResearch);
+
+    window->FinishAgentTurnForTest(true);
+    ASSERT_EQ(sent.size(), 2U);
+    EXPECT_NE(sent[1].find("why is the sky blue"), std::string::npos);
+    EXPECT_TRUE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "running");
+
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "no";
+    window->CompleteResearch(failed);
+    EXPECT_EQ(window->agent_queue().tasks().front().state, agent::TaskState::kFailed);
+    EXPECT_EQ(window->agent_queue().current(), nullptr);
+}
+
+TEST(BrowserWindowPagesTest, AResearchWaitingForApprovalHoldsTheQueueUntilRun) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    ASSERT_EQ(window->StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window->SubmitAgentPromptForTest("later");
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+    EXPECT_EQ(window->agent_queue().current()->state, agent::TaskState::kWaitingForYou);
+    EXPECT_EQ(sent.size(), 1U);  // "later" has not started
+
+    SendPlanMessage(*window, R"({"type":"run"})");
+    ASSERT_EQ(sent.size(), 2U);  // the Run turn; the queued chat still waits
+    EXPECT_EQ(window->agent_queue().current()->state, agent::TaskState::kRunning);
+    EXPECT_EQ(window->agent_queue().queued_count(), 1U);
+
+    ResearchOutcome failed;  // (a report needs real tabs to open)
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "stopped";
+    window->CompleteResearch(failed);
+    EXPECT_EQ(sent.size(), 3U);
+    EXPECT_EQ(sent[2], "later");
+}
+
+TEST(BrowserWindowPagesTest, StoppingAWaitingTaskDeclinesItsCardAndAdvances) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SubmitAgentPromptForTest("buy it");
+    window->SubmitAgentPromptForTest("next");
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    EXPECT_EQ(window->agent_queue().current()->state, agent::TaskState::kWaitingForYou);
+
+    SendAgent(*window, R"({"type":"task_stop"})");
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_EQ(sent, (std::vector<std::string>{"buy it", "next"}));
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"next:running", "buy it:cancelled"}));
+}
+
+TEST(BrowserWindowPagesTest, TheQueueWaitsUntilTheLastCardOfATaskCloses) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    window->SubmitAgentPromptForTest("one");
+    window->SubmitAgentPromptForTest("two");
+    for (const char* id : {"c1", "c2"}) {
+        window->ShowConfirmation(MakeConfirmation(id), [](agent::ConfirmationAnswer) {});
+    }
+    // The turn ends while cards are open: recorded, applied when the last card closes.
+    window->FinishAgentTurnForTest(true);
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"one:waiting", "two:queued"}));
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kCancel);
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"one:waiting", "two:queued"}));
+    window->AnswerConfirmation("c2", agent::ConfirmationAnswer::kCancel);
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"two:running", "one:done"}));
+}
+
+TEST(BrowserWindowPagesTest, ClosingThePanelKeepsTheTaskRunning) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    window->SubmitAgentPromptForTest("long job");
+    window->SubmitAgentPromptForTest("after");
+    SendAgent(*window, R"({"type":"close_panel"})");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"long job:running", "after:queued"}));
+}
+
+TEST(BrowserWindowPagesTest, AChatThatCannotBeSentEndsFailedAndTheQueueMovesOn) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    bool accept = false;
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&](std::string text) {
+        sent.push_back(std::move(text));
+        return accept;
+    });
+    window->SubmitAgentPromptForTest("refused");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"refused:failed"}));
+    accept = true;
+    window->SubmitAgentPromptForTest("taken");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"taken:running", "refused:failed"}));
+}
+
+TEST(BrowserWindowPagesTest, AgentButtonLabel) {
+    agent::AgentTaskQueue queue([](const agent::AgentTask&) {});
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent");
+    queue.Enqueue(agent::TaskKind::kChat, "a", {}, 0);
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent");  // running, no plan
+    queue.OnProgress("t1", 3, 7);
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent \xC2\xB7 3/7");
+    queue.OnProgress("t1", 0, 0);
+    queue.Enqueue(agent::TaskKind::kChat, "b", {}, 0);
+    queue.Enqueue(agent::TaskKind::kChat, "c", {}, 0);
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent \xC2\xB7 2 queued");
+}
+
+TEST(BrowserWindowPagesTest, PaletteListsAgentTasks) {
+    const std::vector<PaletteCommandEntry> commands = BrowserWindow::PaletteCommands();
+    const auto found = std::find_if(commands.begin(), commands.end(), [](const auto& command) {
+        return command.id == "agent_tasks";
+    });
+    ASSERT_NE(found, commands.end());
+    EXPECT_EQ(found->title, "Agent tasks");
+}
+
+TEST(BrowserWindowPagesTest, TheQueueFixtureShowsOneRunningAndTwoQueuedTasks) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ShowQueueFixtureForDev();
+    EXPECT_EQ(window->agent_queue().current()->done, 3U);
+    EXPECT_EQ(window->agent_queue().queued_count(), 2U);
 }
 
 }  // namespace

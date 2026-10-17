@@ -616,6 +616,41 @@ class SettingsPage(unittest.TestCase):
         self.assertIn("var(--border-2", keycap.group(0))
 
 
+class AgentTasksStrip(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_renders_the_strip_with_move_remove_and_stop_controls(self) -> None:
+        self.assertIn('id="tasks"', self.html)
+        for glyph in ("\\u2191", "\\u2193", "\\u2715"):
+            with self.subTest(glyph=glyph):
+                self.assertIn(glyph, self.html)
+        self.assertIn('"Stop"', self.html)
+        self.assertIn('"Clear finished"', self.html)
+
+    def test_posts_the_documented_task_messages(self) -> None:
+        self.assertRegex(self.html, r'type: "task_move", id: task\.id, dir: "up"')
+        self.assertRegex(self.html, r'type: "task_move", id: task\.id, dir: "down"')
+        self.assertIn('type: "task_remove", id: task.id', self.html)
+        self.assertIn('type: "task_stop"', self.html)
+        self.assertIn('type: "tasks_clear_finished"', self.html)
+
+    def test_a_queued_message_shows_its_place_in_the_queue(self) -> None:
+        self.assertIn('"Queued \\u00b7 #"', self.html)
+
+    def test_the_composer_queues_instead_of_blocking_while_a_task_runs(self) -> None:
+        self.assertNotIn("if (!(state.session && state.session.busy)) submit", self.html)
+        self.assertIn('"Queue (Enter)"', self.html)
+
+    def test_strip_text_is_set_as_text_and_uses_theme_variables_only(self) -> None:
+        node = self.html[self.html.index("function taskNode") :][:1800]
+        self.assertNotIn("innerHTML", node)
+        css = self.html[self.html.index("/* Tasks strip") :][:2400]
+        css = css[: css.index("/* Composer */")]
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(css, r"rgba?\(")
+
+
 class AgentConfirmationCard(unittest.TestCase):
     def setUp(self) -> None:
         self.html = page("agent.html")

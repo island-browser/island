@@ -2661,6 +2661,28 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
+std::string AgentButtonLabel(const agent::AgentTaskQueue& queue) {
+    const agent::AgentTask* live = queue.current();
+    if (live != nullptr && live->total > 0) {
+        return "Agent \xC2\xB7 " + std::to_string(live->done) + "/" + std::to_string(live->total);
+    }
+    if (queue.queued_count() > 0) {
+        return "Agent \xC2\xB7 " + std::to_string(queue.queued_count()) + " queued";
+    }
+    return "Agent";
+}
+
+void BrowserChrome::SetAgentButtonLabel(std::string label) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || label == agent_button_label_) {
+        return;
+    }
+    agent_button_label_ = std::move(label);
+    agent_button_->SetText(agent_button_label_);
+    agent_button_->SetAccessibleName(agent_button_label_ == "Agent" ? "Agent panel"
+                                                                    : agent_button_label_);
+}
+
 void BrowserChrome::SetAgentNeedsYou(bool needs_you) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || needs_you == agent_needs_you_) {

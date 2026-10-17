@@ -21,12 +21,13 @@
 #include "agent_navigation.h"
 #include "agent_providers.h"
 #include "agent_session.h"
+#include "agent_task_queue.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
-#include "browser_tools.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "browser_import.h"
+#include "browser_tools.h"
 #include "cef_content_blocker.h"
 #include "cheatsheet_overlay.h"
 #include "chrome_snapshot.h"
@@ -249,7 +250,8 @@ class BrowserWindow : public CefClient,
     };
     enum class ResearchStart : std::uint8_t {
         kStarted,
-        kBusy,          // another research task or agent turn is running
+        kBusy,          // research cannot be queued now (the window is closing)
+        kQueued,        // another agent task is live; the research starts when it finishes
         kNotInstalled,  // the selected agent is not on PATH (status carries the message)
         kFailed,        // the agent refused or could not be launched
     };
@@ -341,6 +343,16 @@ class BrowserWindow : public CefClient,
     void SetAgentSendForTest(std::function<bool(std::string)> send) {
         agent_send_for_test_ = std::move(send);
     }
+    // Ends the turn of the task the window started last, as the session would (chat tasks).
+    void FinishAgentTurnForTest(bool ok) { FinishInFlightTurn(ok); }
+    bool SubmitAgentPromptForTest(std::string text) {
+        return SubmitAgentPrompt(std::move(text), /*include_context=*/false);
+    }
+    [[nodiscard]] const agent::AgentTaskQueue& agent_queue() const noexcept { return agent_queue_; }
+    // Dev capture (`agent_fixture:queue`): one running and two queued tasks, nothing sent.
+    void ShowQueueFixtureForDev();
+    // The command palette's command list (the window's own commands).
+    [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands();
     void SetPlanCloseConfirmationForTest(
         std::function<bool(std::string_view, std::string_view, std::string_view)> confirm) {
         plan_close_confirmation_for_test_ = std::move(confirm);
@@ -869,7 +881,32 @@ class BrowserWindow : public CefClient,
     void HandleAgentPageMessage(const json::Value& message);
     // The panel's "send" path, shared by the start page's Ask agent mode.
     // Returns false when the session refused the turn (it is busy with another one).
+    // Queues the prompt as a chat task (it starts at once when nothing else is live). Returns
+    // false when the prompt is blank or the agent could not take it.
     bool SubmitAgentPrompt(std::string text, bool include_context);
+    // Queue plumbing. StartQueuedTask is the queue's StartFn: it sends one task's prompt.
+    void StartQueuedTask(const agent::AgentTask& task);
+    // Stops the live task: cancels the turn, withdraws its confirmation cards and lets the
+    // queue move on (after the stopped turn's end when one is still in flight).
+    void StopAgentTask();
+    // Reports the end of the turn started for the live chat task (ok: it was not an error).
+    void FinishInFlightTurn(bool ok);
+    // Compares the session with the in-flight chat turn after a session change.
+    void CheckInFlightTurn();
+    void FinishPostedTurn();
+    // The body of a research task start (the queue's StartFn for kResearch).
+    bool StartResearchTask(const agent::AgentTask& queued);
+    void EndResearchTask(const std::string& task_id, bool ok);
+    // For paths that drop the live turn without an end event (new chat, agent switch, teardown):
+    // the live task is cancelled and the queue moves on at once.
+    void AbandonInFlightTurn();
+    [[nodiscard]] std::optional<agent::TaskKind> TaskKindOf(std::string_view id) const;
+    void ReportQueueProgress();
+    // Edge-triggered OnWaiting: a card is open or the research waits for approval.
+    void SyncQueueWaiting();
+    void HandleTaskMessage(std::string_view type, const json::Value& message);
+    [[nodiscard]] json::Value TasksStateJson() const;
+    void RefreshAgentButtonLabel();
     // Pushes StartPageStateJson to every tab currently showing the start page
     // (and each open report page its report and theme).
     void RenderStartPages();
@@ -917,7 +954,7 @@ class BrowserWindow : public CefClient,
     // Takes the newest plan from the agent transcript (when it has one) and keeps the edits.
     void RefreshPlanFromTranscript();
     // Sends one user turn to the research agent (through the test seam when set).
-    bool SendToAgent(std::string text);
+    bool SendToAgent(std::string text, std::string context = {});
     // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
     // approval, and it becomes the turn the research classifies next. `approves_plan` is true
     // for a Run, whose turn may end with a plain report. `continues_run` (a failed-step retry)
@@ -1066,6 +1103,8 @@ class BrowserWindow : public CefClient,
         bool awaiting_approval = false;
         // The turn in flight is a Run of the approved plan (see SendPlanTurn).
         bool plan_approved = false;
+        // The queue task this research runs as ("" when none, as in tests that set it directly).
+        std::string task_id;
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;
@@ -1174,6 +1213,19 @@ class BrowserWindow : public CefClient,
     };
     std::optional<ShortcutConflict> shortcut_conflict_;
     std::unique_ptr<agent::AgentSession> agent_session_;
+    // Agent work runs one task at a time from this queue (see src/agent/agent_task_queue.h).
+    agent::AgentTaskQueue agent_queue_{
+        [this](const agent::AgentTask& task) { StartQueuedTask(task); }};
+    // The task whose prompt the session accepted; its turn end is reported with this id.
+    std::string in_flight_id_;
+    bool turn_finish_posted_ = false;
+    bool queue_waiting_ = false;
+    std::string waiting_id_;   // the task OnWaiting(…, true) was last sent for
+    std::string start_error_;  // why the last StartQueuedTask failed
+    // Transcript items before the live task's prompt, so older plans are not its progress.
+    std::size_t task_items_base_ = 0;
+    std::size_t reported_done_ = 0, reported_total_ = 0;
+    bool queue_fixture_ = false;
     std::vector<PendingConfirmation> pending_confirmations_;
     std::chrono::seconds confirmation_clock_offset_{0};
     bool confirmation_timer_armed_ = false;

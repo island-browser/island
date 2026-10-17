@@ -932,6 +932,8 @@ bool BrowserWindow::SetAgentProvider(std::string_view id) {
             agent_session_->Configure(std::move(config));
         } else {
             static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
+            // The old agent's turn end never arrives.
+            AbandonInFlightTurn();
         }
     }
     ScheduleLocalPagesRender();
@@ -1034,7 +1036,8 @@ std::string BrowserWindow::AgentPanelStateJson() const {
             .Set("endpoint",
                  json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
                                                                                 : std::string()))
-            .Set("confirmations", ConfirmationsStateJson());
+            .Set("confirmations", ConfirmationsStateJson())
+            .Set("tasks", TasksStateJson());
     json::Value providers = AgentProvidersStateJson();
     for (auto& [key, value] : providers.object_val) {
         if (key == "provider" || key == "providers" || key == "env_override" ||
@@ -1052,6 +1055,7 @@ std::string BrowserWindow::AgentPanelStateJson() const {
 }
 
 void BrowserWindow::ScheduleLocalPagesRender() {
+    RefreshAgentButtonLabel();
     if ((agent_panel_ == nullptr && !internal_page_.has_value()) || agent_panel_render_scheduled_ ||
         closing_) {
         return;
@@ -2186,11 +2190,12 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
     if (type == "send") {
         SubmitAgentPrompt(std::string(message.StringOr("text", "")),
                           message.BoolOr("include_context", true));
-    } else if (type == "cancel") {
+    } else if (type == "cancel" || type == "task_stop") {
         // Cards carry no origin, so Stop withdraws every open card; a stopped turn's action
         // must not run later.
-        CancelPendingConfirmations();
-        agent_session_->Cancel();
+        StopAgentTask();
+    } else if (type == "task_move" || type == "task_remove" || type == "tasks_clear_finished") {
+        HandleTaskMessage(type, message);
     } else if (type == "permission") {
         const json::Value* option = message.FindMember("option_id");
         agent_session_->ResolvePermission(message.IntOr("request_id", -1),
@@ -2199,8 +2204,10 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
                                               : std::nullopt);
         RefreshAddressIndicators();
     } else if (type == "new_chat") {
-        CancelPendingConfirmations();
+        // The new conversation drops the live turn without an end event.
         agent_session_->NewChat();
+        AbandonInFlightTurn();
+        CancelPendingConfirmations();
     } else if (type == "set_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "start") {
@@ -2218,11 +2225,280 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
 }
 
 bool BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
+    if (closing_ || TrimmedCopy(text).empty()) {
+        return false;
+    }
     EnsureAgentSession();
-    const std::string context = include_context ? ActiveTabAgentContext() : std::string();
-    const bool sent = agent_session_->Send(std::move(text), context);
+    std::string context = include_context ? ActiveTabAgentContext() : std::string();
+    const agent::AgentTask task =
+        agent_queue_.Enqueue(agent::TaskKind::kChat, std::move(text), std::move(context),
+                             static_cast<std::int64_t>(UnixNowMs()));
     ScheduleLocalPagesRender();
-    return sent;
+    return task.state != agent::TaskState::kFailed;
+}
+
+void BrowserWindow::StartQueuedTask(const agent::AgentTask& task) {
+    in_flight_id_.clear();
+    queue_waiting_ = false;
+    waiting_id_.clear();
+    reported_done_ = 0;
+    reported_total_ = 0;
+    start_error_.clear();
+    bool started = false;
+    if (closing_) {
+        start_error_ = "The window is closing.";
+    } else {
+        EnsureAgentSession();
+        // A grant ("allow for this task") never outlives the task that earned it.
+        if (agent_host_ != nullptr) {
+            agent_host_->toolbox().ResetTaskGrants();
+        }
+        task_items_base_ = agent_session_->transcript().items().size();
+        if (queue_fixture_) {
+            started = true;  // dev capture: the task is live, nothing is sent
+        } else if (task.kind == agent::TaskKind::kResearch) {
+            started = StartResearchTask(task);
+        } else {
+            started = SendToAgent(task.prompt, task.context);
+            if (!started) {
+                start_error_ = agent_session_->error().empty() ? "The agent could not be started."
+                                                               : agent_session_->error();
+            }
+        }
+    }
+    if (!started) {
+        // Reported after the failed start, so the queue moves on to the next task.
+        agent_queue_.OnTurnFinished(task.id, false);
+        return;
+    }
+    in_flight_id_ = task.id;
+    SyncQueueWaiting();
+}
+
+std::optional<agent::TaskKind> BrowserWindow::TaskKindOf(std::string_view id) const {
+    for (const agent::AgentTask& task : agent_queue_.tasks()) {
+        if (task.id == id) {
+            return task.kind;
+        }
+    }
+    return std::nullopt;
+}
+
+void BrowserWindow::FinishInFlightTurn(bool ok) {
+    if (in_flight_id_.empty()) {
+        return;
+    }
+    // Cleared first: the queue starts the next task from inside this call.
+    const std::string id = std::move(in_flight_id_);
+    in_flight_id_.clear();
+    agent_queue_.OnTurnFinished(id, ok);
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::CheckInFlightTurn() {
+    // Research reports its own end (CompleteResearch); the test seam never touches the session.
+    if (in_flight_id_.empty() || turn_finish_posted_ || agent_send_for_test_ || closing_ ||
+        agent_session_ == nullptr || agent_session_->busy() ||
+        TaskKindOf(in_flight_id_) != agent::TaskKind::kChat) {
+        return;
+    }
+    if (chrome_ == nullptr) {
+        FinishPostedTurn();
+        return;
+    }
+    // The session is inside its own event handler here, and the next task sends from the queue:
+    // finish from a posted task.
+    turn_finish_posted_ = true;
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::FinishPostedTurn,
+                                                            CefRefPtr<BrowserWindow>(this))));
+}
+
+void BrowserWindow::FinishPostedTurn() {
+    turn_finish_posted_ = false;
+    if (in_flight_id_.empty() || closing_ || agent_session_ == nullptr || agent_session_->busy() ||
+        TaskKindOf(in_flight_id_) != agent::TaskKind::kChat) {
+        return;
+    }
+    // A dead agent reports no turn end; the failed state is the end.
+    FinishInFlightTurn(agent_session_->state() != agent::AcpState::kFailed);
+}
+
+void BrowserWindow::ReportQueueProgress() {
+    if (in_flight_id_.empty() || agent_session_ == nullptr) {
+        return;
+    }
+    const std::vector<agent::TranscriptItem>& items = agent_session_->transcript().items();
+    for (std::size_t index = items.size(); index > task_items_base_; --index) {
+        const agent::TranscriptItem& item = items[index - 1];
+        if (item.kind != agent::TranscriptItem::Kind::kPlan) {
+            continue;
+        }
+        const std::size_t total = item.plan.size();
+        const std::size_t done = static_cast<std::size_t>(
+            std::count_if(item.plan.begin(), item.plan.end(),
+                          [](const agent::AcpPlanEntry& e) { return e.status == "completed"; }));
+        if (done != reported_done_ || total != reported_total_) {
+            reported_done_ = done;
+            reported_total_ = total;
+            agent_queue_.OnProgress(in_flight_id_, done, total);
+        }
+        return;
+    }
+}
+
+void BrowserWindow::SyncQueueWaiting() {
+    // Waiting is a boolean for the queue: it ends only when the last card closes and the
+    // research no longer waits for approval.
+    const bool want =
+        !pending_confirmations_.empty() || (research_.has_value() && research_->awaiting_approval);
+    if (want == queue_waiting_) {
+        return;
+    }
+    if (want) {
+        if (in_flight_id_.empty()) {
+            return;  // an external agent's card: no task of ours waits
+        }
+        waiting_id_ = in_flight_id_;
+        queue_waiting_ = true;
+        agent_queue_.OnWaiting(waiting_id_, true);
+    } else {
+        queue_waiting_ = false;
+        const std::string id = std::move(waiting_id_);
+        waiting_id_.clear();
+        agent_queue_.OnWaiting(id, false);
+    }
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::StopAgentTask() {
+    if (agent_queue_.current() == nullptr) {
+        // Nothing of ours is live (an external agent's cards may be): just withdraw the cards.
+        CancelPendingConfirmations();
+        if (agent_session_ != nullptr) {
+            agent_session_->Cancel();
+        }
+        return;
+    }
+    if (agent_session_ != nullptr) {
+        agent_session_->Cancel();
+    }
+    const bool turn_open = !in_flight_id_.empty() && !agent_send_for_test_ &&
+                           agent_session_ != nullptr && agent_session_->busy();
+    // The queue stops first: withdrawing a card can lift "waiting", and a task that no longer
+    // is live ignores it.
+    queue_waiting_ = false;
+    waiting_id_.clear();
+    if (turn_open) {
+        agent_queue_.StopCurrent();  // the next task starts at the stopped turn's end
+    } else {
+        in_flight_id_.clear();
+        agent_queue_.StopCurrentAndAdvanceNow();
+    }
+    CancelPendingConfirmations();
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::AbandonInFlightTurn() {
+    in_flight_id_.clear();
+    queue_waiting_ = false;
+    waiting_id_.clear();
+    agent_queue_.StopCurrentAndAdvanceNow();
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::HandleTaskMessage(std::string_view type, const json::Value& message) {
+    const std::string_view id = message.StringOr("id", "");
+    if (type == "task_move") {
+        if (message.StringOr("dir", "") == "up") {
+            agent_queue_.MoveUp(id);
+        } else if (message.StringOr("dir", "") == "down") {
+            agent_queue_.MoveDown(id);
+        }
+    } else if (type == "task_remove") {
+        agent_queue_.Remove(id);
+    } else if (type == "tasks_clear_finished") {
+        agent_queue_.ClearFinished();
+    }
+    ScheduleLocalPagesRender();
+}
+
+json::Value BrowserWindow::TasksStateJson() const {
+    json::Value list = json::Value::MakeArray();
+    std::size_t queued_position = 0;
+    for (const agent::AgentTask& task : agent_queue_.tasks()) {
+        const char* state = "queued";
+        switch (task.state) {
+            case agent::TaskState::kQueued:
+                state = "queued";
+                break;
+            case agent::TaskState::kRunning:
+                state = "running";
+                break;
+            case agent::TaskState::kWaitingForYou:
+                state = "waiting";
+                break;
+            case agent::TaskState::kDone:
+                state = "done";
+                break;
+            case agent::TaskState::kFailed:
+                state = "failed";
+                break;
+            case agent::TaskState::kCancelled:
+                state = "cancelled";
+                break;
+        }
+        const char* kind = "chat";
+        switch (task.kind) {
+            case agent::TaskKind::kChat:
+                kind = "chat";
+                break;
+            case agent::TaskKind::kResearch:
+                kind = "research";
+                break;
+            case agent::TaskKind::kCollect:
+                kind = "collect";
+                break;
+            case agent::TaskKind::kAsk:
+                kind = "ask";
+                break;
+        }
+        json::Value entry =
+            json::Value::MakeObject()
+                .Set("id", json::Value::String(task.id))
+                .Set("kind", json::Value::String(kind))
+                .Set("title", json::Value::String(task.title))
+                .Set("state", json::Value::String(state))
+                .Set("done", json::Value::Int(static_cast<std::int64_t>(task.done)))
+                .Set("total", json::Value::Int(static_cast<std::int64_t>(task.total)));
+        if (task.state == agent::TaskState::kQueued) {
+            ++queued_position;
+            entry.Set("position", json::Value::Int(static_cast<std::int64_t>(queued_position)));
+            if (task.kind == agent::TaskKind::kChat) {
+                entry.Set("prompt", json::Value::String(task.prompt));
+            }
+        }
+        list.Push(std::move(entry));
+    }
+    return list;
+}
+
+void BrowserWindow::RefreshAgentButtonLabel() {
+    if (chrome_ != nullptr && !closing_) {
+        chrome_->SetAgentButtonLabel(AgentButtonLabel(agent_queue_));
+    }
+}
+
+void BrowserWindow::ShowQueueFixtureForDev() {
+    queue_fixture_ = true;
+    EnsureAgentSession();
+    for (const char* prompt : {"Summarize the open tabs about the espresso machine",
+                               "Find the cheapest flight from Berlin to Lisbon in May",
+                               "Draft a reply to the landlord about the lease"}) {
+        agent_queue_.Enqueue(agent::TaskKind::kChat, prompt, {},
+                             static_cast<std::int64_t>(UnixNowMs()));
+    }
+    agent_queue_.OnProgress("t1", 3, 7);
+    ScheduleLocalPagesRender();
 }
 
 std::string BrowserWindow::StartPageStateJson() const {
@@ -2441,6 +2717,8 @@ void BrowserWindow::CloseAgentPanelAndSession() {
     research_.reset();
     CancelPendingConfirmations();
     agent_session_.reset();
+    // Teardown: the session is gone, so its turn end never comes. closing_ fails the rest.
+    AbandonInFlightTurn();
 }
 
 void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
@@ -4615,10 +4893,13 @@ void BrowserWindow::ShowCommandPalette() {
     for (const ResearchReport& report : reports_.reports) {
         reports.push_back({.id = report.id, .title = report.title, .question = report.question});
     }
-    std::vector<PaletteCommandEntry> commands;
-    commands.push_back({.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"});
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
-                           std::move(commands), std::move(reports));
+                           PaletteCommands(), std::move(reports));
+}
+
+std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
+    return {{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
+            {.id = "agent_tasks", .title = "Agent tasks"}};
 }
 
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
@@ -4701,6 +4982,9 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
         case PaletteEntryKind::kCommand:
             if (selection.command.id == "sleep_inactive_tabs") {
                 static_cast<void>(SleepInactiveTabsNow());
+            } else if (selection.command.id == "agent_tasks") {
+                // The Tasks strip sits on top of the panel.
+                SetAgentPanelOpen(true);
             }
             break;
         case PaletteEntryKind::kReport:
@@ -4907,6 +5191,7 @@ void BrowserWindow::RefreshConfirmationUi() {
     if (chrome_ != nullptr) {
         chrome_->SetAgentNeedsYou(!pending_confirmations_.empty());
     }
+    SyncQueueWaiting();
     ScheduleLocalPagesRender();
 }
 

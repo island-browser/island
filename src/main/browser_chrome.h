@@ -21,6 +21,7 @@
 
 #include "address_bar_model.h"
 #include "address_indicators.h"
+#include "agent_task_queue.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "collapsed_rail.h"
@@ -284,6 +285,10 @@ class BrowserChromeHost {
     // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
     virtual void OpenBlockerSettings() = 0;
 };
+
+// The Agent entry's label for the task queue: the live task's plan progress when it has one
+// ("Agent · 3/7"), else the number of queued tasks ("Agent · 2 queued"), else "Agent".
+[[nodiscard]] std::string AgentButtonLabel(const agent::AgentTaskQueue& queue);
 
 class BrowserChrome final : public NavigationObserver {
   public:
@@ -844,6 +849,8 @@ class BrowserChrome final : public NavigationObserver {
     // panel may be closed). The dot sits on the entry's icon, the one place a label button can
     // draw a mark.
     void SetAgentNeedsYou(bool needs_you);
+    // The Agent entry's text: "Agent", "Agent · 3/7" or "Agent · 2 queued" (AgentButtonLabel).
+    void SetAgentButtonLabel(std::string label);
     [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
     // A short updater notice ("Island 0.5.0 is available"): the rail's
     // Settings button takes the accent tint and carries it in its tooltip
@@ -960,6 +967,7 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
     bool agent_needs_you_ = false;
+    std::string agent_button_label_ = "Agent";
     std::string update_notice_;
     CefRefPtr<CefBrowserView> browser_view_;
     // U6 split view state; both stay null while a single view is attached.

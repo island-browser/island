@@ -14,10 +14,11 @@
 //       `research:<question>` starts a Research task and `open_report` opens the newest stored
 //       report in a new tab, `plan_fixture` opens a Plan tab with the sample research plan
 //       waiting for approval, `agent_pages:<count>[:<gap>]` opens that many agent pages through
-//       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and `cheatsheet` opens the shortcut cheatsheet.
-//       `agent_fixture:confirm` shows a sample agent confirmation card in the panel.
-//       `settings:<section>` opens Settings on one section (appearance, shortcuts, ...).
-//       `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
+//       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and
+//       `cheatsheet` opens the shortcut cheatsheet. `agent_fixture:confirm` shows a sample agent
+//       confirmation card in the panel. `agent_fixture:queue` shows one running and two queued
+//       agent tasks in the panel. `settings:<section>` opens Settings on one section (appearance,
+//       shortcuts, ...). `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
 //       density, font,
 //       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the
 //       Settings > Appearance path.

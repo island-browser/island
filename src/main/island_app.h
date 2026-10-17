@@ -57,6 +57,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenPlanFixture();
     // Developer capture only: a sample agent confirmation card (`agent_fixture:confirm`).
     void ShowConfirmationFixture();
+    // Developer capture only: one running and two queued agent tasks (`agent_fixture:queue`).
+    void ShowQueueFixture();
     // Developer capture only: `count` agent pages opened back to back during the plan fixture.
     void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);

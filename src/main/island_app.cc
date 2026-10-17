@@ -226,6 +226,13 @@ void IslandApp::ShowConfirmationFixture() {
     }
 }
 
+void IslandApp::ShowQueueFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowQueueFixtureForDev();
+    }
+}
+
 void IslandApp::OpenAgentPagesForDev(int count, int gap_ms) {
     CEF_REQUIRE_UI_THREAD();
     if (browser_window_ != nullptr) {
