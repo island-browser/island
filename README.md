@@ -1,149 +1,162 @@
-# Island Browser
+# Island
 
-Island is a Phase 1 C++20 desktop browser skeleton built directly on Chromium Embedded Framework
-(CEF) and native `cef_views`. The implemented app opens one native top-level `CefWindow` containing
-one `CefBrowserView` with a deterministic local data page. Browser chrome, tabs, spaces,
-persistence, command bar, settings, extensions, and expanded CDP features are not implemented yet.
+Island is a desktop web browser with a built-in AI agent. It is a C++20 application built directly
+on the Chromium Embedded Framework (CEF) and CEF's native `cef_views` toolkit. It is not Electron
+and not a web-based shell: the sidebar, tabs, palettes and overlays are native views.
 
-## Status
+> **Status:** Island is pre-1.0. Every build is an **unsigned GitHub prerelease**. Only macOS
+> arm64 has local build, run and package evidence. See [Status and limits](#status-and-limits).
 
-- Intended desktop targets: `macosx64`, `macosarm64`, `windows64`, `windowsarm64`, `linux64`,
-  `linuxarm64`.
-- Local evidence: macOS arm64 clean build passed; dependency verify passed; CTest passed 18/18; the
-  runtime showed one window/page/title/marker, blocked popups, handled history back/forward, and
-  cleaned up after native close/menu Quit; package tests passed 11/11.
-- Needed evidence: macOS x64 plus Windows/Linux targets require native GitHub Actions build,
-  test, and package evidence before they are treated as verified.
-- Windows build matrix covers both sandbox off and sandbox on.
-- Public stable release is blocked until signing and notarization verification exist.
+## What you get
 
-## Features at a glance
+**Looks and sidebar**
+- Three looks, switchable live in Settings > Appearance: **Native** (the default: a macOS-style
+  source list, system font, one blue accent), **Arc** (space-tinted canvas and a rounded page
+  card) and **Graphite**.
+- A sidebar on the left or right with pinned tabs, tabs and a space switcher. `Cmd/Ctrl+B`
+  collapses it to a 52 DIP icon rail of tab favicons.
+- Light, dark or system theme; density, corner radius, font and shadow are adjustable.
 
-- Arc-style sidebar tinted by each space's color, pinned tabs, compact address field, floating
-  page card, command palette (`Cmd/Ctrl+K`) and search palette (`Cmd/Ctrl+Shift+K`).
-- **All tabs** (`Cmd/Ctrl+Shift+A`): every space's tabs as searchable cards; arrow keys, Enter,
-  Delete, `P` to pin, drag a card onto another space to move it.
-- **Settings** (`Cmd/Ctrl+,`): theme, sidebar agent, MCP client config, keyboard shortcuts (click a
-  shortcut and press new keys; conflicts are flagged), and import.
-- **Import** from Chrome-family browsers, Safari and Firefox (bookmarks), and Arc (spaces with their
-  colors and pinned tabs). Nothing leaves the computer.
-- **AI agents**: an Agent Client Protocol agent runs in the sidebar (`Cmd/Ctrl+J`) — Claude Code
-  (the default, via `npx -y @agentclientprotocol/claude-agent-acp`), Codex, OpenCode, Gemini CLI,
-  Qwen Code, Goose, or your own command; switch from the panel's title or Settings — and Island
-  serves browser tools over MCP at `http://127.0.0.1:9223/mcp` (bearer token in
-  `agent-endpoint.json`, or the `island_mcp_bridge` stdio bridge). Settings shows a ready-to-paste
-  `mcpServers` config.
-- **Updates** (Settings > Updates): Island checks its GitHub releases shortly after startup (at
-  most once a day) or on demand, downloads the archive for your platform, verifies it against the
-  release's `SHA256SUMS.txt`, and swaps it in on "Restart to update", keeping the previous version
-  as a backup until the new one starts. Pre-releases are opt-in. Builds run from a CMake build
-  directory never update themselves; `ISLAND_DISABLE_UPDATES=1` turns updates off.
-- **Native content blocking** (Settings > Privacy): EasyList and EasyPrivacy are evaluated by
-  Brave's `adblock` Rust engine before subresources load. Ads and trackers can be controlled
-  separately, sites can be allowlisted, and the All tabs view shows each tab's blocked count.
+**Tabs, spaces and split view**
+- Spaces group tabs (work, travel, research). Rename, reorder and switch them from the sidebar,
+  menu or keyboard.
+- Pin tabs, reopen closed tabs, and see every space's tabs as searchable cards in **All tabs**
+  (`Cmd/Ctrl+Shift+A`).
+- Split view shows two tabs side by side (`Cmd/Ctrl+Shift+S`) with a keyboard-adjustable divider.
 
-## Versions
+**Search and palettes**
+- The command palette (`Cmd/Ctrl+K`) finds open tabs, spaces, bookmarks, on-device history,
+  research reports and commands. The search palette (`Cmd/Ctrl+Shift+K`) sends a query to Google,
+  ChatGPT, Perplexity, Claude or Gemini.
+- The start page has three modes: Search, Ask Agent and Research, plus six speed-dial tiles.
 
-The version lives in `VERSION` (SemVer) and feeds the build, the app's About page, the agent
-protocols, the macOS bundle, and the site
-([island-browser/site](https://github.com/island-browser/site)). Release notes go under
-`## [Unreleased]` in `CHANGELOG.md`; cut a release with:
+**Agent and research**
+- An [Agent Client Protocol](https://agentclientprotocol.com) agent runs in the sidebar panel
+  (`Cmd/Ctrl+J`): Claude Code (default), Codex, OpenCode, Gemini CLI, Qwen Code, Goose or your own
+  command.
+- **Research** mode asks the agent for a branching plan first. A pinned **Plan** tab shows it as a
+  graph; nothing runs until you approve. Pages the agent opens become grouped child tabs, and the
+  answer lands in a **Report** tab.
+- Island serves browser tools to external agents over **MCP** at `http://127.0.0.1:<port>/mcp`
+  (bearer token). Settings > Agent & tools has a ready-to-paste config.
+
+**Privacy**
+- Native ad and tracker blocking on Brave's Rust `adblock` engine with EasyList and EasyPrivacy,
+  with separate controls and a per-site allowlist.
+- On-device history search. History never leaves your computer and can be turned off or cleared.
+
+**Reading and pages**
+- Reader view (`Cmd/Ctrl+Alt+R`) and find in page (`Cmd/Ctrl+F`).
+- **Tab sleep** frees memory from inactive tabs. **Peek** shows a link in a floating card
+  (`Cmd/Ctrl+click`).
+
+**Settings, shortcuts and updates**
+- Settings (`Cmd/Ctrl+,`) has General, Appearance, Privacy & blocking, Tabs, Reader, Agent &
+  tools, Shortcuts and About sections, with search.
+- Every shortcut is rebindable. `Cmd/Ctrl+/` shows a cheatsheet of the ten most used.
+- Import bookmarks from Chrome-family browsers, Safari and Firefox, and spaces with pinned tabs
+  from Arc. Nothing leaves the computer.
+- The built-in updater checks GitHub releases, verifies the SHA-256 checksum and swaps the app in
+  on "Restart to update".
+
+## Install
+
+Download a build from [GitHub Releases](https://github.com/island-browser/island/releases):
+
+- `nightly` is a rolling prerelease of the latest `main`.
+- `vX.Y.Z` is one prerelease per version, titled `Island X.Y.Z (unsigned)`.
+
+Each release has a portable archive per target (`island_browser-<version>-<target>.zip` for macOS
+and Windows, `.tar.gz` for Linux), installers (`.dmg`, `.deb`, `-setup.exe`) and `SHA256SUMS.txt`.
+Targets are `macosarm64`, `macosx64`, `windows64`, `windowsarm64`, `linux64` and `linuxarm64`.
+
+Builds are not code-signed or notarized, so macOS Gatekeeper refuses to open them at first. Either
+allow the app in System Settings > Privacy & Security, or remove the quarantine flag:
 
 ```bash
-python3 scripts/version.py bump minor   # or major / patch; --pre beta for a pre-release
-python3 scripts/version.py check
+xattr -dr com.apple.quarantine /Applications/Island.app
 ```
 
-When the bump lands on `main`, the commit is tagged `vX.Y.Z` automatically. The site, which lives
-in its own repository, picks up the new version and changelog on its next daily build (or a manual
-run of its deploy workflow).
+Windows SmartScreen may also warn. While this repository is private, its releases are visible only
+to people with access to it. The [user guide](docs/user-guide/getting-started/install.md) has the
+step-by-step version.
 
-## Downloads / releases
+## Build from source
 
-Every push to `main` that changes the app builds all six targets and publishes them on
-[GitHub Releases](https://github.com/island-browser/island/releases) (`build-release.yml`):
-
-- `nightly` — a rolling prerelease that always holds the latest successful build of `main`.
-- `vX.Y.Z` — one prerelease per version, titled `Island X.Y.Z (unsigned)`, with that version's
-  `CHANGELOG.md` notes.
-
-Each release carries `island_browser-<version>-<target>.zip` (macOS, Windows) or `.tar.gz` (Linux)
-and a `SHA256SUMS.txt` to verify them against. **All builds are unsigned prereleases**: they are not
-code-signed or notarized, so macOS Gatekeeper refuses to open the app until you allow it in System
-Settings > Privacy & Security (or run `xattr -dr com.apple.quarantine island_browser.app`), and
-Windows SmartScreen may warn. While the repository is private, its releases
-are visible only to people with access to the repository, and downloading assets needs an
-authenticated GitHub request.
-
-## Dependencies
-
-CEF 150 and Geist are pinned in `deps/dependencies.lock.json` and installed outside git:
-
-- `third_party/cef/` for the CEF binary distribution.
-- `assets/fonts/` for Geist and Geist Mono files.
-
-The first CMake configure also needs network access for GoogleTest v1.15.2 through CMake
-`FetchContent`.
-
-The native content blocker needs a stable Rust toolchain (`cargo` and `rustc`). CMake enables
-`ISLAND_ENABLE_CONTENT_BLOCKER` by default when `cargo` is found and otherwise builds a no-op
-implementation. Pass `-DISLAND_ENABLE_CONTENT_BLOCKER=OFF` explicitly to test that fallback.
-The Rust crate and dependency graph are pinned by `src/content_blocker_ffi/Cargo.toml` and
-`Cargo.lock`; EasyList and EasyPrivacy themselves are downloaded at runtime and never committed.
+Requirements: CMake, a C++20 compiler, Python 3, network access for the first configure
+(GoogleTest), and a stable Rust toolchain for the ad blocker (without `cargo`, a no-op blocker is
+built).
 
 ```bash
 bash -n scripts/setup_deps.sh
 ./scripts/setup_deps.sh --dry-run
 ./scripts/setup_deps.sh
-./scripts/setup_deps.sh --force
 python3 scripts/deps.py verify
-python3 scripts/deps.py check-updates
-```
-
-Setup syntax is `./scripts/setup_deps.sh [--dry-run] [--force] [--target <target>]`. Use
-`--target <target>` with `setup_deps.sh` or `scripts/deps.py` when resolving a non-host target.
-
-## Build, test, and run
-
-```bash
 cmake -B build -S .
 cmake --build build
 ctest --test-dir build --output-on-failure
 open build/src/main/island_browser.app
 ```
 
-On macOS the app bundle is `build/src/main/island_browser.app`. It should show one Island window with
-one local data page. Smoke mode uses a deterministic marker page:
+`scripts/setup_deps.sh` vendors the pinned CEF distribution into `third_party/cef/` and the Geist
+fonts into `assets/fonts/`; both stay out of git. Smoke run on macOS:
 
 ```bash
 open build/src/main/island_browser.app --args --island-smoke-test
+pgrep -fl island_browser || true   # after quitting: no helper processes should remain
 ```
 
-Startup should remain data-only with no external requests. Popups should be blocked, history
-back/forward should work on the smoke history entry, and close/menu Quit should leave no
-`island_browser` helper processes after quitting. Cmd+R has a decisive accepted signal; physical
-Cmd+Q remains a manual caveat.
+The AI-agent kernel and the search kernel also build standalone, without CEF:
 
 ```bash
-pgrep -fl island_browser || true
+cmake -B build-agent -S src/agent && cmake --build build-agent
+ctest --test-dir build-agent --output-on-failure
+python3 -m pytest tests/deps tests/package tests/design tests/version
 ```
 
-## Package an unsigned candidate
+Build-time detail: [AGENTS.md](AGENTS.md), [docs/release-process.md](docs/release-process.md).
 
-```bash
-python3 scripts/package.py --target macosarm64 --build-dir build --version 0.1.0 --output-dir dist
-```
+## Project layout
 
-Packaging writes `island_browser-<version>-<target>.zip` for macOS/Windows targets,
-`island_browser-<version>-<target>.tar.gz` for Linux targets, and `SHA256SUMS.txt`. Each package
-contains `build-metadata.json` and `THIRD_PARTY_NOTICES.txt`; current metadata is unsigned:
-`signed=false`, `notarized=false`, and `publicReleaseEligible=false`.
+| Path | Contents |
+|------|----------|
+| `src/main/` | The browser: CEF app and window, native chrome, tabs, spaces, local pages (`pages/`) |
+| `src/agent/` | CEF-free agent kernel: MCP tools endpoint and ACP client |
+| `src/search/` | CEF-free search kernel behind on-device history search |
+| `src/content_blocker_ffi/` | Rust crate wrapping Brave's `adblock` engine |
+| `tests/`, `bench/` | GoogleTest and pytest suites; benchmark support |
+| `scripts/`, `deps/`, `cmake/` | Dependency vendoring, packaging, versioning, platform CMake |
+| `docs/` | Process docs, specs and plans, and the [user guide](docs/user-guide/README.md) |
+| `DESIGN.md` | The product and visual design narrative |
 
-## More docs
+## Status and limits
 
-- `docs/dependency-update-process.md`
-- `docs/supported-platforms.md`
-- `docs/release-process.md`
-- Current Phase 1 design/plan: `docs/superpowers/specs/2026-08-08-island-browser-phase1-design.md`
-  and `docs/superpowers/plans/2026-08-08-island-browser-phase1.md`
-- Historical Phase 0 design/plan: `docs/superpowers/`
+- **Unsigned prereleases only.** Stable public release is blocked until signing and notarization
+  verification exist.
+- **Platform evidence.** Only macOS arm64 is built, tested and run locally. The other five targets
+  need native GitHub Actions evidence before they count as supported; see
+  [docs/supported-platforms.md](docs/supported-platforms.md).
+- **Visual acceptance** (Phase 3 U10) still needs a human with display access.
+- **Not in scope:** browser extensions (they need CEF's Chrome runtime; Island uses Alloy), sync,
+  profiles and accounts, and more than one top-level window.
+- **macOS deviations:** the split divider moves through menu items and shortcuts, not by dragging.
+
+## Documentation
+
+- [User guide](docs/user-guide/README.md): task-first help, written to be published on GitBook.
+- [CHANGELOG.md](CHANGELOG.md): every release and the unreleased notes.
+- [DESIGN.md](DESIGN.md): why Island looks and behaves the way it does.
+- [docs/supported-platforms.md](docs/supported-platforms.md) and
+  [docs/release-process.md](docs/release-process.md).
+
+## Contributing
+
+- Read [AGENTS.md](AGENTS.md) first. Only units of an accepted spec and plan are implemented.
+- Work on a branch and open a pull request. Build and test locally before committing; GitHub
+  Actions triggers are mostly paused.
+- Add your change to `## [Unreleased]` in `CHANGELOG.md`. Do not edit `VERSION` by hand: the
+  project owner bumps it with `python3 scripts/version.py bump <part>` and merges the PR. Run
+  `python3 scripts/version.py check` before committing version changes.
+- Style: Google-based, 4-space indent, 100 columns, explicit `std::`, target-scoped CMake.
+
+Licensed under the terms in [LICENSE](LICENSE).

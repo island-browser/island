@@ -24,6 +24,7 @@ each accepted phase.
 | Directory | Purpose |
 |-----------|---------|
 | `superpowers/` | Dated phase specs and plans (see `superpowers/AGENTS.md`) |
+| `user-guide/` | The end-user guide in GitBook layout (see `user-guide/AGENTS.md`) |
 
 ## For AI Agents
 
