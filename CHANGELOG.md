@@ -50,6 +50,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Native's Back and Forward buttons now share one continuous toolbar surface, removing the thin
+  rail-colored seams beside the ghost-button group.
 - The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
   control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
   the most visited sites (from history, one per host, opened in the current tab). Tab and

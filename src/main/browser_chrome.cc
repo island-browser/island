@@ -3015,7 +3015,7 @@ void BrowserChrome::ApplyControlTheme() {
     // Rail-descendant panels are created with no delegate and would otherwise inherit
     // the window's primary background; painting them the rail color keeps the whole
     // column one uniform tinted surface so the floating card separates cleanly.
-    navigation_row_->SetBackgroundColor(rail.argb);
+    navigation_row_->SetBackgroundColor(NavigationRowSurface(tokens_).argb);
     address_row_->SetBackgroundColor(rail.argb);
     tab_strip_->SetBackgroundColor(rail.argb);
     tab_list_scroll_->SetBackgroundColor(rail.argb);
@@ -3035,12 +3035,9 @@ void BrowserChrome::ApplyControlTheme() {
     reader_button_->SetBackgroundColor(address_well.argb);
     // Back and Forward are ghost icon buttons: no fill of their own, so only the
     // native hover/pressed ink shows when targeted.
-    back_button_->SetBackgroundColor(rail.argb);
-    forward_button_->SetBackgroundColor(rail.argb);
-    if (tokens_.look == LookPreset::kNative) {
-        back_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
-        forward_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
-    }
+    const ArgbColor navigation_surface = NavigationRowSurface(tokens_);
+    back_button_->SetBackgroundColor(navigation_surface.argb);
+    forward_button_->SetBackgroundColor(navigation_surface.argb);
     share_button_->SetBackgroundColor(tokens_.surface_secondary.argb);
     // The active-page card lifts to the primary surface against the tinted rail.
     active_page_->SetBackgroundColor(active_page_fill.argb);

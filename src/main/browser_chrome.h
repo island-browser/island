@@ -542,6 +542,11 @@ class BrowserChrome final : public NavigationObserver {
                 .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
+    // Native places the navigation row in the toolbar, so the row and its ghost buttons must
+    // share the toolbar surface. Arc and Graphite keep the row on the rail canvas.
+    [[nodiscard]] static ArgbColor NavigationRowSurface(const ChromeTokens& tokens) {
+        return tokens.look == LookPreset::kNative ? tokens.surface_secondary : tokens.canvas;
+    }
     // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP
     // icon buttons share one row; the segments sit inside the track's 2 DIP inset.
     struct NativeSwitcherMetrics {

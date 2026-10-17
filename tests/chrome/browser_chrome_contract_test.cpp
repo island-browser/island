@@ -531,6 +531,19 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     EXPECT_NE(dark_active.fill, dark.accent);
 }
 
+TEST(BrowserChromeNativeContractTest, GivenNavigationButtonsThenTheirRowSharesTheirSurface) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, theme);
+        EXPECT_EQ(BrowserChrome::NavigationRowSurface(native), native.surface_secondary);
+
+        const ChromeTokens arc = ChromeTokens::ForLook(LookPreset::kArc, theme);
+        EXPECT_EQ(BrowserChrome::NavigationRowSurface(arc), arc.canvas);
+
+        const ChromeTokens graphite = ChromeTokens::ForLook(LookPreset::kGraphite, theme);
+        EXPECT_EQ(BrowserChrome::NavigationRowSurface(graphite), graphite.canvas);
+    }
+}
+
 }  // namespace
 TEST(BrowserChromeContractTest, GivenAFixedWidthColumnWhenSizedThenNeitherDimensionIsZero) {
     // CEF ignores a delegate size with a zero dimension, which let the agent panel's content
