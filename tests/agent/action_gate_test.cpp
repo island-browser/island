@@ -53,6 +53,7 @@ TEST(ActionGateTest, PasswordFieldsAreBlockedEvenWhenTrusted) {
             GateDecision d = Classify(Call("page_type", facts), *trusted);
             EXPECT_EQ(d.action, ActionClass::kBlocked);
             EXPECT_EQ(d.rule, GateRule::kPassword);
+            EXPECT_FALSE(d.trusted_allowed);
         }
     }
     EXPECT_EQ(Classify(Call("page_press_key", Input("password")), kTrusted).action,
@@ -140,6 +141,146 @@ TEST(ActionGateTest, LookAlikeHostsDoNotMatch) {
     EXPECT_FALSE(HostMatchesTrusted("evil-example.com", kTrusted));
     EXPECT_EQ(HostOf("https://WWW.Example.com.:8443/x"), "example.com");
     EXPECT_EQ(HostOf("not a url"), "");
+}
+
+// --- Fix round 1 -------------------------------------------------------------------------------
+
+// I1: the target of browser_navigate is read the way a browser reads it, so a backslash cannot
+// hide the real host behind a fake one.
+TEST(ActionGateTest, BackslashInTargetDoesNotHideForeignHost) {
+    GateInput in = Call("browser_navigate");
+    in.target_url = "https://evil.net\\@shop.example.com/";  // loads evil.net
+    GateDecision d = Classify(in, kNone);
+    EXPECT_EQ(d.action, ActionClass::kConfirm);
+    EXPECT_EQ(d.rule, GateRule::kForeignNavigation);
+    EXPECT_EQ(d.summary, "Open evil.net in your tab");
+    in.target_url = "https://evil.net/?u=https://shop.example.com/";
+    EXPECT_EQ(Classify(in, kNone).rule, GateRule::kForeignNavigation);
+    in.target_url = "https://shop.example.com\\@evil.net/";  // loads shop.example.com
+    EXPECT_EQ(Classify(in, kNone).action, ActionClass::kFree);
+}
+
+TEST(ActionGateTest, HostOfReadsTheAuthorityLikeABrowser) {
+    EXPECT_EQ(HostOf("https://evil.net\\@shop.example.com/"), "evil.net");
+    EXPECT_EQ(HostOf("https://shop.example.com\\@evil.net/"), "shop.example.com");
+    EXPECT_EQ(HostOf("https://shop.example.com\t.evil.net/"), "shop.example.com.evil.net");
+    EXPECT_EQ(HostOf("https://evil.net/?u=https://shop.example.com/"), "evil.net");
+    EXPECT_EQ(HostOf("evil.net/?u=https://shop.example.com/"), "");
+    EXPECT_EQ(HostOf("https://shop.example.com:443@evil.net/"), "evil.net");
+}
+
+// I1 (empty hosts): an unknown page or target never counts as the same site.
+TEST(ActionGateTest, EmptyHostsCountAsForeignNavigation) {
+    GateInput in = Call("browser_navigate");
+    in.page_url = "about:blank";
+    in.target_url = "evil.net";  // no scheme: the tool layer resolves it to https://evil.net
+    GateDecision d = Classify(in, kNone);
+    EXPECT_EQ(d.action, ActionClass::kConfirm);
+    EXPECT_EQ(d.rule, GateRule::kForeignNavigation);
+    in.target_url = "https://shop.example.com/";
+    EXPECT_EQ(Classify(in, kNone).action, ActionClass::kConfirm);
+}
+
+// I2: `cc-num` is a card field name, as §2.1 lists it.
+TEST(ActionGateTest, CcNumNameIsACardField) {
+    GateDecision d = Classify(Call("page_type", Input("text", {}, "cc-num")), kNone);
+    EXPECT_EQ(d.action, ActionClass::kConfirm);
+    EXPECT_EQ(d.rule, GateRule::kCardField);
+    EXPECT_FALSE(d.trusted_allowed);
+    ElementFacts by_id = Input("text");
+    by_id.id = "CC-NUM";
+    EXPECT_EQ(Classify(Call("page_type", by_id), kTrusted).rule, GateRule::kCardField);
+}
+
+// I3: rules 1 and 2 apply only to the tools §2.1 names.
+TEST(ActionGateTest, PasswordAndCardRulesApplyOnlyToTyping) {
+    EXPECT_EQ(Classify(Call("page_click", Input("password")), kNone).action, ActionClass::kFree);
+    ElementFacts card = Input("text", "cc-number");
+    EXPECT_EQ(Classify(Call("page_click", card), kNone).action, ActionClass::kFree);
+}
+
+TEST(ActionGateTest, ClickOnProductCardIsFree) {
+    ElementFacts card;
+    card.tag = "div";
+    card.id = "product-card";
+    card.text = "Open";
+    card.page_origin = "https://shop.example.com";
+    EXPECT_EQ(Classify(Call("page_click", card), kTrusted).action, ActionClass::kFree);
+    EXPECT_EQ(Classify(Call("page_click", card), kNone).action, ActionClass::kFree);
+}
+
+// I4: typing or pressing a key without element facts asks, on every site.
+TEST(ActionGateTest, UnclassifiableTypingAndKeysAskEvenWhenTrusted) {
+    GateDecision typed = Classify(Call("page_type"), kTrusted);
+    EXPECT_EQ(typed.action, ActionClass::kConfirm);
+    EXPECT_EQ(typed.rule, GateRule::kUnclassified);
+    EXPECT_FALSE(typed.trusted_allowed);
+    GateInput key = Call("page_press_key");
+    key.key = "a";
+    EXPECT_EQ(Classify(key, kTrusted).action, ActionClass::kConfirm);
+    EXPECT_EQ(Classify(key, kTrusted).rule, GateRule::kUnclassified);
+}
+
+// I5: non-ASCII spaces and punctuation end a word; Cyrillic letters do not.
+TEST(ActionGateTest, PunctuationAndSpacesEndWords) {
+    EXPECT_TRUE(IsConsequentialText("Buy\xC2\xA0now"));      // NBSP
+    EXPECT_TRUE(IsConsequentialText("Sign\xC2\xA0up"));      // NBSP
+    EXPECT_TRUE(IsConsequentialText("Delete\xE2\x80\xA6"));  // U+2026
+    EXPECT_TRUE(
+        IsConsequentialText("\xC2\xAB\xD0\x9A\xD1\x83\xD0\xBF\xD0\xB8\xD1\x82\xD1\x8C"
+                            "\xC2\xBB"));                    // «Купить»
+    EXPECT_TRUE(IsConsequentialText("Pay\xE2\x80\x94now"));  // U+2014
+    EXPECT_FALSE(IsConsequentialText("Покупить"));  // "купить" inside a longer Cyrillic word
+    EXPECT_FALSE(IsConsequentialText("Payé"));      // a Latin letter after the word
+}
+
+// M1: rule 6 compares origins, not hosts.
+TEST(ActionGateTest, NavigationComparesOrigins) {
+    GateInput in = Call("browser_navigate");
+    in.target_url = "http://shop.example.com:8080/";
+    EXPECT_EQ(Classify(in, kNone).rule, GateRule::kForeignNavigation);
+    in.target_url = "https://shop.example.com:443/x";  // explicit default port: same origin
+    EXPECT_EQ(Classify(in, kNone).action, ActionClass::kFree);
+    in.target_url = "http://shop.example.com/";
+    EXPECT_EQ(Classify(in, kNone).rule, GateRule::kForeignNavigation);
+}
+
+// M2: a summary is one line, and an element without text is named by its role.
+TEST(ActionGateTest, SummaryIsOneLine) {
+    GateDecision d = Classify(Call("page_click", Button("Place\norder\n\nnow")), kNone);
+    EXPECT_EQ(d.summary, "Click \"Place order now\" on shop.example.com");
+    ElementFacts blank = Button("", true);
+    EXPECT_EQ(Classify(Call("page_click", blank), kNone).summary,
+              "Click an element on shop.example.com");
+}
+
+// M3: an IPv6 host keeps its brackets and loses its port.
+TEST(ActionGateTest, IPv6HostDropsThePort) {
+    EXPECT_EQ(HostOf("https://[::1]:8080/"), "[::1]");
+    EXPECT_EQ(HostOf("https://[::1]/"), "[::1]");
+}
+
+// M6: the trusted variants of rules 3-7 and the untrusted variant of rule 2.
+TEST(ActionGateTest, TrustedSiteFreesEveryConsequentialRule) {
+    EXPECT_EQ(Classify(Call("page_click", Button("Go", true, true)), kTrusted).action,
+              ActionClass::kFree);
+    GateInput enter = Call("page_press_key", Input("text"));
+    enter.key = "Enter";
+    EXPECT_EQ(Classify(enter, kTrusted).action, ActionClass::kFree);
+    GateInput nav = Call("browser_navigate");
+    nav.target_url = "https://bank.other.org/";
+    EXPECT_EQ(Classify(nav, kTrusted).action, ActionClass::kFree);
+    EXPECT_EQ(Classify(Call("browser_close_tab"), kTrusted).action, ActionClass::kFree);
+}
+
+TEST(ActionGateTest, CardRuleAsksOnUntrustedSitesToo) {
+    EXPECT_EQ(Classify(Call("page_type", Input("text", "cc-number")), kNone).rule,
+              GateRule::kCardField);
+}
+
+// M8: a password field never offers "Trust this site".
+TEST(ActionGateTest, PasswordBlockOffersNoTrust) {
+    EXPECT_FALSE(Classify(Call("page_type", Input("password")), kTrusted).trusted_allowed);
 }
 
 }  // namespace

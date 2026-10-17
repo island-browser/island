@@ -1,7 +1,6 @@
 #include "action_gate.h"
 
 #include <cstddef>
-#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,21 +19,13 @@ constexpr std::string_view kConsequentialWords[] = {
 
 constexpr std::size_t kClipChars = 40;
 constexpr std::string_view kEllipsis = "\xE2\x80\xA6";  // U+2026
-
-bool IsAsciiSpace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+constexpr char32_t kReplacement = 0xFFFD;
 
 bool IsAsciiUpper(char c) { return c >= 'A' && c <= 'Z'; }
 
-bool IsAsciiLower(char c) { return c >= 'a' && c <= 'z'; }
+bool IsAsciiAlpha(char c) { return (c >= 'a' && c <= 'z') || IsAsciiUpper(c); }
 
 bool IsAsciiDigit(char c) { return c >= '0' && c <= '9'; }
-
-// A word byte is an ASCII letter or digit, or any byte of a multi-byte (non-ASCII) character, so
-// Cyrillic words are never split at a byte boundary.
-bool IsWordByte(char c) {
-    return IsAsciiLower(c) || IsAsciiUpper(c) || IsAsciiDigit(c) ||
-           static_cast<unsigned char>(c) >= 0x80;
-}
 
 std::string Lowercase(std::string_view text) {
     std::string out(text);
@@ -44,29 +35,50 @@ std::string Lowercase(std::string_view text) {
     return out;
 }
 
-std::string Trim(std::string_view text) {
-    std::size_t begin = 0;
-    std::size_t end = text.size();
-    while (begin < end && IsAsciiSpace(text[begin])) ++begin;
-    while (end > begin && IsAsciiSpace(text[end - 1])) --end;
-    return std::string(text.substr(begin, end - begin));
+// Length in bytes of the whitespace character that starts at text[i], or 0 when none does. Covers
+// ASCII whitespace, U+00A0, U+2000..U+200A, U+2028, U+2029, U+202F, U+205F and U+3000.
+std::size_t SpaceLengthAt(std::string_view text, std::size_t i) {
+    const auto c = static_cast<unsigned char>(text[i]);
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v') return 1;
+    if (c == 0xC2 && i + 1 < text.size() && text[i + 1] == '\xA0') return 2;
+    if (i + 2 >= text.size()) return 0;
+    const auto b1 = static_cast<unsigned char>(text[i + 1]);
+    const auto b2 = static_cast<unsigned char>(text[i + 2]);
+    if (c == 0xE2 && b1 == 0x80 &&
+        ((b2 >= 0x80 && b2 <= 0x8A) || b2 == 0xA8 || b2 == 0xA9 || b2 == 0xAF)) {
+        return 3;
+    }
+    if (c == 0xE2 && b1 == 0x81 && b2 == 0x9F) return 3;
+    if (c == 0xE3 && b1 == 0x80 && b2 == 0x80) return 3;
+    return 0;
 }
 
-// Lowercases ASCII and basic Cyrillic (U+0401, U+0410..U+042F), collapses whitespace runs into a
-// single space, and trims. Used only for matching, never for display.
-std::string NormalizeForMatch(std::string_view text) {
+// Replaces every run of whitespace with one ASCII space and trims both ends. Case is kept.
+std::string CollapseSpaces(std::string_view text) {
     std::string out;
     bool pending_space = false;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        if (IsAsciiSpace(c)) {
+    for (std::size_t i = 0; i < text.size();) {
+        const std::size_t space = SpaceLengthAt(text, i);
+        if (space > 0) {
             pending_space = !out.empty();
+            i += space;
             continue;
         }
         if (pending_space) {
             out.push_back(' ');
             pending_space = false;
         }
+        out.push_back(text[i]);
+        ++i;
+    }
+    return out;
+}
+
+// Lowercases ASCII and basic Cyrillic (U+0401, U+0410..U+042F). Used only for matching.
+std::string FoldCase(std::string_view text) {
+    std::string out;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
         const auto byte = static_cast<unsigned char>(c);
         if (byte == 0xD0 && i + 1 < text.size()) {
             const auto next = static_cast<unsigned char>(text[i + 1]);
@@ -94,12 +106,59 @@ std::string NormalizeForMatch(std::string_view text) {
     return out;
 }
 
+std::string NormalizeForMatch(std::string_view text) { return FoldCase(CollapseSpaces(text)); }
+
+// Length of the UTF-8 sequence that starts with this lead byte; 0 for a continuation byte.
+std::size_t Utf8Length(char lead) {
+    const auto byte = static_cast<unsigned char>(lead);
+    if (byte < 0x80) return 1;
+    if ((byte >> 5) == 0x6) return 2;
+    if ((byte >> 4) == 0xE) return 3;
+    if ((byte >> 3) == 0x1E) return 4;
+    return 0;
+}
+
+// Decodes the character that starts at text[i]; kReplacement when the bytes are malformed.
+char32_t DecodeAt(std::string_view text, std::size_t i) {
+    const std::size_t length = Utf8Length(text[i]);
+    if (length == 0 || i + length > text.size()) return kReplacement;
+    const auto lead = static_cast<unsigned char>(text[i]);
+    char32_t cp = static_cast<char32_t>(length == 1 ? lead : lead & (0xFF >> (length + 1)));
+    for (std::size_t k = 1; k < length; ++k) {
+        const auto cont = static_cast<unsigned char>(text[i + k]);
+        if ((cont & 0xC0) != 0x80) return kReplacement;
+        cp = static_cast<char32_t>((cp << 6) | (cont & 0x3F));
+    }
+    return cp;
+}
+
+// Decodes the character that ends just before text[end]; kReplacement when there is none.
+char32_t DecodeBefore(std::string_view text, std::size_t end) {
+    std::size_t start = end - 1;
+    while (start > 0 && end - start < 4 &&
+           (static_cast<unsigned char>(text[start]) & 0xC0) == 0x80) {
+        --start;
+    }
+    if (Utf8Length(text[start]) != end - start) return kReplacement;
+    return DecodeAt(text, start);
+}
+
+// Letters and digits make up a word. Spaces, punctuation and symbols (NBSP, «», —, …, $) end one.
+bool IsWordCharacter(char32_t cp) {
+    if (cp < 0x80) {
+        const char c = static_cast<char>(cp);
+        return IsAsciiAlpha(c) || IsAsciiDigit(c);
+    }
+    if (cp >= 0xC0 && cp <= 0x24F) return cp != 0xD7 && cp != 0xF7;  // Latin-1 and Latin Extended
+    return cp >= 0x400 && cp <= 0x4FF;                               // Cyrillic
+}
+
 bool ContainsWord(std::string_view text, std::string_view word) {
     for (std::size_t pos = text.find(word); pos != std::string_view::npos;
          pos = text.find(word, pos + 1)) {
-        const bool left_ok = pos == 0 || !IsWordByte(text[pos - 1]);
         const std::size_t end = pos + word.size();
-        const bool right_ok = end == text.size() || !IsWordByte(text[end]);
+        const bool left_ok = pos == 0 || !IsWordCharacter(DecodeBefore(text, pos));
+        const bool right_ok = end == text.size() || !IsWordCharacter(DecodeAt(text, end));
         if (left_ok && right_ok) return true;
     }
     return false;
@@ -127,35 +186,90 @@ bool IsCardField(const ElementFacts& facts) {
     const std::string autocomplete = Lowercase(facts.autocomplete);
     if (autocomplete.rfind("cc-", 0) == 0) return true;
     const std::string names = Lowercase(facts.name + " " + facts.id);
-    for (std::string_view needle :
-         {"card", "cvv", "cvc", "csc", "ccnum", "expir", "exp-date", "exp_date", "security-code"}) {
+    for (std::string_view needle : {"card", "cvv", "cvc", "csc", "ccnum", "cc-num", "expir",
+                                    "exp-date", "exp_date", "security-code"}) {
         if (names.find(needle) != std::string::npos) return true;
     }
     return false;
 }
 
 std::string ClickSummary(const ElementFacts& facts, const std::string& host) {
-    const std::string label = Trim(facts.text.empty() ? facts.aria_label : facts.text);
+    std::string label = CollapseSpaces(facts.text);
+    if (label.empty()) label = CollapseSpaces(facts.aria_label);
+    if (label.empty()) return "Click an element on " + host;
     return "Click \"" + Clip(label) + "\" on " + host;
+}
+
+// The parts of an absolute URL that matter to the gate.
+struct UrlParts {
+    std::string scheme;  // lowercase
+    std::string host;    // lowercase, no trailing dot; an IPv6 host keeps its brackets
+    std::string port;    // as written; "" when absent
+};
+
+// Splits an absolute URL the way a browser reads its authority: tabs and newlines are dropped,
+// "\" ends the authority like "/", and the userinfo is everything before the last "@". Returns
+// false when there is no "scheme://" prefix.
+bool SplitUrl(std::string_view url, UrlParts& parts) {
+    std::string clean;
+    for (const char c : url) {
+        if (c != '\t' && c != '\n' && c != '\r') clean.push_back(c);
+    }
+    const std::string_view text = clean;
+    const std::size_t sep = text.find("://");
+    if (sep == std::string_view::npos || sep == 0 || !IsAsciiAlpha(text[0])) return false;
+    for (std::size_t i = 0; i < sep; ++i) {
+        const char c = text[i];
+        if (!IsAsciiAlpha(c) && !IsAsciiDigit(c) && c != '+' && c != '-' && c != '.') return false;
+    }
+    parts.scheme = Lowercase(text.substr(0, sep));
+
+    std::string_view authority = text.substr(sep + 3);
+    authority = authority.substr(0, authority.find_first_of("/?#\\"));
+    const std::size_t at = authority.rfind('@');
+    if (at != std::string_view::npos) authority = authority.substr(at + 1);
+
+    std::string_view host = authority;
+    parts.port.clear();
+    if (authority.starts_with('[')) {
+        const std::size_t close = authority.find(']');
+        if (close == std::string_view::npos) return false;
+        host = authority.substr(0, close + 1);
+        if (authority.size() > close + 1 && authority[close + 1] == ':') {
+            parts.port = std::string(authority.substr(close + 2));
+        }
+    } else {
+        const std::size_t colon = authority.rfind(':');
+        if (colon != std::string_view::npos) {
+            host = authority.substr(0, colon);
+            parts.port = std::string(authority.substr(colon + 1));
+        }
+    }
+    parts.host = Lowercase(host);
+    while (!parts.host.empty() && parts.host.back() == '.') parts.host.pop_back();
+    return true;
+}
+
+// scheme://host:port with the default port spelled out. "" when the URL has no host, so that an
+// unknown page or target never equals another one.
+std::string OriginOf(std::string_view url) {
+    UrlParts parts;
+    if (!SplitUrl(url, parts) || parts.host.empty()) return {};
+    std::string port = parts.port;
+    if (port.empty()) {
+        if (parts.scheme == "https") port = "443";
+        if (parts.scheme == "http") port = "80";
+    }
+    return parts.scheme + "://" + parts.host + ":" + port;
 }
 
 }  // namespace
 
 std::string HostOf(std::string_view url) {
-    const std::size_t scheme = url.find("://");
-    if (scheme == std::string_view::npos) return {};
-    std::string_view rest = url.substr(scheme + 3);
-    std::string_view authority = rest.substr(0, rest.find_first_of("/?#"));
-    const std::size_t at = authority.rfind('@');
-    if (at != std::string_view::npos) authority = authority.substr(at + 1);
-    if (!authority.empty() && authority.front() != '[') {
-        const std::size_t colon = authority.rfind(':');
-        if (colon != std::string_view::npos) authority = authority.substr(0, colon);
-    }
-    std::string host = Lowercase(authority);
-    while (!host.empty() && host.back() == '.') host.pop_back();
-    if (host.rfind("www.", 0) == 0) host.erase(0, 4);
-    return host;
+    UrlParts parts;
+    if (!SplitUrl(url, parts)) return {};
+    if (parts.host.starts_with("www.")) return parts.host.substr(4);
+    return parts.host;
 }
 
 bool HostMatchesTrusted(std::string_view host, const std::vector<std::string>& trusted) {
@@ -185,18 +299,38 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
     decision.host = HostOf(input.page_url);
     const std::string& host = decision.host;
     const bool facts_present = input.facts.has_value();
+    const bool typing = input.tool == "page_type";
+    const bool keying = input.tool == "page_press_key";
 
-    // Rules 1 and 2 hold on every site, trusted or not.
-    if (facts_present && IsPasswordField(*input.facts)) {
+    // Rule 1 covers typing and key presses only, so the agent can still focus a password field.
+    if ((typing || keying) && facts_present && IsPasswordField(*input.facts)) {
         decision.action = ActionClass::kBlocked;
         decision.rule = GateRule::kPassword;
         decision.summary = "Use a password or sign-in code field on " + host;
+        decision.trusted_allowed = false;
         return decision;
     }
-    if (facts_present && IsCardField(*input.facts)) {
+    // Rule 2 covers typing into a card field, on every site.
+    if (typing && facts_present && IsCardField(*input.facts)) {
         decision.action = ActionClass::kConfirm;
         decision.rule = GateRule::kCardField;
         decision.summary = "Type into the card number field on " + host;
+        decision.trusted_allowed = false;
+        return decision;
+    }
+    // Without the element, the gate cannot tell what the action does. It asks on every site.
+    // (A missing-facts page_click is handled below as kSubmit, and Enter as kEnterInForm.)
+    if (typing && !facts_present) {
+        decision.action = ActionClass::kConfirm;
+        decision.rule = GateRule::kUnclassified;
+        decision.summary = "Type into an unidentified field on " + host;
+        decision.trusted_allowed = false;
+        return decision;
+    }
+    if (keying && !facts_present && input.key != "Enter") {
+        decision.action = ActionClass::kConfirm;
+        decision.rule = GateRule::kUnclassified;
+        decision.summary = "Press a key on an unidentified element on " + host;
         decision.trusted_allowed = false;
         return decision;
     }
@@ -216,7 +350,7 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
             rule = GateRule::kConsequentialWord;
             summary = ClickSummary(*input.facts, host);
         }
-    } else if (input.tool == "page_press_key") {
+    } else if (keying) {
         if (input.key == "Enter" && (!facts_present || input.facts->in_form)) {
             rule = GateRule::kEnterInForm;
             summary = "Press Enter in a form on " + host;
@@ -225,9 +359,12 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
         rule = GateRule::kScript;
         summary = "Run a script on " + host;
     } else if (input.tool == "browser_navigate" && !input.tab_opened_by_agent) {
-        const std::string target = HostOf(input.target_url);
-        if (target != host) {
+        // Origin, not host: a change of scheme or port is a different origin too. An unknown
+        // origin on either side counts as different.
+        const std::string target_origin = OriginOf(input.target_url);
+        if (target_origin.empty() || target_origin != OriginOf(input.page_url)) {
             rule = GateRule::kForeignNavigation;
+            const std::string target = HostOf(input.target_url);
             summary = target.empty() ? "Open the new page in your tab"
                                      : "Open " + target + " in your tab";
         }

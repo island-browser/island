@@ -25,6 +25,7 @@ enum class GateRule : std::uint8_t {
     kScript,
     kForeignNavigation,
     kClosePersonTab,
+    kUnclassified,  // missing element facts for page_type / page_press_key; always asks
 };
 
 // What the tool layer knows about the element a page action targets (or the focused element for
@@ -41,7 +42,10 @@ struct GateInput {
     std::optional<ElementFacts> facts;  // target or focused element, when gathered
     std::string key;                    // page_press_key: the key name
     std::string page_url;               // the tab's current URL
-    std::string target_url;             // browser_navigate: the new URL
+    // browser_navigate: the URL the navigation will actually load, i.e. after the tool layer has
+    // resolved and validated the agent's argument (search text becomes a search URL). Never the
+    // raw argument.
+    std::string target_url;
     bool tab_opened_by_agent = false;
 };
 
@@ -50,14 +54,16 @@ struct GateDecision {
     GateRule rule = GateRule::kNone;
     std::string summary;          // "Click \"Place order\" on shop.example.com"
     std::string host;             // page host without "www."
-    bool trusted_allowed = true;  // false for card fields
+    bool trusted_allowed = true;  // false for card fields, password fields and kUnclassified
 };
 
-// Lowercase host of a URL without scheme, userinfo, port, trailing dot or leading "www.".
-// Returns "" when the input has no "://".
+// Lowercase host of an absolute URL without scheme, userinfo, port, trailing dot or leading
+// "www."; an IPv6 host keeps its brackets. Reads the authority the way a browser does: "\" ends it
+// like "/", and tabs and newlines are ignored. Returns "" when the input has no "scheme://".
 [[nodiscard]] std::string HostOf(std::string_view url);
 
-// True when host equals a trusted site or is a subdomain of one. Look-alikes do not match.
+// True when host equals a trusted site or is a subdomain of one. Look-alikes do not match. host
+// is expected in the form HostOf returns; trusted sites are stored lowercase without "www.".
 [[nodiscard]] bool HostMatchesTrusted(std::string_view host,
                                       const std::vector<std::string>& trusted);
 

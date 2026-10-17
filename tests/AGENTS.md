@@ -43,6 +43,7 @@ Two independent test systems live side by side here:
 | `overlay_lifetime_test.cpp`, `settings_focus_test.cpp`, `report_store_test.cpp`, `research_prompt_test.cpp` | Overlay create/destroy rules, repeated Settings section focus, the Reports list, and the research prompt, space name and report extraction |
 | `chrome/collapsed_rail_test.cpp` | Icon rail metrics: buttons and scrollbar fit 52 DIP, list height with gaps and separator |
 | `agent/plan_graph_test.cpp`, `agent/plan_edits_test.cpp` (fixture `agent/plan_fixture.h`) | Plan graph building and layout (branches, joins, depth), and the plan edit messages |
+| `agent/action_gate_test.cpp` | Action gate classification: password and card fields, consequential words, submits, Enter in forms, scripts, foreign navigation and tab close, host and origin matching |
 | `design/test_native_look_contract.py`, `design/test_reader_extract.py` | Native look color drift guard (pytest); Reader extraction heuristic run against `reader_extract.js` (pytest) |
 
 ## Test targets
