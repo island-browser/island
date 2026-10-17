@@ -11,6 +11,7 @@
 #include "include/views/cef_panel_delegate.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
+#include "native_handle.h"
 #include "search_palette_model.h"
 
 namespace island {
@@ -171,7 +172,7 @@ void CheatsheetOverlay::Apply(OverlayStep step) {
                                                    /*can_activate=*/true));
             if (overlay_.has_overlay()) {
                 overlay_.get()->SetVisible(false);
-                if (CefWindowHandle handle = window_->GetWindowHandle(); handle != nullptr) {
+                if (void* handle = NativeHandlePointer(window_->GetWindowHandle()); handle != nullptr) {
                     mouse_monitor_ = std::make_unique<MouseDownMonitor>(
                         handle,
                         [this](bool in_view, CefPoint point) { HandleMouseDown(in_view, point); });
