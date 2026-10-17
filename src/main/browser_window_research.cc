@@ -532,18 +532,20 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
     return AppendChildOfPlan(location->first, std::move(startup_url), std::move(node_id),
-                             std::move(label), activate);
+                             std::move(label), activate, /*opened_by_agent=*/true);
 }
 
 TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string startup_url,
-                                       std::string node_id, std::string label, bool activate) {
+                                       std::string node_id, std::string label, bool activate,
+                                       bool opened_by_agent) {
     Space& space = spaces_[space_index];
     Tab tab{NextTabId()};
     const TabId id = tab.id();
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetGroupLabel(std::move(label));
-    // Every page under the Plan tab is a research page the agent opened for the running plan.
-    tab.SetOpenedByAgent(true);
+    // A research page is one the agent opened for the running plan. The Report is not: it is
+    // the person's result, so the agent may not navigate or close it without asking.
+    tab.SetOpenedByAgent(opened_by_agent);
     if (activate) {
         // The model changes first (space, then selection) and the view is attached once; the
         // browser view is created while the tab is attached (EnsureTabBrowserView).
@@ -1020,7 +1022,8 @@ bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view spac
         // the view is attached once even when the person is in another space.
         static_cast<void>(AppendChildOfPlan(
             plan_location.has_value() ? plan_location->first : active_space_index_,
-            ReportPageUrlFor(id), std::move(result_node), "Result", /*activate=*/true));
+            ReportPageUrlFor(id), std::move(result_node), "Result", /*activate=*/true,
+            /*opened_by_agent=*/false));
     } else {
         AppendTabToActiveSpace(ReportPageUrlFor(id));
     }

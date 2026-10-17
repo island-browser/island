@@ -361,19 +361,38 @@ TEST(PrefsStoreTest, GivenThemeTokensWhenConvertedThenTheyRoundTripStrictly) {
 
 TEST(PrefsStoreTest, TrustedSitesRoundTripNormalizedAndDeduplicated) {
     const std::filesystem::path path = TempPath("trusted_sites.json");
+    // Padded entries are trimmed; a bare label such as "localhost" is refused (it would trust
+    // every host under it).
     WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"system",)"
-                    R"("agent_trusted_sites":["WWW.Example.com","example.com","","Shop.Test"]})");
+                    R"("agent_trusted_sites":["WWW.Example.com","example.com","","Shop.Test",)"
+                    R"(" Padded.Test ","localhost","com"]})");
     const PrefsLoadResult loaded = PrefsStore::Load(path);
     EXPECT_EQ(loaded.error, PrefsError::kNone);
     EXPECT_EQ(loaded.state.agent_trusted_sites,
-              (std::vector<std::string>{"example.com", "shop.test"}));
+              (std::vector<std::string>{"example.com", "shop.test", "padded.test"}));
 
     ASSERT_EQ(PrefsStore::Save(path, loaded.state), PrefsError::kNone);
     EXPECT_EQ(PrefsStore::Load(path).state.agent_trusted_sites, loaded.state.agent_trusted_sites);
+    std::filesystem::remove(path);
+}
 
-    WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"system",)"
+TEST(PrefsStoreTest, MalformedTrustedSitesAreIgnoredWithoutLosingOtherPrefs) {
+    const std::filesystem::path path = TempPath("trusted_sites_lenient.json");
+    // A value that is not an array is ignored: the file still loads with its other prefs.
+    WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"dark",)"
                     R"("agent_trusted_sites":"example.com"})");
-    EXPECT_EQ(PrefsStore::Load(path).error, PrefsError::kSchemaError);
+    PrefsLoadResult loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_TRUE(loaded.state.agent_trusted_sites.empty());
+    EXPECT_EQ(loaded.state.theme, ThemePreference::kDark);
+
+    // Non-string entries are skipped; the strings around them are kept.
+    WriteFile(path, R"({"version":1,"onboarding_completed":false,"theme":"dark",)"
+                    R"("agent_trusted_sites":["a.test",7,null,{"x":1},"B.test"]})");
+    loaded = PrefsStore::Load(path);
+    EXPECT_EQ(loaded.error, PrefsError::kNone);
+    EXPECT_EQ(loaded.state.agent_trusted_sites, (std::vector<std::string>{"a.test", "b.test"}));
+    EXPECT_EQ(loaded.state.theme, ThemePreference::kDark);
     std::filesystem::remove(path);
 }
 

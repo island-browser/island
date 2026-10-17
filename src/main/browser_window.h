@@ -179,8 +179,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool RestoreSessionStateForTest(const SessionState& state);
     // The live CefBrowser of a tab of the active space, or nullptr.
     [[nodiscard]] CefRefPtr<CefBrowser> BrowserForTab(std::optional<std::size_t> index) const;
-    // kNewSpace plus an optional name.
-    [[nodiscard]] bool CreateSpace(std::string_view name);
+    // kNewSpace plus an optional name. `opened_by_agent` marks the space's start tab, which the
+    // agent creates through NewSpace (see Tab::opened_by_agent).
+    [[nodiscard]] bool CreateSpace(std::string_view name, bool opened_by_agent = false);
     // Pins/unpins a tab of the active space (Arc-style pinned group).
     [[nodiscard]] bool SetActiveSpaceTabPinned(std::size_t index, bool pinned);
     [[nodiscard]] const std::vector<Space>& spaces() const noexcept { return spaces_; }
@@ -849,9 +850,10 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] TabId AppendPlanChildTab(std::string startup_url, std::string node_id,
                                            std::string label, bool activate);
     // The part of AppendPlanChildTab that needs the Plan's space: an activated child makes that
-    // space active and is selected with one attach, wherever the person was.
+    // space active and is selected with one attach, wherever the person was. `opened_by_agent`
+    // marks the child: true for a research page, false for the Report (the person's result).
     TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
-                            std::string label, bool activate);
+                            std::string label, bool activate, bool opened_by_agent);
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
     // The address a new tab opens (empty text: the start page), or nullopt when the text is not
     // an address Island allows.

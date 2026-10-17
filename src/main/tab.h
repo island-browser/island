@@ -52,8 +52,9 @@ class Tab {
     void SetPinned(bool pinned) noexcept { pinned_ = pinned; }
     [[nodiscard]] bool pinned() const noexcept { return pinned_; }
 
-    // Whether the agent opened this tab (browser_open_tab, or a research branch page). The agent
-    // may navigate and close such a tab without asking; a tab the person opened is theirs.
+    // Whether the agent opened this tab (browser_open_tab, a research branch page, or a space the
+    // agent created). The agent may navigate and close such a tab without asking. The Plan and
+    // the Report are not agent tabs, and a tab the person moved to another space is theirs.
     void SetOpenedByAgent(bool opened) noexcept { opened_by_agent_ = opened; }
     [[nodiscard]] bool opened_by_agent() const noexcept { return opened_by_agent_; }
 

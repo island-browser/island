@@ -177,7 +177,8 @@ agent::HostStatus WindowAgentHost::SwitchSpace(std::size_t space) {
 }
 
 agent::HostStatus WindowAgentHost::NewSpace(std::string_view name) {
-    return StatusFor(window_->CreateSpace(name), "Could not create a space.");
+    return StatusFor(window_->CreateSpace(name, /*opened_by_agent=*/true),
+                     "Could not create a space.");
 }
 
 agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {

@@ -61,7 +61,8 @@ struct PrefsState {
     bool block_trackers = true;
     std::vector<std::string> content_blocker_allowlist;
     // Sites the agent may act on without asking (its "trust this site" choice), stored as
-    // NormalizeTrustedSites returns them. Optional key; absent means none.
+    // NormalizeTrustedSites returns them. Optional key; absent means none, and a malformed value
+    // is ignored on load (see ParsePrefsState).
     std::vector<std::string> agent_trusted_sites;
     // Minutes of inactivity before a background tab releases its browser (0 = never; see
     // tab_sleep_policy.h). Optional key; a value that is not one of 0/15/30/60 means the default.

@@ -262,5 +262,53 @@ TEST(WindowAgentHostTest, OpenTabMarksTheTabAsOpenedByAgent) {
     EXPECT_TRUE(listed[1].opened_by_agent);
 }
 
+TEST(WindowAgentHostTest, NewSpaceStartTabIsOpenedByAgent) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(host.NewSpace("Trip").ok);
+
+    const Space& space = ActiveSpace(*window);
+    EXPECT_EQ(space.name(), "Trip");
+    ASSERT_EQ(space.tab_count(), 1U);
+    EXPECT_TRUE(space.tabs()[0].opened_by_agent());
+    // The person's own new space starts with a tab the person owns.
+    EXPECT_TRUE(window->CreateSpace("Mine"));
+    EXPECT_FALSE(ActiveSpace(*window).tabs()[0].opened_by_agent());
+}
+
+TEST(WindowAgentHostTest, TrustedSitesAddNormalizeAndRemoveIgnoringUnknownHosts) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_TRUE(window->trusted_sites().empty());
+
+    window->AddTrustedSite("WWW.Shop.test");
+    window->AddTrustedSite("https://shop.test/cart");  // same host: no duplicate
+    window->AddTrustedSite("  docs.test ");
+    window->AddTrustedSite("localhost");  // a bare label is refused
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"shop.test", "docs.test"}));
+
+    // The agent reads the same list through the host.
+    WindowAgentHost host(*window);
+    EXPECT_EQ(host.TrustedSites(), (std::vector<std::string>{"shop.test", "docs.test"}));
+
+    window->RemoveTrustedSite("WWW.SHOP.test");
+    window->RemoveTrustedSite("never-added.test");  // unknown: a no-op
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"docs.test"}));
+}
+
+TEST(WindowAgentHostTest, OpenedByAgentSurvivesASessionRoundTrip) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(host.OpenTab("https://docs.test/a").ok);
+    const SessionState state = window->BuildSessionState();
+
+    CefRefPtr<BrowserWindow> restored = MakeWindow();
+    ASSERT_TRUE(restored->RestoreSessionStateForTest(state));
+    ASSERT_FALSE(restored->spaces().empty());
+    const Space& space = restored->spaces()[0];
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_FALSE(space.tabs()[0].opened_by_agent());
+    EXPECT_TRUE(space.tabs()[1].opened_by_agent());
+}
+
 }  // namespace
 }  // namespace island

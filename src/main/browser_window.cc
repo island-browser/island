@@ -826,12 +826,18 @@ CefRefPtr<CefBrowser> BrowserWindow::BrowserForTab(std::optional<std::size_t> in
     return tab != nullptr ? tab->browser() : nullptr;
 }
 
-bool BrowserWindow::CreateSpace(std::string_view name) {
+bool BrowserWindow::CreateSpace(std::string_view name, bool opened_by_agent) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return false;
     }
     ExecuteCommand(BrowserCommand::kNewSpace);
+    if (opened_by_agent) {
+        // kNewSpace makes the new space active and gives it its start tab.
+        if (Tab* start = active_tab(); start != nullptr) {
+            start->SetOpenedByAgent(true);
+        }
+    }
     if (!name.empty()) {
         static_cast<void>(RenameSpace(active_space_index_, std::string(name)));
     }
@@ -1985,6 +1991,8 @@ bool BrowserWindow::MoveTabToSpace(std::size_t from_space, std::size_t tab, std:
         moved.SetStartupUrl(address.url);
     }
     moved.SetPinned(pinned);
+    // The mark is not carried over: moving a tab is the person's act, so the tab is theirs now
+    // and the agent must ask before it navigates or closes it.
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
         if (spaces_[index].id() != target_id) {
             continue;

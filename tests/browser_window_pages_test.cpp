@@ -926,6 +926,48 @@ TEST(BrowserWindowPagesTest, ACompletedResearchStoresTheReportAndOpensItInTheRes
     std::filesystem::remove_all(file.parent_path());
 }
 
+TEST(BrowserWindowPagesTest, ResearchPagesUnderThePlanAreAgentTabsAndTheReportIsNot) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() /
+        ("island_reports_marks_" + std::to_string(update::CurrentProcessId())) / "reports.json";
+    std::filesystem::remove_all(file.parent_path());
+    window->SetReportsFileForTest(file);
+
+    // The start tab and the Plan tab are not agent tabs; two background research pages below
+    // the Plan are.
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    const Space& space = SpaceAt(*window, 0);
+    ASSERT_EQ(space.tab_count(), 4U);
+    int research_pages = 0;
+    for (const Tab& tab : space.tabs()) {
+        if (tab.group_parent().has_value()) {
+            EXPECT_TRUE(tab.opened_by_agent());
+            ++research_pages;
+        } else {
+            EXPECT_FALSE(tab.opened_by_agent());
+        }
+    }
+    EXPECT_EQ(research_pages, 2);
+
+    // Finishing the research opens the Report below the Plan. It is the person's result: grouped,
+    // but not marked, so the agent must ask before it navigates or closes it.
+    window->CompleteResearch(ReportOutcome("# Marks\n\nBody."));
+    ASSERT_EQ(space.tab_count(), 5U);
+    int reports = 0;
+    for (const Tab& tab : space.tabs()) {
+        if (window->ReportIdForUrl(tab.startup_url()).has_value()) {
+            ++reports;
+            EXPECT_TRUE(tab.group_parent().has_value());
+            EXPECT_FALSE(tab.opened_by_agent());
+        }
+    }
+    EXPECT_EQ(reports, 1);
+    std::filesystem::remove_all(file.parent_path());
+}
+
 TEST(BrowserWindowPagesTest, CancelledAndFailedResearchLeaveNoReport) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetReportPageUrlForTest(std::string(kReportUrl));

@@ -23,9 +23,19 @@ static_assert(agent::kDefaultAgentProviderId == "claude",
 
 PrefsLoadResult Fail(PrefsError error) { return {error, PrefsState{}}; }
 
-// A bare host ("Example.com") or a URL: HostOf needs a scheme, so one is added to a bare host.
+// A bare host ("Example.com") or a URL, with surrounding spaces ignored. HostOf needs a scheme,
+// so one is added to a bare host. A host without a dot ("com", "localhost") yields nothing: it
+// would otherwise trust every host under that label.
 std::string TrustedHostOf(const std::string& entry) {
-    return agent::HostOf(entry.find("://") == std::string::npos ? "https://" + entry : entry);
+    constexpr std::string_view kSpaces = " \t\r\n";
+    const std::size_t first = entry.find_first_not_of(kSpaces);
+    if (first == std::string::npos) {
+        return {};
+    }
+    const std::string text = entry.substr(first, entry.find_last_not_of(kSpaces) - first + 1);
+    const std::string host =
+        agent::HostOf(text.find("://") == std::string::npos ? "https://" + text : text);
+    return host.find('.') == std::string::npos ? std::string() : host;
 }
 
 PrefsLoadResult ParsePrefsState(const json::Value& root) {
@@ -174,16 +184,16 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             state.content_blocker_allowlist.push_back(site.string_val);
         }
     }
-    if (const json::Value* trusted = root.FindMember("agent_trusted_sites")) {
-        if (!trusted->IsArray()) {
-            return Fail(PrefsError::kSchemaError);
-        }
+    // Lenient, unlike the lists above: a value that is not an array is ignored and non-string
+    // entries are skipped. Fewer trusted sites only means more confirmations, and a damaged list
+    // must not cost the person the rest of their preferences.
+    if (const json::Value* trusted = root.FindMember("agent_trusted_sites");
+        trusted != nullptr && trusted->IsArray()) {
         std::vector<std::string> sites;
         for (const json::Value& site : trusted->array_val) {
-            if (!site.IsString()) {
-                return Fail(PrefsError::kSchemaError);
+            if (site.IsString()) {
+                sites.push_back(site.string_val);
             }
-            sites.push_back(site.string_val);
         }
         state.agent_trusted_sites = NormalizeTrustedSites(sites);
     }
