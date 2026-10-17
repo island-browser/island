@@ -517,7 +517,7 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
                                                             bool active) {
         return {.track = tokens.fill,
-                .fill = active ? tokens.surface : tokens.fill,
+                .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
     // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP

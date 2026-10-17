@@ -524,6 +524,11 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelec
     EXPECT_EQ(idle.fill, light.fill);
     EXPECT_EQ(idle.title, light.text_secondary);
     EXPECT_EQ(idle.track, light.fill);
+
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const auto dark_active = BrowserChrome::NativeSegmentColors(dark, /*active=*/true);
+    EXPECT_EQ(dark_active.fill.argb, 0xFF636366U);
+    EXPECT_NE(dark_active.fill, dark.fill);
 }
 
 }  // namespace
