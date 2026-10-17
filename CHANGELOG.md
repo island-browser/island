@@ -27,15 +27,23 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   version at the bottom, and one section shown at a time. Appearance groups its controls into
   Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
   an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
-  Native has no space color. Every existing setting keeps its behavior.
+  Native has no space color. Every existing setting keeps its behavior. Search finds sections by
+  name (Privacy, Shortcuts, About) and shows the whole pane for them, and also finds the Import
+  sources and the About list. A section that is already selected opens again when it is requested
+  again (for example, the privacy shield after a click on another section), and an explicit
+  request clears the search first. The search fields use the interface font, and the selected
+  section in the list is filled with a semibold label instead of the accent.
+- The window does not re-lay out the page in a loop while idle, and the Native sidebar and
+  toolbar stay visible when a page swap is deferred, for example when pages open in the
+  background.
 
 ### Added
 
 - Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
   system-blue accent for selection and focus, a source-list sidebar and no space color. Released
   profiles without Appearance settings use Native; Arc-era profiles with Appearance settings but
-  no saved look keep Arc. Appearance > Look switches between Native, Arc and Graphite, and changing
-  any other control there shows "Custom".
+  no saved look keep Arc. Settings > Appearance starts with a Look preset menu (Native, Arc,
+  Graphite), and changing any other control there shows "Custom".
 - The Native sidebar bottom is redesigned: one full-width Agent button (sparkle, 32 DIP)
   sits at the very bottom of the sidebar and is tinted while the agent panel is open; the toolbar
   Agent button is gone under Native (the address-field agent dot shows agent state).
@@ -49,7 +57,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   step, branch from a step (at most 3 levels deep) or ask the agent to expand one. A research
   turn that proposes a plan and stops now shows "Waiting for approval" instead of failing.
   Plain ACP plans open in List view with stable p0, p1, ... step ids, and each research reuses
-  its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab.
+  its single Plan tab without closing spaces or adding cleanup to Reopen Closed Tab. Plan graphs
+  with a cycle keep valid dependencies from that cycle to downstream steps.
 - Island opens the research space itself (the question's name; a space with that name is reused)
   with the Plan hub as its pinned first tab, so the agent no longer creates one. Pages the agent
   opens during research become indented child rows under the Plan tab, each run of a branch under
@@ -72,7 +81,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   a 320 DIP card in the bottom-right corner of the page listing the ten most-used bindings
   (Command palette, Ask agent, Toggle sidebar, Split view, New tab, Close tab, Find in page,
   Reader view, Settings, Cheatsheet) with their current keys. ⌘/ again, Esc, its close button
-  or a click outside closes it, and the shortcut is configurable in Settings like the others.
+  or a click outside (macOS only) closes it, and the shortcut is configurable in Settings like the others.
 - Settings > Keyboard shortcuts records a new shortcut when you click a row: the row shows an
   accent outline and "Press keys…", and Esc cancels. A chord another action already uses is not
   taken silently: an amber banner says "⌘B is already used by Toggle sidebar." with Replace
@@ -85,16 +94,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   agent panel). Each has an accessible name and a full-text tooltip, and the indicators follow
   the active tab.
 - The Native look now uses a 248 DIP source-list sidebar and a 52 DIP page toolbar with 28 DIP
-  navigation buttons, a centered idle address field, Share and Agent actions, sentence-case
+  navigation buttons, a centered idle address field, a Share action, sentence-case
   section labels, system-blue selected rows with white text, and space switchers without space
   colors. Arc and Graphite keep their existing chrome. The Native address field is a rounded
   (radius 8) fill plate without an outline, and Back/Forward stay clear of the window buttons
   when the sidebar is on the right or collapsed to the icon rail.
 - Local pages now receive every Native look color slot, including selection, warning, status,
   and plan-branch colors, as live CSS variables in light and dark themes.
-- Settings > Appearance now starts with a Look preset menu for Native, Arc, and Graphite. Native
-  is the default for new profiles; changing any individual appearance control labels the result
-  Custom. Profiles with an Appearance object but no saved look keep their Arc appearance.
 - Native look color tokens: neutral source-list surfaces, system blue selection, accessible
   secondary/warning text pairs, and four plan-branch colors in light and dark themes. Native
   customization ignores space color so its canvas and accent stay fixed.
@@ -117,9 +123,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   until you approve the plan.
 
 ### Fixed
-
-- The window no longer re-lays out the page in a loop while idle, and the Native sidebar and
-  toolbar stay visible when a page swap is deferred, for example when pages open in the background.
 - Research no longer swaps the page view several times in one turn (which crashed CEF a few
   seconds later): the space is made with the Plan tab as its only tab, reusing a space, opening
   the Report and selecting a plan node from another space change the model first and swap the
@@ -128,15 +131,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   gated too, and the 2 s cap applies only when a browser is never created. Pages the agent already
   moved past load when you show them. A browser whose tab was closed while it was being created no
   longer keeps the app from quitting.
-
-- Settings search finds sections by name (Privacy, Shortcuts, About) and shows the whole pane
-  for them, and it finds the Import sources and the About list, which were hidden for every
-  query. A Settings section that is already selected opens again when it is requested again
-  (for example, the privacy shield after a click on another section), and an explicit request
-  clears the search first.
-- Settings > Appearance and Shortcuts use the interface font in their search fields, and the
-  selected section in the Settings list is filled with a semibold label instead of the accent.
-- Plan graphs with a cycle keep valid dependencies from that cycle to downstream steps.
 
 ## [0.6.2] - 2026-10-15
 
