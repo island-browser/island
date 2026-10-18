@@ -394,6 +394,9 @@ class BrowserChrome final : public NavigationObserver {
     // the pinned Chromium (150.0.7871.129); an unknown token ("SemiBold") fails the whole list.
     [[nodiscard]] static std::string FontListForTokens(const ChromeTokens& tokens, int size_px,
                                                        ChromeFontWeight weight);
+    [[nodiscard]] static constexpr std::string_view WindowsSystemFontFamilies() {
+        return "Segoe UI Variable, Segoe UI";
+    }
     // Native's sentence-case section headers ("Favorites", "<Space> · Tabs"): 11 px, weight 600.
     [[nodiscard]] static std::string SectionHeaderFontList(const ChromeTokens& tokens) {
         return FontListForTokens(tokens, 11, ChromeFontWeight::kSemiBold);

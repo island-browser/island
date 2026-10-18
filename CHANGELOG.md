@@ -31,6 +31,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Moving a regular tab into a research group places it after the group without reporting a
   phantom move.
 - Closing a split-view window detaches both page panes and the divider cleanly.
+- Windows prefers Segoe UI Variable for Native chrome and falls back to Segoe UI.
 
 ## [0.7.1] - 2026-10-17
 

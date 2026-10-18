@@ -409,6 +409,10 @@ TEST(BrowserWindowTest, GivenSectionHeaderWhenFormattedThenItUsesTheParsedSemiBo
                           ", 11px"));
 }
 
+TEST(BrowserWindowTest, GivenWindowsSystemFontsThenSegoeUiVariablePrecedesTheFallback) {
+    EXPECT_EQ(BrowserChrome::WindowsSystemFontFamilies(), "Segoe UI Variable, Segoe UI");
+}
+
 TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColorAccent) {
     const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);

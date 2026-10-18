@@ -491,7 +491,7 @@ std::string BrowserChrome::FontListForTokens(const ChromeTokens& tokens, int siz
 #if defined(__APPLE__)
         family = ".AppleSystemUIFont, Helvetica Neue";
 #elif defined(_WIN32)
-        family = "Segoe UI";
+        family = WindowsSystemFontFamilies();
 #else
         family = "sans-serif";
 #endif
