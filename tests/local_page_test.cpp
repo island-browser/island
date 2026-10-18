@@ -141,5 +141,12 @@ TEST(LocalPageTest, TheSharedMarkdownRendererIsInlinedIntoThePagesThatNeedIt) {
     }
 }
 
+TEST(LocalPageTest, SettingsSelectedSegmentsUseTheThemeToken) {
+    const std::string html(SettingsPageHtml());
+
+    EXPECT_NE(html.find("background: var(--segment-selected)"), std::string::npos);
+    EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace island

@@ -1132,6 +1132,10 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("warn_text", json::Value::String(CssColor(tokens.warning_text)))
         .Set("success", json::Value::String(CssColor(tokens.success)))
         .Set("danger", json::Value::String(CssColor(tokens.danger)))
+        .Set("segment_selected",
+             json::Value::String(CssColor(tokens.segment_selected.argb != 0
+                                              ? tokens.segment_selected
+                                              : tokens.surface)))
         .Set("branch", std::move(branch))
         .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
         .Set("font", json::Value::String(CssFontStack(tokens)))

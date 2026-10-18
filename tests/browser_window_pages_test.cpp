@@ -140,7 +140,7 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
         {"accent", "#0a64d8"},      {"selection", "#0a64d8"}, {"accent_soft", "#dfe9f8"},
         {"accent_text", "#0a4fa8"}, {"warn_bg", "#fff8e6"},   {"warn_border", "#f5d38a"},
         {"warn_text", "#6a4a00"},   {"success", "#248a3d"},   {"danger", "#d70015"},
-        {"canvas", "#ebebef"},
+        {"segment_selected", "#ffffff"},                         {"canvas", "#ebebef"},
     };
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
@@ -157,6 +157,22 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
         ASSERT_TRUE(branch->array_val[i].IsString());
         EXPECT_EQ(branch->array_val[i].string_val, expected_branches[i]);
     }
+}
+
+TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenUsesNativeValueAndSurfaceFallback) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+
+    std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#ffffff");
+
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"set_look","look":"arc"})"));
+    state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* theme = state->FindMember("theme");
+    ASSERT_NE(theme, nullptr);
+    EXPECT_EQ(theme->StringOr("segment_selected", ""), theme->StringOr("surface", ""));
 }
 
 TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
