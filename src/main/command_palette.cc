@@ -274,6 +274,11 @@ void CommandPaletteModel::SetSpaces(std::vector<PaletteSpaceEntry> spaces) {
 }
 
 void CommandPaletteModel::SetQuery(std::string query) {
+    if (query == query_) {
+        // The same draft (the query field echoes it on Return) keeps the highlight the user
+        // moved with the arrow keys and any rejection the last submit surfaced.
+        return;
+    }
     query_ = std::move(query);
     highlighted_index_ = 0;
     last_rejection_.reset();

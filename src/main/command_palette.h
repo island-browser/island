@@ -244,7 +244,8 @@ class CommandPaletteModel {
     // Replaces the draft query and resets the highlight to the first row, so
     // narrowing results can never leave the highlight past the last row. A new
     // draft also clears any surfaced rejection, mirroring
-    // AddressBarModel::SetEditText.
+    // AddressBarModel::SetEditText. Re-setting the same text is a no-op, so the
+    // Return key can echo the field without losing the arrowed row.
     void SetQuery(std::string query);
 
     // Moves the highlight by `delta` rows, wrapping at both ends of the current

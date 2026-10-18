@@ -167,6 +167,33 @@ TEST(CommandPaletteTest, GivenANewPaletteWhenInspectedThenItIsHiddenAndEmpty) {
     EXPECT_TRUE(palette.Results().empty());
 }
 
+TEST(CommandPaletteTest, GivenAnArrowedRowWhenTheSameQueryIsEchoedThenItStaysHighlighted) {
+    // The Return key re-applies the field's text; that must not reset the arrowed row.
+    CommandPaletteModel palette(NeverCalledValidator());
+    palette.Open();
+    palette.SetCommands({{.id = "first", .title = "First"}, {.id = "second", .title = "Second"}});
+    palette.MoveHighlight(1);
+
+    palette.SetQuery("");
+
+    EXPECT_EQ(palette.highlighted_index(), 1U);
+    const std::optional<PaletteSelection> selection = palette.Submit();
+    ASSERT_TRUE(selection.has_value());
+    EXPECT_EQ(selection->kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(selection->command.id, "second");
+}
+
+TEST(CommandPaletteTest, GivenAChangedQueryThenTheHighlightResetsToTheFirstRow) {
+    CommandPaletteModel palette(NeverCalledValidator());
+    palette.Open();
+    palette.SetCommands({{.id = "first", .title = "First"}, {.id = "second", .title = "Second"}});
+    palette.MoveHighlight(1);
+
+    palette.SetQuery("sec");
+
+    EXPECT_EQ(palette.highlighted_index(), 0U);
+}
+
 TEST(CommandPaletteTest, GivenAHiddenPaletteWhenSubmittedThenNoActionIsProduced) {
     CommandPaletteModel palette(NeverCalledValidator());
     palette.SetQuery("https://example.test/");

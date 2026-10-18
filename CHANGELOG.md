@@ -48,8 +48,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   active tab, and indices refer to its space. While a research runs, they act on the agent's own
   research page in the Plan's space; a plan waiting for approval is not a running research. When
   that page is missing or closed, the tool reports it instead of using the page on screen.
-- Choosing "Change space icon…" from the command palette opens the icon picker after the palette
-  closes, not inside its own submit.
+- Choosing "Change space icon…" from the command palette with the keyboard opens the icon picker.
+  Return re-applied the unchanged query, which reset the arrowed row, so it submitted the first row
+  instead.
 - Focusing or blurring the Native address field repaints only its focus colors, not the whole
   window.
 - Selected segments on the Settings, Start and Plan pages have an outline in dark theme, so the
