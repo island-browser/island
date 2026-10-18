@@ -1452,6 +1452,44 @@ TEST(BrowserWindowPagesTest, AViewYoungerThanOneHundredMillisecondsHoldsTheSwap)
     EXPECT_FALSE(window->ViewSwapPendingForTest());
 }
 
+TEST(BrowserWindowPagesTest, OpeningSettingsWaitsForTheYoungTabToSettle) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const TabId attached = window->active_tab_id();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewForSwapTest(attached);
+    window->BrowserCreatedForViewSwapTest(attached);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+    EXPECT_EQ(window->internal_page(), LocalPageKind::kSettings);
+}
+
+TEST(BrowserWindowPagesTest, HidingYoungSettingsWaitsForItToSettle) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedInternalPageForSwapTest(LocalPageKind::kSettings);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+    EXPECT_FALSE(window->internal_page().has_value());
+}
+
 TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->ExecuteCommand(BrowserCommand::kNewTab);

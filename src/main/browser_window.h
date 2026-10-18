@@ -298,6 +298,8 @@ class BrowserWindow : public CefClient,
     void AdvanceViewSwapTimeForTest(std::chrono::milliseconds elapsed);
     void SetAttachedViewForSwapTest(TabId tab);
     void SetAttachedViewsForSwapTest(std::vector<TabId> tabs);
+    void SetAttachedInternalPageForSwapTest(LocalPageKind kind);
+    void ToggleInternalPageForSwapTest(LocalPageKind kind);
     void BrowserCreatedForViewSwapTest(TabId tab);
     [[nodiscard]] std::uint64_t AttachedViewGenerationForTest() const noexcept {
         return attached_view_generation_;
@@ -744,6 +746,10 @@ class BrowserWindow : public CefClient,
         CefRefPtr<CefBrowserView> view;
         std::optional<TabId> tab;
         LocalPage* local_page = nullptr;
+        // A logical local-page attachment for the headless view-swap tests. Production
+        // attachments always use local_page instead.
+        std::optional<LocalPageKind> local_page_for_test;
+        std::optional<std::chrono::steady_clock::time_point> browser_created_at_for_test;
         // The view sits in the split's second slot (BrowserChrome::split_view_).
         bool second_slot = false;
     };

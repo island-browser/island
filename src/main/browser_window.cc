@@ -3819,6 +3819,9 @@ Tab* BrowserWindow::TabForAttachedView(const AttachedView& attached) noexcept {
 
 bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
     if (show_internal_page_ && internal_page_.has_value()) {
+        if (attached.local_page_for_test.has_value()) {
+            return attached.local_page_for_test == internal_page_;
+        }
         return attached.local_page != nullptr &&
                attached.local_page == InternalPageFor(*internal_page_);
     }
@@ -3835,6 +3838,9 @@ bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
 }
 
 bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
+    if (attached.local_page_for_test.has_value()) {
+        return true;
+    }
     if (attached.local_page != nullptr) {
         return attached.local_page == settings_page_.get() ||
                attached.local_page == overview_page_.get();
@@ -3844,6 +3850,9 @@ bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
 }
 
 bool BrowserWindow::AttachedViewBrowserWasCreated(const AttachedView& attached) {
+    if (attached.local_page_for_test.has_value()) {
+        return attached.browser_created_at_for_test.has_value();
+    }
     if (attached.local_page != nullptr) {
         return attached.local_page->browser_was_created();
     }
@@ -3853,6 +3862,13 @@ bool BrowserWindow::AttachedViewBrowserWasCreated(const AttachedView& attached) 
 
 std::optional<BrowserWindow::ViewSwapClock::duration> BrowserWindow::AttachedViewAgeAt(
     const AttachedView& attached, ViewSwapClock::time_point now) {
+    if (attached.local_page_for_test.has_value()) {
+        if (!attached.browser_created_at_for_test.has_value() ||
+            now < *attached.browser_created_at_for_test) {
+            return std::nullopt;
+        }
+        return now - *attached.browser_created_at_for_test;
+    }
     if (attached.local_page != nullptr) {
         return attached.local_page->BrowserViewAgeAt(now);
     }
@@ -4012,6 +4028,24 @@ void BrowserWindow::SetAttachedViewsForSwapTest(std::vector<TabId> tabs) {
     }
     attached_view_for_test_ = true;
     SetAttachedViews(std::move(attached));
+}
+
+void BrowserWindow::SetAttachedInternalPageForSwapTest(LocalPageKind kind) {
+    attached_view_for_test_ = true;
+    internal_page_ = kind;
+    show_internal_page_ = true;
+    SetAttachedViews(
+        {AttachedView{.local_page_for_test = kind, .browser_created_at_for_test = ViewSwapNow()}});
+}
+
+void BrowserWindow::ToggleInternalPageForSwapTest(LocalPageKind kind) {
+    if (internal_page_ == kind) {
+        HideInternalPage();
+        return;
+    }
+    internal_page_ = kind;
+    show_internal_page_ = true;
+    RequestViewSwap();
 }
 
 void BrowserWindow::BrowserCreatedForViewSwapTest(TabId tab_id) {
