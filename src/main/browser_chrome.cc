@@ -1629,6 +1629,8 @@ void BrowserChrome::RecordRelayout() {
         ++browser_view_size_change_count_;
     }
     last_browser_view_bounds_ = std::move(bounds);
+    // Resizing or relayout wakes the bounded corner-patch poll after an idle stop.
+    PushCornerPatches();
 }
 
 ChromeViewTreeNode BrowserChrome::view_tree_snapshot() const {
@@ -3330,22 +3332,36 @@ void BrowserChrome::SetCornerPatchSink(std::function<void(const std::vector<Corn
     corner_sink_ = std::move(sink);
     last_patches_.clear();
     PushCornerPatches();
+}
+
+bool BrowserChrome::RefreshCornerPatches() {
+    if (!corner_sink_ || detached_) {
+        return false;
+    }
+    std::vector<CornerPatch> patches = ComputeCornerPatches();
+    if (patches == last_patches_) {
+        return false;
+    }
+    last_patches_ = patches;
+    corner_sink_(patches);
+    return true;
+}
+
+void BrowserChrome::PushCornerPatches() {
+    patch_poll_unchanged_ticks_ = 0;
+    static_cast<void>(RefreshCornerPatches());
 #if defined(__APPLE__)
-    // Only macOS has a native overlay to feed; the poll follows scrolling lists.
+    // Only macOS has a native overlay to feed. Layout and pointer activity wake this bounded
+    // poll so scrolling rows are followed without keeping a timer alive forever while idle.
     SchedulePatchPoll();
 #endif
 }
 
-void BrowserChrome::PushCornerPatches() {
-    if (!corner_sink_ || detached_) {
-        return;
-    }
-    std::vector<CornerPatch> patches = ComputeCornerPatches();
-    if (patches == last_patches_) {
-        return;
-    }
-    last_patches_ = patches;
-    corner_sink_(patches);
+BrowserChrome::CornerPatchPollState BrowserChrome::AdvanceCornerPatchPoll(
+    std::size_t unchanged_ticks, bool patches_changed) {
+    const std::size_t next = patches_changed ? 0 : unchanged_ticks + 1;
+    return {.unchanged_ticks = next,
+            .continue_polling = next < CornerPatchPollUnchangedLimit()};
 }
 
 void BrowserChrome::SchedulePatchPoll() {
@@ -3358,8 +3374,13 @@ void BrowserChrome::SchedulePatchPoll() {
                            [](std::shared_ptr<BrowserChrome*> alive) {
                                if (BrowserChrome* chrome = *alive) {
                                    chrome->patch_poll_pending_ = false;
-                                   chrome->PushCornerPatches();
-                                   chrome->SchedulePatchPoll();
+                                   const CornerPatchPollState state = AdvanceCornerPatchPoll(
+                                       chrome->patch_poll_unchanged_ticks_,
+                                       chrome->RefreshCornerPatches());
+                                   chrome->patch_poll_unchanged_ticks_ = state.unchanged_ticks;
+                                   if (state.continue_polling) {
+                                       chrome->SchedulePatchPoll();
+                                   }
                                }
                            },
                            alive_)),

@@ -374,6 +374,15 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
     [[nodiscard]] static ArgbColor TextfieldFocusRingColor(const ChromeTokens& tokens,
                                                            bool address_focused);
+    struct CornerPatchPollState {
+        std::size_t unchanged_ticks = 0;
+        bool continue_polling = true;
+
+        bool operator==(const CornerPatchPollState&) const = default;
+    };
+    [[nodiscard]] static constexpr std::size_t CornerPatchPollUnchangedLimit() { return 8; }
+    [[nodiscard]] static CornerPatchPollState AdvanceCornerPatchPoll(std::size_t unchanged_ticks,
+                                                                     bool patches_changed);
     // The corner patch that rounds the address plate at `bounds` (window DIP). Native's address
     // sits in the always-shown toolbar; the other looks' address lives in the expanded sidebar
     // only, so it has no patch while the sidebar is collapsed.
@@ -939,6 +948,7 @@ class BrowserChrome final : public NavigationObserver {
     void ApplyAddressIndicators();
     // Called by the row buttons' delegates on every pointer-state change.
     void RefreshRowHover();
+    [[nodiscard]] bool RefreshCornerPatches();
     void PushCornerPatches();
     void SchedulePatchPoll();
     void ApplyCollapsedRailTheme();
@@ -1101,6 +1111,7 @@ class BrowserChrome final : public NavigationObserver {
     std::function<void(const std::vector<CornerPatch>&)> corner_sink_;
     std::vector<CornerPatch> last_patches_;
     bool patch_poll_pending_ = false;
+    std::size_t patch_poll_unchanged_ticks_ = 0;
     std::size_t browser_view_size_change_count_ = 0;
     std::size_t relayout_count_ = 0;
     std::vector<CefRect> last_browser_view_bounds_;

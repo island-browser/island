@@ -230,6 +230,21 @@ TEST(BrowserWindowTest, GivenNativeAddressFocusWhenTextfieldRingResolvedThenItMa
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.accent);
 }
 
+TEST(BrowserWindowTest, CornerPatchPollingStopsAfterAQuietStreakAndResetsOnChange) {
+    BrowserChrome::CornerPatchPollState state;
+    for (std::size_t tick = 0; tick < BrowserChrome::CornerPatchPollUnchangedLimit(); ++tick) {
+        state = BrowserChrome::AdvanceCornerPatchPoll(state.unchanged_ticks,
+                                                      /*patches_changed=*/false);
+        EXPECT_EQ(state.continue_polling,
+                  tick + 1 < BrowserChrome::CornerPatchPollUnchangedLimit());
+    }
+
+    EXPECT_EQ(BrowserChrome::AdvanceCornerPatchPoll(state.unchanged_ticks,
+                                                    /*patches_changed=*/true),
+              (BrowserChrome::CornerPatchPollState{.unchanged_ticks = 0,
+                                                   .continue_polling = true}));
+}
+
 TEST(BrowserWindowTest, GivenNativeTreeWhenInspectedThenToolbarAndAddressIdsMatchRuntime) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
     const ChromeViewTreeNode* rail = FindChromeView(tree, ChromeViewId::kRail);
