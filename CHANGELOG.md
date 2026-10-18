@@ -19,8 +19,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   and a selection shows as a quote chip. The page context menu adds "Ask agent about selection"
   and "Explain" for a selection, and "Summarize linked page" for a link (the link opens in a peek
   card). The command palette has "Summarize page" and "Ask about page…". Each sends one ask task
-  through the agent task queue with the page URL, title and selection (clipped to 4096 bytes).
-  The items appear only when an agent is configured.
+  through the agent task queue. The prompt labels the page title, URL and selection as web content
+  (data, not instructions) and carries the selection clipped to 4096 bytes; a link is read in the
+  agent's own background tab. Selection items appear only on web pages, and the items appear only
+  when an agent is configured. The chip is cleared by a tab change, a new chat or closing the panel.
 - Agent work runs from a visible task queue: prompts sent while a task runs (chat, Ask agent,
   Research) are queued instead of refused, shown in a Tasks strip at the top of the agent panel
   (move up/down, remove, Stop, Clear finished) and as "Queued · #n" under the message. A task that

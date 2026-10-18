@@ -260,6 +260,8 @@ footer { flex: none; padding: 8px 12px 10px; }
 .composer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 8px 8px 12px; transition: border-color .16s, box-shadow .16s; }
 .composer:focus-within { border-color: var(--text-2); box-shadow: var(--shadow); }
+/* The composer border shows focus; the field itself draws no ring. */
+.composer textarea:focus-visible { outline: none; }
 .context { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 11px/1.5 var(--mono);
   color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
   padding: 1px 7px; margin-bottom: 6px; }
@@ -270,6 +272,7 @@ footer { flex: none; padding: 8px 12px 10px; }
 .context-clear { width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
   color: var(--text-2); display: grid; place-items: center; padding: 0; }
 .context-clear:hover { background: var(--surface-2); color: var(--text); }
+.context-clear:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; border-radius: 50%; }
 .quote-chip { flex-basis: 100%; max-width: 100%; font: 11px/1.5 var(--font); color: var(--text-2);
   background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
   border-radius: 4px; padding: 2px 8px; }
@@ -282,6 +285,7 @@ textarea::placeholder { color: var(--text-2); }
   color: var(--surface); display: grid; place-items: center; flex: none; transition: opacity .16s; }
 .send:disabled { opacity: .25; cursor: default; }
 .send:not(:disabled):hover { opacity: .85; }
+.send:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; border-radius: var(--radius-sm); }
 .send svg { width: 14px; height: 14px; }
 .hint { font: 10.5px/1.4 var(--mono); color: var(--text-2); text-align: center; margin-top: 7px; letter-spacing: .02em; }
 .hint kbd { font: 10px/1.3 var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); color: var(--text); }

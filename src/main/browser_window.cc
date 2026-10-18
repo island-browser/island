@@ -719,6 +719,7 @@ Space& BrowserWindow::AppendSpace(std::string name) {
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
     Space& space = active_space();
+    context_chip_.reset();  // the new tab is a new page context
     DetachActiveTabObservers();
     Tab tab{NextTabId()};
     tab.SetStartupUrl(std::move(startup_url));
@@ -978,6 +979,10 @@ void BrowserWindow::ToggleAgentPanel() { SetAgentPanelOpen(!agent_panel_open());
 
 void BrowserWindow::SetAgentPanelOpen(bool open) {
     CEF_REQUIRE_UI_THREAD();
+    if (!open) {
+        // A chip left unsent when the panel closes is stale by the time the panel opens again.
+        context_chip_.reset();
+    }
     if (closing_ || chrome_ == nullptr) {
         return;
     }
@@ -1013,9 +1018,7 @@ std::string BrowserWindow::ActiveTabAgentContext() const {
     if (!IsWebUrl(nav.url)) {
         return {};
     }
-    return "The user is looking at the tab \"" + nav.page_title + "\" (" + nav.url +
-           ") in the Island browser. Use the island-browser tools (page_read, page_snapshot, "
-           "page_click, page_type, browser_*) to see and act on the browser.";
+    return BuildAgentContext(nav.url, nav.page_title, {});
 }
 
 BrowserWindow::AgentContextChip BrowserWindow::ActiveTabChip() const {
@@ -1031,42 +1034,54 @@ BrowserWindow::AgentContextChip BrowserWindow::ActiveTabChip() const {
 }
 
 void BrowserWindow::ShowAgentContextChip(AgentContextChip chip) {
+    // The chip holds what a send would use, clipped: never a whole page or selection.
+    chip.title = std::string(ClipUtf8(chip.title, kAgentTitleLimit));
+    chip.selection = std::string(ClipUtf8(chip.selection, kAgentSelectionLimit));
     context_chip_ = std::move(chip);
     SetAgentPanelOpen(true);
     ScheduleLocalPagesRender();
 }
 
-bool BrowserWindow::AskAgent(std::string prompt, const AgentContextChip& context) {
+bool BrowserWindow::AskAgent(std::string prompt, std::string context) {
     if (closing_ || TrimmedCopy(prompt).empty()) {
         return false;
     }
     EnsureAgentSession();
     SetAgentPanelOpen(true);
-    const agent::AgentTask task = agent_queue_.Enqueue(
-        agent::TaskKind::kAsk, std::move(prompt),
-        context.url.empty() ? std::string()
-                            : BuildAgentContext(context.url, context.title, context.selection),
-        static_cast<std::int64_t>(UnixNowMs()));
+    const agent::AgentTask task =
+        agent_queue_.Enqueue(agent::TaskKind::kAsk, std::move(prompt), std::move(context),
+                             static_cast<std::int64_t>(UnixNowMs()));
     ScheduleLocalPagesRender();
     return task.state != agent::TaskState::kFailed;
 }
 
 bool BrowserWindow::RunAgentMenuCommand(int offset, const AgentContextChip& page,
                                         std::string_view link) {
+    // Selections come from web pages only: a Report or the start page is not a page to quote.
     switch (offset) {
         case kAgentMenuAsk:
+            if (!IsWebUrl(page.url)) {
+                return false;
+            }
             ShowAgentContextChip(page);
             return true;
         case kAgentMenuExplain:
-            static_cast<void>(AskAgent("Explain this in plain words.", page));
+            if (!IsWebUrl(page.url)) {
+                return false;
+            }
+            static_cast<void>(AskAgent("Explain this in plain words.",
+                                       BuildAgentContext(page.url, page.title, page.selection)));
             return true;
         case kAgentMenuSummarizeLink:
-            // The linked page opens in a peek card; the agent reads it by its address.
+            if (!IsWebUrl(link)) {
+                return false;
+            }
+            // The linked page opens in a peek card for the person; the agent reads it in its own
+            // background tab.
             if (window_ != nullptr) {
                 DeferPeek(std::string(link));
             }
-            static_cast<void>(AskAgent("Summarize this page.",
-                                       {.title = {}, .url = std::string(link), .selection = {}}));
+            static_cast<void>(AskAgent("Summarize this page.", BuildLinkAgentContext(link)));
             return true;
         default:
             return false;
@@ -1085,7 +1100,8 @@ void BrowserWindow::RunPaletteCommand(std::string_view id) {
             // Nothing to ask about, or no agent yet: the panel explains how to set one up.
             SetAgentPanelOpen(true);
         } else if (id == "summarize_page") {
-            static_cast<void>(AskAgent("Summarize this page.", page));
+            static_cast<void>(
+                AskAgent("Summarize this page.", BuildAgentContext(page.url, page.title, {})));
         } else {
             ShowAgentContextChip(page);
         }
@@ -2293,6 +2309,7 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         // The new conversation drops the live turn without an end event.
         AbandonInFlightTurn([this] { agent_session_->NewChat(); });
         CancelPendingConfirmations();
+        context_chip_.reset();
     } else if (type == "set_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "start") {
@@ -2321,10 +2338,13 @@ bool BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
                                           context_chip_->selection)
                       : ActiveTabAgentContext();
     }
-    context_chip_.reset();  // a chip is for one question
-    const agent::AgentTask task =
-        agent_queue_.Enqueue(agent::TaskKind::kChat, std::move(text), std::move(context),
-                             static_cast<std::int64_t>(UnixNowMs()));
+    // A question sent with a chip is an ask about that chip; the chip is for one question.
+    const agent::TaskKind kind = include_context && context_chip_.has_value()
+                                     ? agent::TaskKind::kAsk
+                                     : agent::TaskKind::kChat;
+    context_chip_.reset();
+    const agent::AgentTask task = agent_queue_.Enqueue(kind, std::move(text), std::move(context),
+                                                       static_cast<std::int64_t>(UnixNowMs()));
     ScheduleLocalPagesRender();
     return task.state != agent::TaskState::kFailed;
 }
@@ -2946,6 +2966,8 @@ void BrowserWindow::SelectTabWithOneAttach(std::size_t space, std::size_t tab) {
         target.active_tab_index() == tab) {
         return;
     }
+    // A chip describes the tab it was made from; another tab's question starts clean.
+    context_chip_.reset();
     DetachActiveTabObservers();
     active_space_index_ = space;
     target.SelectTabIndex(tab);
@@ -3426,7 +3448,7 @@ bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<Ce
     return false;
 }
 
-void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                         CefRefPtr<CefContextMenuParams> params,
                                         CefRefPtr<CefMenuModel> model) {
     CEF_REQUIRE_UI_THREAD();
@@ -3437,11 +3459,16 @@ void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFram
     if (has_link) {
         model->AddItem(MENU_ID_USER_FIRST, "Open in peek");
     }
-    const bool has_selection = !TrimmedCopy(params->GetSelectionText().ToString()).empty();
+    const Tab* tab = FindTabByBrowser(browser);
+    const bool on_web_page = tab != nullptr && IsWebUrl(tab->navigation_state().snapshot().url);
+    const bool has_selection =
+        on_web_page && !TrimmedCopy(params->GetSelectionText().ToString()).empty();
     const std::vector<AgentMenuItem> items =
         AgentContextMenuItems(!ResolvedAgentCommand().empty(), has_selection, has_link);
     if (!items.empty()) {
-        model->AddSeparator();
+        if (model->GetCount() > 0) {
+            model->AddSeparator();
+        }
         for (const AgentMenuItem& item : items) {
             model->AddItem(MENU_ID_USER_FIRST + item.offset, std::string(item.label));
         }

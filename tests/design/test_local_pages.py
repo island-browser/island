@@ -664,6 +664,16 @@ class AgentContextChip(unittest.TestCase):
         clear = clear[: clear.index("});")]
         self.assertIn('type: "clear_context"', clear)
 
+    def test_the_composer_focus_is_the_border_not_an_accent_ring(self) -> None:
+        self.assertRegex(self.html, r"\.composer textarea:focus-visible\s*\{\s*outline:\s*none")
+        self.assertRegex(self.html, r"\.composer:focus-within\s*\{\s*border-color:\s*var\(--text-2\)")
+        for selector in (".send:focus-visible", ".context-clear:focus-visible"):
+            rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", self.html)
+            self.assertIsNotNone(rule, selector)
+            self.assertIn("var(--text-2)", rule.group(1))
+            self.assertNotIn("var(--accent)", rule.group(1))
+            self.assertIn("border-radius", rule.group(1))
+
     def test_the_quote_is_set_as_text(self) -> None:
         self.assertIn('getElementById("quote-text").textContent = quote', self.html)
 

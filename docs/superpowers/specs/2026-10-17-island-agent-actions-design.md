@@ -182,7 +182,7 @@ finished"). ⌘K "Agent tasks" opens the panel scrolled to the strip.
 | ⌘K | "Ask about page…" | opens the panel with the page chip, cursor in the composer |
 | ⌘K | "Collect from tabs…" | §5 |
 | ⌘K | "Agent tasks" | §3.3 |
-| ⌘J | open the agent | the composer shows a removable chip with the current tab's title; the prompt then carries the page URL, title and selection (if any) |
+| ⌘J | open the agent | the composer shows the current tab as a toggle chip (on by default; struck through when off, and then the prompt carries no page); ⌘J does not read the selection, so the prompt never carries one. Only the context-menu and quote path has a removable chip and a selection |
 
 Context goes into the prompt as a short block (URL, title, the selection up to 4 KB). The agent
 reads page text itself with `page_read`; Island does not paste whole pages into prompts.

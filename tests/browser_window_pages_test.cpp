@@ -2650,7 +2650,22 @@ TEST(BrowserWindowPagesTest, ExplainEnqueuesAnAskWithTheSelection) {
     const agent::AgentTask& task = window->agent_queue().tasks()[0];
     EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
     EXPECT_EQ(task.prompt, "Explain this in plain words.");
-    EXPECT_EQ(task.context, "Page: T\nURL: https://a.test/\nSelection:\nquoted");
+    EXPECT_NE(task.context.find("<page_url>https://a.test/</page_url>"), std::string::npos);
+    EXPECT_NE(task.context.find("<selection>quoted</selection>"), std::string::npos);
+}
+
+TEST(BrowserWindowPagesTest, SelectionItemsRefuseNonWebPages) {
+    // A Report tab is a data: document: its text is not quoted, and no chip is made from it.
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    const BrowserWindow::AgentContextChip report = {
+        .title = "Report", .url = "data:text/html,<p>long</p>", .selection = "q"};
+    EXPECT_FALSE(window->RunAgentMenuCommand(kAgentMenuExplain, report, ""));
+    EXPECT_FALSE(window->RunAgentMenuCommand(kAgentMenuAsk, report, ""));
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    EXPECT_TRUE(window->agent_queue().tasks().empty());
+    EXPECT_FALSE(window->RunAgentMenuCommand(kAgentMenuSummarizeLink, {}, "javascript:alert(1)"));
 }
 
 TEST(BrowserWindowPagesTest, SummarizeLinkOpensPeekAndEnqueues) {
@@ -2660,8 +2675,10 @@ TEST(BrowserWindowPagesTest, SummarizeLinkOpensPeekAndEnqueues) {
     EXPECT_TRUE(window->RunAgentMenuCommand(
         kAgentMenuSummarizeLink, {.title = "T", .url = "https://a.test/"}, "https://b.test/page"));
     const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
     EXPECT_EQ(task.prompt, "Summarize this page.");
-    EXPECT_NE(task.context.find("URL: https://b.test/page"), std::string::npos);
+    EXPECT_NE(task.context.find("<page_url>https://b.test/page</page_url>"), std::string::npos);
+    EXPECT_NE(task.context.find("browser_open_tab"), std::string::npos);
     EXPECT_FALSE(window->RunAgentMenuCommand(99, {}, ""));
 }
 
@@ -2680,7 +2697,45 @@ TEST(BrowserWindowPagesTest, AskAboutSelectionSetsTheChipAndSendConsumesIt) {
                                 {.title = "T", .url = "https://a.test/", .selection = "q"}, "");
     SendAgent(*window, R"({"type":"send","text":"why","include_context":true})");
     EXPECT_FALSE(window->agent_context_chip().has_value());
-    EXPECT_NE(window->agent_queue().tasks()[0].context.find("Selection:\nq"), std::string::npos);
+    EXPECT_EQ(window->agent_queue().tasks()[0].kind, agent::TaskKind::kAsk);
+    EXPECT_NE(window->agent_queue().tasks()[0].context.find("<selection>q</selection>"),
+              std::string::npos);
+}
+
+TEST(BrowserWindowPagesTest, AChipIsClearedByATabChangeNewChatOrClosingThePanel) {
+    const ScopedAgentCommand command("\"unbalanced");  // Start fails without a process
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    const BrowserWindow::AgentContextChip quote = {
+        .title = "T", .url = "https://a.test/", .selection = "q"};
+    ASSERT_TRUE(window->OpenNewTab("https://b.test/"));
+    ASSERT_TRUE(window->ActivateTabAt(0, 0));
+    window->RunAgentMenuCommand(kAgentMenuAsk, quote, "");
+    ASSERT_TRUE(window->agent_context_chip().has_value());
+    // The same tab keeps its chip; another tab does not inherit it.
+    ASSERT_TRUE(window->ActivateTabAt(0, 0));
+    EXPECT_TRUE(window->agent_context_chip().has_value());
+    ASSERT_TRUE(window->ActivateTabAt(0, 1));
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    window->RunAgentMenuCommand(kAgentMenuAsk, quote, "");
+    SendAgent(*window, R"({"type":"new_chat"})");
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    window->RunAgentMenuCommand(kAgentMenuAsk, quote, "");
+    window->SetAgentPanelOpen(false);
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+}
+
+TEST(BrowserWindowPagesTest, AChipStoresAClippedTitleAndSelection) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->RunAgentMenuCommand(kAgentMenuAsk,
+                                {.title = std::string(400, 't'),
+                                 .url = "https://a.test/",
+                                 .selection = std::string(20000, 's')},
+                                "");
+    ASSERT_TRUE(window->agent_context_chip().has_value());
+    EXPECT_EQ(window->agent_context_chip()->title.size(), kAgentTitleLimit);
+    EXPECT_EQ(window->agent_context_chip()->selection.size(), kAgentSelectionLimit);
 }
 
 TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
@@ -2694,7 +2749,7 @@ TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
     const agent::AgentTask& task = window->agent_queue().tasks()[0];
     EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
     EXPECT_EQ(task.prompt, "Summarize this page.");
-    EXPECT_NE(task.context.find("URL: https://a.test/"), std::string::npos);
+    EXPECT_NE(task.context.find("<page_url>https://a.test/</page_url>"), std::string::npos);
     const auto commands = BrowserWindow::PaletteCommands();
     EXPECT_TRUE(std::any_of(commands.begin(), commands.end(),
                             [](const auto& c) { return c.id == "ask_about_page"; }));

@@ -353,7 +353,8 @@ class BrowserWindow : public CefClient,
     }
     [[nodiscard]] const agent::AgentTaskQueue& agent_queue() const noexcept { return agent_queue_; }
     // "Ask the agent from context": the page chip above the composer, optionally carrying the
-    // text that was selected. Cleared by the chip's ✕, a send, or a new page context.
+    // text that was selected. Cleared by the chip's ✕, a send, a new chat, a tab change or closing
+    // the panel.
     struct AgentContextChip {
         std::string title;
         std::string url;
@@ -364,9 +365,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] const std::optional<AgentContextChip>& agent_context_chip() const noexcept {
         return context_chip_;
     }
-    // Queues an ask task whose context is the page (and selection). False when the agent could
-    // not take it.
-    bool AskAgent(std::string prompt, const AgentContextChip& context);
+    // Queues an ask task with `context` (agent_context.h; empty for none). False when the agent
+    // could not take it.
+    bool AskAgent(std::string prompt, std::string context);
     // A palette command by id (the palette view routes its selection here).
     void RunPaletteCommand(std::string_view id);
     // One of the context menu's agent items (offsets from agent_context.h) for the tab at
