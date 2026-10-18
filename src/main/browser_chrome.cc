@@ -2703,9 +2703,19 @@ void BrowserChrome::Detach() {
     for (const CefRefPtr<SurfacePanelDelegate>& surface_delegate : surface_delegates_) {
         surface_delegate->Detach();
     }
-    if (browser_view_ != nullptr && browser_content_ != nullptr) {
-        browser_content_->RemoveChildView(browser_view_);
+    if (browser_content_ != nullptr) {
+        const auto remove_child = [this](const CefRefPtr<CefView>& view) {
+            const CefRefPtr<CefView> parent = view != nullptr ? view->GetParentView() : nullptr;
+            if (parent != nullptr && parent->IsSame(browser_content_)) {
+                browser_content_->RemoveChildView(view);
+            }
+        };
+        remove_child(split_view_);
+        remove_child(split_divider_);
+        remove_child(browser_view_);
     }
+    split_view_ = nullptr;
+    split_divider_ = nullptr;
     browser_view_ = nullptr;
     if (agent_panel_view_ != nullptr && agent_panel_ != nullptr) {
         agent_panel_->RemoveChildView(agent_panel_view_);

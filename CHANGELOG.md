@@ -30,6 +30,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Agent-opened research pages stay grouped in the Plan's space without interrupting another space.
 - Moving a regular tab into a research group places it after the group without reporting a
   phantom move.
+- Closing a split-view window detaches both page panes and the divider cleanly.
 
 ## [0.7.1] - 2026-10-17
 
