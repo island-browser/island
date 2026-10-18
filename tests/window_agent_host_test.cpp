@@ -195,6 +195,27 @@ TEST(WindowAgentHostTest, APlanAwaitingApprovalLeavesChatInThePersonsSpace) {
               "https://docs.test/chat");
 }
 
+TEST(WindowAgentHostTest, ANewResearchDoesNotInheritThePreviousAgentPage) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->SetResearchTaskForTest("first");
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    // The research children are recorded as the agent's pages, so a call without an index
+    // reaches the first research's last page.
+    ASSERT_TRUE(window->ResolveAgentTab(std::nullopt).tab.has_value());
+
+    ResearchOutcome cancelled;
+    cancelled.kind = ResearchOutcome::Kind::kCancelled;
+    cancelled.message = "Research cancelled.";
+    window->CompleteResearch(cancelled);
+    window->SetResearchTaskForTest("second");
+
+    // The second research has not opened a page yet: the old one must not answer for it.
+    const BrowserWindow::AgentTabLookup lookup = window->ResolveAgentTab(std::nullopt);
+    EXPECT_FALSE(lookup.tab.has_value());
+    EXPECT_EQ(lookup.error, BrowserWindow::AgentTabError::kNoAgentPage);
+}
+
 TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest("data:text/html,plan");

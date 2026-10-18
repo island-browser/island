@@ -209,14 +209,15 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 
 - Agent tool targets (`BrowserWindow::ResolveAgentTab`, `window_agent_host.cc`). In ordinary chat the
   agent works with the window the person sees: tab indices and calls without an index refer to the
-  active space and its active tab (`browser_list_tabs` lists that space). While a research runs
-  and no plan waits for approval (`ResearchOwnsAgent`), the agent works in the Plan's space: indices
-  and the listing refer to it, and `browser_open_tab` files pages into the Plan's group;
-  and a call without an index acts on `agent_tab_id_`, the agent's most recent research page
-  (recorded for each research child). If that page is missing or closed, the tool errors and never
-  falls back to the person's tab. Page tools need a live browser and never activate a page;
-  `browser_navigate` and pinning change a page in another space in place; `browser_activate_tab`
-  switches the person's space on purpose; `browser_close_tab` works only in the space on screen.
+  active space and its active tab (`browser_list_tabs` lists that space). While a research runs and
+  no plan waits for approval (`ResearchOwnsAgent`), the agent works in the Plan's space: indices and
+  the listing refer to it, `browser_open_tab` files pages into the Plan's group, and a call without
+  an index acts on `agent_tab_id_`, the agent's most recent research page. That id is recorded for
+  each research child and cleared when a research starts or ends. If the page is missing or closed,
+  the tool errors and never falls back to the person's tab. Page tools need a live browser and never
+  activate a page; `browser_navigate` and pinning change a page in another space in place;
+  `browser_activate_tab` switches the person's space on purpose; `browser_close_tab` works only in
+  the space on screen.
 
 - Space icons (add one): (1) add the locked Lucide SVG source (see `tools/icon_pipeline/AGENTS.md`) and its
   entry in `tools/icon_pipeline/icon-sources.lock.json`; the pipeline pins that file with `kLockHash` in

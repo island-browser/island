@@ -200,6 +200,8 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
         return {ResearchStart::kFailed, message};
     }
     research_ = std::move(task);
+    // The agent's page belongs to one research: a new one starts without the last run's page.
+    agent_tab_id_.reset();
     research_status_.question = asked;
     plan_entries_.clear();
     plan_edits_ = {};
@@ -264,6 +266,7 @@ void BrowserWindow::CancelResearch() {
     if (research_->awaiting_approval) {
         // Nothing runs while the plan waits, so there is no turn to cancel.
         research_.reset();
+        agent_tab_id_.reset();
         SetResearchStatus("cancelled", "Research cancelled.");
         return;
     }
@@ -325,6 +328,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     }
     const ResearchTask task = std::move(*research_);
     research_.reset();
+    agent_tab_id_.reset();
     research_finish_posted_ = false;
     research_status_.question = task.question;
     switch (outcome.kind) {

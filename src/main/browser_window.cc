@@ -2552,6 +2552,7 @@ void BrowserWindow::CloseAgentPanelAndSession() {
         }
     }
     research_.reset();
+    agent_tab_id_.reset();
     agent_session_.reset();
 }
 
