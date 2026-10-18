@@ -18,6 +18,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 ### Fixed
 
 - Opening the agent panel no longer hides the page and the toolbar.
+- The Native address field shows one clear accent focus ring instead of a second inner ring.
 
 ## [0.7.1] - 2026-10-17
 

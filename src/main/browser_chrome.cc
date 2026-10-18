@@ -459,6 +459,13 @@ ArgbColor BrowserChrome::AddressOutlineColor(const ChromeTokens& tokens, bool fo
     return focused ? tokens.accent : tokens.border;
 }
 
+ArgbColor BrowserChrome::TextfieldFocusRingColor(const ChromeTokens& tokens, bool address_focused) {
+    if (tokens.look == LookPreset::kNative && address_focused) {
+        return AddressPlateStyleFor(tokens).fill;
+    }
+    return tokens.accent;
+}
+
 std::optional<CornerPatch> BrowserChrome::AddressCornerPatch(const ChromeTokens& tokens,
                                                              const DipRect& bounds,
                                                              bool sidebar_expanded) {
@@ -2850,6 +2857,7 @@ void BrowserChrome::HandleAddressUserAction(CefRefPtr<CefTextfield>) { CEF_REQUI
 void BrowserChrome::HandleAddressFocus() {
     CEF_REQUIRE_UI_THREAD();
     if (!detached_) {
+        host_->SetAddressFocusRingSuppressed(true);
         host_->BeginAddressEditing();
         UpdateAddressFocusLeadingEdge();
         ScheduleAddressSelection();
@@ -2859,6 +2867,7 @@ void BrowserChrome::HandleAddressFocus() {
 void BrowserChrome::HandleAddressBlur() {
     CEF_REQUIRE_UI_THREAD();
     if (!detached_) {
+        host_->SetAddressFocusRingSuppressed(false);
         host_->CancelAddressEditing();
         UpdateAddressFocusLeadingEdge();
     }

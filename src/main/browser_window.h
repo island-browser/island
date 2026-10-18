@@ -544,6 +544,7 @@ class BrowserWindow : public CefClient,
     void CloseTab(std::size_t index) override;
     void SelectSpace(std::size_t index) override;
     void BeginAddressEditing() override;
+    void SetAddressFocusRingSuppressed(bool suppressed) override;
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
@@ -1080,6 +1081,7 @@ class BrowserWindow : public CefClient,
     std::string projected_page_title_;
     bool browser_was_created_ = false;
     bool closing_ = false;
+    bool address_focus_ring_suppressed_ = false;
     bool message_loop_quit_ = false;
     // False for the smoke run and the headless test seam: the session file is
     // neither read at startup nor written on clean quit.

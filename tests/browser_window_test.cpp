@@ -219,6 +219,17 @@ TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPain
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
 
+TEST(BrowserWindowTest, GivenNativeAddressFocusWhenTextfieldRingResolvedThenItMatchesThePlate) {
+    const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
+
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(native, /*address_focused=*/true),
+              native.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(native, /*address_focused=*/false),
+              native.accent);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.accent);
+}
+
 TEST(BrowserWindowTest, GivenNativeTreeWhenInspectedThenToolbarAndAddressIdsMatchRuntime) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
     const ChromeViewTreeNode* rail = FindChromeView(tree, ChromeViewId::kRail);

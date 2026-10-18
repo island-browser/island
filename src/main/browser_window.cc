@@ -2682,6 +2682,17 @@ void BrowserWindow::BeginAddressEditing() {
     PublishChromeSnapshot();
 }
 
+void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
+    CEF_REQUIRE_UI_THREAD();
+    if (address_focus_ring_suppressed_ == suppressed) {
+        return;
+    }
+    address_focus_ring_suppressed_ = suppressed;
+    if (window_ != nullptr) {
+        ApplyTheme(window_, ResolvedChromeTheme(), true);
+    }
+}
+
 void BrowserWindow::CancelAddressEditing() {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
@@ -4053,7 +4064,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
             SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
                               AttachedView{.view = second->browser_view(), .tab = second->id(),
-                                         .second_slot = true}});
+                                           .second_slot = true}});
             return;
         }
     }
@@ -4183,6 +4194,14 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     window->SetThemeColor(CEF_ColorTextfieldSelectionForeground, tokens.background.argb);
     window->SetThemeColor(CEF_ColorTextfieldOutline, tokens.border.argb);
     window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
+    // CEF installs its own two-DIP FocusRing inside every textfield. While the Native address
+    // field is focused, paint only that shared ring in the address plate color so Island's
+    // outer accent ring remains the sole focus indicator. Restore the accent as soon as focus
+    // leaves the address field so palette textfields keep their normal focus treatment.
+    window->SetThemeColor(
+        CEF_ColorFocusableBorderFocused,
+        BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+    window->SetThemeColor(CEF_ColorFocusableBorderUnfocused, tokens.border.argb);
     if (notify_views) {
         window->ThemeChanged();
     }

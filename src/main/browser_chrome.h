@@ -273,6 +273,7 @@ class BrowserChromeHost {
     virtual void CloseTab(std::size_t index) = 0;
     virtual void SelectSpace(std::size_t index) = 0;
     virtual void BeginAddressEditing() = 0;
+    virtual void SetAddressFocusRingSuppressed(bool suppressed) = 0;
     virtual void CancelAddressEditing() = 0;
     virtual void SubmitAddressDraft(std::string_view draft) = 0;
     virtual void FocusBrowserView() = 0;
@@ -371,6 +372,8 @@ class BrowserChrome final : public NavigationObserver {
     // The color the address row paints around its children: the hairline (accent while focused),
     // or the plate fill itself in Native so no outline or ring shows.
     [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
+    [[nodiscard]] static ArgbColor TextfieldFocusRingColor(const ChromeTokens& tokens,
+                                                           bool address_focused);
     // The corner patch that rounds the address plate at `bounds` (window DIP). Native's address
     // sits in the always-shown toolbar; the other looks' address lives in the expanded sidebar
     // only, so it has no patch while the sidebar is collapsed.
