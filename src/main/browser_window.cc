@@ -847,53 +847,35 @@ bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
     return true;
 }
 
-std::size_t BrowserWindow::AgentSpaceIndex() {
-    if (research_.has_value() && plan_tab_.has_value()) {
-        if (const auto location = TabLocation(*plan_tab_); location.has_value()) {
-            PinAgentSpace(location->first);
-            return location->first;
-        }
+bool BrowserWindow::ResearchOwnsAgent() const {
+    return research_.has_value() && plan_tab_.has_value() && TabLocation(*plan_tab_).has_value();
+}
+
+std::size_t BrowserWindow::AgentSpaceIndex() const {
+    if (ResearchOwnsAgent()) {
+        return TabLocation(*plan_tab_)->first;
     }
-    if (agent_space_id_.has_value()) {
-        for (std::size_t index = 0; index < spaces_.size(); ++index) {
-            if (spaces_[index].id() == *agent_space_id_) {
-                return index;
-            }
-        }
-        // The pinned space was closed, and its page with it: the agent's context ends there.
-        agent_space_id_.reset();
-        agent_tab_id_.reset();
-    }
-    PinAgentSpace(active_space_index_);
     return active_space_index_;
 }
 
-void BrowserWindow::PinAgentSpace(std::size_t space_index) {
-    const SpaceId id = spaces_[space_index].id();
-    if (agent_space_id_ == id) {
-        return;
+BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
+    std::optional<std::size_t> index) const {
+    if (!ResearchOwnsAgent()) {
+        // Ordinary chat: the agent works with the window the person sees. Indices and calls
+        // without an index refer to the active space and its active tab.
+        const Space& space = active_space();
+        if (index.has_value()) {
+            if (*index >= space.tab_count()) {
+                return {.error = AgentTabError::kNoSuchTab};
+            }
+            return {.tab = AgentTabRef{.space = active_space_index_, .tab = *index}};
+        }
+        if (!space.has_active_tab()) {
+            return {.error = AgentTabError::kNoAgentPage};
+        }
+        return {.tab = AgentTabRef{.space = active_space_index_, .tab = space.active_tab_index()}};
     }
-    // A page of the old space is not reachable from the new one, so it stops being the target.
-    agent_space_id_ = id;
-    agent_tab_id_.reset();
-}
-
-void BrowserWindow::RecordAgentPage(TabId id, std::size_t space_index) {
-    PinAgentSpace(space_index);
-    agent_tab_id_ = id;
-}
-
-void BrowserWindow::FollowAgentToActiveSpace() {
-    CEF_REQUIRE_UI_THREAD();
-    if (closing_ || (research_.has_value() && plan_tab_.has_value())) {
-        return;
-    }
-    PinAgentSpace(active_space_index_);
-    const Tab* tab = active_tab();
-    agent_tab_id_ = tab != nullptr ? std::optional<TabId>(tab->id()) : std::nullopt;
-}
-
-BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(std::optional<std::size_t> index) {
+    // During research the agent works in the Plan's space and on its own most recent page.
     const std::size_t space_index = AgentSpaceIndex();
     if (index.has_value()) {
         if (*index >= spaces_[space_index].tab_count()) {
@@ -912,7 +894,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(std::optional<std::
     return {.tab = AgentTabRef{.space = location->first, .tab = location->second}};
 }
 
-bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) {
+bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {
     const AgentTabLookup lookup = ResolveAgentTab(index);
     if (!lookup.tab.has_value()) {
         return false;

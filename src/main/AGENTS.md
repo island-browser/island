@@ -207,38 +207,16 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
   the page has no live frame; removing the Plan's space stops the research (no dialog).
 
-- Agent tool targets (`BrowserWindow::ResolveAgentTab`, `window_agent_host.cc`): the agent works
-  in one space, its pinned `agent_space_id_`. That is the Plan's space while a research runs;
-  otherwise the space it opened a page in, the space it moved to with `browser_new_space` /
-  `browser_switch_space` (`FollowAgentToActiveSpace`), or the space on screen at its first call.
-  Tab indices from the tools refer to that space, and `browser_list_tabs` lists it. A call with no
-  index acts on `agent_tab_id_`, the agent's most recent page (`RecordAgentPage`: every research
-  child and every `browser_open_tab` page). If there is none, or it was closed, the tool errors and
-  never falls back to the person's active tab. Page tools need a live browser and never activate
-  a page; `browser_navigate` and pinning change a page in another space in place;
-  `browser_activate_tab` switches the person's space on purpose; `browser_close_tab` works only in
-  the space on screen. Pinning a space forgets the page when the space changes.
+- Agent tool targets (`BrowserWindow::ResolveAgentTab`, `window_agent_host.cc`). In ordinary chat the
+  agent works with the window the person sees: tab indices and calls without an index refer to the
+  active space and its active tab (`browser_list_tabs` lists that space). While a research runs
+  (`ResearchOwnsAgent`), the agent works in the Plan's space: indices and the listing refer to it,
+  and a call without an index acts on `agent_tab_id_`, the agent's most recent research page
+  (recorded for each research child). If that page is missing or closed, the tool errors and never
+  falls back to the person's tab. Page tools need a live browser and never activate a page;
+  `browser_navigate` and pinning change a page in another space in place; `browser_activate_tab`
+  switches the person's space on purpose; `browser_close_tab` works only in the space on screen.
 
-- Space icons (add one): (1) add the locked Lucide SVG source (see `tools/icon_pipeline/AGENTS.md`) and its
-  entry in `tools/icon_pipeline/icon-sources.lock.json`; the pipeline pins that file with `kLockHash` in
-  `tools/icon_pipeline/icon_pipeline.cc`, so update the constant with the lock; (2) add its entry to
-  `kSpaceIconChoices` in `space_icon.h` (the array size changes with it); (3) run
-  `tools/icon_pipeline/run.sh generate` to regenerate the PNGs and `run.sh verify` to check them; (4) update the PNG count in the root
-  `CMakeLists.txt` (`816` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
-  The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
-  switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
-  none.
-- Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
-  (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
-  the icon. Each command submit must reach the host after the palette released its overlay, so the
-  picker is scheduled with `ScheduleSpaceIconPicker` (a posted task). To add another palette command,
-  append a `PaletteCommandEntry` to the command list in `BrowserWindow::ShowCommandPalette` and
-  handle its id in `OnCommandPaletteSubmitted`.
-- Native's Agent row (`kRailAgentButton`) has three views: the name (`agent_button_`, fitted by
-  `FitAgentEntryName` to the room between the label and the status dot), the status dot and the
-  keycap (`agent_keycap_`). `AgentEntryStatus` drives the dot: `AgentActivity` is `kIdle`,
-  `kWorking` or `kNeedsYou`, and the status is refreshed from `RefreshAgentEntry`. The row's views
-  are currently three focus stops; the meta and keycap labels should not be (review item M4, open).
 - Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
   clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
   grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyAddressFocusColors`

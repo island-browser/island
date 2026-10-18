@@ -162,10 +162,10 @@ class BrowserWindow : public CefClient,
     // labels it with the running branch and remembers which plan node opened it.
     [[nodiscard]] bool OpenAgentTab(std::string_view text);
 
-    // Agent tools (window_agent_host.cc). The agent works in one space: the Plan's space while a
-    // research runs, otherwise the space it pinned when its context started (or moved to with
-    // NewSpace/SwitchSpace). Tab indices from the agent refer to that space, and a call without
-    // an index acts on the agent's most recent page, never on the page the person is viewing.
+    // Agent tools (window_agent_host.cc). In ordinary chat the agent works with the window the
+    // person sees: indices and calls without an index refer to the active space and tab. While a
+    // research runs, the agent works in the Plan's space: indices refer to that space, and a call
+    // without an index acts on the agent's own most recent page (never the person's tab).
     enum class AgentTabError { kNone, kNoAgentPage, kAgentPageClosed, kNoSuchTab };
     struct AgentTabRef {
         std::size_t space = 0;
@@ -175,9 +175,9 @@ class BrowserWindow : public CefClient,
         std::optional<AgentTabRef> tab;
         AgentTabError error = AgentTabError::kNone;
     };
-    [[nodiscard]] std::size_t AgentSpaceIndex();
-    [[nodiscard]] AgentTabLookup ResolveAgentTab(std::optional<std::size_t> index);
-    [[nodiscard]] bool IsAgentPlanTab(std::optional<std::size_t> index);
+    [[nodiscard]] std::size_t AgentSpaceIndex() const;
+    [[nodiscard]] AgentTabLookup ResolveAgentTab(std::optional<std::size_t> index) const;
+    [[nodiscard]] bool IsAgentPlanTab(std::optional<std::size_t> index) const;
     [[nodiscard]] CefRefPtr<CefBrowser> AgentBrowser(AgentTabRef ref) const;
     [[nodiscard]] bool NavigateAgentTab(std::optional<std::size_t> index, std::string_view text);
     // Activating brings the agent's page to the front, switching the person to its space.
@@ -185,9 +185,6 @@ class BrowserWindow : public CefClient,
     // Closing is allowed only in the space on screen: the person's view is never changed to close.
     [[nodiscard]] bool CloseAgentTab(std::size_t index);
     [[nodiscard]] bool SetAgentTabPinned(std::size_t index, bool pinned);
-    // After the agent creates or selects a space, its context moves there with the space's
-    // selected page. Ignored while a research keeps the agent in the Plan's space.
-    void FollowAgentToActiveSpace();
     // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
     // True when the tab of the active space (nullopt = the active tab) is the research Plan tab.
@@ -355,7 +352,7 @@ class BrowserWindow : public CefClient,
     void SetPlanPageUrlForTest(std::string url) { plan_page_url_ = std::move(url); }
     // Makes a tab the agent's most recent page, as if the agent had opened it.
     void TargetAgentPageForTest(std::size_t space, std::size_t tab) {
-        RecordAgentPage(spaces_[space].tabs()[tab].id(), space);
+        agent_tab_id_ = spaces_[space].tabs()[tab].id();
     }
     void SetAgentSendForTest(std::function<bool(std::string)> send) {
         agent_send_for_test_ = std::move(send);
@@ -913,9 +910,8 @@ class BrowserWindow : public CefClient,
     // space active and is selected with one attach, wherever the person was.
     TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
                             std::string label, bool activate);
-    // Pins the agent's space; moving to another space forgets the page that lived in the old one.
-    void PinAgentSpace(std::size_t space_index);
-    void RecordAgentPage(TabId id, std::size_t space_index);
+    // True while a research runs with its Plan tab in a space: the agent's space is then the Plan's.
+    [[nodiscard]] bool ResearchOwnsAgent() const;
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
     // The address a new tab opens (empty text: the start page), or nullopt when the text is not
     // an address Island allows.
@@ -1072,8 +1068,7 @@ class BrowserWindow : public CefClient,
     std::map<std::string, TabId> plan_node_tabs_;
     // True while the command palette is the space-icon picker (no tabs, no history rows).
     bool space_icon_picker_open_ = false;
-    // The agent's space and its most recent page (runtime only; never persisted).
-    std::optional<SpaceId> agent_space_id_;
+    // The agent's most recent page during a research (runtime only; never persisted).
     std::optional<TabId> agent_tab_id_;
     bool space_icon_picker_scheduled_ = false;
     bool ui_tasks_enabled_for_test_ = true;

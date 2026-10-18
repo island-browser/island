@@ -54,8 +54,8 @@ std::string PlanTabError(std::optional<std::size_t> tab) {
 std::string AgentTabErrorText(BrowserWindow::AgentTabError error, std::optional<std::size_t> tab) {
     switch (error) {
         case BrowserWindow::AgentTabError::kNoAgentPage:
-            return "The agent has no page yet (no live page to act on). Open one with "
-                   "browser_open_tab, or pass a tab index.";
+            return "There is no tab to act on yet. Open one with browser_open_tab, or pass a tab "
+                   "index.";
         case BrowserWindow::AgentTabError::kAgentPageClosed:
             return "The agent's page was closed (no live page). Open a new one with "
                    "browser_open_tab, or pass a tab index.";
@@ -196,19 +196,12 @@ agent::HostStatus WindowAgentHost::PinTab(std::size_t tab, bool pinned) {
 }
 
 agent::HostStatus WindowAgentHost::SwitchSpace(std::size_t space) {
-    const bool ok = window_->SelectSpaceIndex(space);
-    if (ok) {
-        window_->FollowAgentToActiveSpace();
-    }
-    return StatusFor(ok, "No space at index " + std::to_string(space) + ".");
+    return StatusFor(window_->SelectSpaceIndex(space),
+                     "No space at index " + std::to_string(space) + ".");
 }
 
 agent::HostStatus WindowAgentHost::NewSpace(std::string_view name) {
-    const bool ok = window_->CreateSpace(name);
-    if (ok) {
-        window_->FollowAgentToActiveSpace();
-    }
-    return StatusFor(ok, "Could not create a space.");
+    return StatusFor(window_->CreateSpace(name), "Could not create a space.");
 }
 
 agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
@@ -227,7 +220,7 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
         CefRefPtr<CefBrowser> browser = window_->AgentBrowser(*lookup.tab);
         if (browser == nullptr) {
             return agent::HostStatus::Error(
-                "The agent's page has no live page yet: it is not shown in the window.");
+                "The page has no live page yet: it is not shown in the window.");
         }
         switch (action) {
             case agent::AgentBrowserAction::kBack:
@@ -278,8 +271,8 @@ void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_v
         agent::DevToolsReply reply;
         reply.ok = false;
         reply.error = std::string(tab.has_value() ? "Tab " + std::to_string(*tab)
-                                                  : std::string("The agent's page")) +
-                      " has no live page: it is not shown in the window yet.";
+                                                  : std::string("The active tab")) +
+                      " has no live page yet: it is not shown in the window.";
         done(std::move(reply));
         return;
     }

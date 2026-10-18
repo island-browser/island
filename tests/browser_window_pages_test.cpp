@@ -15,6 +15,7 @@
 
 #include "agent/plan_fixture.h"
 #include "browser_window.h"
+#include "window_agent_host.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
@@ -1710,6 +1711,44 @@ TEST(BrowserWindowPagesTest, AddressFocusRepaintsOnlyItsColorsNotTheWholeWindow)
     window->SetAddressFocusRingSuppressed(false);
     EXPECT_EQ(window->LastAddressFocusRepaintForTest(),
               BrowserWindow::AddressFocusRepaint::kColorsOnly);
+}
+
+TEST(BrowserWindowPagesTest, DuringResearchNoIndexActsOnTheAgentsPageNotThePersons) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+    ASSERT_TRUE(window->CreateSpace("Person's space"));
+    const std::string persons_url = SpaceAt(*window, 2).tabs()[0].startup_url();
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+    WindowAgentHost host(*window);
+    const auto call = [&](std::string_view tool, Value args = Value::MakeObject()) {
+        std::optional<agent::ToolResult> result;
+        host.toolbox().Call(tool, args, [&](agent::ToolResult r) { result = std::move(r); });
+        return result.value_or(agent::ToolResult::Error("no result"));
+    };
+
+    // Indices and listings refer to the Plan's space, though the person is in another space.
+    const Value tabs = *json::Parse(call("browser_list_tabs").content[0].text);
+    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), SpaceAt(*window, 1).tab_count());
+
+    // Without an index the agent's own page is the target.
+    EXPECT_FALSE(call("browser_navigate",
+                      Value::MakeObject().Set("url", Value::String("https://reviews.test/next")))
+                     .is_error);
+    EXPECT_EQ(SpaceAt(*window, 1).tabs().back().startup_url(), "https://reviews.test/next");
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), persons_url);
+
+    // When the agent's page is closed, the call fails and the person's tab is left alone.
+    ASSERT_TRUE(window->SelectSpaceIndex(1));
+    ASSERT_TRUE(window->CloseAgentTab(SpaceAt(*window, 1).tab_count() - 1));
+    ASSERT_TRUE(window->SelectSpaceIndex(2));
+    const agent::ToolResult gone =
+        call("browser_navigate", Value::MakeObject().Set("url", Value::String("https://x.test/")));
+    EXPECT_TRUE(gone.is_error);
+    EXPECT_NE(gone.content[0].text.find("closed"), std::string::npos);
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), persons_url);
 }
 
 TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {

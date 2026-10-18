@@ -528,9 +528,7 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
         plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
     if (!location.has_value()) {
         AppendTabToActiveSpace(std::move(startup_url));
-        const TabId id = active_tab() != nullptr ? active_tab()->id() : TabId{};
-        RecordAgentPage(id, active_space_index_);
-        return id;
+        return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
     // Do not pull the person away from another space. The page still belongs to the research,
     // so append it to the Plan's group in the background; it becomes active only when the Plan
@@ -538,7 +536,7 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
     activate = activate && location->first == active_space_index_;
     const TabId id = AppendChildOfPlan(location->first, std::move(startup_url),
                                        std::move(node_id), std::move(label), activate);
-    RecordAgentPage(id, location->first);
+    agent_tab_id_ = id;
     return id;
 }
 
@@ -579,7 +577,6 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
     }
     if (!research_.has_value() || !plan_tab_.has_value()) {
         AppendTabToActiveSpace(std::move(*url));
-        RecordAgentPage(active_tab()->id(), active_space_index_);
         return true;
     }
     const std::optional<agent::PlanNode> node = RunningPlanNode();

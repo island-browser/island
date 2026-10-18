@@ -121,7 +121,7 @@ TEST(WindowAgentHostTest, ListTabsTitlesAnUnshownPageLikeTheSidebar) {
     EXPECT_EQ(listed[1].StringOr("title", ""), "https://docs.test/a");
 }
 
-TEST(WindowAgentHostTest, PageToolsWithoutAnIndexActOnTheAgentsOwnPageAfterASpaceSwitch) {
+TEST(WindowAgentHostTest, InChatPageToolsWithoutAnIndexActOnTheActiveTab) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     WindowAgentHost host(*window);
     ASSERT_FALSE(Call(host, "browser_open_tab",
@@ -130,44 +130,23 @@ TEST(WindowAgentHostTest, PageToolsWithoutAnIndexActOnTheAgentsOwnPageAfterASpac
     const std::size_t agent_space = window->active_space_index();
     const std::size_t agent_tab = ActiveSpace(*window).active_tab_index();
     ASSERT_TRUE(window->CreateSpace("Personal"));
-    const std::string persons_url = ActiveSpace(*window).tabs()[0].startup_url();
 
-    // The person is now looking at another space: the agent's calls must not reach its page.
+    // No research runs: a call without an index is about the tab the person is viewing.
     EXPECT_FALSE(Call(host, "browser_navigate",
                       Value::MakeObject().Set("url", Value::String("https://docs.test/next")))
                      .is_error);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "https://docs.test/next");
     EXPECT_EQ(window->spaces()[agent_space].tabs()[agent_tab].startup_url(),
-              "https://docs.test/next");
-    EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), persons_url);
+              "https://docs.test/agent");
 
-    // Listing reports the agent's space, not the one on screen.
+    // Reads without an index report the active tab, not an agent page.
+    const agent::ToolResult read = Call(host, "page_read");
+    EXPECT_TRUE(read.is_error);
+    EXPECT_NE(read.content[0].text.find("active tab"), std::string::npos);
+
+    // Listing shows the active space.
     const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
-    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(),
-              window->spaces()[agent_space].tab_count());
-}
-
-TEST(WindowAgentHostTest, PageToolsReportAClosedAgentPageInsteadOfUsingThePersonsTab) {
-    CefRefPtr<BrowserWindow> window = MakeWindow();
-    WindowAgentHost host(*window);
-    ASSERT_FALSE(Call(host, "browser_open_tab",
-                      Value::MakeObject().Set("url", Value::String("https://docs.test/agent")))
-                     .is_error);
-    const std::size_t agent_space = window->active_space_index();
-    ASSERT_TRUE(window->CreateSpace("Personal"));
-    const std::string persons_url = ActiveSpace(*window).tabs()[0].startup_url();
-    // The person closes the agent's page in its own space.
-    ASSERT_TRUE(window->SelectSpaceIndex(agent_space));
-    ASSERT_FALSE(Call(host, "browser_close_tab",
-                      Value::MakeObject().Set("tab", Value::Int(1)))
-                     .is_error);
-    ASSERT_TRUE(window->SelectSpaceIndex(agent_space == 0 ? 1 : 0));
-
-    const agent::ToolResult navigate =
-        Call(host, "browser_navigate",
-             Value::MakeObject().Set("url", Value::String("https://docs.test/next")));
-    EXPECT_TRUE(navigate.is_error);
-    EXPECT_NE(navigate.content[0].text.find("closed"), std::string::npos);
-    EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), persons_url);
+    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), ActiveSpace(*window).tab_count());
 }
 
 TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
