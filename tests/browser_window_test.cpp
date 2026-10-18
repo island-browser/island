@@ -219,18 +219,25 @@ TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPain
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
 
-TEST(BrowserWindowTest, GivenNativeAddressFocusWhenTextfieldRingResolvedThenItIsTransparent) {
-    const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+TEST(BrowserWindowTest,
+     GivenNativeAddressFocusWhenTextfieldRingResolvedThenItIsThePlateFillOverAnExtremeBackdrop) {
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
 
-    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(native, /*address_focused=*/true),
-              (ArgbColor{.argb = 0x013A3A3DU}));
-    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(native, /*address_focused=*/false),
-              native.accent);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/true), dark.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(light, /*address_focused=*/true), light.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/true),
+              (ArgbColor{.argb = 0xFFFFFFFFU}));
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(light, /*address_focused=*/true),
+              (ArgbColor{.argb = 0xFF000000U}));
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/false),
+              dark.canvas);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false), dark.accent);
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.accent);
-    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(native, /*address_focused=*/true), native.fill);
-    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(native, /*address_focused=*/false),
-              native.border);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(arc, /*address_focused=*/true), arc.canvas);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(dark, /*address_focused=*/true), dark.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(dark, /*address_focused=*/false), dark.border);
     EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/true), arc.border);
 }
 

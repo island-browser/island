@@ -459,14 +459,32 @@ ArgbColor BrowserChrome::AddressOutlineColor(const ChromeTokens& tokens, bool fo
     return focused ? tokens.accent : tokens.border;
 }
 
+namespace {
+
+// The plate fill is "light" when its green channel is past mid-grey (Native light #E8E8ED,
+// dark #3A3A3D).
+bool IsLightFill(const ArgbColor& fill) { return ((fill.argb >> 8) & 0xFFU) >= 0x80U; }
+
+}  // namespace
+
 ArgbColor BrowserChrome::TextfieldFocusRingColor(const ChromeTokens& tokens, bool address_focused) {
     if (tokens.look == LookPreset::kNative && address_focused) {
-        // Chromium adds a contrasting halo around an opaque focus-ring color. Keep a nonzero
-        // alpha so the color is not treated as an absent/default override, but make the stroke
-        // effectively transparent and leave focus indication to the address row's accent ring.
-        return {.argb = (tokens.fill.argb & 0x00FFFFFFU) | 0x01000000U};
+        // Chromium paints the textfield's inner ring with CEF_ColorFocusableBorderFocused, after
+        // clamping it to a minimum contrast against CEF_ColorWindowBackground (see
+        // TextfieldFocusRingBackdrop). The plate fill makes that ring vanish into the plate, so
+        // only the address row's accent ring shows.
+        return AddressPlateStyleFor(tokens).fill;
     }
     return tokens.accent;
+}
+
+ArgbColor BrowserChrome::TextfieldFocusRingBackdrop(const ChromeTokens& tokens,
+                                                    bool address_focused) {
+    if (tokens.look == LookPreset::kNative && address_focused) {
+        // The opposite extreme keeps the plate-colored ring clear of the minimum-contrast clamp.
+        return {.argb = IsLightFill(AddressPlateStyleFor(tokens).fill) ? 0xFF000000U : 0xFFFFFFFFU};
+    }
+    return tokens.canvas;
 }
 
 ArgbColor BrowserChrome::TextfieldOutlineColor(const ChromeTokens& tokens, bool address_focused) {

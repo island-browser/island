@@ -4267,11 +4267,15 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
         CEF_ColorTextfieldOutline,
         BrowserChrome::TextfieldOutlineColor(tokens, address_focus_ring_suppressed_).argb);
     window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
-    // CEF installs its own two-DIP FocusRing inside every textfield. While the Native address
-    // field is focused, make that shared ring transparent so Chromium cannot add a contrasting
-    // halo around it and Island's outer accent ring remains the sole focus indicator. Restore the
-    // accent as soon as focus leaves the address field so palette textfields keep their normal
-    // focus treatment.
+    // CEF installs its own two-DIP FocusRing inside every textfield, drawn in
+    // CEF_ColorFocusableBorderFocused and clamped to a minimum contrast against
+    // CEF_ColorWindowBackground (a ring darker than that clamp is lifted to a grey 94,94,94). While
+    // the Native address field is focused, paint that ring as the plate fill so Island's outer
+    // accent ring is the sole focus indicator. Restore the accent as soon as focus leaves the
+    // address field so palette textfields keep their normal focus treatment.
+    window->SetThemeColor(
+        CEF_ColorWindowBackground,
+        BrowserChrome::TextfieldFocusRingBackdrop(tokens, address_focus_ring_suppressed_).argb);
     window->SetThemeColor(
         CEF_ColorFocusableBorderFocused,
         BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);

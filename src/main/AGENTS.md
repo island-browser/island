@@ -205,3 +205,9 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
   deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
   the page has no live frame; removing the Plan's space stops the research (no dialog).
+
+- Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
+  clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
+  grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyTheme` sets the
+  ring to the plate fill and the window background to the opposite extreme
+  (`BrowserChrome::TextfieldFocusRingColor/Backdrop`), so only the row's accent ring shows.

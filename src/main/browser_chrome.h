@@ -374,6 +374,11 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
     [[nodiscard]] static ArgbColor TextfieldFocusRingColor(const ChromeTokens& tokens,
                                                            bool address_focused);
+    // CEF_ColorWindowBackground: the reference the textfield focus ring's minimum contrast is
+    // measured against. Native address focus needs an extreme one so a plate-colored ring is not
+    // lightened into a grey inner ring.
+    [[nodiscard]] static ArgbColor TextfieldFocusRingBackdrop(const ChromeTokens& tokens,
+                                                              bool address_focused);
     [[nodiscard]] static ArgbColor TextfieldOutlineColor(const ChromeTokens& tokens,
                                                          bool address_focused);
     struct CornerPatchPollState {
