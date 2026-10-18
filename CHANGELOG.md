@@ -70,6 +70,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Closing a split-view window detaches both page panes and the divider cleanly.
 - Windows prefers Segoe UI Variable for Native chrome and falls back to Segoe UI.
 - Settings and other internal pages respect the same young-browser swap guard as ordinary tabs.
+- The research prompt asks the agent not to purchase, post or delete on a site or type passwords or
+  payment details, which the Plan's limits and the README state; a step that needs them asks first.
 
 ### Known limitations
 

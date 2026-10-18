@@ -91,6 +91,13 @@ TEST(BuildResearchPromptTest, SaysWhatToDoWithAPageThatIsNotShown) {
     EXPECT_NE(prompt.find("do not activate that page"), std::string::npos);
 }
 
+TEST(BuildResearchPromptTest, ForbidsPurchasePostDeleteAndSecretsWithoutAskingFirst) {
+    const std::string prompt = BuildResearchPrompt("why");
+    EXPECT_NE(prompt.find("Never purchase, post or delete"), std::string::npos);
+    EXPECT_NE(prompt.find("never type passwords or payment details"), std::string::npos);
+    EXPECT_NE(prompt.find("needs_you set"), std::string::npos);
+}
+
 TEST(BuildResearchPromptTest, ClipsAnOversizedQuestion) {
     const std::string prompt = BuildResearchPrompt(std::string(kMaxResearchQuestionBytes * 3, 'q'));
     EXPECT_NE(prompt.find(std::string(kMaxResearchQuestionBytes, 'q')), std::string::npos);

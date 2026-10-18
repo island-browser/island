@@ -150,7 +150,10 @@ std::string BuildResearchPrompt(std::string_view question) {
     prompt += "4. Compare the sources: where they agree, where they disagree, which is newer or ";
     prompt += "more authoritative. Do not rest an important claim on a single source.\n";
     prompt += "5. Do not ask the user questions. If the question is ambiguous, pick the most ";
-    prompt += "likely reading and state that assumption in the report.\n\n";
+    prompt += "likely reading and state that assumption in the report.\n";
+    prompt += "Never purchase, post or delete anything on a site, and never type passwords or ";
+    prompt += "payment details. A step that needs a sign-in or one of those actions gets ";
+    prompt += "needs_you set, and the person decides before it runs.\n\n";
     prompt += "Finish with ONE final message that contains only the report, between these two ";
     prompt += "marker lines (each on its own line, nothing else on it):\n";
     prompt += std::string(kReportBeginMarker) + "\n";
