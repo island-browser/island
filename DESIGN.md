@@ -213,6 +213,9 @@ values.
 
 `segment_selected` is shared by Native, Arc and Graphite. A selected segment is a neutral raised
 plate with the normal `text` color; blue remains reserved for actions and `:focus-visible` rings.
+In dark theme the selected plate equals the track fill, so the chrome draws a `border_strong`
+outline there (`BrowserChrome::NativeSegmentColors`), and the web pages draw the same hairline as an
+inset `--segment-outline` (`#48484A`; `transparent` in light). Blue is still not used for selection.
 
 ### Documented colors
 
