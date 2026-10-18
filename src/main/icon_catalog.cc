@@ -179,6 +179,22 @@ std::optional<CefRefPtr<CefImage>> IconCatalog::Load(ChromeIcon icon, ChromeIcon
                          VariantPath(resource_root_, icon, tone, size, "2"));
 }
 
+std::optional<CefRefPtr<CefImage>> IconCatalog::LoadTinted(ChromeIcon icon, ArgbColor color,
+                                                           ChromeIconSize size) const {
+    const std::optional<CefRefPtr<CefImage>> source =
+        ReadImagePair(VariantPath(resource_root_, icon, ChromeIconTone::kText, size, "1"),
+                      VariantPath(resource_root_, icon, ChromeIconTone::kText, size, "2"));
+    if (!source.has_value()) {
+        return std::nullopt;
+    }
+    CefRefPtr<CefImage> tinted = CefImage::CreateImage();
+    if (!AddTintedRepresentation(*source, tinted, kOneXScale, color) ||
+        !AddTintedRepresentation(*source, tinted, kTwoXScale, color)) {
+        return std::nullopt;
+    }
+    return tinted;
+}
+
 std::optional<CefRefPtr<CefImage>> IconCatalog::LoadSpaceIcon(std::string_view icon_id,
                                                               ArgbColor color,
                                                               ChromeIconSize size) const {

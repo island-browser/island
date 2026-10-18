@@ -560,17 +560,44 @@ class BrowserChrome final : public NavigationObserver {
         }
         // Truncated here rather than by the label button, which elides too early; the cap keeps
         // the name clear of the keycap in the 286 DIP sidebar.
-        constexpr std::size_t kMaxNameChars = 16;
+        return status.provider_name;
+    }
+    // The longest code-point prefix of |text| plus an ellipsis that |measure| (the label's own
+    // preferred width) fits in |max_width|. Text that already fits is returned unchanged.
+    [[nodiscard]] static std::string FitAgentEntryText(
+        std::string_view text, int max_width, const std::function<int(std::string_view)>& measure) {
+        if (measure(text) <= max_width) {
+            return std::string(text);
+        }
         std::vector<std::size_t> starts;
-        for (std::size_t i = 0; i < status.provider_name.size(); ++i) {
-            if ((static_cast<unsigned char>(status.provider_name[i]) & 0xC0U) != 0x80U) {
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if ((static_cast<unsigned char>(text[i]) & 0xC0U) != 0x80U) {
                 starts.push_back(i);
             }
         }
-        if (starts.size() > kMaxNameChars) {
-            return status.provider_name.substr(0, starts[kMaxNameChars - 1]) + "\xE2\x80\xA6";
+        const std::string ellipsis = "\xE2\x80\xA6";
+        if (starts.empty()) {
+            return ellipsis;
         }
-        return status.provider_name;
+        const auto prefix = [&](std::size_t count) {
+            return std::string(text.substr(0, count < starts.size() ? starts[count] : text.size()));
+        };
+        std::size_t low = 0;
+        std::size_t high = starts.size() - 1;
+        while (low < high) {
+            const std::size_t middle = (low + high + 1) / 2;
+            if (measure(prefix(middle) + ellipsis) <= max_width) {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        // No space before the ellipsis: "Claude…", not "Claude …".
+        std::string kept = prefix(low);
+        while (!kept.empty() && kept.back() == ' ') {
+            kept.pop_back();
+        }
+        return kept + ellipsis;
     }
     [[nodiscard]] static ArgbColor AgentStatusDotColor(const ChromeTokens& tokens,
                                                        AgentActivity activity) {
@@ -1056,6 +1083,8 @@ class BrowserChrome final : public NavigationObserver {
     void ApplyCollapsedTabVisual(std::size_t position);
     void ApplyAddressPillImages();
     void ApplyAgentEntryStatus(ArgbColor row_fill);
+    // Shortens the Native Agent name to the width the row leaves it, measured by the label itself.
+    void FitAgentEntryName();
     void ApplyAddressIndicators();
     // Called by the row buttons' delegates on every pointer-state change.
     void RefreshRowHover();
@@ -1152,6 +1181,13 @@ class BrowserChrome final : public NavigationObserver {
     // dot, and the shortcut keycap. Arc and Graphite keep agent_button_ alone in the footer.
     CefRefPtr<CefPanel> agent_row_;
     CefRefPtr<CefLabelButton> agent_meta_;
+    CefRefPtr<CefLabelButton> agent_dot_;
+    CefRefPtr<CefPanel> agent_spacer_;
+    // The untruncated label text, and the inputs the last fit was measured for.
+    std::string agent_meta_text_;
+    int agent_fit_row_width_ = -1;
+    std::string agent_fit_text_;
+    bool agent_fit_keycap_ = false;
     CefRefPtr<CefLabelButton> agent_keycap_;
     AgentEntryStatus agent_status_;
     std::string agent_shortcut_label_;

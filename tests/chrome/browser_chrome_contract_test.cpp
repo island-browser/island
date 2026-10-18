@@ -621,9 +621,8 @@ TEST(BrowserChromeNativeContractTest, GivenAgentStatusWhenLabeledThenQueueProgre
     EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "7/7");
     EXPECT_EQ(BrowserChrome::AgentEntryDescription(status), "Claude Code, working, task 7/7");
     const AgentEntryStatus longer{.provider_name = "A very long provider name"};
-    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(longer), "A very long pro\xE2\x80\xA6");
-    EXPECT_EQ(BrowserChrome::AgentEntryMetaText({.provider_name = "Sixteen chars ok"}),
-              "Sixteen chars ok");
+    // The full name; the view fits it to the measured room (see FitAgentEntryText).
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(longer), "A very long provider name");
     EXPECT_EQ(BrowserChrome::AgentEntryDescription({.activity = AgentActivity::kNeedsYou}),
               "Agent, needs you");
 }
@@ -640,6 +639,40 @@ TEST(BrowserChromeNativeContractTest, GivenAgentActivityWhenColoredThenEachState
         EXPECT_NE(working.argb, needs.argb);
         EXPECT_NE(idle.argb, needs.argb);
     }
+}
+
+}  // namespace
+}  // namespace island
+
+namespace island {
+namespace {
+
+// Fake measure: seven DIP per code point, so the expectations below count code points.
+int CodePointWidth(std::string_view text) {
+    int width = 0;
+    for (const char byte : text) {
+        if ((static_cast<unsigned char>(byte) & 0xC0U) != 0x80U) {
+            width += 7;
+        }
+    }
+    return width;
+}
+
+TEST(BrowserChromeNativeContractTest, GivenANameThatFitsWhenFittedThenItIsKept) {
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("Claude Code", 77, CodePointWidth), "Claude Code");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenANameThatDoesNotFitThenItEndsWithAnEllipsisInside) {
+    // Nine code points plus the ellipsis is 70 DIP: "A very lo" and the ellipsis.
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("A very long provider name", 70, CodePointWidth),
+              "A very lo\xE2\x80\xA6");
+    // A multi-byte character is never split.
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("\xCE\xA9mega sphere", 49, CodePointWidth),
+              "\xCE\xA9mega\xE2\x80\xA6");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNoRoomThenOnlyTheEllipsisRemains) {
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("Claude Code", 0, CodePointWidth), "\xE2\x80\xA6");
 }
 
 }  // namespace
