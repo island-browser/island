@@ -847,6 +847,148 @@ bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
     return true;
 }
 
+std::size_t BrowserWindow::AgentSpaceIndex() {
+    if (research_.has_value() && plan_tab_.has_value()) {
+        if (const auto location = TabLocation(*plan_tab_); location.has_value()) {
+            PinAgentSpace(location->first);
+            return location->first;
+        }
+    }
+    if (agent_space_id_.has_value()) {
+        for (std::size_t index = 0; index < spaces_.size(); ++index) {
+            if (spaces_[index].id() == *agent_space_id_) {
+                return index;
+            }
+        }
+        // The pinned space was closed, and its page with it: the agent's context ends there.
+        agent_space_id_.reset();
+        agent_tab_id_.reset();
+    }
+    PinAgentSpace(active_space_index_);
+    return active_space_index_;
+}
+
+void BrowserWindow::PinAgentSpace(std::size_t space_index) {
+    const SpaceId id = spaces_[space_index].id();
+    if (agent_space_id_ == id) {
+        return;
+    }
+    // A page of the old space is not reachable from the new one, so it stops being the target.
+    agent_space_id_ = id;
+    agent_tab_id_.reset();
+}
+
+void BrowserWindow::RecordAgentPage(TabId id, std::size_t space_index) {
+    PinAgentSpace(space_index);
+    agent_tab_id_ = id;
+}
+
+void BrowserWindow::FollowAgentToActiveSpace() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || (research_.has_value() && plan_tab_.has_value())) {
+        return;
+    }
+    PinAgentSpace(active_space_index_);
+    const Tab* tab = active_tab();
+    agent_tab_id_ = tab != nullptr ? std::optional<TabId>(tab->id()) : std::nullopt;
+}
+
+BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(std::optional<std::size_t> index) {
+    const std::size_t space_index = AgentSpaceIndex();
+    if (index.has_value()) {
+        if (*index >= spaces_[space_index].tab_count()) {
+            return {.error = AgentTabError::kNoSuchTab};
+        }
+        return {.tab = AgentTabRef{.space = space_index, .tab = *index}};
+    }
+    if (!agent_tab_id_.has_value()) {
+        return {.error = AgentTabError::kNoAgentPage};
+    }
+    const std::optional<std::pair<std::size_t, std::size_t>> location =
+        TabLocation(*agent_tab_id_);
+    if (!location.has_value() || location->first != space_index) {
+        return {.error = AgentTabError::kAgentPageClosed};
+    }
+    return {.tab = AgentTabRef{.space = location->first, .tab = location->second}};
+}
+
+bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) {
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (!lookup.tab.has_value()) {
+        return false;
+    }
+    const Tab& tab = spaces_[lookup.tab->space].tabs()[lookup.tab->tab];
+    if (plan_tab_.has_value() && tab.id() == *plan_tab_) {
+        return true;
+    }
+    return !plan_page_url_.empty() && tab.startup_url() == plan_page_url_;
+}
+
+CefRefPtr<CefBrowser> BrowserWindow::AgentBrowser(AgentTabRef ref) const {
+    if (closing_) {
+        return nullptr;
+    }
+    return spaces_[ref.space].tabs()[ref.tab].browser();
+}
+
+bool BrowserWindow::NavigateAgentTab(std::optional<std::size_t> index, std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value() || IsAgentPlanTab(lookup.tab->tab)) {
+        return false;
+    }
+    const AgentTabRef ref = *lookup.tab;
+    if (ref.space == active_space_index_) {
+        return NavigateTab(ref.tab, text);
+    }
+    // The page is in a space the person is not viewing: change its address without switching.
+    const std::optional<std::string> url = ResolveAgentNavigation(text, address_validator_);
+    if (!url.has_value()) {
+        return false;
+    }
+    Tab& tab = spaces_[ref.space].tabs()[ref.tab];
+    if (tab.browser() != nullptr && tab.browser()->GetMainFrame() != nullptr) {
+        tab.browser()->GetMainFrame()->LoadURL(*url);
+    } else {
+        tab.SetStartupUrl(*url);
+        tab.ClearSavedScroll();
+    }
+    return true;
+}
+
+bool BrowserWindow::ActivateAgentTab(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value()) {
+        return false;
+    }
+    SelectTabWithOneAttach(lookup.tab->space, lookup.tab->tab);
+    return true;
+}
+
+bool BrowserWindow::CloseAgentTab(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value() || lookup.tab->space != active_space_index_) {
+        return false;
+    }
+    return CloseActiveSpaceTabIndex(lookup.tab->tab);
+}
+
+bool BrowserWindow::SetAgentTabPinned(std::size_t index, bool pinned) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value()) {
+        return false;
+    }
+    Space& space = spaces_[lookup.tab->space];
+    if (!space.SetTabPinned(space.tabs()[lookup.tab->tab].id(), pinned)) {
+        return false;
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
 agent::ResolvedAgentCommand BrowserWindow::ResolvedAgent() const {
     const char* const env_command = std::getenv("ISLAND_AGENT_COMMAND");
     return agent::ResolveAgentCommand(prefs_.agent_provider, prefs_.agent_command,

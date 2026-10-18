@@ -1677,6 +1677,29 @@ TEST(BrowserWindowPagesTest, AnAgentPageOpenedFromAnotherSpaceStaysGroupedInTheP
     EXPECT_EQ(SpaceAt(*window, 2).tab_count(), 1U);
 }
 
+TEST(BrowserWindowPagesTest, AResearchPageIsTheAgentsTargetWhenThePersonIsInAnotherSpace) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+    ASSERT_TRUE(window->CreateSpace("Person's space"));
+    const std::string persons_url = SpaceAt(*window, 2).tabs()[0].startup_url();
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+
+    // The agent's page is the Plan space's newest child, and no index means that page.
+    const BrowserWindow::AgentTabLookup lookup = window->ResolveAgentTab(std::nullopt);
+    ASSERT_TRUE(lookup.tab.has_value());
+    EXPECT_EQ(lookup.tab->space, 1U);
+    EXPECT_EQ(lookup.tab->tab, SpaceAt(*window, 1).tab_count() - 1);
+    EXPECT_EQ(window->AgentSpaceIndex(), 1U);
+
+    EXPECT_TRUE(window->NavigateAgentTab(std::nullopt, "https://reviews.test/next"));
+    EXPECT_EQ(SpaceAt(*window, 1).tabs().back().startup_url(), "https://reviews.test/next");
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), persons_url);
+    EXPECT_EQ(window->active_space_index(), 2U);
+}
+
 TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));

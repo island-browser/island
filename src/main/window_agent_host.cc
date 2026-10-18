@@ -43,11 +43,29 @@ bool EndpointDisabled() {
     return value != nullptr && (std::string_view(value) == "off" || std::string_view(value) == "0");
 }
 
-// Names the tab the caller meant: the active one, or the one it gave an index for.
+// Names the tab the caller meant: the agent's own page, or the one it gave an index for.
 std::string PlanTabError(std::optional<std::size_t> tab) {
-    return std::string(tab.has_value() ? "That tab" : "The active tab") +
+    return std::string(tab.has_value() ? "That tab" : "The agent's page") +
            " is the research Plan tab, Island's own page. Open a page with browser_open_tab, or "
            "address a page tab.";
+}
+
+// Why an agent tool could not reach its tab. Indices are in the agent's space.
+std::string AgentTabErrorText(BrowserWindow::AgentTabError error, std::optional<std::size_t> tab) {
+    switch (error) {
+        case BrowserWindow::AgentTabError::kNoAgentPage:
+            return "The agent has no page yet (no live page to act on). Open one with "
+                   "browser_open_tab, or pass a tab index.";
+        case BrowserWindow::AgentTabError::kAgentPageClosed:
+            return "The agent's page was closed (no live page). Open a new one with "
+                   "browser_open_tab, or pass a tab index.";
+        case BrowserWindow::AgentTabError::kNoSuchTab:
+            return "No tab at index " + std::to_string(tab.value_or(0)) +
+                   " in the agent's space (list tabs to see its indices).";
+        case BrowserWindow::AgentTabError::kNone:
+            break;
+    }
+    return "The agent's tab is unavailable.";
 }
 
 agent::HostStatus StatusFor(bool ok, std::string error) {
@@ -116,7 +134,8 @@ std::vector<agent::AgentSpaceInfo> WindowAgentHost::ListSpaces() {
 
 std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
     std::vector<agent::AgentTabInfo> tabs;
-    const Space& space = window_->spaces()[window_->active_space_index()];
+    // The agent's space (the Plan's while a research runs), never the space on screen.
+    const Space& space = window_->spaces()[window_->AgentSpaceIndex()];
     for (std::size_t index = 0; index < space.tab_count(); ++index) {
         const Tab& tab = space.tabs()[index];
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
@@ -135,54 +154,101 @@ agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
 }
 
 agent::HostStatus WindowAgentHost::Navigate(std::optional<std::size_t> tab, std::string_view url) {
-    if (window_->IsPlanTabIndex(tab)) {
+    const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(tab);
+    if (!lookup.tab.has_value()) {
+        return agent::HostStatus::Error(AgentTabErrorText(lookup.error, tab));
+    }
+    if (window_->IsAgentPlanTab(tab)) {
         return agent::HostStatus::Error(PlanTabError(tab));
     }
-    return StatusFor(window_->NavigateTab(tab, url),
+    return StatusFor(window_->NavigateAgentTab(tab, url),
                      "Could not navigate: unknown tab or an address Island does not allow.");
 }
 
 agent::HostStatus WindowAgentHost::ActivateTab(std::size_t tab) {
-    return StatusFor(window_->SelectActiveSpaceTabIndex(tab),
-                     "No tab at index " + std::to_string(tab) + ".");
+    const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(tab);
+    if (!lookup.tab.has_value()) {
+        return agent::HostStatus::Error(AgentTabErrorText(lookup.error, tab));
+    }
+    return StatusFor(window_->ActivateAgentTab(tab), "Could not activate that tab.");
 }
 
 agent::HostStatus WindowAgentHost::CloseTab(std::size_t tab) {
-    return StatusFor(window_->CloseActiveSpaceTabIndex(tab),
-                     "No tab at index " + std::to_string(tab) + ".");
+    const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(tab);
+    if (!lookup.tab.has_value()) {
+        return agent::HostStatus::Error(AgentTabErrorText(lookup.error, tab));
+    }
+    if (lookup.tab->space != window_->active_space_index()) {
+        return agent::HostStatus::Error(
+            "The agent's tab " + std::to_string(tab) +
+            " is in a space the person is not viewing. Closing it is not allowed from here.");
+    }
+    return StatusFor(window_->CloseAgentTab(tab), "Could not close that tab.");
 }
 
 agent::HostStatus WindowAgentHost::PinTab(std::size_t tab, bool pinned) {
-    return StatusFor(window_->SetActiveSpaceTabPinned(tab, pinned),
-                     "No tab at index " + std::to_string(tab) + ".");
+    const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(tab);
+    if (!lookup.tab.has_value()) {
+        return agent::HostStatus::Error(AgentTabErrorText(lookup.error, tab));
+    }
+    return StatusFor(window_->SetAgentTabPinned(tab, pinned),
+                     "Could not pin that tab.");
 }
 
 agent::HostStatus WindowAgentHost::SwitchSpace(std::size_t space) {
-    return StatusFor(window_->SelectSpaceIndex(space),
-                     "No space at index " + std::to_string(space) + ".");
+    const bool ok = window_->SelectSpaceIndex(space);
+    if (ok) {
+        window_->FollowAgentToActiveSpace();
+    }
+    return StatusFor(ok, "No space at index " + std::to_string(space) + ".");
 }
 
 agent::HostStatus WindowAgentHost::NewSpace(std::string_view name) {
-    return StatusFor(window_->CreateSpace(name), "Could not create a space.");
+    const bool ok = window_->CreateSpace(name);
+    if (ok) {
+        window_->FollowAgentToActiveSpace();
+    }
+    return StatusFor(ok, "Could not create a space.");
 }
 
 agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
     const bool history = action == agent::AgentBrowserAction::kBack ||
                          action == agent::AgentBrowserAction::kForward ||
                          action == agent::AgentBrowserAction::kReload;
-    if (history && window_->IsPlanTabIndex(std::nullopt)) {
-        return agent::HostStatus::Error(PlanTabError(std::nullopt));
+    if (history) {
+        // History moves the agent's own page, never the page the person is viewing.
+        const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(std::nullopt);
+        if (!lookup.tab.has_value()) {
+            return agent::HostStatus::Error(AgentTabErrorText(lookup.error, std::nullopt));
+        }
+        if (window_->IsAgentPlanTab(std::nullopt)) {
+            return agent::HostStatus::Error(PlanTabError(std::nullopt));
+        }
+        CefRefPtr<CefBrowser> browser = window_->AgentBrowser(*lookup.tab);
+        if (browser == nullptr) {
+            return agent::HostStatus::Error(
+                "The agent's page has no live page yet: it is not shown in the window.");
+        }
+        switch (action) {
+            case agent::AgentBrowserAction::kBack:
+                browser->GoBack();
+                break;
+            case agent::AgentBrowserAction::kForward:
+                browser->GoForward();
+                break;
+            case agent::AgentBrowserAction::kReload:
+                browser->Reload();
+                break;
+            default:
+                break;
+        }
+        return agent::HostStatus::Ok();
     }
     switch (action) {
         case agent::AgentBrowserAction::kBack:
-            window_->ExecuteCommand(BrowserCommand::kBack);
-            break;
         case agent::AgentBrowserAction::kForward:
-            window_->ExecuteCommand(BrowserCommand::kForward);
-            break;
         case agent::AgentBrowserAction::kReload:
-            window_->ExecuteCommand(BrowserCommand::kReload);
-            break;
+            break;  // handled above, on the agent's own page
         case agent::AgentBrowserAction::kToggleSplit:
             window_->ExecuteCommand(BrowserCommand::kToggleSplit);
             break;
@@ -197,20 +263,23 @@ void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_v
                                    json::Value params, agent::DevToolsCallback done) {
     // Every page tool (read, snapshot, click, type, evaluate, screenshot) comes through here.
     // The Plan tab is Island's own page: an agent could press Run on it and approve its own plan.
-    if (window_->IsPlanTabIndex(tab)) {
+    const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(tab);
+    if (!lookup.tab.has_value() || window_->IsAgentPlanTab(tab)) {
         agent::DevToolsReply reply;
         reply.ok = false;
-        reply.error = PlanTabError(tab);
+        reply.error = lookup.tab.has_value() ? PlanTabError(tab)
+                                             : AgentTabErrorText(lookup.error, tab);
         done(std::move(reply));
         return;
     }
-    CefRefPtr<CefBrowser> browser = window_->BrowserForTab(tab);
+    CefRefPtr<CefBrowser> browser = window_->AgentBrowser(*lookup.tab);
     if (browser == nullptr) {
+        // Never activates the page: that would move the person's view to the agent's space.
         agent::DevToolsReply reply;
         reply.ok = false;
-        reply.error = tab ? "Tab " + std::to_string(*tab) +
-                                " has no live page. Activate it with browser_activate_tab first."
-                          : std::string("The active tab has no live page yet.");
+        reply.error = std::string(tab.has_value() ? "Tab " + std::to_string(*tab)
+                                                  : std::string("The agent's page")) +
+                      " has no live page: it is not shown in the window yet.";
         done(std::move(reply));
         return;
     }

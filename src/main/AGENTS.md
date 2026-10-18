@@ -201,10 +201,22 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   complete run, and `MoveTab` reports whether its final position changed. `BrowserWindow` maps
   the running `BuildPlanGraph` node id to the opened `TabId`. `NavigateTab` and the agent's
   back/forward/reload refuse the Plan tab
-  (`IsPlanTabIndex`). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
+  (`IsPlanTabIndex`; `IsAgentPlanTab` for the agent's targets). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
   every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
   deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
   the page has no live frame; removing the Plan's space stops the research (no dialog).
+
+- Agent tool targets (`BrowserWindow::ResolveAgentTab`, `window_agent_host.cc`): the agent works
+  in one space, its pinned `agent_space_id_`. That is the Plan's space while a research runs;
+  otherwise the space it opened a page in, the space it moved to with `browser_new_space` /
+  `browser_switch_space` (`FollowAgentToActiveSpace`), or the space on screen at its first call.
+  Tab indices from the tools refer to that space, and `browser_list_tabs` lists it. A call with no
+  index acts on `agent_tab_id_`, the agent's most recent page (`RecordAgentPage`: every research
+  child and every `browser_open_tab` page). If there is none, or it was closed, the tool errors and
+  never falls back to the person's active tab. Page tools need a live browser and never activate
+  a page; `browser_navigate` and pinning change a page in another space in place;
+  `browser_activate_tab` switches the person's space on purpose; `browser_close_tab` works only in
+  the space on screen. Pinning a space forgets the page when the space changes.
 
 - Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
   clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
