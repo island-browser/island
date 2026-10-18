@@ -21,6 +21,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - The Native address field shows one clear accent focus ring instead of a second inner ring.
 - Settings uses each look's selected-segment color instead of forcing Native's dark gray.
 - Agent-opened research pages stay grouped in the Plan's space without interrupting another space.
+- Moving a regular tab into a research group places it after the group without reporting a
+  phantom move.
 
 ## [0.7.1] - 2026-10-17
 

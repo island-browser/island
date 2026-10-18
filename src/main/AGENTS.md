@@ -197,8 +197,10 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   URL). Children sit right after the Plan tab's last child; a pinned Plan's children start the
   unpinned tabs, so the pinned group stays whole (`Space::AppendChildTab`). `NormalizeGroups`
   re-places a parent's children behind it after moves, pinning and restore; only the child the
-  person dragged away is ungrouped. `BrowserWindow` maps the running `BuildPlanGraph` node id to
-  the opened `TabId`. `NavigateTab` and the agent's back/forward/reload refuse the Plan tab
+  person dragged away is ungrouped. An ordinary tab dropped inside a child run lands after the
+  complete run, and `MoveTab` reports whether its final position changed. `BrowserWindow` maps
+  the running `BuildPlanGraph` node id to the opened `TabId`. `NavigateTab` and the agent's
+  back/forward/reload refuse the Plan tab
   (`IsPlanTabIndex`). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
   every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
   deferred to the in-content Stop / Keep running confirmation, or stops the research at once when

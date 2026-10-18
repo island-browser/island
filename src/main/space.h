@@ -85,7 +85,9 @@ class Space {
     // child leaves the rest of the group intact. Unknown ids remove nothing.
     std::optional<Tab> RemoveTab(TabId id);
 
-    // Reorders; the active tab keeps its identity. Rejects out-of-range positions.
+    // Reorders; the active tab keeps its identity. A drop inside a child run lands after the
+    // complete group. Returns true only when the tab's final position differs from its start;
+    // out-of-range and normalized no-op moves return false.
     bool MoveTab(std::size_t from_index, std::size_t to_index);
 
     // Pins or unpins a tab and keeps the pinned group contiguous at the front:

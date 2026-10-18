@@ -233,7 +233,8 @@ bool Space::MoveTab(std::size_t from_index, std::size_t to_index) {
         }
     }
     NormalizeGroups(moved_id);
-    return true;
+    const std::optional<std::size_t> moved_index = IndexOfTab(moved_id);
+    return moved_index.has_value() && *moved_index != from_index;
 }
 
 bool Space::SetTabPinned(TabId id, bool pinned) {
@@ -253,7 +254,8 @@ bool Space::SetTabPinned(TabId id, bool pinned) {
     // (just after the remaining pinned tabs) is count.
     const std::size_t count = pinned_count();
     const std::size_t target = pinned ? count - 1 : count;
-    return MoveTab(*index, target);
+    static_cast<void>(MoveTab(*index, target));
+    return true;
 }
 
 std::size_t Space::pinned_count() const noexcept {
