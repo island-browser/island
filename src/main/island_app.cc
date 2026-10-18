@@ -233,6 +233,13 @@ void IslandApp::ShowQueueFixture() {
     }
 }
 
+void IslandApp::ShowQuoteFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowQuoteFixtureForDev();
+    }
+}
+
 void IslandApp::OpenAgentPagesForDev(int count, int gap_ms) {
     CEF_REQUIRE_UI_THREAD();
     if (browser_window_ != nullptr) {

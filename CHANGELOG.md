@@ -15,6 +15,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Ask the agent from context: the page context chip above the composer now has a ✕ to clear it,
+  and a selection shows as a quote chip. The page context menu adds "Ask agent about selection"
+  and "Explain" for a selection, and "Summarize linked page" for a link (the link opens in a peek
+  card). The command palette has "Summarize page" and "Ask about page…". Each sends one ask task
+  through the agent task queue with the page URL, title and selection (clipped to 4096 bytes).
+  The items appear only when an agent is configured.
 - Agent work runs from a visible task queue: prompts sent while a task runs (chat, Ask agent,
   Research) are queued instead of refused, shown in a Tasks strip at the top of the agent panel
   (move up/down, remove, Stop, Clear finished) and as "Queued · #n" under the message. A task that

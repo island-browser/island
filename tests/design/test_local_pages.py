@@ -651,6 +651,23 @@ class AgentTasksStrip(unittest.TestCase):
         self.assertNotRegex(css, r"rgba?\(")
 
 
+class AgentContextChip(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_the_page_chip_has_a_clear_button_and_a_quote_chip(self) -> None:
+        for fragment in ('id="context-clear"', 'id="quote-chip"', "state.context_chip"):
+            self.assertIn(fragment, self.html)
+
+    def test_clear_posts_clear_context(self) -> None:
+        clear = self.html[self.html.index('getElementById("context-clear").addEventListener') :]
+        clear = clear[: clear.index("});")]
+        self.assertIn('type: "clear_context"', clear)
+
+    def test_the_quote_is_set_as_text(self) -> None:
+        self.assertIn('getElementById("quote-text").textContent = quote', self.html)
+
+
 class AgentConfirmationCard(unittest.TestCase):
     def setUp(self) -> None:
         self.html = page("agent.html")

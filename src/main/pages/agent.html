@@ -265,6 +265,15 @@ footer { flex: none; padding: 8px 12px 10px; }
   padding: 1px 7px; margin-bottom: 6px; }
 .context[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
 .context span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chiprow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
+.chiprow .context { margin-bottom: 0; }
+.context-clear { width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
+  color: var(--text-2); display: grid; place-items: center; padding: 0; }
+.context-clear:hover { background: var(--surface-2); color: var(--text); }
+.quote-chip { flex-basis: 100%; max-width: 100%; font: 11px/1.5 var(--font); color: var(--text-2);
+  background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 4px; padding: 2px 8px; }
+.quote-chip span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .row { display: flex; align-items: flex-end; gap: 8px; }
 textarea { flex: 1; border: 0; background: transparent; color: var(--text); font: inherit;
   resize: none; outline: none; max-height: 160px; min-height: 22px; padding: 4px 0; }
@@ -296,10 +305,14 @@ textarea::placeholder { color: var(--text-2); }
 <footer>
   <div id="confirmations" role="alertdialog" aria-label="The agent needs your approval" hidden></div>
   <div class="composer">
-    <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent" hidden>
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
-      <span id="context-label"></span>
-    </button>
+    <div class="chiprow" id="chiprow" hidden>
+      <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+        <span id="context-label"></span>
+      </button>
+      <button class="context-clear" id="context-clear" title="Remove the page context" aria-label="Remove the page context" hidden><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      <div class="quote-chip" id="quote-chip" title="The selected text goes to the agent" hidden><span id="quote-text"></span></div>
+    </div>
     <div class="row">
       <textarea id="input" rows="1" placeholder="Ask anything, or tell it what to do" aria-label="Message the agent"></textarea>
       <button class="send" id="send" title="Send (Enter)" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
@@ -879,13 +892,17 @@ textarea::placeholder { color: var(--text-2); }
     sendButton.setAttribute("aria-label", busy ? "Stop" : isBusy() ? "Queue" : "Send");
     sendButton.disabled = !busy && !hasText;
 
-    if (state.context && state.context.url) {
-      contextButton.hidden = false;
-      document.getElementById("context-label").textContent =
-        state.context.title ? state.context.title : state.context.url;
+    // An asked-from-context chip (page, maybe a selection) wins over the live tab.
+    var chip = state.context_chip && state.context_chip.url ? state.context_chip : null;
+    var shown = chip || (state.context && state.context.url ? state.context : null);
+    document.getElementById("chiprow").hidden = !shown;
+    document.getElementById("context-clear").hidden = !chip;
+    var quote = chip && chip.selection ? chip.selection : "";
+    document.getElementById("quote-chip").hidden = !quote;
+    document.getElementById("quote-text").textContent = quote;
+    if (shown) {
+      document.getElementById("context-label").textContent = shown.title ? shown.title : shown.url;
       contextButton.setAttribute("aria-pressed", includeContext ? "true" : "false");
-    } else {
-      contextButton.hidden = true;
     }
   }
 
@@ -949,6 +966,11 @@ textarea::placeholder { color: var(--text-2); }
     if (input.value.trim()) submit(input.value);
     else if (isBusy()) post({ type: "cancel" });
   });
+  document.getElementById("context-clear").addEventListener("click", function () {
+    state.context_chip = null;
+    post({ type: "clear_context" });
+    render();
+  });
   contextButton.addEventListener("click", function () { includeContext = !includeContext; render(); });
   document.getElementById("new-chat").addEventListener("click", function () { post({ type: "new_chat" }); });
   document.getElementById("close").addEventListener("click", function () { post({ type: "close_panel" }); });
@@ -957,6 +979,7 @@ textarea::placeholder { color: var(--text-2); }
     if (next.theme) { state.theme = next.theme; applyTheme(next.theme); }
     if (next.session) state.session = next.session;
     if ("context" in next) state.context = next.context;
+    if ("context_chip" in next) state.context_chip = next.context_chip;
     if ("tasks" in next) state.tasks = next.tasks || [];
     if ("confirmations" in next) state.confirmations = next.confirmations || [];
     if ("endpoint" in next) state.endpoint = next.endpoint;

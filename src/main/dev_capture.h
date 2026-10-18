@@ -17,7 +17,8 @@
 //       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and
 //       `cheatsheet` opens the shortcut cheatsheet. `agent_fixture:confirm` shows a sample agent
 //       confirmation card in the panel. `agent_fixture:queue` shows one running and two queued
-//       agent tasks in the panel. `settings:<section>` opens Settings on one section (appearance,
+//       agent tasks in the panel. `agent_fixture:quote` shows a page chip with a quote chip.
+//       `settings:<section>` opens Settings on one section (appearance,
 //       shortcuts, ...). `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
 //       density, font,
 //       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the

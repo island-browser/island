@@ -15,6 +15,7 @@
 #include <system_error>
 #include <utility>
 
+#include "agent_context.h"
 #include "app_resources.h"
 #include "browser_import.h"
 #include "cef_address_parser.h"
@@ -1017,6 +1018,80 @@ std::string BrowserWindow::ActiveTabAgentContext() const {
            "page_click, page_type, browser_*) to see and act on the browser.";
 }
 
+BrowserWindow::AgentContextChip BrowserWindow::ActiveTabChip() const {
+    const Tab* tab = active_tab();
+    if (tab == nullptr) {
+        return {};
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    if (!IsWebUrl(nav.url)) {
+        return {};
+    }
+    return {.title = nav.page_title, .url = nav.url, .selection = {}};
+}
+
+void BrowserWindow::ShowAgentContextChip(AgentContextChip chip) {
+    context_chip_ = std::move(chip);
+    SetAgentPanelOpen(true);
+    ScheduleLocalPagesRender();
+}
+
+bool BrowserWindow::AskAgent(std::string prompt, const AgentContextChip& context) {
+    if (closing_ || TrimmedCopy(prompt).empty()) {
+        return false;
+    }
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    const agent::AgentTask task = agent_queue_.Enqueue(
+        agent::TaskKind::kAsk, std::move(prompt),
+        context.url.empty() ? std::string()
+                            : BuildAgentContext(context.url, context.title, context.selection),
+        static_cast<std::int64_t>(UnixNowMs()));
+    ScheduleLocalPagesRender();
+    return task.state != agent::TaskState::kFailed;
+}
+
+bool BrowserWindow::RunAgentMenuCommand(int offset, const AgentContextChip& page,
+                                        std::string_view link) {
+    switch (offset) {
+        case kAgentMenuAsk:
+            ShowAgentContextChip(page);
+            return true;
+        case kAgentMenuExplain:
+            static_cast<void>(AskAgent("Explain this in plain words.", page));
+            return true;
+        case kAgentMenuSummarizeLink:
+            // The linked page opens in a peek card; the agent reads it by its address.
+            if (window_ != nullptr) {
+                DeferPeek(std::string(link));
+            }
+            static_cast<void>(AskAgent("Summarize this page.",
+                                       {.title = {}, .url = std::string(link), .selection = {}}));
+            return true;
+        default:
+            return false;
+    }
+}
+
+void BrowserWindow::RunPaletteCommand(std::string_view id) {
+    if (id == "sleep_inactive_tabs") {
+        static_cast<void>(SleepInactiveTabsNow());
+    } else if (id == "agent_tasks") {
+        // The Tasks strip sits on top of the panel.
+        SetAgentPanelOpen(true);
+    } else if (id == "summarize_page" || id == "ask_about_page") {
+        const AgentContextChip page = ActiveTabChip();
+        if (page.url.empty() || ResolvedAgentCommand().empty()) {
+            // Nothing to ask about, or no agent yet: the panel explains how to set one up.
+            SetAgentPanelOpen(true);
+        } else if (id == "summarize_page") {
+            static_cast<void>(AskAgent("Summarize this page.", page));
+        } else {
+            ShowAgentContextChip(page);
+        }
+    }
+}
+
 std::string BrowserWindow::AgentPanelStateJson() const {
     json::Value theme = ThemeJson();
     json::Value context = json::Value::Null();
@@ -1028,12 +1103,20 @@ std::string BrowserWindow::AgentPanelStateJson() const {
                           .Set("url", json::Value::String(nav.url));
         }
     }
+    json::Value context_chip = json::Value::Null();
+    if (context_chip_.has_value()) {
+        context_chip = json::Value::MakeObject()
+                           .Set("title", json::Value::String(context_chip_->title))
+                           .Set("url", json::Value::String(context_chip_->url))
+                           .Set("selection", json::Value::String(context_chip_->selection));
+    }
     const agent::AgentEndpoint* endpoint =
         agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
     json::Value state =
         json::Value::MakeObject()
             .Set("theme", std::move(theme))
             .Set("context", std::move(context))
+            .Set("context_chip", std::move(context_chip))
             .Set("endpoint",
                  json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
                                                                                 : std::string()))
@@ -2191,6 +2274,8 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
     if (type == "send") {
         SubmitAgentPrompt(std::string(message.StringOr("text", "")),
                           message.BoolOr("include_context", true));
+    } else if (type == "clear_context") {
+        context_chip_.reset();
     } else if (type == "cancel" || type == "task_stop") {
         // Cards carry no origin, so Stop withdraws every open card; a stopped turn's action
         // must not run later.
@@ -2229,7 +2314,14 @@ bool BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
         return false;
     }
     EnsureAgentSession();
-    std::string context = include_context ? ActiveTabAgentContext() : std::string();
+    std::string context;
+    if (include_context) {
+        context = context_chip_.has_value()
+                      ? BuildAgentContext(context_chip_->url, context_chip_->title,
+                                          context_chip_->selection)
+                      : ActiveTabAgentContext();
+    }
+    context_chip_.reset();  // a chip is for one question
     const agent::AgentTask task =
         agent_queue_.Enqueue(agent::TaskKind::kChat, std::move(text), std::move(context),
                              static_cast<std::int64_t>(UnixNowMs()));
@@ -2550,7 +2642,7 @@ json::Value BrowserWindow::TasksStateJson() const {
         if (task.state == agent::TaskState::kQueued) {
             ++queued_position;
             entry.Set("position", json::Value::Int(static_cast<std::int64_t>(queued_position)));
-            if (task.kind == agent::TaskKind::kChat) {
+            if (task.kind == agent::TaskKind::kChat || task.kind == agent::TaskKind::kAsk) {
                 entry.Set("prompt", json::Value::String(task.prompt));
             }
         }
@@ -2576,6 +2668,15 @@ void BrowserWindow::ShowQueueFixtureForDev() {
     }
     agent_queue_.OnProgress("t1", 3, 7);
     ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::ShowQuoteFixtureForDev() {
+    ShowAgentContextChip(
+        {.title = "Example Domain",
+         .url = "https://example.com/",
+         .selection = "This domain is for use in illustrative examples in documents. You may use "
+                      "this domain in literature without prior coordination or asking for "
+                      "permission."});
 }
 
 std::string BrowserWindow::StartPageStateJson() const {
@@ -3329,8 +3430,21 @@ void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFram
                                         CefRefPtr<CefContextMenuParams> params,
                                         CefRefPtr<CefMenuModel> model) {
     CEF_REQUIRE_UI_THREAD();
-    if (params != nullptr && model != nullptr && IsWebUrl(params->GetLinkUrl().ToString())) {
+    if (params == nullptr || model == nullptr) {
+        return;
+    }
+    const bool has_link = IsWebUrl(params->GetLinkUrl().ToString());
+    if (has_link) {
         model->AddItem(MENU_ID_USER_FIRST, "Open in peek");
+    }
+    const bool has_selection = !TrimmedCopy(params->GetSelectionText().ToString()).empty();
+    const std::vector<AgentMenuItem> items =
+        AgentContextMenuItems(!ResolvedAgentCommand().empty(), has_selection, has_link);
+    if (!items.empty()) {
+        model->AddSeparator();
+        for (const AgentMenuItem& item : items) {
+            model->AddItem(MENU_ID_USER_FIRST + item.offset, std::string(item.label));
+        }
     }
 }
 
@@ -3338,11 +3452,23 @@ bool BrowserWindow::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPt
                                          CefRefPtr<CefContextMenuParams> params, int command_id,
                                          EventFlags) {
     CEF_REQUIRE_UI_THREAD();
-    if (command_id != MENU_ID_USER_FIRST || params == nullptr || !IsPeekLinkSource(browser)) {
+    if (params == nullptr || !IsPeekLinkSource(browser)) {
         return false;
     }
-    DeferPeek(params->GetLinkUrl().ToString());
-    return true;
+    if (command_id == MENU_ID_USER_FIRST) {
+        DeferPeek(params->GetLinkUrl().ToString());
+        return true;
+    }
+    const Tab* tab = FindTabByBrowser(browser);
+    if (tab == nullptr) {
+        return false;
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    return RunAgentMenuCommand(command_id - MENU_ID_USER_FIRST,
+                               {.title = nav.page_title,
+                                .url = nav.url,
+                                .selection = params->GetSelectionText().ToString()},
+                               params->GetLinkUrl().ToString());
 }
 
 bool BrowserWindow::IsPeekLinkSource(CefRefPtr<CefBrowser> browser) const {
@@ -4976,7 +5102,9 @@ void BrowserWindow::ShowCommandPalette() {
 
 std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
     return {{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
-            {.id = "agent_tasks", .title = "Agent tasks"}};
+            {.id = "agent_tasks", .title = "Agent tasks"},
+            {.id = "summarize_page", .title = "Summarize page"},
+            {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"}};
 }
 
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
@@ -5057,12 +5185,7 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             OpenHistory(selection.history);
             break;
         case PaletteEntryKind::kCommand:
-            if (selection.command.id == "sleep_inactive_tabs") {
-                static_cast<void>(SleepInactiveTabsNow());
-            } else if (selection.command.id == "agent_tasks") {
-                // The Tasks strip sits on top of the panel.
-                SetAgentPanelOpen(true);
-            }
+            RunPaletteCommand(selection.command.id);
             break;
         case PaletteEntryKind::kReport:
             static_cast<void>(OpenReportTab(selection.report.id));

@@ -470,6 +470,10 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->ShowQueueFixture();
         return true;
     }
+    if (island::DevAgentFixtureName(action) == "quote") {
+        app->ShowQuoteFixture();
+        return true;
+    }
     if (action == "plan_fixture") {
         app->OpenPlanFixture();
         return true;

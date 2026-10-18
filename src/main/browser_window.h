@@ -352,8 +352,30 @@ class BrowserWindow : public CefClient,
         return SubmitAgentPrompt(std::move(text), /*include_context=*/false);
     }
     [[nodiscard]] const agent::AgentTaskQueue& agent_queue() const noexcept { return agent_queue_; }
+    // "Ask the agent from context": the page chip above the composer, optionally carrying the
+    // text that was selected. Cleared by the chip's ✕, a send, or a new page context.
+    struct AgentContextChip {
+        std::string title;
+        std::string url;
+        std::string selection;
+
+        bool operator==(const AgentContextChip&) const = default;
+    };
+    [[nodiscard]] const std::optional<AgentContextChip>& agent_context_chip() const noexcept {
+        return context_chip_;
+    }
+    // Queues an ask task whose context is the page (and selection). False when the agent could
+    // not take it.
+    bool AskAgent(std::string prompt, const AgentContextChip& context);
+    // A palette command by id (the palette view routes its selection here).
+    void RunPaletteCommand(std::string_view id);
+    // One of the context menu's agent items (offsets from agent_context.h) for the tab at
+    // `browser`'s page, `selection` and `link`. False when the item is not an agent item.
+    bool RunAgentMenuCommand(int offset, const AgentContextChip& page, std::string_view link);
     // Dev capture (`agent_fixture:queue`): one running and two queued tasks, nothing sent.
     void ShowQueueFixtureForDev();
+    // Dev capture (`agent_fixture:quote`): the panel with a page chip and a selection quote.
+    void ShowQuoteFixtureForDev();
     // The command palette's command list (the window's own commands).
     [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands();
     void SetPlanCloseConfirmationForTest(
@@ -878,6 +900,10 @@ class BrowserWindow : public CefClient,
     // Shows Settings scrolled to `section` (e.g. "agent").
     void ShowSettingsSection(std::string section);
     [[nodiscard]] std::string ActiveTabAgentContext() const;
+    // The active tab as a chip (empty url when it is not a web page).
+    [[nodiscard]] AgentContextChip ActiveTabChip() const;
+    // Opens the panel with the chip set and the composer focused.
+    void ShowAgentContextChip(AgentContextChip chip);
     // Coalesces panel re-renders (streaming chunks arrive in bursts).
     void ScheduleLocalPagesRender();
     void FlushLocalPagesRender();
@@ -1228,6 +1254,7 @@ class BrowserWindow : public CefClient,
     };
     std::optional<ShortcutConflict> shortcut_conflict_;
     std::unique_ptr<agent::AgentSession> agent_session_;
+    std::optional<AgentContextChip> context_chip_;
     // Agent work runs one task at a time from this queue (see src/agent/agent_task_queue.h).
     agent::AgentTaskQueue agent_queue_{
         [this](const agent::AgentTask& task) { StartQueuedTask(task); }};

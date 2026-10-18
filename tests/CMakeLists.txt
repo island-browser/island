@@ -38,6 +38,7 @@ add_executable(island_tests
     favicon_policy_test.cpp
     history_recorder_test.cpp
     find_bar_model_test.cpp
+    agent_context_test.cpp
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
@@ -65,6 +66,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_input.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/agent_context.cc"
     "${CMAKE_SOURCE_DIR}/src/main/agent_navigation.cc"
     "${CMAKE_SOURCE_DIR}/src/main/local_page.cc"
     ${ISLAND_LOCAL_PAGE_SOURCES}

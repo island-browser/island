@@ -16,6 +16,7 @@
 
 #include "agent/http_server.h"
 #include "agent/plan_fixture.h"
+#include "agent_context.h"
 #include "browser_window.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
@@ -2638,6 +2639,65 @@ TEST(BrowserWindowPagesTest, TheQueueFixtureShowsOneRunningAndTwoQueuedTasks) {
     window->ShowQueueFixtureForDev();
     EXPECT_EQ(window->agent_queue().current()->done, 3U);
     EXPECT_EQ(window->agent_queue().queued_count(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, ExplainEnqueuesAnAskWithTheSelection) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    EXPECT_TRUE(window->RunAgentMenuCommand(
+        kAgentMenuExplain, {.title = "T", .url = "https://a.test/", .selection = "quoted"}, ""));
+    const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
+    EXPECT_EQ(task.prompt, "Explain this in plain words.");
+    EXPECT_EQ(task.context, "Page: T\nURL: https://a.test/\nSelection:\nquoted");
+}
+
+TEST(BrowserWindowPagesTest, SummarizeLinkOpensPeekAndEnqueues) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    EXPECT_TRUE(window->RunAgentMenuCommand(
+        kAgentMenuSummarizeLink, {.title = "T", .url = "https://a.test/"}, "https://b.test/page"));
+    const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.prompt, "Summarize this page.");
+    EXPECT_NE(task.context.find("URL: https://b.test/page"), std::string::npos);
+    EXPECT_FALSE(window->RunAgentMenuCommand(99, {}, ""));
+}
+
+TEST(BrowserWindowPagesTest, AskAboutSelectionSetsTheChipAndSendConsumesIt) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    window->RunAgentMenuCommand(kAgentMenuAsk,
+                                {.title = "T", .url = "https://a.test/", .selection = "q"}, "");
+    ASSERT_TRUE(window->agent_context_chip().has_value());
+    const std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    EXPECT_EQ(state->FindMember("context_chip")->StringOr("selection", ""), "q");
+    SendAgent(*window, R"({"type":"clear_context"})");
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    window->RunAgentMenuCommand(kAgentMenuAsk,
+                                {.title = "T", .url = "https://a.test/", .selection = "q"}, "");
+    SendAgent(*window, R"({"type":"send","text":"why","include_context":true})");
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    EXPECT_NE(window->agent_queue().tasks()[0].context.find("Selection:\nq"), std::string::npos);
+}
+
+TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://a.test/"));
+    window->RunPaletteCommand("summarize_page");
+    ASSERT_EQ(window->agent_queue().tasks().size(), 1U);
+    const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
+    EXPECT_EQ(task.prompt, "Summarize this page.");
+    EXPECT_NE(task.context.find("URL: https://a.test/"), std::string::npos);
+    const auto commands = BrowserWindow::PaletteCommands();
+    EXPECT_TRUE(std::any_of(commands.begin(), commands.end(),
+                            [](const auto& c) { return c.id == "ask_about_page"; }));
 }
 
 }  // namespace
