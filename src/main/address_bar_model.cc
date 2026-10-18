@@ -6,27 +6,34 @@
 namespace island {
 namespace {
 
-constexpr std::string_view kDataPageDisplayText = "Island";
-
-std::string DisplayTextForUrl(const std::string& url) {
-    return url.starts_with("data:") ? std::string(kDataPageDisplayText) : url;
-}
+constexpr std::string_view kFallbackInternalDisplayUrl = "island://local-page";
 
 }  // namespace
 
 const AddressBarSnapshot& AddressBarModel::snapshot() const noexcept { return snapshot_; }
 
 void AddressBarModel::UpdateCommittedUrl(std::string url) {
-    committed_url_ = std::move(url);
-    snapshot_.display_text = DisplayTextForUrl(committed_url_);
+    // A data: URL may contain an entire built-in page. Never retain that payload as text the
+    // address field can reveal; callers with a known page use UpdateInternalPage instead.
+    UpdateCommittedText(url.starts_with("data:") ? std::string(kFallbackInternalDisplayUrl)
+                                                 : std::move(url));
+}
+
+void AddressBarModel::UpdateInternalPage(std::string display_url) {
+    UpdateCommittedText(std::move(display_url));
+}
+
+void AddressBarModel::UpdateCommittedText(std::string text) {
+    committed_text_ = std::move(text);
+    snapshot_.display_text = committed_text_;
     if (snapshot_.mode == AddressBarMode::kResting) {
-        snapshot_.edit_text = committed_url_;
+        snapshot_.edit_text = committed_text_;
     }
 }
 
 void AddressBarModel::Focus() {
     if (snapshot_.mode == AddressBarMode::kResting) {
-        snapshot_.edit_text = committed_url_;
+        snapshot_.edit_text = committed_text_;
     }
     snapshot_.mode = AddressBarMode::kEditing;
     snapshot_.validation_error.reset();
@@ -50,9 +57,9 @@ std::optional<std::string> AddressBarModel::Submit(const ValidatedAddress& addre
         return std::nullopt;
     }
 
-    committed_url_ = address.url;
+    committed_text_ = address.url;
     RestoreCommittedState();
-    return committed_url_;
+    return committed_text_;
 }
 
 void AddressBarModel::Blur() { RestoreCommittedState(); }
@@ -60,8 +67,8 @@ void AddressBarModel::Blur() { RestoreCommittedState(); }
 void AddressBarModel::Escape() { RestoreCommittedState(); }
 
 void AddressBarModel::RestoreCommittedState() {
-    snapshot_.display_text = DisplayTextForUrl(committed_url_);
-    snapshot_.edit_text = committed_url_;
+    snapshot_.display_text = committed_text_;
+    snapshot_.edit_text = committed_text_;
     snapshot_.mode = AddressBarMode::kResting;
     snapshot_.validation_error.reset();
 }

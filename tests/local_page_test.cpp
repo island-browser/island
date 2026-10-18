@@ -126,6 +126,15 @@ TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
     }
 }
 
+TEST(LocalPageTest, BuiltInPagesHaveShortDisplayUrlsAndStartUsesThePlaceholder) {
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kAgent), "island://agent");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kSettings), "island://settings");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kTabOverview), "island://tabs");
+    EXPECT_TRUE(LocalPage::DisplayUrl(LocalPageKind::kStart).empty());
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kReport), "island://report");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kPlan), "island://plan");
+}
+
 // The build inlines src/main/pages/markdown.js where a page carries the
 // placeholder line; the embedded pages must hold the renderer, not the marker.
 TEST(LocalPageTest, TheSharedMarkdownRendererIsInlinedIntoThePagesThatNeedIt) {

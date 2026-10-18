@@ -1183,6 +1183,10 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
     show_internal_page_ = true;
+    UpdateAddressBarForCurrentPage();
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
     RequestViewSwap();
     FlushLocalPagesRender();
 }
@@ -1194,6 +1198,10 @@ void BrowserWindow::HideInternalPage() {
     internal_page_.reset();
     show_internal_page_ = false;
     shortcut_conflict_.reset();
+    UpdateAddressBarForCurrentPage();
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
     RequestViewSwap();
 }
 
@@ -2751,10 +2759,7 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
         return;
     }
 
-    const Tab* shown_tab = active_tab();
-    address_bar_model_.UpdateCommittedUrl(shown_tab != nullptr && ReaderActiveFor(*shown_tab)
-                                              ? EffectiveUrl(*shown_tab)
-                                              : snapshot.url);
+    UpdateAddressBarForNavigation(snapshot);
     UpdateReaderButton();
     if (chrome_ != nullptr) {
         chrome_->OnNavigationChanged(snapshot);
@@ -2774,6 +2779,37 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
     if (navigation_observer_ != nullptr) {
         navigation_observer_->OnNavigationChanged(snapshot);
     }
+}
+
+void BrowserWindow::UpdateAddressBarForNavigation(const NavigationSnapshot& snapshot) {
+    if (internal_page_.has_value()) {
+        address_bar_model_.UpdateInternalPage(std::string(LocalPage::DisplayUrl(*internal_page_)));
+        return;
+    }
+
+    const Tab* shown_tab = active_tab();
+    const std::string url = shown_tab != nullptr && ReaderActiveFor(*shown_tab)
+                                ? EffectiveUrl(*shown_tab)
+                                : snapshot.url;
+    if (!start_page_url_.empty() && url == start_page_url_) {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kStart)));
+    } else if (!plan_page_url_.empty() && url == plan_page_url_) {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kPlan)));
+    } else if (!report_page_url_.empty() && url.size() > report_page_url_.size() + 1 &&
+               url.compare(0, report_page_url_.size(), report_page_url_) == 0 &&
+               url[report_page_url_.size()] == '#') {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kReport)) +
+            url.substr(report_page_url_.size()));
+    } else {
+        address_bar_model_.UpdateCommittedUrl(url);
+    }
+}
+
+void BrowserWindow::UpdateAddressBarForCurrentPage() {
+    UpdateAddressBarForNavigation(navigation_snapshot());
 }
 
 CefRefPtr<CefDisplayHandler> BrowserWindow::GetDisplayHandler() { return this; }

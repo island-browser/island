@@ -456,6 +456,33 @@ TEST(BrowserWindowTest, GivenAHeadlessWindowWhenTheViewTreeIsRequestedThenItRepo
     EXPECT_FALSE(snapshot.can_go_forward);
 }
 
+TEST(BrowserWindowTest, GivenInternalPagesWhenAddressEditingBeginsThenNoDataUrlIsExposed) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+
+    window->SetStartPageUrlForTest("data:text/html,start");
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,start"});
+    window->BeginAddressEditing();
+    EXPECT_TRUE(window->address_bar_snapshot().edit_text.empty());
+    window->CancelAddressEditing();
+
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,plan"});
+    window->BeginAddressEditing();
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, "island://plan");
+    EXPECT_EQ(window->address_bar_snapshot().edit_text.find("data:"), std::string::npos);
+    window->CancelAddressEditing();
+
+    window->SetReportPageUrlForTest("data:text/html,report");
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,report#r12"});
+    window->BeginAddressEditing();
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, "island://report#r12");
+    window->CancelAddressEditing();
+
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,other"});
+    window->BeginAddressEditing();
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, "island://local-page");
+}
+
 TEST(BrowserWindowTest, GivenNewTabCommandsWhenExecutedThenTabsAppendAndSelectInTheActiveSpace) {
     const CefRefPtr<BrowserWindow> window = MakeWindow();
     const SpaceId default_space_id = window->active_space_id();

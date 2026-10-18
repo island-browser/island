@@ -29,6 +29,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Opening the agent panel no longer hides the page and the toolbar.
 - The Native address field shows one clear accent focus ring in either theme instead of a second
   inner ring.
+- Focusing the address field on an Island page no longer exposes its embedded data URL; the start
+  page stays empty and other built-in pages use short `island://` addresses.
 - Settings uses each look's selected-segment color instead of forcing Native's dark gray.
 - Agent-opened research pages stay grouped in the Plan's space without interrupting another space.
 - Moving a regular tab into a research group places it after the group without reporting a

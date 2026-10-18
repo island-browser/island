@@ -194,6 +194,7 @@ class BrowserWindow : public CefClient,
     // The data: URL of Island's own start page, which a tab with no startup
     // URL loads. Computed on first use (it needs CEF's base64 encoder).
     [[nodiscard]] const std::string& StartPageUrl() const;
+    void SetStartPageUrlForTest(std::string url) { start_page_url_ = std::move(url); }
     // The state the start page renders, exposed for tests.
     [[nodiscard]] std::string StartPageStateJson() const;
     // Applies one start page message ({search}, {ask_agent}, {research}, {set_start_mode},
@@ -496,6 +497,9 @@ class BrowserWindow : public CefClient,
     void SetNavigationObserver(NavigationObserver* observer);
     void SetChromeObserver(ChromeObserver* observer);
     [[nodiscard]] const NavigationSnapshot& navigation_snapshot() const noexcept;
+    [[nodiscard]] const AddressBarSnapshot& address_bar_snapshot() const noexcept {
+        return address_bar_model_.snapshot();
+    }
     [[nodiscard]] const ChromeSnapshot& chrome_snapshot() const noexcept;
     [[nodiscard]] ChromeViewTreeNode chrome_view_tree_snapshot() const;
     void RequestClose();
@@ -900,6 +904,8 @@ class BrowserWindow : public CefClient,
     void OnUpdaterChanged();
     void HideInternalPage();
     [[nodiscard]] LocalPage* InternalPageFor(LocalPageKind kind) const;
+    void UpdateAddressBarForNavigation(const NavigationSnapshot& snapshot);
+    void UpdateAddressBarForCurrentPage();
     [[nodiscard]] json::Value ThemeJson() const;
 
     void CloseAgentPanelAndSession();
