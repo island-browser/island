@@ -130,10 +130,10 @@ int WelcomeFlow::ContentHeightDip(int readable_sources, int note_lines) {
 }
 
 WelcomeFlow::ButtonColors WelcomeFlow::SegmentColors(const ChromeTokens& tokens, bool selected) {
-    // The selected segment steps to the secondary surface and takes the accent: the
-    // accent marks active state only. Unselected segments are plain surface.
+    // Selected options use the same neutral raised plate as the web segmented controls.
+    // Accent remains reserved for keyboard focus and actions.
     if (selected) {
-        return {.fill = tokens.surface_secondary, .text = tokens.accent};
+        return {.fill = tokens.segment_selected, .text = tokens.text};
     }
     return {.fill = tokens.surface, .text = tokens.text};
 }

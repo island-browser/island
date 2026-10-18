@@ -148,5 +148,18 @@ TEST(LocalPageTest, SettingsSelectedSegmentsUseTheThemeToken) {
     EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"), std::string::npos);
 }
 
+TEST(LocalPageTest, EverySegmentedPageUsesTheNeutralThemeTokenAndFocusVisible) {
+    for (const LocalPageKind kind :
+         {LocalPageKind::kSettings, LocalPageKind::kStart, LocalPageKind::kPlan}) {
+        const std::string html(LocalPageHtml(kind));
+        EXPECT_NE(html.find("--segment-selected: #E3E3E8"), std::string::npos);
+        EXPECT_NE(html.find("--segment-selected: #3A3A3D"), std::string::npos);
+        EXPECT_NE(html.find("var(--segment-selected)"), std::string::npos);
+        EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"),
+                  std::string::npos);
+        EXPECT_NE(html.find(":focus-visible"), std::string::npos);
+    }
+}
+
 }  // namespace
 }  // namespace island

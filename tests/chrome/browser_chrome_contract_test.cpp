@@ -515,10 +515,10 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSwitcherWhenSizedThenSegmentsFi
     EXPECT_EQ(sizes.segment_dip + 2 * sizes.track_inset_dip, sizes.row_dip);
 }
 
-TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelectedOneIsSurface) {
+TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelectedIsNeutral) {
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const auto active = BrowserChrome::NativeSegmentColors(light, /*active=*/true);
-    EXPECT_EQ(active.fill, light.surface);
+    EXPECT_EQ(active.fill.argb, 0xFFE3E3E8U);
     EXPECT_EQ(active.title, light.text);
     const auto idle = BrowserChrome::NativeSegmentColors(light, /*active=*/false);
     EXPECT_EQ(idle.fill, light.fill);
@@ -527,8 +527,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelec
 
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const auto dark_active = BrowserChrome::NativeSegmentColors(dark, /*active=*/true);
-    EXPECT_EQ(dark_active.fill.argb, 0xFF636366U);
-    EXPECT_NE(dark_active.fill, dark.fill);
+    EXPECT_EQ(dark_active.fill.argb, 0xFF3A3A3DU);
+    EXPECT_NE(dark_active.fill, dark.accent);
 }
 
 }  // namespace

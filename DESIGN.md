@@ -155,7 +155,7 @@ values.
 ```design-tokens-native
 {
   "contract": "island-native-look",
-  "version": 1,
+  "version": 2,
   "colors": {
     "light": {
       "background": "#EBEBEF",
@@ -176,6 +176,7 @@ values.
       "warning_text": "#6A4A00",
       "success": "#248A3D",
       "danger": "#D70015",
+      "segment_selected": "#E3E3E8",
       "branch_a": "#0A64D8",
       "branch_b": "#8E44AD",
       "branch_c": "#C25400",
@@ -200,6 +201,7 @@ values.
       "warning_text": "#FFD60A",
       "success": "#30D158",
       "danger": "#FF453A",
+      "segment_selected": "#3A3A3D",
       "branch_a": "#0A84FF",
       "branch_b": "#BF5AF2",
       "branch_c": "#FF9F0A",
@@ -208,6 +210,9 @@ values.
   }
 }
 ```
+
+`segment_selected` is shared by Native, Arc and Graphite. A selected segment is a neutral raised
+plate with the normal `text` color; blue remains reserved for actions and `:focus-visible` rings.
 
 ### Documented colors
 

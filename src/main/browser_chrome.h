@@ -522,7 +522,7 @@ class BrowserChrome final : public NavigationObserver {
                 .text = tokens.text,
                 .sparkle = tokens.accent};
     }
-    // Native's space segmented control: a `fill` track, the selected segment on `surface`,
+    // Native's space segmented control: a `fill` track, the selected segment on its neutral plate,
     // the selected name in `text` and the others in `text_secondary`.
     struct SegmentPalette {
         ArgbColor track;

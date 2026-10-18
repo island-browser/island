@@ -140,7 +140,7 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
         {"accent", "#0a64d8"},      {"selection", "#0a64d8"}, {"accent_soft", "#dfe9f8"},
         {"accent_text", "#0a4fa8"}, {"warn_bg", "#fff8e6"},   {"warn_border", "#f5d38a"},
         {"warn_text", "#6a4a00"},   {"success", "#248a3d"},   {"danger", "#d70015"},
-        {"segment_selected", "#ffffff"},                         {"canvas", "#ebebef"},
+        {"segment_selected", "#e3e3e8"},                         {"canvas", "#ebebef"},
     };
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
@@ -159,12 +159,12 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     }
 }
 
-TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenUsesNativeValueAndSurfaceFallback) {
+TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenIsNeutralForEveryLook) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
 
     std::optional<Value> state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
-    EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#ffffff");
+    EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
 
     window->OnLocalPageMessage(LocalPageKind::kSettings,
                                *json::Parse(R"({"type":"set_look","look":"arc"})"));
@@ -172,7 +172,13 @@ TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenUsesNativeValueAndSurfaceF
     ASSERT_TRUE(state.has_value());
     const Value* theme = state->FindMember("theme");
     ASSERT_NE(theme, nullptr);
-    EXPECT_EQ(theme->StringOr("segment_selected", ""), theme->StringOr("surface", ""));
+    EXPECT_EQ(theme->StringOr("segment_selected", ""), "#e3e3e8");
+
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"set_look","look":"graphite"})"));
+    state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
 }
 
 TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {

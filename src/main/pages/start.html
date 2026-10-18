@@ -13,6 +13,7 @@
   --text-2: #636366; --text-3: #8E8E93; --border: #E5E5EA; --border-2: #D2D2D7; --accent: #0A64D8;
   --selection: #0A64D8; --accent-soft: #DFE9F8; --accent-text: #0A4FA8; --warn-bg: #FFF8E6;
   --warn-border: #F5D38A; --warn-text: #6A4A00; --success: #248A3D; --danger: #D70015;
+  --segment-selected: #E3E3E8;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: light;
@@ -23,6 +24,7 @@
     --text-2: #98989D; --text-3: #6E6E73; --border: #38383A; --border-2: #48484A; --accent: #0A84FF;
     --selection: #0A6FE0; --accent-soft: #16324F; --accent-text: #64B5FF; --warn-bg: #3A2E12;
     --warn-border: #6B5420; --warn-text: #FFD60A; --success: #30D158; --danger: #FF453A;
+    --segment-selected: #3A3A3D;
     color-scheme: dark;
   }
 }
@@ -31,6 +33,7 @@
   --text-2: #98989D; --text-3: #6E6E73; --border: #38383A; --border-2: #48484A; --accent: #0A84FF;
   --selection: #0A6FE0; --accent-soft: #16324F; --accent-text: #64B5FF; --warn-bg: #3A2E12;
   --warn-border: #6B5420; --warn-text: #FFD60A; --success: #30D158; --danger: #FF453A;
+  --segment-selected: #3A3A3D;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -50,7 +53,8 @@ main { width: 560px; max-width: calc(100% - 32px); margin-top: 22vh; align-self:
 .modes { display: flex; align-self: center; padding: 2px; border-radius: 8px; background: var(--fill); }
 .modes button { height: 24px; padding: 0 16px; border: 0; border-radius: 6px; background: transparent;
   color: var(--text); font-size: 13px; line-height: 24px; transition: background .16s; }
-.modes button[aria-checked="true"] { background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.modes button[aria-checked="true"] { background: var(--segment-selected); color: var(--text);
+  box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 
 /* Search field: 44 px, with a 4 px accent halo while focused. */
 .field { display: flex; align-items: center; height: 44px; padding: 0 6px 0 16px; border: 1px solid var(--border-2);
@@ -298,7 +302,8 @@ main { width: 560px; max-width: calc(100% - 32px); margin-top: 22vh; align-self:
       ["selection", "--selection"], ["accent_soft", "--accent-soft"],
       ["accent_text", "--accent-text"], ["warn_bg", "--warn-bg"],
       ["warn_border", "--warn-border"], ["warn_text", "--warn-text"],
-      ["success", "--success"], ["danger", "--danger"]
+      ["success", "--success"], ["danger", "--danger"],
+      ["segment_selected", "--segment-selected"]
     ].forEach(function (mapping) {
       var value = theme[mapping[0]];
       if (value) root.style.setProperty(mapping[1], value);

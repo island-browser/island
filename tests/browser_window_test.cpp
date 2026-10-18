@@ -418,9 +418,9 @@ TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColor
     const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);
     const BrowserChrome::EntryColors idle = BrowserChrome::SpaceChipColors(tokens, false);
 
-    // Native segments: the selected one is `surface` on the `fill` track, the others sit on it.
-    EXPECT_EQ(active.fill, tokens.surface);
-    EXPECT_EQ(active.outline, tokens.surface);
+    // Native segments: the selected one is a neutral plate on the `fill` track.
+    EXPECT_EQ(active.fill, tokens.segment_selected);
+    EXPECT_EQ(active.outline, tokens.segment_selected);
     EXPECT_EQ(active.title, tokens.text);
     EXPECT_EQ(idle.fill, tokens.fill);
     EXPECT_NE(active.fill, tokens.selection);

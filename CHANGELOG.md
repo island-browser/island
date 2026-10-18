@@ -17,6 +17,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Selected segments use a neutral raised plate with normal text in every look; blue is reserved
+  for actions and keyboard focus.
 - Streaming agent status updates use the session's permission count instead of repeatedly scanning
   the full transcript.
 - macOS rounded-corner patches stop polling after the chrome settles and wake again for layout or

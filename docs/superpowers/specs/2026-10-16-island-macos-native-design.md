@@ -40,8 +40,9 @@
 
 - **Chrome recedes, page leads.** The sidebar is grey, the toolbar is light, and the page is white
   and full bleed. Color appears only for selection, focus, agent state and approval.
-- **One blue.** `accent`/`selection` (#0A64D8 light; #0A84FF / #0A6FE0 dark) mark the selected tab row, focus rings, the
-  primary button and the active segment. No other blue appears in the chrome.
+- **One blue.** `accent`/`selection` (#0A64D8 light; #0A84FF / #0A6FE0 dark) mark the
+  selected tab row, keyboard focus rings and primary actions. Segmented controls use neutral
+  raised plates. No other blue appears in the chrome.
 - **Amber means "you decide".** Anything that waits for a person (sign-in, an approval, a
   shortcut conflict) uses the warning trio and nothing else does.
 - **Same component, two actors.** A row the agent is reading gets a small status dot. An approval is
@@ -62,12 +63,13 @@ added to `ChromeTokens` and to the CSS variables of the local pages (`src/main/p
 | `surface` | `#FFFFFF` | `#1E1E20` | Page, panels, cards, palette |
 | `surface_secondary` | `#F6F6F8` | `#252527` | Toolbar, inspector, agent panel |
 | `fill` *(new)* | `#E8E8ED` | `#3A3A3D` | Address field, segmented track, chips, code |
+| `segment_selected` | `#E3E3E8` | `#3A3A3D` | Neutral raised selected segment; normal text color |
 | `text` | `#1D1D1F` | `#F5F5F7` | Labels, titles |
 | `text_secondary` | `#636366` | `#98989D` | Meta, section headers, icons |
 | `text_tertiary` *(new)* | `#8E8E93` | `#6E6E73` | Placeholders, disabled, skipped |
 | `border` | `#E5E5EA` | `#38383A` | Hairlines |
 | `border_strong` *(new)* | `#D2D2D7` | `#48484A` | Field and button outlines, keycaps |
-| `accent` | `#0A64D8` | `#0A84FF` | Focus ring, links, active segment, primary button (light) |
+| `accent` | `#0A64D8` | `#0A84FF` | Focus ring, links, primary button (light) |
 | `selection` *(new)* | `#0A64D8` | `#0A6FE0` | Selected tab row, selected palette row, primary button (dark); white text on it |
 | `accent_soft` *(new)* | `#DFE9F8` | `#16324F` | Agent button, "Paused" pill, question node |
 | `accent_text` *(new)* | `#0A4FA8` | `#64B5FF` | Text on `accent_soft` |

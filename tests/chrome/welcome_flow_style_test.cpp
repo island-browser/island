@@ -73,11 +73,12 @@ TEST(WelcomeFlowStyleTest, ButtonRolesFollowDesignSystemInBothThemes) {
         const WelcomeFlow::ButtonColors secondary = WelcomeFlow::SecondaryButtonColors(tokens);
         EXPECT_EQ(secondary.fill, tokens.surface);
         EXPECT_GE(ContrastRatio(secondary.text, secondary.fill), 4.5);
-        // Segments: the selected one steps to the secondary surface and takes the accent.
+        // Segments: the selected one is a neutral plate with normal text.
         const WelcomeFlow::ButtonColors selected = WelcomeFlow::SegmentColors(tokens, true);
         const WelcomeFlow::ButtonColors idle = WelcomeFlow::SegmentColors(tokens, false);
-        EXPECT_EQ(selected.fill, tokens.surface_secondary);
-        EXPECT_EQ(selected.text, tokens.accent);
+        EXPECT_EQ(selected.fill, tokens.segment_selected);
+        EXPECT_EQ(selected.text, tokens.text);
+        EXPECT_NE(selected.text, tokens.accent);
         EXPECT_NE(selected.fill, idle.fill);
         EXPECT_GE(ContrastRatio(selected.text, selected.fill), 4.5);
         EXPECT_GE(ContrastRatio(idle.text, idle.fill), 4.5);
