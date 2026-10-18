@@ -41,42 +41,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   the tab and the Agent button with a dot (it never opens the panel or takes focus), survives
   closing the panel, and is withdrawn when its tab closes or moves, its space is left, or Stop is pressed. Settings > Agent &
   tools lists the trusted sites with Remove buttons.
-
-### Changed
-
-- The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
-  control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
-  the most visited sites (from history, one per host, opened in the current tab). Tab and
-  Shift+Tab step through the modes while the field has focus. Clearing history clears the tiles.
-  Visits are grouped by host before the six-tile limit applies, so one busy site with many pages
-  no longer hides the others. IP-address sites get a neutral globe instead of a digit, and the
-  old keyboard-shortcut list under the start page is removed.
-- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
-  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
-  version at the bottom, and one section shown at a time. Appearance groups its controls into
-  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
-  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
-  Native has no space color. Every existing setting keeps its behavior. Search finds sections by
-  name (Privacy, Shortcuts, About) and shows the whole pane for them, and also finds the Import
-  sources and the About list. A section that is already selected opens again when it is requested
-  again (for example, the privacy shield after a click on another section), and an explicit
-  request clears the search first. The search fields use the interface font, and the selected
-  section in the list is filled with a semibold label instead of the accent.
-- The window does not re-lay out the page in a loop while idle, and the Native sidebar and
-  toolbar stay visible when a page swap is deferred, for example when pages open in the
-  background.
-
-### Added
-
 - Tabs the agent opens (`browser_open_tab`, and the pages of a research plan) are remembered as
   agent-opened and keep that mark across a restart. The sites you trust for the agent are saved
   in prefs (`agent_trusted_sites`, normalized to bare lowercase hosts).
-- The agent now asks before consequential page actions: submits and buttons with words such as
-  "Buy" or "Delete", Enter in a form, running a script, opening another site in one of your tabs,
-  closing your tab, and typing into card fields; it never types into password fields. Until the
-  confirmation card lands (agent-actions Task 4) the temporary host answers every such question
-  with "declined", so `page_evaluate`, navigation and closing of your tabs are refused. Do not
-  release this branch before then.
 - Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
   system-blue accent for selection and focus, a source-list sidebar and no space color. Released
   profiles without Appearance settings use Native; Arc-era profiles with Appearance settings but
@@ -162,6 +129,30 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
   until you approve the plan.
 
+### Changed
+
+- The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
+  control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
+  the most visited sites (from history, one per host, opened in the current tab). Tab and
+  Shift+Tab step through the modes while the field has focus. Clearing history clears the tiles.
+  Visits are grouped by host before the six-tile limit applies, so one busy site with many pages
+  no longer hides the others. IP-address sites get a neutral globe instead of a digit, and the
+  old keyboard-shortcut list under the start page is removed.
+- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
+  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
+  version at the bottom, and one section shown at a time. Appearance groups its controls into
+  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
+  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
+  Native has no space color. Every existing setting keeps its behavior. Search finds sections by
+  name (Privacy, Shortcuts, About) and shows the whole pane for them, and also finds the Import
+  sources and the About list. A section that is already selected opens again when it is requested
+  again (for example, the privacy shield after a click on another section), and an explicit
+  request clears the search first. The search fields use the interface font, and the selected
+  section in the list is filled with a semibold label instead of the accent.
+- The window does not re-lay out the page in a loop while idle, and the Native sidebar and
+  toolbar stay visible when a page swap is deferred, for example when pages open in the
+  background.
+
 ### Fixed
 
 - Opening Settings or All tabs right after a new tab, or switching split panes quickly, no longer
@@ -174,17 +165,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   gated too, and the 2 s cap applies only when a browser is never created. Pages the agent already
   moved past load when you show them. A browser whose tab was closed while it was being created no
   longer keeps the app from quitting.
-
-- Collect from tabs: a CSV cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is
-  written with a leading quote, so a spreadsheet shows it as text instead of running it. JSON is
-  unchanged.
-- Collect from tabs: the Collect sheet sends each checked tab's URL with its index, and the tab is
-  taken only while the active space still holds that URL. Tabs that closed or moved while the sheet
-  was open no longer pick up the wrong page.
-- Collect from tabs: the table icon on a collection report shows again, and the tab rows in the
-  sheet keep the URL's case.
-- Collect from tabs: a JSON export keeps every column when headers repeat (`Source 2`), tables in
-  fenced code blocks are ignored, and an answer without a table is no longer saved as a collection.
 
 ## [0.6.2] - 2026-10-15
 

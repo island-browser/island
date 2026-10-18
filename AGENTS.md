@@ -61,6 +61,16 @@
   committing. At the project owner's request (2026-10-06), `build-release.yml` builds all six
   targets on every push to `main` that changes the app and publishes them as **unsigned GitHub
   prereleases** (`nightly`, plus `vX.Y.Z` once per version) for the in-browser updater.
+- Agent actions (spec `docs/superpowers/specs/2026-10-17-island-agent-actions-design.md`, 2026-10-17):
+  every consequential page or browser action the agent takes passes the CEF-free action gate
+  (`src/agent/action_gate.*`). Password fields are never typed into; card fields, submits,
+  consequential words, scripts, navigation to another origin in the person's tab and closing the
+  person's tab ask first through a confirmation card in the agent panel (Allow once, Allow for this
+  task, Trust this site, Cancel; 120 s). Trusted sites (Settings > Agent & tools) skip those
+  prompts. Agent work runs from a visible task queue (`src/agent/agent_task_queue.*`, the Tasks
+  strip). The agent can be asked about a selection, a link or the page, and Collect from tabs
+  gathers a table that exports as CSV or JSON. Extension points: `src/agent/AGENTS.md` and
+  `src/main/AGENTS.md`, "Extension points".
 - Native ad and tracker blocking is in scope as of 2026-10-15 at the project owner's request. It
   uses Brave's Rust `adblock` engine with runtime-cached EasyList and EasyPrivacy data; browser
   extensions remain out of scope.

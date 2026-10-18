@@ -336,6 +336,25 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground; the accent marks focus and the
   active/selected state only.
+- **Agent panel (native, `pages/agent.html`):**
+  - *Confirmation card:* a `.card.ask` above the composer, its outline `--text-2` with `--shadow`.
+    It is titled "Allow this action?", shows the host in mono `--text-2` and the summary, and has
+    buttons for Allow once (the primary, `--text` fill), Allow for this task, Trust this site and
+    Cancel. A card that cannot be trusted (card fields, password and unclassified fields) offers
+    only Allow once and Cancel. Esc declines the oldest card. The card never takes focus.
+  - *Tasks strip:* a `--surface` block with a `--border` outline and `--radius` corners, above the
+    conversation, with a mono uppercase "Tasks" heading and a "Clear finished" link. Each row shows
+    its state as text (Queued, Running, Needs you, Done, Failed, Stopped), and a running or waiting
+    row takes the `--accent-soft` fill. Queued rows have Move up, Move down and Remove buttons;
+    running ones have Stop. A queued chat message sits under the conversation with a dashed
+    outline at 65 % opacity and the tag "Queued · #n".
+  - *Chips above the composer:* the page chip (a share toggle, with a ✕ that removes the page
+    context) and, for a selection, a quote chip in `--text-2` at 11px, clamped to two lines.
+  - *Collect sheet:* a centred dialog over a scrim, with one text field labelled in mono uppercase,
+    a list of tab rows (checkbox, title and mono URL on a 1px `--border` list) and a Collect
+    button that is disabled until something is typed.
+- **Settings > Agent & tools > Trusted sites:** a `--surface` card listing each host with a Remove
+  button, which names the host in its accessible label; an empty state says how to add one.
 - **Keyboard keys:** Geist Mono 11–12px on `--surface` with a 1px border and a 2px bottom border.
 - **Status chips:** mono uppercase label plus a 6px dot; meaning is carried by the label, never by
   color alone.

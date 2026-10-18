@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-08-28 | Updated: 2026-08-28 -->
+<!-- Generated: 2026-08-28 | Updated: 2026-10-18 -->
 
 # main
 
@@ -53,6 +53,7 @@ platform executable links.
 | `address_indicators.h` | CEF-free rules for the Native address-field indicators (`ComputeAddressIndicators`: shield count capped at "9999+", Reader, agent state). `BrowserWindow::RefreshAddressIndicators` recomputes them on tab/space switch, blocked request, Reader change and agent session change and calls `BrowserChrome::SetAddressIndicators`; the shield opens Settings > Privacy (no blocker popover exists), the dot toggles the agent panel. The agent state is window-wide because the agent drives the active tab |
 | `browser_window.cc` (confirmations) | `ShowConfirmation`/`AnswerConfirmation` keep pending agent confirmation cards in the window (120 s timeout via a 1 s UI timer, cancelled on shutdown, Stop/new chat and when the card's tab closes, moves or its space is left; the card never opens the panel or takes focus; the HTTP handler budget `kHandlerTimeoutSeconds`=150 exceeds the card timeout); panel state key `confirmations`, panel message `confirm`, settings message `remove_trusted_site`; the Agent button icon carries a 6 DIP accent dot (`BrowserChrome::SetAgentNeedsYou`); dev action `agent_fixture:confirm` |
 | `browser_window.cc` (task queue) | `agent_queue_` (`src/agent/agent_task_queue.h`) runs agent work one task at a time: `SubmitAgentPrompt` and `StartResearch` enqueue, `StartQueuedTask` (the StartFn) sends and records `in_flight_id_`, `CheckInFlightTurn`/`FinishPostedTurn` report chat turn ends (posted, since the session is inside its handler), research reports from `CompleteResearch`, `SyncQueueWaiting` is the edge-triggered OnWaiting (cards or research awaiting approval; a research waiting for approval reports no turn end, Run is the same task), `StopAgentTask` cancels then `StopCurrent` (turn open) or `StopCurrentAndAdvanceNow`, `AbandonInFlightTurn` for new chat/agent switch/teardown; panel state key `tasks`, messages `task_move`/`task_remove`/`task_stop`/`tasks_clear_finished`; `AgentButtonLabel` (browser_chrome.cc); palette command `agent_tasks`; dev action `agent_fixture:queue` |
+| `agent_context.{h,cc}` | CEF-free "ask the agent about this": `BuildAgentContext` (page title, URL and selection in tags labelled as web content, selection clipped to 4096 bytes), `BuildLinkAgentContext` (a link the agent reads in its own background tab), `AgentContextMenuItems` (the page context menu's agent items and their `kAgentMenu*` offsets), `ClipUtf8` / `EscapeUntrusted` / `UntrustedTitle` |
 | `prefs_store.{h,cc}` | Preferences JSON (theme, history capture, agent provider + custom command with migration from the old single command, agent panel state, agent trusted sites, shortcut overrides, update checks) |
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
 | `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
@@ -119,6 +120,42 @@ platform executable links.
   because S0 cannot flush a segment that predates its MemTable.
 - Platform selection is `if(APPLE) / elseif(WIN32) / elseif(Linux)` with a `FATAL_ERROR` fallback;
   each branch adds its own `font_registry_*` source and platform link libraries.
+
+### Agent extension points (window side)
+
+The agent kernel's own extension points (gate rules, gated tools, task kinds) are in
+`src/agent/AGENTS.md`, "Extension points". The three below live in the window.
+
+**A new context-menu ask** (`agent_context.h`, `agent_context.cc`, `browser_window.cc`):
+1. Add `inline constexpr int kAgentMenu<Name> = N;` to `agent_context.h`. Start at 4: offset 0 is
+   "Open in peek" (`MENU_ID_USER_FIRST`), and every offset is added to `MENU_ID_USER_FIRST`.
+2. Add the item to `AgentContextMenuItems`, with its condition (`has_agent`, `has_selection`,
+   `has_link`). Selection items need a web page; `RunAgentMenuCommand` refuses the rest too.
+3. Handle the offset in the `switch` of `BrowserWindow::RunAgentMenuCommand`. Build the prompt, and
+   the context with `BuildAgentContext` or `BuildLinkAgentContext`, then call `AskAgent(prompt,
+   context)`, which opens the panel and enqueues a `kAsk` task. Page text reaches the prompt only
+   through `ClipUtf8`, `EscapeUntrusted` and `UntrustedTitle`.
+4. To offer it in the command palette too, add an entry to `PaletteCommands()` and a branch to
+   `BrowserWindow::RunPaletteCommand`.
+5. Tests: `tests/agent_context_test.cpp` for the items and the escaping; `BrowserWindowPages` tests
+   for the path. The CEF menu model (`OnBeforeContextMenu`, `OnContextMenuCommand`) has no unit
+   test, so click the item in a real window before release.
+
+**A new export format** (`table_export.h`, `table_export.cc`, `browser_window_research.cc`, `pages/report.html`):
+1. Add a pure converter `std::string TableTo<Format>(const Table&)` to `table_export.{h,cc}`. Follow
+   `TableToCsv`: RFC 4180 quoting, and formula neutralization for spreadsheet formats (`TableToJson`
+   does not neutralize).
+2. In `BrowserWindow::ExportReport`, accept the format name, call the converter, and use the
+   extension `"." + format`. `md` goes to `SaveReportToFile`; an unknown name is an error.
+3. In `pages/report.html`, add a `role="menuitem"` button with `data-format` to `export-menu`. If the
+   format needs a table, add its id to the list that disables the items when `has_table` is false.
+4. Tests: `tests/table_export_test.cpp` for the converter; `BrowserWindowPagesTest.ExportMessageWritesTheChosenFormat`
+   for the message path (it writes through `export_path_for_test_`).
+
+**A new task kind**: see `src/agent/AGENTS.md`. In this directory the window touches it in
+`BrowserWindow::StartQueuedTask` (send the prompt, set `in_flight_is_chat_`), in
+`FinishInFlightTurn` if the kind needs a turn-end hook (as `FinishCollectTurn` does), and in the
+kind switch of `BrowserWindow::TasksStateJson`.
 
 ### CEF ownership seams
 
