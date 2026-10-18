@@ -4810,10 +4810,8 @@ AgentTabState BrowserWindow::AgentStateForActiveTab() const {
     if (agent_session_ == nullptr || active_tab() == nullptr || !agent_session_->busy()) {
         return AgentTabState::kIdle;
     }
-    for (const agent::TranscriptItem& item : agent_session_->transcript().items()) {
-        if (item.kind == agent::TranscriptItem::Kind::kPermission && item.resolution.empty()) {
-            return AgentTabState::kWaitingForYou;
-        }
+    if (agent_session_->pending_permission_count() != 0) {
+        return AgentTabState::kWaitingForYou;
     }
     return AgentTabState::kReading;
 }

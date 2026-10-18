@@ -87,12 +87,14 @@ TEST(AgentSessionTest, QueuedPromptRunsOnceTheAgentIsReady) {
     ASSERT_NE(FindKind(session, TranscriptItem::Kind::kUser), nullptr);
 
     ASSERT_TRUE(loop.PumpUntil([&] { return OpenPermission(session) != nullptr; }));
+    EXPECT_EQ(session.pending_permission_count(), 1U);
     EXPECT_EQ(session.agent_name(), "Fake Agent");
     const TranscriptItem* agent = FindKind(session, TranscriptItem::Kind::kAgent);
     ASSERT_NE(agent, nullptr);
     EXPECT_EQ(agent->text, "echo: hello | ctx: Active tab: Docs https://docs.test/");
 
     session.ResolvePermission(OpenPermission(session)->request_id, std::string("yes"));
+    EXPECT_EQ(session.pending_permission_count(), 0U);
     ASSERT_TRUE(loop.PumpUntil([&] { return session.state() == AcpState::kReady; }));
     const TranscriptItem* tool = FindKind(session, TranscriptItem::Kind::kTool);
     ASSERT_NE(tool, nullptr);
@@ -115,7 +117,9 @@ TEST(AgentSessionTest, CancelAnswersThePermissionAndStopsTheTurn) {
     ASSERT_TRUE(loop.PumpUntil([&] { return session.state() == AcpState::kReady; }));
     ASSERT_TRUE(session.Send("go"));
     ASSERT_TRUE(loop.PumpUntil([&] { return OpenPermission(session) != nullptr; }));
+    EXPECT_EQ(session.pending_permission_count(), 1U);
     session.Cancel();
+    EXPECT_EQ(session.pending_permission_count(), 0U);
     ASSERT_TRUE(loop.PumpUntil([&] { return session.state() == AcpState::kReady; }));
     EXPECT_EQ(FindKind(session, TranscriptItem::Kind::kTool)->status, "failed");
     EXPECT_EQ(session.transcript().items().back().text, "Stopped.");

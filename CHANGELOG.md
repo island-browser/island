@@ -15,6 +15,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [0.7.2] - 2026-10-17
 
+### Changed
+
+- Streaming agent status updates use the session's permission count instead of repeatedly scanning
+  the full transcript.
+
 ### Fixed
 
 - Opening the agent panel no longer hides the page and the toolbar.
