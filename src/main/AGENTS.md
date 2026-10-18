@@ -220,6 +220,9 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 
 - Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
   clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
-  grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyTheme` sets the
-  ring to the plate fill and the window background to the opposite extreme
-  (`BrowserChrome::TextfieldFocusRingColor/Backdrop`), so only the row's accent ring shows.
+  grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyAddressFocusColors`
+  sets the ring to the plate fill and the window background to the opposite extreme
+  (`BrowserChrome::TextfieldFocusRingColor/Backdrop`), so only the row's accent ring shows. Focus
+  and blur call `SetAddressFocusRingSuppressed`, which repaints just those colors and calls
+  `ThemeChanged` (the chrome reapplies its colors); it never runs a full `ApplyTheme`, and other
+  looks skip the repaint because their helpers do not change.

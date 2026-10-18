@@ -1700,6 +1700,18 @@ TEST(BrowserWindowPagesTest, AResearchPageIsTheAgentsTargetWhenThePersonIsInAnot
     EXPECT_EQ(window->active_space_index(), 2U);
 }
 
+TEST(BrowserWindowPagesTest, AddressFocusRepaintsOnlyItsColorsNotTheWholeWindow) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    // Native is the default look: focusing and blurring the address field changes three
+    // colors and nothing else (no full ApplyTheme, no page or start-page re-render).
+    window->SetAddressFocusRingSuppressed(true);
+    EXPECT_EQ(window->LastAddressFocusRepaintForTest(),
+              BrowserWindow::AddressFocusRepaint::kColorsOnly);
+    window->SetAddressFocusRingSuppressed(false);
+    EXPECT_EQ(window->LastAddressFocusRepaintForTest(),
+              BrowserWindow::AddressFocusRepaint::kColorsOnly);
+}
+
 TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));

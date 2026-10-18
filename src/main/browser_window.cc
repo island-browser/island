@@ -2846,14 +2846,44 @@ void BrowserWindow::BeginAddressEditing() {
     PublishChromeSnapshot();
 }
 
+void BrowserWindow::ApplyAddressFocusColors(CefRefPtr<CefWindow> window,
+                                            const ChromeTokens& tokens) const {
+    window->SetThemeColor(
+        CEF_ColorTextfieldOutline,
+        BrowserChrome::TextfieldOutlineColor(tokens, address_focus_ring_suppressed_).argb);
+    // CEF installs its own two-DIP FocusRing inside every textfield, drawn in
+    // CEF_ColorFocusableBorderFocused and clamped to a minimum contrast against
+    // CEF_ColorWindowBackground (a ring darker than that clamp is lifted to a grey 94,94,94). While
+    // the Native address field is focused, paint that ring as the plate fill so Island's outer
+    // accent ring is the sole focus indicator. Restore the accent as soon as focus leaves the
+    // address field so palette textfields keep their normal focus treatment.
+    window->SetThemeColor(
+        CEF_ColorWindowBackground,
+        BrowserChrome::TextfieldFocusRingBackdrop(tokens, address_focus_ring_suppressed_).argb);
+    window->SetThemeColor(
+        CEF_ColorFocusableBorderFocused,
+        BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+}
+
 void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
     CEF_REQUIRE_UI_THREAD();
-    if (address_focus_ring_suppressed_ == suppressed) {
+    if (closing_ || address_focus_ring_suppressed_ == suppressed) {
         return;
     }
     address_focus_ring_suppressed_ = suppressed;
+    // Only the Native look paints these colors (the helpers gate on it). Other looks keep their
+    // colors, so focus changes repaint nothing for them.
+    const ChromeTokens tokens = ResolvedTokens(ResolvedChromeTheme());
+    if (tokens.look != LookPreset::kNative) {
+        address_focus_repaint_ = AddressFocusRepaint::kNone;
+        return;
+    }
+    // A full ApplyTheme here re-themed every view, page and start page on each focus change.
+    // Only the three colors change; ThemeChanged then repaints the views that read them.
+    address_focus_repaint_ = AddressFocusRepaint::kColorsOnly;
     if (window_ != nullptr) {
-        ApplyTheme(window_, ResolvedChromeTheme(), true);
+        ApplyAddressFocusColors(window_, tokens);
+        window_->ThemeChanged();
     }
 }
 
@@ -4421,22 +4451,8 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     window->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder, tokens.text_secondary.argb);
     window->SetThemeColor(CEF_ColorTextfieldSelectionBackground, tokens.accent.argb);
     window->SetThemeColor(CEF_ColorTextfieldSelectionForeground, tokens.background.argb);
-    window->SetThemeColor(
-        CEF_ColorTextfieldOutline,
-        BrowserChrome::TextfieldOutlineColor(tokens, address_focus_ring_suppressed_).argb);
     window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
-    // CEF installs its own two-DIP FocusRing inside every textfield, drawn in
-    // CEF_ColorFocusableBorderFocused and clamped to a minimum contrast against
-    // CEF_ColorWindowBackground (a ring darker than that clamp is lifted to a grey 94,94,94). While
-    // the Native address field is focused, paint that ring as the plate fill so Island's outer
-    // accent ring is the sole focus indicator. Restore the accent as soon as focus leaves the
-    // address field so palette textfields keep their normal focus treatment.
-    window->SetThemeColor(
-        CEF_ColorWindowBackground,
-        BrowserChrome::TextfieldFocusRingBackdrop(tokens, address_focus_ring_suppressed_).argb);
-    window->SetThemeColor(
-        CEF_ColorFocusableBorderFocused,
-        BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+    ApplyAddressFocusColors(window, tokens);
     window->SetThemeColor(CEF_ColorFocusableBorderUnfocused, tokens.border.argb);
     if (notify_views) {
         window->ThemeChanged();

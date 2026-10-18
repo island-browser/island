@@ -603,6 +603,13 @@ class BrowserWindow : public CefClient,
     void SelectSpace(std::size_t index) override;
     void BeginAddressEditing() override;
     void SetAddressFocusRingSuppressed(bool suppressed) override;
+    // What the last address focus change repainted: nothing, the three focus colors only, or a
+    // full window re-theme (never, since focus changes no longer re-theme the window).
+    enum class AddressFocusRepaint { kNone, kColorsOnly, kFullTheme };
+    [[nodiscard]] AddressFocusRepaint LastAddressFocusRepaintForTest() const noexcept {
+        return address_focus_repaint_;
+    }
+    void ApplyAddressFocusColors(CefRefPtr<CefWindow> window, const ChromeTokens& tokens) const;
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
@@ -1158,6 +1165,7 @@ class BrowserWindow : public CefClient,
     bool browser_was_created_ = false;
     bool closing_ = false;
     bool address_focus_ring_suppressed_ = false;
+    AddressFocusRepaint address_focus_repaint_ = AddressFocusRepaint::kNone;
     bool message_loop_quit_ = false;
     // False for the smoke run and the headless test seam: the session file is
     // neither read at startup nor written on clean quit.
