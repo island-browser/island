@@ -2768,9 +2768,9 @@ TEST(BrowserWindowPagesTest, CollectTaskOpensACollectionReport) {
     window.SetReportPageUrlForTest(std::string(kReportUrl));
     ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/one"));
     EXPECT_FALSE(window.CollectFromTabs("price", {}));  // nothing to collect
-    EXPECT_FALSE(window.CollectFromTabs("  ", {0}));    // no question
+    EXPECT_FALSE(window.CollectFromTabs("  ", {{0, "https://a.test/one"}}));  // no question
 
-    ASSERT_TRUE(window.CollectFromTabs("price", {0}));
+    ASSERT_TRUE(window.CollectFromTabs("price", {{0, "https://a.test/one"}}));
     ASSERT_EQ(qw.sent.size(), 1U);
     EXPECT_NE(qw.sent[0].find("What to collect: price"), std::string::npos);
     EXPECT_NE(qw.sent[0].find("<page_url>https://a.test/one</page_url>"), std::string::npos);
@@ -2786,6 +2786,32 @@ TEST(BrowserWindowPagesTest, CollectTaskOpensACollectionReport) {
     EXPECT_EQ(report.title, "Grinders");
     const Space& space = SpaceAt(window, window.active_space_index());
     EXPECT_EQ(space.tabs().back().startup_url(), std::string(kReportUrl) + "#" + report.id);
+}
+
+TEST(BrowserWindowPagesTest, CollectTakesOnlyChoicesWhoseUrlIsStillThere) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_TRUE(window.OpenNewTab("https://x.test/"));
+    ASSERT_TRUE(window.OpenNewTab("https://y.test/"));
+    ASSERT_TRUE(window.OpenNewTab("https://z.test/"));
+    // The sheet showed a, b and c at indices 0, 1 and 2 (the first tab is a). Then a closes, so
+    // b and c move up.
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/"));
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 1, "https://b.test/"));
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 2, "https://c.test/"));
+    ASSERT_TRUE(window.CloseTabAt(0, 0));
+    ASSERT_TRUE(window.CollectFromTabs(
+        "price", {{0, "https://a.test/"}, {1, "https://b.test/"}, {2, "https://c.test/"}}));
+    ASSERT_EQ(window.agent_queue().tasks().size(), 1U);
+    const std::string& context = window.agent_queue().tasks()[0].context;
+    EXPECT_NE(context.find("https://b.test/"), std::string::npos);
+    EXPECT_NE(context.find("https://c.test/"), std::string::npos);
+    EXPECT_EQ(context.find("https://a.test/"), std::string::npos);
+
+    // A choice whose tab is gone, with nothing else queued, is refused outright.
+    EXPECT_FALSE(window.CollectFromTabs("price", {{0, "https://a.test/"}}));
 }
 
 TEST(BrowserWindowPagesTest, ExportMessageWritesTheChosenFormat) {

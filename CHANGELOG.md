@@ -175,6 +175,17 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   moved past load when you show them. A browser whose tab was closed while it was being created no
   longer keeps the app from quitting.
 
+- Collect from tabs: a CSV cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is
+  written with a leading quote, so a spreadsheet shows it as text instead of running it. JSON is
+  unchanged.
+- Collect from tabs: the Collect sheet sends each checked tab's URL with its index, and the tab is
+  taken only while the active space still holds that URL. Tabs that closed or moved while the sheet
+  was open no longer pick up the wrong page.
+- Collect from tabs: the table icon on a collection report shows again, and the tab rows in the
+  sheet keep the URL's case.
+- Collect from tabs: a JSON export keeps every column when headers repeat (`Source 2`), tables in
+  fenced code blocks are ignored, and an answer without a table is no longer saved as a collection.
+
 ## [0.6.2] - 2026-10-15
 
 ### Fixed

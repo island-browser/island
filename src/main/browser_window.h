@@ -32,6 +32,7 @@
 #include "cheatsheet_overlay.h"
 #include "chrome_snapshot.h"
 #include "clipboard.h"
+#include "collect_prompt.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
 #include "find_bar_model.h"
@@ -381,9 +382,11 @@ class BrowserWindow : public CefClient,
     void ShowCollectFixtureForDev();
     // Dev capture (`report_fixture:collection`): a collection Report tab with its Export menu open.
     void ShowCollectionReportFixtureForDev();
-    // Queues a collection of the active space's web tabs at `indices` for `what` (blank or no
-    // web tab: refused). False when the agent could not take it.
-    bool CollectFromTabs(std::string_view what, const std::vector<std::size_t>& indices);
+    // Queues a collection of the web tabs the sheet showed, for `what` (blank or no web tab:
+    // refused). A choice is taken only when the active space still holds its URL, at its index or,
+    // if the tabs moved, at another index; a closed or changed tab is left out. False when the
+    // agent could not take it.
+    bool CollectFromTabs(std::string_view what, const std::vector<CollectChoice>& choices);
     // Stores `markdown` as a collection report and opens its Report tab. False when it is blank.
     bool CompleteCollect(std::string_view question, std::string_view markdown);
     // Test seam: CSV and JSON exports are written to `path` instead of through the save dialog.
@@ -1317,8 +1320,8 @@ class BrowserWindow : public CefClient,
     std::uint64_t collect_sheet_seq_ = 0;
     // Turns the session had ended when the in-flight collect turn was sent.
     std::uint64_t collect_turns_before_ = 0;
-    // Dev capture only: the collection fixture's Export menu is opened on load.
-    bool report_fixture_menu_ = false;
+    // Dev capture only: the report whose Export menu the collection fixture opens on load.
+    std::string report_fixture_menu_id_;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).

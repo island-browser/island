@@ -1,5 +1,6 @@
 #include "table_export.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -94,7 +95,9 @@ std::optional<Link> ParseLink(std::string_view cell) {
         return std::nullopt;
     }
     const std::string_view url = cell.substr(split + 2, cell.size() - split - 3);
-    if (url.find_first_of(" \t") != std::string_view::npos) {
+    // A second "](" means two links ("[a](b)[c](d)"), not one link with a strange URL.
+    const bool spaced = url.find_first_of(" \t") != std::string_view::npos;
+    if (spaced || url.find("](") != std::string_view::npos) {
         return std::nullopt;
     }
     return Link{std::string(cell.substr(1, split - 1)), std::string(url)};
@@ -134,12 +137,20 @@ Table ExpandLinks(const Table& raw) {
     return out;
 }
 
+// A cell that starts with one of these is run as a formula by spreadsheets: a leading quote makes
+// it text. The page text is untrusted, so this applies to every CSV cell.
+constexpr std::string_view kFormulaStarts = "=+-@\t\r";
+
 std::string CsvField(std::string_view field) {
-    if (field.find_first_of(",\"\r\n") == std::string_view::npos) {
-        return std::string(field);
+    std::string text(field);
+    if (!text.empty() && kFormulaStarts.find(text.front()) != std::string_view::npos) {
+        text.insert(text.begin(), '\'');
+    }
+    if (text.find_first_of(",\"\r\n") == std::string::npos) {
+        return text;
     }
     std::string out = "\"";
-    for (const char c : field) {
+    for (const char c : text) {
         if (c == '"') {
             out += "\"\"";
         } else {
@@ -201,8 +212,25 @@ std::optional<Table> FirstMarkdownTable(std::string_view markdown) {
         lines.push_back(line);
         start = end + 1;
     }
+    // Lines inside a fenced code block (and the fences) are not table text.
+    std::vector<bool> fenced(lines.size(), false);
+    std::string_view fence;
+    for (std::size_t i = 0; i < lines.size(); ++i) {
+        const std::string_view line = Trim(lines[i]);
+        if (fence.empty()) {
+            if (line.starts_with("```") || line.starts_with("~~~")) {
+                fence = line.substr(0, 3);
+                fenced[i] = true;
+            }
+        } else {
+            fenced[i] = true;
+            if (line.starts_with(fence)) {
+                fence = {};
+            }
+        }
+    }
     for (std::size_t i = 0; i + 1 < lines.size(); ++i) {
-        if (lines[i].find('|') == std::string_view::npos) {
+        if (fenced[i] || fenced[i + 1] || lines[i].find('|') == std::string_view::npos) {
             continue;
         }
         Table raw;
@@ -212,7 +240,7 @@ std::optional<Table> FirstMarkdownTable(std::string_view markdown) {
         }
         for (std::size_t j = i + 2; j < lines.size(); ++j) {
             const std::string_view line = Trim(lines[j]);
-            if (line.empty() || line.find('|') == std::string_view::npos) {
+            if (fenced[j] || line.empty() || line.find('|') == std::string_view::npos) {
                 break;
             }
             std::vector<std::string> cells = SplitRow(line);
@@ -237,25 +265,40 @@ std::string TableToCsv(const Table& table) {
     };
     append_row(table.header);
     for (const std::vector<std::string>& row : table.rows) {
-        append_row(row);
+        // A short hand-built row reads as empty cells, as in JSON.
+        std::vector<std::string> cells = row;
+        cells.resize(table.header.size());
+        append_row(cells);
     }
     return out;
 }
 
 std::string TableToJson(const Table& table) {
+    // A repeated header would repeat a JSON key, and most parsers keep only the last one, losing
+    // a column. Repeats get " 2", " 3", ... instead.
+    std::vector<std::string> keys;
+    for (const std::string& name : table.header) {
+        std::string key = name;
+        for (std::size_t n = 2; std::find(keys.begin(), keys.end(), key) != keys.end(); ++n) {
+            key = name + " " + std::to_string(n);
+        }
+        keys.push_back(std::move(key));
+    }
     std::string out = "[";
     for (std::size_t r = 0; r < table.rows.size(); ++r) {
         if (r > 0) {
             out += ',';
         }
         out += '{';
-        for (std::size_t c = 0; c < table.header.size(); ++c) {
+        for (std::size_t c = 0; c < keys.size(); ++c) {
             if (c > 0) {
                 out += ',';
             }
-            AppendJsonString(out, table.header[c]);
+            AppendJsonString(out, keys[c]);
             out += ':';
-            AppendJsonString(out, table.rows[r][c]);
+            // A short hand-built row reads as empty cells.
+            const std::vector<std::string>& row = table.rows[r];
+            AppendJsonString(out, c < row.size() ? std::string_view(row[c]) : std::string_view());
         }
         out += '}';
     }

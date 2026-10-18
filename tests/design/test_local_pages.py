@@ -334,6 +334,9 @@ class ReportPage(unittest.TestCase):
     def test_a_collection_shows_a_table_icon(self) -> None:
         self.assertIn('report.kind === "collection"', self.html)
         self.assertIn('id="kind-icon"', self.html)
+        # <svg> has no `hidden` IDL property: assigning it would leave the icon visible.
+        self.assertIn('toggleAttribute("hidden", !collection)', self.html)
+        self.assertNotIn("kind-icon\").hidden", self.html)
 
     def test_never_navigates_by_itself(self) -> None:
         for fragment in ("location", "window.open", "target=", "<form", "href=\""):
@@ -769,6 +772,17 @@ class AgentCollectSheet(unittest.TestCase):
     def test_tab_titles_are_text_nodes(self) -> None:
         self.assertIn("title.textContent = tab.title || tab.url", self.html)
         self.assertIn("url.textContent = tab.url", self.html)
+
+    def test_uppercase_label_rule_does_not_reach_the_tab_rows(self) -> None:
+        # The tab rows are <label> elements too: URLs must keep their case.
+        self.assertIn('.collect-sheet label[for="collect-what"]', self.html)
+        self.assertNotIn(".collect-sheet label,", self.html)
+        self.assertNotIn(".collect-sheet label {", self.html)
+
+    def test_each_checked_tab_is_sent_with_the_url_the_sheet_showed(self) -> None:
+        self.assertIn("box.dataset.url = tab.url", self.html)
+        self.assertIn('return { index: Number(box.value), url: box.dataset.url || "" };', self.html)
+        self.assertIn('post({ type: "collect", what: what, tabs: tabs });', self.html)
 
 
 class SettingsTrustedSites(unittest.TestCase):

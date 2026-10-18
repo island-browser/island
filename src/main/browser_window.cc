@@ -1057,23 +1057,42 @@ bool BrowserWindow::AskAgent(std::string prompt, std::string context) {
 }
 
 bool BrowserWindow::CollectFromTabs(std::string_view what,
-                                    const std::vector<std::size_t>& indices) {
+                                    const std::vector<CollectChoice>& choices) {
     CEF_REQUIRE_UI_THREAD();
     const std::string asked = std::string(ClipUtf8(TrimmedCopy(what), kMaxCollectWhatBytes));
     if (closing_ || asked.empty()) {
         return false;
     }
-    // Web pages only: a Report, the start page or a settings page has nothing to collect.
-    std::vector<CollectTab> tabs;
+    // Web pages only: a Report, the start page or a settings page has nothing to collect. The
+    // sheet can be open while tabs close or the space changes, so a choice must still match its
+    // URL; the index is only a hint for finding it.
     const std::vector<Tab>& space_tabs = active_space().tabs();
-    for (const std::size_t index : indices) {
-        if (index >= space_tabs.size() || tabs.size() >= kMaxCollectTabs) {
+    const auto has_url = [&space_tabs](std::size_t index, std::string_view url) {
+        const NavigationSnapshot& nav = space_tabs[index].navigation_state().snapshot();
+        return nav.url == url && IsWebUrl(nav.url);
+    };
+    std::vector<CollectTab> tabs;
+    std::vector<std::size_t> taken;
+    for (const CollectChoice& choice : choices) {
+        if (tabs.size() >= kMaxCollectTabs) {
+            break;
+        }
+        std::optional<std::size_t> found;
+        if (choice.index < space_tabs.size() && has_url(choice.index, choice.url)) {
+            found = choice.index;
+        } else {
+            for (std::size_t index = 0; index < space_tabs.size() && !found; ++index) {
+                if (has_url(index, choice.url)) {
+                    found = index;
+                }
+            }
+        }
+        if (!found.has_value() || std::find(taken.begin(), taken.end(), *found) != taken.end()) {
             continue;
         }
-        const NavigationSnapshot& nav = space_tabs[index].navigation_state().snapshot();
-        if (IsWebUrl(nav.url)) {
-            tabs.push_back({.index = index, .title = nav.page_title, .url = nav.url});
-        }
+        taken.push_back(*found);
+        const NavigationSnapshot& nav = space_tabs[*found].navigation_state().snapshot();
+        tabs.push_back({.index = *found, .title = nav.page_title, .url = nav.url});
     }
     if (tabs.empty()) {
         return false;
@@ -2354,16 +2373,18 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
     } else if (type == "clear_context") {
         context_chip_.reset();
     } else if (type == "collect") {
-        std::vector<std::size_t> indices;
+        std::vector<CollectChoice> choices;
         if (const json::Value* list = message.FindMember("tabs");
             list != nullptr && list->IsArray()) {
             for (const json::Value& item : list->array_val) {
-                if (item.IsInt() && item.int_val >= 0) {
-                    indices.push_back(static_cast<std::size_t>(item.int_val));
+                const json::Value* index = item.IsObject() ? item.FindMember("index") : nullptr;
+                if (index != nullptr && index->IsInt() && index->int_val >= 0) {
+                    choices.push_back({.index = static_cast<std::size_t>(index->int_val),
+                                       .url = std::string(item.StringOr("url", ""))});
                 }
             }
         }
-        static_cast<void>(CollectFromTabs(message.StringOr("what", ""), indices));
+        static_cast<void>(CollectFromTabs(message.StringOr("what", ""), choices));
     } else if (type == "cancel" || type == "task_stop") {
         // Cards carry no origin, so Stop withdraws every open card; a stopped turn's action
         // must not run later.

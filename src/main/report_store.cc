@@ -29,10 +29,8 @@ std::string ClipUtf8(std::string text, std::size_t limit) {
 }
 
 ReportLoadResult ParseState(const json::Value& root) {
-    // Version 1 (no kind) loads as research reports; the next save writes the current version.
     if (!root.IsObject() || !root.HasRequiredInt("version") ||
-        (root.FindMember("version")->int_val != 1 &&
-         root.FindMember("version")->int_val != ReportState::kCurrentSchemaVersion) ||
+        root.FindMember("version")->int_val != ReportState::kCurrentSchemaVersion ||
         !root.HasRequiredArray("reports")) {
         return Fail(ReportError::kSchemaError);
     }
@@ -82,8 +80,12 @@ std::string Serialize(const ReportState& state) {
         w.StringValue(report.markdown);
         w.Key("created_ms");
         w.IntValue(report.created_ms);
-        w.Key("kind");
-        w.StringValue(report.kind);
+        // Only collections carry "kind". Research reports are written exactly as version 1 always
+        // wrote them, so an older build reads this file unchanged; it ignores unknown members.
+        if (report.kind != kReportKindResearch) {
+            w.Key("kind");
+            w.StringValue(report.kind);
+        }
         w.EndObject();
     }
     w.EndArray();

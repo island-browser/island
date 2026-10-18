@@ -22,6 +22,14 @@ struct CollectTab {
     bool operator==(const CollectTab&) const = default;
 };
 
+// A tab checked in the Collect sheet: its index in the space and the URL the sheet showed for it.
+struct CollectChoice {
+    std::size_t index = 0;
+    std::string url;
+
+    bool operator==(const CollectChoice&) const = default;
+};
+
 // What to collect is clipped to this many bytes (on a UTF-8 boundary).
 inline constexpr std::size_t kMaxCollectWhatBytes = 1000;
 // A collection reads at most this many tabs.

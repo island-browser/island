@@ -23,15 +23,15 @@ struct ResearchReport {
     std::string question;
     std::string markdown;
     std::int64_t created_ms = 0;  // Unix time, milliseconds
-    // "research" for a Research answer, "collection" for a table collected
-    // from tabs. Older files have no kind and load as "research".
+    // "research" for a Research answer, "collection" for a table collected from tabs. The file
+    // writes "kind" only for collections; a report without it loads as "research".
     std::string kind = std::string(kReportKindResearch);
 
     bool operator==(const ResearchReport&) const = default;
 };
 
 struct ReportState {
-    static constexpr int kCurrentSchemaVersion = 2;
+    static constexpr int kCurrentSchemaVersion = 1;
     // Oldest reports beyond this many are dropped on Add().
     static constexpr std::size_t kMaxReports = 100;
     // A single report is clipped to this many bytes (on a UTF-8 boundary).

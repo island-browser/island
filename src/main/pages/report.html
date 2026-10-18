@@ -164,7 +164,8 @@ h1.title { margin: 0 0 6px; font-size: 28px; line-height: 1.2; letter-spacing: -
     document.getElementById("meta").textContent = meta.join("  |  ");
     var collection = report.kind === "collection";
     document.getElementById("kind-text").textContent = collection ? "Collected table" : "Research report";
-    document.getElementById("kind-icon").hidden = !collection;
+    // SVG elements have no `hidden` property; toggle the attribute instead.
+    document.getElementById("kind-icon").toggleAttribute("hidden", !collection);
     // A report without a table has no CSV or JSON to export.
     ["export-csv", "export-json"].forEach(function (id) {
       var item = document.getElementById(id);

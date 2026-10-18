@@ -1152,7 +1152,7 @@ std::string BrowserWindow::ReportPageStateJson(std::string_view id) const {
     return json::Serialize(Value::MakeObject()
                                .Set("theme", ThemeJson())
                                .Set("report", std::move(report))
-                               .Set("open_export", Value::Bool(report_fixture_menu_)));
+                               .Set("open_export", Value::Bool(id == report_fixture_menu_id_)));
 }
 
 void BrowserWindow::RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const {
@@ -1279,11 +1279,13 @@ void BrowserWindow::FinishCollectTurn(std::string_view task_id) {
             question = task.prompt;
         }
     }
-    // The collect prompt asks for the marked table; an unmarked answer is still an answer.
+    // The collect prompt asks for the marked table. An answer without a table (a refusal, say)
+    // is not stored as a collection: it stays in the agent panel's transcript.
     const ResearchOutcome outcome = ClassifyResearchTurn(
         agent_session_->transcript(), collect_turns_before_, agent_session_->error(),
         /*plan_approved=*/true);
-    if (outcome.kind == ResearchOutcome::Kind::kReport) {
+    if (outcome.kind == ResearchOutcome::Kind::kReport &&
+        FirstMarkdownTable(outcome.markdown).has_value()) {
         static_cast<void>(CompleteCollect(question, outcome.markdown));
     }
 }
@@ -1320,7 +1322,7 @@ void BrowserWindow::ShowCollectionReportFixtureForDev() {
         "| [Bean House](https://beans.example/c) | 175 EUR | 4.4 | 5 days |\n";
     // Dev capture only: kept in memory, so the person's Reports file is not touched.
     const std::string id = ReportStore::Add(reports_, std::move(report));
-    report_fixture_menu_ = true;
+    report_fixture_menu_id_ = id;
     static_cast<void>(OpenReportTabImpl(id, {}, /*group_with_plan=*/false));
 }
 

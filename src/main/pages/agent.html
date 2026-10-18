@@ -297,7 +297,7 @@ textarea::placeholder { color: var(--text-2); }
   gap: 10px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
   box-shadow: 0 16px 40px rgba(0, 0, 0, .18); }
 .collect-sheet h2 { margin: 0; font: 600 14px/1.3 var(--font); color: var(--text); }
-.collect-sheet label, .collect-sheet .field-label { font: 500 10.5px/1.4 var(--mono); color: var(--text-2);
+.collect-sheet label[for="collect-what"], .collect-sheet .field-label { font: 500 10.5px/1.4 var(--mono); color: var(--text-2);
   letter-spacing: .04em; text-transform: uppercase; }
 .collect-sheet .field-label { margin: 0; }
 .collect-what { width: 100%; font: 13px/1.4 var(--font); color: var(--text); background: var(--bg);
@@ -1051,6 +1051,7 @@ textarea::placeholder { color: var(--text-2); }
       var box = document.createElement("input");
       box.type = "checkbox";
       box.value = String(tab.index);
+      box.dataset.url = tab.url;  // the URL the sheet showed; native takes the tab only while it still has it
       box.checked = !tab.pinned;  // pinned tabs are the ones the person keeps; not collected by default
       var text = document.createElement("span");
       text.className = "row-text";
@@ -1080,9 +1081,11 @@ textarea::placeholder { color: var(--text-2); }
   collectSheet.addEventListener("submit", function (event) {
     event.preventDefault();
     var what = collectWhat.value.trim();
-    var indices = collectChecked().map(function (box) { return Number(box.value); });
-    if (!what || !indices.length) return;
-    post({ type: "collect", what: what, tabs: indices });
+    var tabs = collectChecked().map(function (box) {
+      return { index: Number(box.value), url: box.dataset.url || "" };
+    });
+    if (!what || !tabs.length) return;
+    post({ type: "collect", what: what, tabs: tabs });
     closeCollect();
     input.focus();
   });
