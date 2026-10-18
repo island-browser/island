@@ -17,6 +17,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- The Native footer's Agent row measures the provider name against the laid-out row, so it shows
+  the whole name ("Claude Code") and ellipsizes only when it does not fit; the row's extra gaps are gone.
 - Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon on macOS or from the
   command palette ("Change space icon…") on every platform. The choice persists in the session
   (saved at once) and appears in the Native, Arc and Graphite switchers and the collapsed rail,

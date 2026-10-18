@@ -2519,7 +2519,9 @@ void BrowserChrome::ApplyLookStructure() {
             rail_footer_->AddChildView(agent_row_);
             CefBoxLayoutSettings agent_row_settings;
             agent_row_settings.horizontal = static_cast<int>(true);
-            agent_row_settings.between_child_spacing = tokens_.spacing_1_dip;
+            // The label buttons carry their own side padding; extra gaps would only eat the
+            // room the provider name needs.
+            agent_row_settings.between_child_spacing = 0;
             agent_row_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
             agent_row_settings.inside_border_insets =
                 CefInsets(0, 0, 0, NativeSwitcherSizes().footer_gap_dip);
@@ -2792,9 +2794,14 @@ void BrowserChrome::FitAgentEntryName() {
         agent_meta_ == nullptr) {
         return;
     }
-    // Before the first layout the row has no width yet; the next pass fits the name.
+    // Room measured from the laid-out row: the name starts where the laid-out button ends and may
+    // run until the dot, a gap and the keycap (all at their laid-out sizes) fill the row's right
+    // side. Spacer bounds are not used: an overfull row clamps the spacer to 0, which would make
+    // the current text look like it fits.
+    const int name_left = agent_meta_->GetBounds().x;
     const int row_width = agent_row_->GetBounds().width;
-    if (row_width <= 0) {
+    if (name_left <= 0 || row_width <= 0 || agent_dot_->GetBounds().width <= 0) {
+        // Before the first layout nothing has bounds yet; the next pass fits the name.
         return;
     }
     const bool keycap = agent_keycap_->IsVisible();
@@ -2802,17 +2809,12 @@ void BrowserChrome::FitAgentEntryName() {
         keycap == agent_fit_keycap_) {
         return;
     }
-    // Children in the row: button, name, dot, spacer, and the keycap when a shortcut is shown.
-    const int child_count = keycap ? 5 : 4;
-    const int others = agent_button_->GetPreferredSize().width +
-                       agent_dot_->GetPreferredSize().width +
-                       (keycap ? agent_keycap_->GetPreferredSize().width : 0);
-    // The row keeps a right inset (the footer gap) that the bounds include but children cannot use.
-    const int right_inset = NativeSwitcherSizes().footer_gap_dip;
-    const int max_width =
-        row_width - right_inset - others - (child_count - 1) * tokens_.spacing_1_dip;
+    const int gap = 0;  // matches the row's between_child_spacing
+    const int right_edge = row_width - NativeSwitcherSizes().footer_gap_dip -
+                           (keycap ? agent_keycap_->GetPreferredSize().width + gap : 0);
+    const int room = right_edge - name_left - 2 * gap - agent_dot_->GetBounds().width;
     const std::string fitted =
-        FitAgentEntryText(agent_meta_text_, max_width, [this](std::string_view text) {
+        FitAgentEntryText(agent_meta_text_, room, [this](std::string_view text) {
             agent_meta_->SetText(std::string(text));
             return agent_meta_->GetPreferredSize().width;
         });
@@ -2834,7 +2836,6 @@ void BrowserChrome::ApplyAgentEntryStatus(ArgbColor row_fill) {
     agent_dot_->SetBackgroundColor(row_fill.argb);
     agent_dot_->SetImage(CEF_BUTTON_STATE_NORMAL,
                          BuildStatusDotImage(AgentStatusDotColor(tokens_, agent_status_.activity)));
-    FitAgentEntryName();
     const std::string description = AgentEntryDescription(agent_status_);
     agent_meta_->SetAccessibleName("Agent status: " + description);
     agent_button_->SetAccessibleName("Agent panel");
@@ -2843,6 +2844,7 @@ void BrowserChrome::ApplyAgentEntryStatus(ArgbColor row_fill) {
     agent_keycap_->SetBackgroundColor(tokens_.fill.argb);
     agent_keycap_->SetEnabledTextColors(tokens_.text_secondary.argb);
     agent_keycap_->SetFontList(FontList(11, ChromeFontWeight::kMedium));
+    FitAgentEntryName();
 }
 
 void BrowserChrome::SetAgentEntryStatus(AgentEntryStatus status) {
