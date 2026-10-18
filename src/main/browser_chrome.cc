@@ -461,7 +461,11 @@ ArgbColor BrowserChrome::AddressOutlineColor(const ChromeTokens& tokens, bool fo
 
 ArgbColor BrowserChrome::TextfieldFocusRingColor(const ChromeTokens& tokens, bool address_focused) {
     if (tokens.look == LookPreset::kNative && address_focused) {
-        return AddressPlateStyleFor(tokens).fill;
+        // Chromium adds a contrasting halo around an opaque focus-ring color. That halo is
+        // visible against Native's dark address plate even when the requested color matches the
+        // plate, so make CEF's inner ring fully transparent and leave focus indication to the
+        // address row's outer accent ring.
+        return {};
     }
     return tokens.accent;
 }
