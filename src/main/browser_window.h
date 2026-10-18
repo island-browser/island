@@ -174,6 +174,8 @@ class BrowserWindow : public CefClient,
     struct AgentTabLookup {
         std::optional<AgentTabRef> tab;
         AgentTabError error = AgentTabError::kNone;
+        // True when the lookup resolved inside a running research's Plan space (the agent's pages).
+        bool research = false;
     };
     [[nodiscard]] std::size_t AgentSpaceIndex() const;
     [[nodiscard]] AgentTabLookup ResolveAgentTab(std::optional<std::size_t> index) const;

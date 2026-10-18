@@ -50,6 +50,23 @@ std::string PlanTabError(std::optional<std::size_t> tab) {
            "address a page tab.";
 }
 
+// Why a page has no browser to act on. In a research the page sits in the Plan's space, which the
+// person may not be viewing (a background tab gets its browser only when shown), so the remedy is
+// to report the source, not to activate it: activating would move the person's view.
+std::string NoLivePageText(bool research, std::optional<std::size_t> tab) {
+    if (research) {
+        const std::string what =
+            tab.has_value() ? "Tab " + std::to_string(*tab) : std::string("The agent's page");
+        return what +
+               " has no live page: it is not shown in the window, and the person may be viewing "
+               "another space. Do not activate it, because that moves the person's view. Leave "
+               "this source unread and say so in the report.";
+    }
+    return std::string(tab.has_value() ? "Tab " + std::to_string(*tab)
+                                       : std::string("The active tab")) +
+           " has no live page yet: it is not shown in the window.";
+}
+
 // Why an agent tool could not reach its tab. Indices are in the agent's space.
 std::string AgentTabErrorText(BrowserWindow::AgentTabError error, std::optional<std::size_t> tab) {
     switch (error) {
@@ -219,8 +236,7 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
         }
         CefRefPtr<CefBrowser> browser = window_->AgentBrowser(*lookup.tab);
         if (browser == nullptr) {
-            return agent::HostStatus::Error(
-                "The page has no live page yet: it is not shown in the window.");
+            return agent::HostStatus::Error(NoLivePageText(lookup.research, std::nullopt));
         }
         switch (action) {
             case agent::AgentBrowserAction::kBack:
@@ -270,9 +286,7 @@ void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_v
         // Never activates the page: that would move the person's view to the agent's space.
         agent::DevToolsReply reply;
         reply.ok = false;
-        reply.error = std::string(tab.has_value() ? "Tab " + std::to_string(*tab)
-                                                  : std::string("The active tab")) +
-                      " has no live page yet: it is not shown in the window.";
+        reply.error = NoLivePageText(lookup.research, tab);
         done(std::move(reply));
         return;
     }

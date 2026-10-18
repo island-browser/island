@@ -884,7 +884,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
         if (*index >= spaces_[space_index].tab_count()) {
             return {.error = AgentTabError::kNoSuchTab};
         }
-        return {.tab = AgentTabRef{.space = space_index, .tab = *index}};
+        return {.tab = AgentTabRef{.space = space_index, .tab = *index}, .research = true};
     }
     if (!agent_tab_id_.has_value()) {
         return {.error = AgentTabError::kNoAgentPage};
@@ -894,7 +894,8 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
     if (!location.has_value() || location->first != space_index) {
         return {.error = AgentTabError::kAgentPageClosed};
     }
-    return {.tab = AgentTabRef{.space = location->first, .tab = location->second}};
+    return {.tab = AgentTabRef{.space = location->first, .tab = location->second},
+            .research = true};
 }
 
 bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {

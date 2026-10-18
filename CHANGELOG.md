@@ -71,6 +71,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Windows prefers Segoe UI Variable for Native chrome and falls back to Segoe UI.
 - Settings and other internal pages respect the same young-browser swap guard as ordinary tabs.
 
+### Known limitations
+
+- Research reads each source while its space is shown. If you switch to another space, the
+  research's pages that have not been shown yet have no browser: the agent reports those sources
+  as unread instead of reading them, and does not activate them. Background reading is not in 0.7.2.
+
 ## [0.7.1] - 2026-10-17
 
 ### Fixed

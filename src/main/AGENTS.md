@@ -215,9 +215,10 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   an index acts on `agent_tab_id_`, the agent's most recent research page. That id is recorded for
   each research child and cleared when a research starts or ends. If the page is missing or closed,
   the tool errors and never falls back to the person's tab. Page tools need a live browser and never
-  activate a page; `browser_navigate` and pinning change a page in another space in place;
-  `browser_activate_tab` switches the person's space on purpose; `browser_close_tab` works only in
-  the space on screen.
+  activate a page. A research page without a browser gets a `NoLivePageText` error that tells the
+  agent to report the source unread, because activating it would move the person's view.
+  `browser_navigate` and pinning change a page in another space in place; `browser_activate_tab`
+  switches the person's space on purpose; `browser_close_tab` works only in the space on screen.
 
 - Space icons (add one): (1) add the locked Lucide SVG source (see `tools/icon_pipeline/AGENTS.md`) and its
   entry in `tools/icon_pipeline/icon-sources.lock.json`; the pipeline pins that file with `kLockHash` in

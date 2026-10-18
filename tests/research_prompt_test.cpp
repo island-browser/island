@@ -85,6 +85,12 @@ TEST(BuildResearchPromptTest, AsksForABranchingPlanWithIslandMetadata) {
     EXPECT_LT(prompt.find("wait for approval before running"), prompt.find("How to work:"));
 }
 
+TEST(BuildResearchPromptTest, SaysWhatToDoWithAPageThatIsNotShown) {
+    const std::string prompt = BuildResearchPrompt("why");
+    EXPECT_NE(prompt.find("has no live page"), std::string::npos);
+    EXPECT_NE(prompt.find("do not activate that page"), std::string::npos);
+}
+
 TEST(BuildResearchPromptTest, ClipsAnOversizedQuestion) {
     const std::string prompt = BuildResearchPrompt(std::string(kMaxResearchQuestionBytes * 3, 'q'));
     EXPECT_NE(prompt.find(std::string(kMaxResearchQuestionBytes, 'q')), std::string::npos);

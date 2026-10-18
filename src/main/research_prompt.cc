@@ -143,6 +143,10 @@ std::string BuildResearchPrompt(std::string_view question) {
     prompt += "them. Do not open pages unrelated to the question.\n";
     prompt += "3. Read every source with page_read (use page_snapshot and page_click when the ";
     prompt += "content is behind a control) and note the concrete claims it makes.\n";
+    prompt +=
+        "If a page tool reports that a page has no live page, the person is probably viewing ";
+    prompt += "another space: do not activate that page; leave the source unread, say so in the ";
+    prompt += "report, and do not cite it.\n";
     prompt += "4. Compare the sources: where they agree, where they disagree, which is newer or ";
     prompt += "more authoritative. Do not rest an important claim on a single source.\n";
     prompt += "5. Do not ask the user questions. If the question is ambiguous, pick the most ";

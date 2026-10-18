@@ -216,6 +216,25 @@ TEST(WindowAgentHostTest, ANewResearchDoesNotInheritThePreviousAgentPage) {
     EXPECT_EQ(lookup.error, BrowserWindow::AgentTabError::kNoAgentPage);
 }
 
+TEST(WindowAgentHostTest, AResearchPageWithoutABrowserSaysNotToActivateIt) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->SetResearchTaskForTest("q");
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    WindowAgentHost host(*window);
+
+    // The headless window has no browsers, so the research's last page is not shown.
+    for (const agent::ToolResult& result :
+         {Call(host, "page_read"), Call(host, "browser_back"),
+          Call(host, "page_read", Value::MakeObject().Set("tab", Value::Int(2)))}) {
+        EXPECT_TRUE(result.is_error);
+        EXPECT_NE(result.content[0].text.find("no live page"), std::string::npos)
+            << result.content[0].text;
+        EXPECT_NE(result.content[0].text.find("Do not activate it"), std::string::npos)
+            << result.content[0].text;
+    }
+}
+
 TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest("data:text/html,plan");

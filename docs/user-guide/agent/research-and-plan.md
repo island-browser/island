@@ -69,3 +69,4 @@ Island also saves each report in **Settings > Agent & tools > Reports**, and the
 * Plan and Report tabs are not restored after a restart. Their pages come back as ordinary tabs, and the report stays in your Reports list.
 * The agent cannot approve or change the Plan tab. Its navigation and page tools refuse that tab.
 * A turn that proposes a plan and stops shows "Waiting for approval", not an error.
+* Research reads pages while its space is shown. If you switch to another space, the agent cannot read the research's pages that are not open yet. It reports those sources as unread instead of activating them. Switch back to the research space, or open its tabs, to let it read them; a later release will read them in the background.
