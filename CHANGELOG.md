@@ -13,7 +13,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
-## [0.7.2] - 2026-10-17
+## [0.7.2] - 2026-10-19
 
 ### Added
 
@@ -37,11 +37,22 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   shortcut keycap, on the sidebar's bottom row.
 - Streaming agent status updates use the session's permission count instead of repeatedly scanning
   the full transcript.
-- macOS rounded-corner patches stop polling after the chrome settles and wake again for layout or
-  scrolling activity.
+- macOS rounded-corner patches stop their quick polling after the chrome settles, wake on layout,
+  pointer, tab, space and sidebar changes, and follow scrolling within about a second.
+- Downgrade note: 0.7.1 ignores a space's `icon` and rewrites the session without it, so going
+  0.7.2 → 0.7.1 → 0.7.2 drops every chosen space icon.
 
 ### Fixed
 
+- Agent tools without a tab index act on the agent's own page, and tab indices refer to the
+  agent's space (the Plan's space during research). When that page is missing or closed, the tool
+  reports it instead of using the page on screen.
+- Choosing "Change space icon…" from the command palette opens the icon picker after the palette
+  closes, not inside its own submit.
+- Focusing or blurring the Native address field repaints only its focus colors, not the whole
+  window.
+- Selected segments on the Settings, Start and Plan pages have an outline in dark theme, so the
+  selected option is distinguishable.
 - The Native footer's Agent name fills the room between "Agent" and its status dot, measured from
   the laid-out row, so "Claude Code" shows in full and ellipsizes only when it does not fit.
 - Arc and Graphite space chips keep their natural width; the equal-width track and centered labels
