@@ -2262,7 +2262,10 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         pill_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
         CefRefPtr<CefBoxLayout> pill_layout = views.inner->SetToBoxLayout(pill_settings);
         views.row->AddChildView(views.inner);
-        outline_layout->SetFlexForView(views.inner, 1);
+        // Native segments share the track equally; Arc and Graphite chips keep their own width.
+        if (native) {
+            outline_layout->SetFlexForView(views.inner, 1);
+        }
 
         // Arc and Graphite retain the color square only as the no-icon fallback. Native never
         // shows space color; its chosen icon lives on the segment button beside the name.
@@ -2283,7 +2286,9 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         views.name->SetTooltipText(entry.name);
         views.name->SetFocusable(true);
         views.name->SetInkDropEnabled(true);
-        views.name->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+        if (native) {
+            views.name->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
+        }
         views.name->SetFontList(
             FontList(12, entry.active ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         views.name->SetMinimumSize(
@@ -2512,8 +2517,9 @@ void BrowserChrome::ApplyLookStructure() {
                 CefInsets(0, 0, 0, NativeSwitcherSizes().footer_gap_dip);
             CefRefPtr<CefBoxLayout> agent_row_layout =
                 agent_row_->SetToBoxLayout(agent_row_settings);
-            agent_row_layout->SetFlexForView(agent_button_, 1);
-            agent_row_layout->SetFlexForView(agent_meta_, 0);
+            // The "Agent" label keeps its natural width; the provider name takes the rest.
+            agent_row_layout->SetFlexForView(agent_button_, 0);
+            agent_row_layout->SetFlexForView(agent_meta_, 1);
             agent_row_layout->SetFlexForView(agent_keycap_, 0);
             CefBoxLayoutSettings footer_settings;
             footer_settings.horizontal = static_cast<int>(false);
@@ -3678,6 +3684,7 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
                                                   .radii = {kRowFillRadiusDip, kRowFillRadiusDip,
                                                             kRowFillRadiusDip, kRowFillRadiusDip},
                                                   .fill = tokens_.selected,
+                                                  .plate = std::nullopt,
                                                   .glyph = *icon})
                                  : *icon);
             } else {

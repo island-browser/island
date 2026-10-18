@@ -141,10 +141,37 @@ bool AddTintedRepresentation(CefRefPtr<CefImage> source, CefRefPtr<CefImage> des
                                   CEF_ALPHA_TYPE_POSTMULTIPLIED, pixels.data(), pixels.size());
 }
 
+std::optional<CefRefPtr<CefImage>> ReadTintedSpaceIcon(const std::filesystem::path& resource_root,
+                                                       std::string_view icon_id, ArgbColor color,
+                                                       ChromeIconSize size) {
+    const std::optional<CefRefPtr<CefImage>> source =
+        ReadImagePair(NamedVariantPath(resource_root, icon_id, ChromeIconTone::kText, size, "1"),
+                      NamedVariantPath(resource_root, icon_id, ChromeIconTone::kText, size, "2"));
+    if (!source.has_value()) {
+        return std::nullopt;
+    }
+    CefRefPtr<CefImage> tinted = CefImage::CreateImage();
+    if (!AddTintedRepresentation(*source, tinted, kOneXScale, color) ||
+        !AddTintedRepresentation(*source, tinted, kTwoXScale, color)) {
+        return std::nullopt;
+    }
+    return tinted;
+}
+
 }  // namespace
 
 IconCatalog::IconCatalog(std::filesystem::path resource_root)
-    : resource_root_(std::move(resource_root)) {}
+    : IconCatalog(std::move(resource_root), nullptr) {}
+
+IconCatalog::IconCatalog(std::filesystem::path resource_root, SpaceIconReader space_icon_reader)
+    : resource_root_(std::move(resource_root)), space_icon_reader_(std::move(space_icon_reader)) {
+    if (!space_icon_reader_) {
+        space_icon_reader_ = [root = resource_root_](std::string_view icon_id, ArgbColor color,
+                                                     ChromeIconSize size) {
+            return ReadTintedSpaceIcon(root, icon_id, color, size);
+        };
+    }
+}
 
 std::optional<CefRefPtr<CefImage>> IconCatalog::Load(ChromeIcon icon, ChromeIconTone tone,
                                                      ChromeIconSize size) const {
@@ -158,26 +185,10 @@ std::optional<CefRefPtr<CefImage>> IconCatalog::LoadSpaceIcon(std::string_view i
     if (!IsKnownSpaceIconId(icon_id)) {
         return std::nullopt;
     }
-    return space_icon_cache_.GetOrLoad(icon_id, static_cast<int>(size), color.argb,
-                                       [&] { return ReadTintedSpaceIcon(icon_id, color, size); });
-}
-
-std::optional<CefRefPtr<CefImage>> IconCatalog::ReadTintedSpaceIcon(std::string_view icon_id,
-                                                                    ArgbColor color,
-                                                                    ChromeIconSize size) const {
-    ++space_icon_disk_loads_;
-    const std::optional<CefRefPtr<CefImage>> source =
-        ReadImagePair(NamedVariantPath(resource_root_, icon_id, ChromeIconTone::kText, size, "1"),
-                      NamedVariantPath(resource_root_, icon_id, ChromeIconTone::kText, size, "2"));
-    if (!source.has_value()) {
-        return std::nullopt;
-    }
-    CefRefPtr<CefImage> tinted = CefImage::CreateImage();
-    if (!AddTintedRepresentation(*source, tinted, kOneXScale, color) ||
-        !AddTintedRepresentation(*source, tinted, kTwoXScale, color)) {
-        return std::nullopt;
-    }
-    return tinted;
+    return space_icon_cache_.GetOrLoad(icon_id, static_cast<int>(size), color.argb, [&] {
+        ++space_icon_reads_;
+        return space_icon_reader_(icon_id, color, size);
+    });
 }
 
 }  // namespace island
