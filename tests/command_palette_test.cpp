@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "address_policy.h"
+#include "space_icon.h"
 #include "tab_id.h"
 
 namespace island {
@@ -677,6 +678,34 @@ TEST(CommandPaletteCommandsTest, GivenAHighlightedCommandWhenSubmittedThenItsIdI
     EXPECT_EQ(selection->kind, PaletteEntryKind::kCommand);
     EXPECT_EQ(selection->command.id, "sleep_inactive_tabs");
     EXPECT_FALSE(model.Submit().has_value());
+}
+
+TEST(CommandPaletteSpaceIconTest, GivenThePickerRowsThenNoneComesFirstAndEveryIconFollows) {
+    const std::vector<PaletteCommandEntry> rows = SpaceIconPaletteCommands();
+    ASSERT_EQ(rows.size(), kSpaceIconChoices.size() + 1U);
+    EXPECT_EQ(rows[0].title, "None");
+    EXPECT_EQ(rows[1].title, "Home");
+    for (const PaletteCommandEntry& row : rows) {
+        EXPECT_TRUE(ParseSpaceIconCommandId(row.id).has_value()) << row.id;
+    }
+    EXPECT_EQ(ParseSpaceIconCommandId(rows[0].id), std::string());
+    EXPECT_EQ(ParseSpaceIconCommandId("space_icon:rocket"), std::string("rocket"));
+}
+
+TEST(CommandPaletteSpaceIconTest, GivenOtherOrUnknownIdsThenTheyAreNotPickerRows) {
+    EXPECT_FALSE(ParseSpaceIconCommandId("sleep_inactive_tabs").has_value());
+    EXPECT_FALSE(ParseSpaceIconCommandId(kChangeSpaceIconCommandId).has_value());
+    EXPECT_FALSE(ParseSpaceIconCommandId("space_icon:../etc").has_value());
+    EXPECT_FALSE(ParseSpaceIconCommandId("space_icon:").has_value());
+}
+
+TEST(CommandPaletteSpaceIconTest, GivenTheChangeCommandWhenQueriedThenItMatchesByTitle) {
+    const std::vector<PaletteCommandEntry> commands{
+        {.id = std::string(kChangeSpaceIconCommandId), .title = "Change space icon\xE2\x80\xA6"}};
+    const std::vector<PaletteEntry> found =
+        ComposePaletteResults("space icon", {}, {}, {}, {}, commands);
+    ASSERT_GE(found.size(), 1U);
+    EXPECT_EQ(found[0].command.id, kChangeSpaceIconCommandId);
 }
 
 }  // namespace

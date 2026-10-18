@@ -250,6 +250,11 @@ CefRefPtr<CefImage> MakeSpaceDotImage(ArgbColor fill, ArgbColor ring, bool activ
 constexpr int kIndicatorDip = 20;
 constexpr int kShieldGlyphDip = 14;
 constexpr int kAgentDotDip = 8;
+// The "needs you" dot is not on this branch; the status dot is the Agent entry's only mark.
+constexpr int kAgentStatusDotDip = 6;
+constexpr int kAgentStatusCellDip = 10;
+constexpr int kAgentKeycapRadiusDip = 4;
+constexpr int kAgentKeycapHeightDip = 18;
 
 // Even-odd point-in-polygon test for the shield outline.
 bool InsidePolygon(double x, double y, const std::vector<std::pair<double, double>>& polygon) {
@@ -343,6 +348,23 @@ ImagePixels PixelsAt(const CefRefPtr<CefImage>& image, int scale) {
     pixels.data.resize(binary->GetSize());
     binary->GetData(pixels.data.data(), pixels.data.size(), 0);
     return pixels;
+}
+
+// The Agent entry's status dot: a `kAgentStatusDotDip` circle centered in a square cell.
+CefRefPtr<CefImage> BuildStatusDotImage(ArgbColor color) {
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        RasterBitmap bitmap = NewRasterBitmap(kAgentStatusCellDip, kAgentStatusCellDip, scale);
+        const int inset = (kAgentStatusCellDip - kAgentStatusDotDip) / 2;
+        FillRoundedRect(bitmap, inset, inset, kAgentStatusDotDip, kAgentStatusDotDip,
+                        {kAgentStatusDotDip / 2, kAgentStatusDotDip / 2, kAgentStatusDotDip / 2,
+                         kAgentStatusDotDip / 2},
+                        color);
+        image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
 }
 
 // One edge button's image: an optional rounded fill (the row's selected/hover state), an
@@ -1161,7 +1183,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     rail_layout_ = sidebar_->SetToBoxLayout(RailLayout(tokens_));
 
     CefRefPtr<SurfacePanelDelegate> navigation_row_delegate =
-        new SurfacePanelDelegate(this, SurfaceSlot::kRail, CefSize(0, control_height));
+        new SurfacePanelDelegate(this, SurfaceSlot::kNavigationRow, CefSize(0, control_height));
     surface_delegates_.push_back(navigation_row_delegate);
     navigation_row_delegate_ = navigation_row_delegate;
     CefRefPtr<CefPanel> navigation_row = CefPanel::CreatePanel(navigation_row_delegate);
@@ -1384,6 +1406,24 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     agent_button_->SetMinimumSize(CefSize(0, RowHeight()));
     rail_footer_->AddChildView(agent_button_);
     footer_layout->SetFlexForView(agent_button_, 1);
+    // Native's Agent row (parented by ApplyLookStructure): the Agent button, the provider/progress
+    // label with its status dot, and the shortcut keycap. All three open the panel.
+    CefRefPtr<SurfacePanelDelegate> agent_row_delegate =
+        new SurfacePanelDelegate(this, SurfaceSlot::kRail);
+    surface_delegates_.push_back(agent_row_delegate);
+    agent_row_ = CefPanel::CreatePanel(agent_row_delegate);
+    agent_row_->SetID(static_cast<int>(ChromeViewId::kRailAgentRow));
+    agent_meta_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    agent_meta_->SetID(static_cast<int>(ChromeViewId::kRailAgentMeta));
+    agent_meta_->SetTooltipText("Ask the agent (Ctrl/Cmd+J)");
+    agent_meta_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_RIGHT);
+    agent_meta_->SetMinimumSize(CefSize(0, RowHeight()));
+    agent_keycap_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    agent_keycap_->SetID(static_cast<int>(ChromeViewId::kRailAgentKeycap));
+    agent_keycap_->SetAccessibleName("Agent shortcut");
+    agent_keycap_->SetTooltipText("Ask the agent (Ctrl/Cmd+J)");
+    agent_row_->AddChildView(agent_meta_);
+    agent_row_->AddChildView(agent_keycap_);
     tabs_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     tabs_button_->SetID(static_cast<int>(ChromeViewId::kRailTabsButton));
     tabs_button_->SetAccessibleName("All tabs");
@@ -2460,6 +2500,21 @@ void BrowserChrome::ApplyLookStructure() {
             switcher_row_->AddChildView(tabs_button_);
             switcher_row_->AddChildView(settings_button_);
             rail_footer_->AddChildViewAt(switcher_row_, 0);
+            // The Agent button joins its status label and keycap in one row (Arc keeps it alone).
+            rail_footer_->RemoveChildView(agent_button_);
+            agent_row_->AddChildViewAt(agent_button_, 0);
+            rail_footer_->AddChildView(agent_row_);
+            CefBoxLayoutSettings agent_row_settings;
+            agent_row_settings.horizontal = static_cast<int>(true);
+            agent_row_settings.between_child_spacing = tokens_.spacing_1_dip;
+            agent_row_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+            agent_row_settings.inside_border_insets =
+                CefInsets(0, 0, 0, NativeSwitcherSizes().footer_gap_dip);
+            CefRefPtr<CefBoxLayout> agent_row_layout =
+                agent_row_->SetToBoxLayout(agent_row_settings);
+            agent_row_layout->SetFlexForView(agent_button_, 1);
+            agent_row_layout->SetFlexForView(agent_meta_, 0);
+            agent_row_layout->SetFlexForView(agent_keycap_, 0);
             CefBoxLayoutSettings footer_settings;
             footer_settings.horizontal = static_cast<int>(false);
             footer_settings.between_child_spacing = NativeSwitcherSizes().footer_gap_dip;
@@ -2469,6 +2524,7 @@ void BrowserChrome::ApplyLookStructure() {
             // flex is a view property), and in this vertical footer it would stretch the entry
             // down the whole rail and push the tab list to zero height. Clear it.
             native_footer_layout->SetFlexForView(agent_button_, 0);
+            native_footer_layout->SetFlexForView(agent_row_, 0);
             CefBoxLayoutSettings row_settings;
             row_settings.horizontal = static_cast<int>(true);
             row_settings.between_child_spacing = tokens_.spacing_1_dip;
@@ -2504,6 +2560,9 @@ void BrowserChrome::ApplyLookStructure() {
             // New Tab sits in the tab strip under Native; detach it before restoring it.
             tab_strip_->RemoveChildView(new_tab_button_);
             sidebar_->AddChildViewAt(new_tab_button_, index_of(sidebar_, tab_list_scroll_));
+            agent_row_->RemoveChildView(agent_button_);
+            rail_footer_->RemoveChildView(agent_row_);
+            rail_footer_->AddChildViewAt(agent_button_, 0);
             rail_footer_->AddChildView(tabs_button_);
             rail_footer_->AddChildView(settings_button_);
             rail_footer_->AddChildView(new_space_button_);
@@ -2554,6 +2613,8 @@ void BrowserChrome::ApplyLookStructure() {
         const int footer_height = metrics.row_dip + metrics.footer_gap_dip + metrics.agent_dip;
         rail_footer_delegate_->SetPreferredSize(CefSize(0, footer_height));
         agent_button_->SetMinimumSize(CefSize(0, metrics.agent_dip));
+        agent_meta_->SetMinimumSize(CefSize(0, metrics.agent_dip));
+        agent_keycap_->SetMinimumSize(CefSize(0, kAgentKeycapHeightDip));
         for (const CefRefPtr<CefLabelButton>& button :
              {tabs_button_, settings_button_, new_space_button_}) {
             const int size = metrics.button_dip;
@@ -2706,6 +2767,47 @@ void BrowserChrome::SetAgentPanelOpen(bool open) {
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
 }
 
+// Native's Agent entry, right side: the provider name in secondary text with the status dot,
+// and the shortcut keycap. They share the row's fill so hover covers the whole row.
+void BrowserChrome::ApplyAgentEntryStatus(ArgbColor row_fill) {
+    CEF_REQUIRE_UI_THREAD();
+    agent_row_->SetBackgroundColor(row_fill.argb);
+    agent_meta_->SetBackgroundColor(row_fill.argb);
+    agent_meta_->SetEnabledTextColors(tokens_.text_secondary.argb);
+    agent_meta_->SetFontList(FontList(12, ChromeFontWeight::kRegular));
+    agent_meta_->SetText(AgentEntryMetaText(agent_status_));
+    agent_meta_->SetImage(CEF_BUTTON_STATE_NORMAL, BuildStatusDotImage(AgentStatusDotColor(
+                                                       tokens_, agent_status_.activity)));
+    const std::string description = AgentEntryDescription(agent_status_);
+    agent_meta_->SetAccessibleName("Agent status: " + description);
+    agent_button_->SetAccessibleName("Agent panel");
+    agent_keycap_->SetVisible(!agent_shortcut_label_.empty());
+    agent_keycap_->SetText(agent_shortcut_label_);
+    agent_keycap_->SetBackgroundColor(tokens_.fill.argb);
+    agent_keycap_->SetEnabledTextColors(tokens_.text_secondary.argb);
+    agent_keycap_->SetFontList(FontList(11, ChromeFontWeight::kMedium));
+}
+
+void BrowserChrome::SetAgentEntryStatus(AgentEntryStatus status) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || status == agent_status_) {
+        return;
+    }
+    agent_status_ = std::move(status);
+    ApplyRailButtonTheme();
+    PushCornerPatches();
+}
+
+void BrowserChrome::SetAgentShortcutLabel(std::string label) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || label == agent_shortcut_label_) {
+        return;
+    }
+    agent_shortcut_label_ = std::move(label);
+    ApplyRailButtonTheme();
+    PushCornerPatches();
+}
+
 void BrowserChrome::SetUpdateNotice(std::string notice) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_ || notice == update_notice_) {
@@ -2826,6 +2928,8 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
             return;
         case ChromeViewId::kRailAgentButton:
+        case ChromeViewId::kRailAgentMeta:
+        case ChromeViewId::kRailAgentKeycap:
             host_->ToggleAgentPanel();
             return;
         case ChromeViewId::kToolbarShare:
@@ -3165,6 +3269,7 @@ void BrowserChrome::ApplyRailButtonTheme() {
             NativeAgentEntryColors(tokens_, agent_panel_open_, native_agent_hovered_);
         agent_button_->SetBackgroundColor(agent.fill.argb);
         agent_button_->SetEnabledTextColors(agent.text.argb);
+        ApplyAgentEntryStatus(agent.fill);
     } else {
         // The agent toggle lifts to the surface (and takes the accent) while the
         // panel is open, like an active tab.
@@ -3355,9 +3460,15 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
         patches.push_back(*patch);
     }
     if (tokens_.look == LookPreset::kNative && sidebar_expanded_) {
-        const WindowRect agent = InWindow(agent_button_);
+        const WindowRect agent = InWindow(agent_row_);
         if (agent_panel_open_ || native_agent_hovered_) {
             patches.push_back({agent.x, agent.y, agent.width, agent.height, kRowFillRadiusDip});
+        }
+        const WindowRect keycap = InWindow(agent_keycap_);
+        if (keycap.width > 0 && keycap.height > 0 && !agent_shortcut_label_.empty()) {
+            patches.push_back(
+                {keycap.x, keycap.y, keycap.width, keycap.height, kAgentKeycapRadiusDip,
+                 NativeAgentEntryColors(tokens_, agent_panel_open_, native_agent_hovered_).fill});
         }
         const WindowRect track = InWindow(space_switcher_);
         if (track.width > 0 && track.height > 0) {
@@ -3490,8 +3601,8 @@ void BrowserChrome::RefreshRowHover() {
     }
     // Button state callbacks can arrive while the sidebar is still being built, before the
     // Agent entry exists; it has no hover to track until then.
-    const bool agent_hovered =
-        tokens_.look == LookPreset::kNative && agent_button_ != nullptr && over(agent_button_);
+    const bool agent_hovered = tokens_.look == LookPreset::kNative && agent_row_ != nullptr &&
+                               (over(agent_button_) || over(agent_meta_) || over(agent_keycap_));
     if (agent_hovered != native_agent_hovered_) {
         native_agent_hovered_ = agent_hovered;
         ApplyRailButtonTheme();
@@ -3558,7 +3669,17 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
             const std::optional<CefRefPtr<CefImage>> icon =
                 icon_catalog_.LoadSpaceIcon(entry.icon_id, entry.color, ChromeIconSize::k16);
             if (icon.has_value()) {
-                SetAllStateImages(views.button, *icon);
+                // The dots mark the active space with a ring; an icon gets the selected plate
+                // instead, so the current space stays distinguishable.
+                SetAllStateImages(
+                    views.button,
+                    entry.active ? BuildRowImage({.width_dip = kCollapsedRailButtonDip,
+                                                  .height_dip = kCollapsedRailButtonDip,
+                                                  .radii = {kRowFillRadiusDip, kRowFillRadiusDip,
+                                                            kRowFillRadiusDip, kRowFillRadiusDip},
+                                                  .fill = tokens_.selected,
+                                                  .glyph = *icon})
+                                 : *icon);
             } else {
                 views.button->SetImage(
                     CEF_BUTTON_STATE_NORMAL,

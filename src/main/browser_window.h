@@ -282,6 +282,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] std::string PlanStateJson() const;
     // Developer capture: opens a Plan tab that shows the sample plan waiting for approval.
     void OpenPlanFixtureTab(bool include_child_tabs = false);
+    // Pushes the provider name, activity and shortcut keycap to the sidebar's Agent entry.
+    void RefreshAgentEntry();
     // Opens `count` agent pages, one UI task each, as an agent calling browser_open_tab in a row
     // does (developer capture `agent_pages:<count>[:<gap>]`). `gap_ms` 0 posts every task at once;
     // a positive gap delays each next page by that many milliseconds; kSerialAgentPages posts the
@@ -513,6 +515,8 @@ class BrowserWindow : public CefClient,
     // creating it on first use. The Phase 3 design fixes Cmd/Ctrl+K on the
     // command palette; the later search palette keeps Cmd/Ctrl+Shift+K.
     void ShowCommandPalette();
+    // Reopens the palette listing only the space icons (and None) for the active space.
+    void ShowSpaceIconPicker();
     // Opens the rename overlay for the active space. Menu-driven on macOS (no
     // key equivalent); F2 is the cross-platform accelerator.
     void BeginSpaceRenaming();
@@ -1010,6 +1014,8 @@ class BrowserWindow : public CefClient,
     std::optional<TabId> plan_tab_;
     // Plan node ids come from BuildPlanGraph, matching the ids plan.html posts.
     std::map<std::string, TabId> plan_node_tabs_;
+    // True while the command palette is the space-icon picker (no tabs, no history rows).
+    bool space_icon_picker_open_ = false;
     bool closing_plan_after_confirmation_ = false;
     // Why the last plan action was refused (depth limit, agent busy); empty when none.
     std::string plan_notice_;

@@ -11,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -152,6 +153,26 @@ enum class ChromeViewId : int {
     kRailSwitcherRow = 1076,
     // The branch label above the first grouped (research) tab row of a run; Native only.
     kTabGroupKicker = 1077,
+    // Native's Agent entry (2026-10-18): the row holding the Agent button, the right-aligned
+    // provider/queue label with its status dot, and the shortcut keycap. Native only.
+    kRailAgentRow = 1078,
+    kRailAgentMeta = 1079,
+    kRailAgentKeycap = 1080,
+};
+
+// What the Agent entry's status dot shows, from the agent state the window already tracks.
+enum class AgentActivity : std::uint8_t { kIdle, kWorking, kNeedsYou };
+
+// The right side of Native's Agent entry: the provider name (or, while a task queue runs, its
+// "done/total" progress), the status dot, and the entry's accessible description.
+struct AgentEntryStatus {
+    std::string provider_name;
+    AgentActivity activity = AgentActivity::kIdle;
+    // Task-queue progress; queue_total == 0 means no queue is running.
+    int queue_done = 0;
+    int queue_total = 0;
+
+    bool operator==(const AgentEntryStatus&) const = default;
 };
 
 struct ChromeViewTreeNode {
@@ -424,6 +445,8 @@ class BrowserChrome final : public NavigationObserver {
     enum class SurfaceSlot : std::uint8_t {
         kRoot,
         kRail,
+        // The navigation row: the toolbar surface under Native, the rail canvas otherwise.
+        kNavigationRow,
         kBrowserContent,
         kToolbar,
         kHairline,
@@ -444,6 +467,8 @@ class BrowserChrome final : public NavigationObserver {
                 // One surface: the sidebar and the window margin around the page card share
                 // the canvas, so the card floats on it (Arc).
                 return tokens.canvas;
+            case SurfaceSlot::kNavigationRow:
+                return NavigationRowSurface(tokens);
             case SurfaceSlot::kToolbar:
                 return tokens.surface_secondary;
             case SurfaceSlot::kHairline:
@@ -467,6 +492,8 @@ class BrowserChrome final : public NavigationObserver {
             case SurfaceSlot::kBrowserContent:
             case SurfaceSlot::kRail:
                 return tokens_.canvas;
+            case SurfaceSlot::kNavigationRow:
+                return NavigationRowSurface(tokens_);
             case SurfaceSlot::kToolbar:
                 return tokens_.surface_secondary;
             case SurfaceSlot::kHairline:
@@ -523,6 +550,52 @@ class BrowserChrome final : public NavigationObserver {
         return {.fill = hovered ? tokens.hover : tokens.canvas,
                 .text = open ? tokens.accent_text : tokens.text,
                 .sparkle = tokens.accent};
+    }
+    // The label next to the status dot: queue progress "3/7" while a queue runs, otherwise the
+    // provider name. (The view elides a long name with an ellipsis before the keycap.)
+    [[nodiscard]] static std::string AgentEntryMetaText(const AgentEntryStatus& status) {
+        if (status.queue_total > 0) {
+            return std::to_string(std::min(status.queue_done, status.queue_total)) + "/" +
+                   std::to_string(status.queue_total);
+        }
+        // Truncated here rather than by the label button, which elides too early; the cap keeps
+        // the name clear of the keycap in the 286 DIP sidebar.
+        constexpr std::size_t kMaxNameChars = 16;
+        std::vector<std::size_t> starts;
+        for (std::size_t i = 0; i < status.provider_name.size(); ++i) {
+            if ((static_cast<unsigned char>(status.provider_name[i]) & 0xC0U) != 0x80U) {
+                starts.push_back(i);
+            }
+        }
+        if (starts.size() > kMaxNameChars) {
+            return status.provider_name.substr(0, starts[kMaxNameChars - 1]) + "\xE2\x80\xA6";
+        }
+        return status.provider_name;
+    }
+    [[nodiscard]] static ArgbColor AgentStatusDotColor(const ChromeTokens& tokens,
+                                                       AgentActivity activity) {
+        switch (activity) {
+            case AgentActivity::kWorking:
+                return tokens.accent;
+            case AgentActivity::kNeedsYou:
+                return tokens.warning_border;
+            case AgentActivity::kIdle:
+                break;
+        }
+        return tokens.text_tertiary;
+    }
+    [[nodiscard]] static std::string AgentEntryDescription(const AgentEntryStatus& status) {
+        const char* state = status.activity == AgentActivity::kWorking    ? "working"
+                            : status.activity == AgentActivity::kNeedsYou ? "needs you"
+                                                                          : "idle";
+        std::string text =
+            status.provider_name.empty() ? std::string("Agent") : status.provider_name;
+        text += ", ";
+        text += state;
+        if (status.queue_total > 0) {
+            text += ", task " + AgentEntryMetaText(status);
+        }
+        return text;
     }
     // Native's space segmented control: a `fill` track, the selected segment on its neutral plate,
     // the selected name in `text` and the others in `text_secondary`. Dark mode gives the
@@ -712,7 +785,10 @@ class BrowserChrome final : public NavigationObserver {
                                         {ChromeViewId::kRailNewSpaceButton, {}},
                                         {ChromeViewId::kRailTabsButton, {}},
                                         {ChromeViewId::kRailSettingsButton, {}}}},
-                                      {ChromeViewId::kRailAgentButton, {}}}});
+                                      {ChromeViewId::kRailAgentRow,
+                                       {{ChromeViewId::kRailAgentButton, {}},
+                                        {ChromeViewId::kRailAgentMeta, {}},
+                                        {ChromeViewId::kRailAgentKeycap, {}}}}}});
         } else {
             rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
             rail_children.push_back({ChromeViewId::kRailFooter,
@@ -893,6 +969,12 @@ class BrowserChrome final : public NavigationObserver {
     // or closes the column.
     void SetAgentPanelView(CefRefPtr<CefView> view);
     void SetAgentPanelOpen(bool open);
+    // Native's Agent entry: provider name, status dot. Arc and Graphite ignore it. Queue progress
+    // and the "needs you" state are inert on this branch (no task queue here).
+    void SetAgentEntryStatus(AgentEntryStatus status);
+    // The keycap text from the keymap (the macOS command glyph plus J, or "Ctrl+J"); "" hides the
+    // keycap.
+    void SetAgentShortcutLabel(std::string label);
     [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
     // A short updater notice ("Island 0.5.0 is available"): the rail's
     // Settings button takes the accent tint and carries it in its tooltip
@@ -973,6 +1055,7 @@ class BrowserChrome final : public NavigationObserver {
     void ApplyTabRowVisual(std::size_t index);
     void ApplyCollapsedTabVisual(std::size_t position);
     void ApplyAddressPillImages();
+    void ApplyAgentEntryStatus(ArgbColor row_fill);
     void ApplyAddressIndicators();
     // Called by the row buttons' delegates on every pointer-state change.
     void RefreshRowHover();
@@ -1065,6 +1148,13 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> rail_footer_;
     CefRefPtr<SurfacePanelDelegate> rail_footer_delegate_;
     CefRefPtr<CefLabelButton> agent_button_;
+    // Native only: the row wrapping agent_button_, the provider/progress label with the status
+    // dot, and the shortcut keycap. Arc and Graphite keep agent_button_ alone in the footer.
+    CefRefPtr<CefPanel> agent_row_;
+    CefRefPtr<CefLabelButton> agent_meta_;
+    CefRefPtr<CefLabelButton> agent_keycap_;
+    AgentEntryStatus agent_status_;
+    std::string agent_shortcut_label_;
     // Native's Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
     bool native_agent_hovered_ = false;
     CefRefPtr<CefLabelButton> new_space_button_;

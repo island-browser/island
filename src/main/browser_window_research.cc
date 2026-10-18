@@ -274,6 +274,7 @@ void BrowserWindow::CancelResearch() {
 }
 
 void BrowserWindow::OnAgentSessionChanged() {
+    RefreshAgentEntry();
     ScheduleLocalPagesRender();
     RefreshAddressIndicators();
     RefreshPlanFromTranscript();

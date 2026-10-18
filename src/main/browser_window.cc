@@ -924,6 +924,7 @@ bool BrowserWindow::SetAgentProvider(std::string_view id) {
             static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
         }
     }
+    RefreshAgentEntry();
     ScheduleLocalPagesRender();
     return true;
 }
@@ -2546,6 +2547,7 @@ bool BrowserWindow::SetSpaceIcon(std::size_t space_index, std::string icon_id) {
     }
     spaces_[space_index].SetIconId(std::move(icon_id));
     UpdateChromeCollections();
+    SaveSession();
     return true;
 }
 
@@ -3273,6 +3275,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     // Refreshes that ran before the chrome existed updated the cache without delivering it.
     DeliverAddressIndicators();
     UpdateChromeCollections();
+    RefreshAgentEntry();
     window_->AddChildView(chrome_->root());
     chrome_->SetCornerPatchSink([this](const std::vector<CornerPatch>& patches) {
         corner_patches_ = patches;
@@ -3527,6 +3530,7 @@ void BrowserWindow::ApplyKeymap() {
                                 false, true);
     }
     window_->SetAccelerator(kEscapeAccelerator, kVirtualKeyEscape, false, false, false, true);
+    RefreshAgentEntry();
 }
 
 void BrowserWindow::RunKeyAction(KeyAction action) {
@@ -4662,6 +4666,7 @@ void BrowserWindow::ShowCommandPalette() {
         return;
     }
     CloseCheatsheet(/*refocus_page=*/false);
+    space_icon_picker_open_ = false;
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
@@ -4695,13 +4700,24 @@ void BrowserWindow::ShowCommandPalette() {
     }
     std::vector<PaletteCommandEntry> commands;
     commands.push_back({.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"});
+    commands.push_back(
+        {.id = std::string(kChangeSpaceIconCommandId), .title = "Change space icon\xE2\x80\xA6"});
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
                            std::move(commands), std::move(reports));
 }
 
+void BrowserWindow::ShowSpaceIconPicker() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || command_palette_ == nullptr) {
+        return;
+    }
+    space_icon_picker_open_ = true;
+    command_palette_->Show({}, {}, {}, SpaceIconPaletteCommands(), {});
+}
+
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
     CEF_REQUIRE_UI_THREAD();
-    if (closing_ || history_ == nullptr) {
+    if (closing_ || history_ == nullptr || space_icon_picker_open_) {
         return;
     }
     const std::string requested(query);
@@ -4760,6 +4776,17 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
     if (closing_) {
         return;
     }
+    const bool was_space_icon_picker = std::exchange(space_icon_picker_open_, false);
+    if (was_space_icon_picker) {
+        if (selection.kind == PaletteEntryKind::kCommand) {
+            if (const std::optional<std::string> icon =
+                    ParseSpaceIconCommandId(selection.command.id)) {
+                static_cast<void>(SetSpaceIcon(active_space_index_, *icon));
+            }
+        }
+        FocusBrowserView();
+        return;
+    }
     switch (selection.kind) {
         case PaletteEntryKind::kTab:
             ActivatePaletteTab(selection.tab.id);
@@ -4779,6 +4806,9 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
         case PaletteEntryKind::kCommand:
             if (selection.command.id == "sleep_inactive_tabs") {
                 static_cast<void>(SleepInactiveTabsNow());
+            } else if (selection.command.id == kChangeSpaceIconCommandId) {
+                ShowSpaceIconPicker();
+                return;  // the picker keeps the focus
             }
             break;
         case PaletteEntryKind::kReport:
@@ -4790,6 +4820,7 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
 
 void BrowserWindow::OnCommandPaletteDismissed() {
     CEF_REQUIRE_UI_THREAD();
+    space_icon_picker_open_ = false;
     // Escape restores focus to the invocation point, which is the browser view
     // by default.
     FocusBrowserView();
@@ -4816,6 +4847,32 @@ void BrowserWindow::SavePrefs() const {
         return;
     }
     static_cast<void>(PrefsStore::Save(PrefsStore::DefaultPrefsFilePath(), prefs_));
+}
+
+// Pushes the provider name, the activity and the shortcut keycap to Native's Agent entry. Queue
+// progress and the "needs you" state are not produced on this branch.
+void BrowserWindow::RefreshAgentEntry() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    AgentEntryStatus status;
+    if (agent_session_ != nullptr && agent_session_->busy()) {
+        status.activity = AgentActivity::kWorking;
+    }
+    if (const agent::AgentProvider* provider =
+            agent::FindAgentProvider(ResolvedAgent().provider_id)) {
+        status.provider_name = std::string(provider->name);
+    }
+    chrome_->SetAgentEntryStatus(std::move(status));
+    const std::optional<KeyBinding> binding = keymap_.Binding(KeyAction::kToggleAgentPanel);
+#if defined(__APPLE__)
+    constexpr bool kMac = true;
+#else
+    constexpr bool kMac = false;
+#endif
+    chrome_->SetAgentShortcutLabel(binding.has_value() ? FormatKeyGlyphs(*binding, kMac)
+                                                       : std::string());
 }
 
 void BrowserWindow::ApplyContentBlockerPolicy() {

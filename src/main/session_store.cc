@@ -188,10 +188,10 @@ LoadResult ParseSessionState(const json::Value& root) {
         }
         space_state.color_argb = static_cast<std::uint32_t>(color);
         if (const json::Value* icon = space_val.FindMember("icon")) {
-            if (!icon->IsString()) {
-                return {SessionState::Default(), SessionError::kSchemaError};
+            // A wrong-typed icon is ignored like an unknown id; it must not drop the session.
+            if (icon->IsString()) {
+                space_state.icon_id = NormalizeSpaceIconId(icon->string_val);
             }
-            space_state.icon_id = NormalizeSpaceIconId(icon->string_val);
         }
 
         // Parse tabs

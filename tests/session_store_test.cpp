@@ -99,6 +99,22 @@ TEST(SessionStore, RoundTripsSpaceIconsAndOldOrUnknownIconsLoadAsNone) {
     EXPECT_TRUE(result.state.spaces[0].icon_id.empty());
 }
 
+TEST(SessionStore, IgnoresANonStringSpaceIconInsteadOfDroppingTheSession) {
+    const auto path = std::filesystem::temp_directory_path() / "island_test_space_icon_type.json";
+    for (const char* icon : {"null", "3", "true", "{}"}) {
+        WriteFile(
+            path,
+            std::string(R"({"version":1,"spaces":[{"id":1,"name":"Kept","color_argb":1,"icon":)") +
+                icon + R"(,"tabs":[]}]})");
+        const LoadResult result = SessionStore::Load(path);
+        ASSERT_EQ(result.error, SessionError::kNone) << icon;
+        ASSERT_EQ(result.state.spaces.size(), 1U) << icon;
+        EXPECT_EQ(result.state.spaces[0].name, "Kept");
+        EXPECT_TRUE(result.state.spaces[0].icon_id.empty()) << icon;
+    }
+    std::filesystem::remove(path);
+}
+
 TEST(SessionStore, RoundTripsPinnedTabsAndLoadsSessionsWithoutThePinnedKey) {
     SessionState original = BuildSampleState();
     original.spaces[0].tabs[0].pinned = true;

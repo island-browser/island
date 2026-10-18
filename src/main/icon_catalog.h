@@ -7,6 +7,7 @@
 
 #include "design_tokens.h"
 #include "include/cef_image.h"
+#include "space_icon_cache.h"
 
 namespace island {
 
@@ -49,8 +50,17 @@ class IconCatalog {
                                                                    ArgbColor color,
                                                                    ChromeIconSize size) const;
 
+    // Number of space-icon loads that went to disk (cache misses), for tests and diagnostics.
+    [[nodiscard]] int space_icon_disk_loads() const noexcept { return space_icon_disk_loads_; }
+
   private:
+    [[nodiscard]] std::optional<CefRefPtr<CefImage>> ReadTintedSpaceIcon(std::string_view icon_id,
+                                                                         ArgbColor color,
+                                                                         ChromeIconSize size) const;
+
     std::filesystem::path resource_root_;
+    mutable SpaceIconCache<CefRefPtr<CefImage>> space_icon_cache_;
+    mutable int space_icon_disk_loads_ = 0;
 };
 
 }  // namespace island

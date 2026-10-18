@@ -17,13 +17,17 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
-- Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon. The choice persists
-  in the session and appears in the Native, Arc and Graphite switchers and the collapsed rail.
+- Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon on macOS or from the
+  command palette ("Change space icon…") on every platform. The choice persists in the session
+  (saved at once) and appears in the Native, Arc and Graphite switchers and the collapsed rail,
+  where the active space keeps a selected plate. A non-string `icon` in a session is ignored.
 
 ### Changed
 
 - Selected segments use a neutral raised plate with normal text in every look; blue is reserved
   for actions and keyboard focus.
+- Native's Agent entry shows the provider name with a status dot (idle or working) and the
+  shortcut keycap, on the sidebar's bottom row.
 - Streaming agent status updates use the session's permission count instead of repeatedly scanning
   the full transcript.
 - macOS rounded-corner patches stop polling after the chrome settles and wake again for layout or

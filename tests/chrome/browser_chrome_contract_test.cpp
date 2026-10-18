@@ -436,7 +436,12 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
     // kDivider is the one-DIP hairline immediately above the footer. Top to bottom inside it:
     // the switcher row, then the aligned Agent row at the very bottom.
     EXPECT_EQ(ChildIds(*footer), (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
-                                                            ChromeViewId::kRailAgentButton}));
+                                                            ChromeViewId::kRailAgentRow}));
+    const ChromeViewTreeNode* agent_row = FindChild(*footer, ChromeViewId::kRailAgentRow);
+    ASSERT_NE(agent_row, nullptr);
+    EXPECT_EQ(ChildIds(*agent_row), (std::vector<ChromeViewId>{ChromeViewId::kRailAgentButton,
+                                                               ChromeViewId::kRailAgentMeta,
+                                                               ChromeViewId::kRailAgentKeycap}));
     const ChromeViewTreeNode* switcher_row = FindChild(*footer, ChromeViewId::kRailSwitcherRow);
     ASSERT_NE(switcher_row, nullptr);
     EXPECT_EQ(ChildIds(*switcher_row),
@@ -600,4 +605,42 @@ TEST(BrowserChromeContractTest, GivenAFixedWidthColumnWhenSizedThenNeitherDimens
     EXPECT_EQ(BrowserChrome::FixedWidthColumnFor(0), BrowserChrome::FixedWidthColumn{});
 }
 
+}  // namespace island
+
+namespace island {
+namespace {
+
+TEST(BrowserChromeNativeContractTest, GivenAgentStatusWhenLabeledThenQueueProgressReplacesTheName) {
+    AgentEntryStatus status{.provider_name = "Claude Code"};
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "Claude Code");
+    status.activity = AgentActivity::kWorking;
+    status.queue_done = 3;
+    status.queue_total = 7;
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "3/7");
+    status.queue_done = 9;  // never "9/7"
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "7/7");
+    EXPECT_EQ(BrowserChrome::AgentEntryDescription(status), "Claude Code, working, task 7/7");
+    const AgentEntryStatus longer{.provider_name = "A very long provider name"};
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(longer), "A very long pro\xE2\x80\xA6");
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText({.provider_name = "Sixteen chars ok"}),
+              "Sixteen chars ok");
+    EXPECT_EQ(BrowserChrome::AgentEntryDescription({.activity = AgentActivity::kNeedsYou}),
+              "Agent, needs you");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenAgentActivityWhenColoredThenEachStateIsDistinct) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+        const ArgbColor idle = BrowserChrome::AgentStatusDotColor(tokens, AgentActivity::kIdle);
+        const ArgbColor working =
+            BrowserChrome::AgentStatusDotColor(tokens, AgentActivity::kWorking);
+        const ArgbColor needs =
+            BrowserChrome::AgentStatusDotColor(tokens, AgentActivity::kNeedsYou);
+        EXPECT_NE(idle.argb, working.argb);
+        EXPECT_NE(working.argb, needs.argb);
+        EXPECT_NE(idle.argb, needs.argb);
+    }
+}
+
+}  // namespace
 }  // namespace island

@@ -158,6 +158,14 @@ std::optional<CefRefPtr<CefImage>> IconCatalog::LoadSpaceIcon(std::string_view i
     if (!IsKnownSpaceIconId(icon_id)) {
         return std::nullopt;
     }
+    return space_icon_cache_.GetOrLoad(icon_id, static_cast<int>(size), color.argb,
+                                       [&] { return ReadTintedSpaceIcon(icon_id, color, size); });
+}
+
+std::optional<CefRefPtr<CefImage>> IconCatalog::ReadTintedSpaceIcon(std::string_view icon_id,
+                                                                    ArgbColor color,
+                                                                    ChromeIconSize size) const {
+    ++space_icon_disk_loads_;
     const std::optional<CefRefPtr<CefImage>> source =
         ReadImagePair(NamedVariantPath(resource_root_, icon_id, ChromeIconTone::kText, size, "1"),
                       NamedVariantPath(resource_root_, icon_id, ChromeIconTone::kText, size, "2"));

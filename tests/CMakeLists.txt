@@ -54,6 +54,7 @@ add_executable(island_tests
     start_tiles_test.cpp
     session_store_test.cpp
     sidebar_state_test.cpp
+    space_icon_cache_test.cpp
     space_test.cpp
     startup_options_test.cpp
     dev_capture_test.cpp
