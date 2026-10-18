@@ -39,7 +39,8 @@ platform executable links.
 | `sidebar_state.{h,cc}`, `collapsed_rail.h` | CEF-free expand/collapse state (persistent choice in prefs `sidebar_collapsed`, transient expansion while editing the address from the icon rail) and the icon rail's metrics plus the space-dot raster |
 | `favicon_policy.h` | CEF-free favicon rules: web pages only, 16 DIP downloads, stale-result and clear-on-navigation checks (bookkeeping lives on `Tab`) |
 | `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam |
-| `space.{h,cc}`, `space_icon.h` | Named, colored space with an optional validated Lucide icon id, ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
+| `space.{h,cc}`, `space_icon.h` | Named, colored space with an optional validated Lucide icon id, ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext`. `space_icon.h` owns `kSpaceIconChoices` (24 ids) and `SpaceIconPaletteCommands()` |
+| `space_icon_cache.h` | Template cache of rasterized space icons keyed by id, size and color (`SpaceIconCache<Image>`); a failed load is retried and `Clear()` drops entries. Used by `IconCatalog::LoadSpaceIcon` so switchers do not reread PNGs on each update |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
 | `pages/settings.html` | Settings shell: a section list (`data-pane` items, `aria-current`) over one `<section id=...>` pane at a time, sidebar search over rows, version footer. `settings.appearance.base_look` decides whether Space colors and Sidebar tint show (hidden for Native). Native-side focus requests (`ShowSettingsSection`, dev `settings:<section>`) carry a `focus_seq` from `SettingsFocus` (`settings_focus.h`), so the page opens a repeated section again; they wait until the page has loaded (`LocalPage::loaded()`) |
@@ -218,6 +219,26 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `browser_activate_tab` switches the person's space on purpose; `browser_close_tab` works only in
   the space on screen. Pinning a space forgets the page when the space changes.
 
+- Space icons (add one): (1) add the locked Lucide SVG source (see `tools/icon_pipeline/AGENTS.md`) and its
+  entry in `tools/icon_pipeline/icon-sources.lock.json`; the pipeline pins that file with `kLockHash` in
+  `tools/icon_pipeline/icon_pipeline.cc`, so update the constant with the lock; (2) add its entry to
+  `kSpaceIconChoices` in `space_icon.h` (the array size changes with it); (3) run
+  `tools/icon_pipeline/run.sh generate` to regenerate the PNGs and `run.sh verify` to check them; (4) update the PNG count in the root
+  `CMakeLists.txt` (`816` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
+  The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
+  switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
+  none.
+- Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
+  (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
+  the icon. Each command submit must reach the host after the palette released its overlay, so the
+  picker is scheduled with `ScheduleSpaceIconPicker` (a posted task). To add another palette command,
+  append a `PaletteCommandEntry` to the command list in `BrowserWindow::ShowCommandPalette` and
+  handle its id in `OnCommandPaletteSubmitted`.
+- Native's Agent row (`kRailAgentButton`) has three views: the name (`agent_button_`, fitted by
+  `FitAgentEntryName` to the room between the label and the status dot), the status dot and the
+  keycap (`agent_keycap_`). `AgentEntryStatus` drives the dot: `AgentActivity` is `kIdle`,
+  `kWorking` or `kNeedsYou`, and the status is refreshed from `RefreshAgentEntry`. The row's views
+  are currently three focus stops; the meta and keycap labels should not be (review item M4, open).
 - Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
   clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
   grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyAddressFocusColors`

@@ -44,6 +44,8 @@ In the Native look, the switcher is a segmented control with one segment per spa
 * To rename the active space, press F2. On macOS, you can also use **Browser > Rename Space…**. Type the new name and press Enter. Esc cancels.
 * To move the active space, use **Browser > Move Space Left** or **Move Space Right** (macOS only).
 * To close the active space, use **Browser > Close Space** (macOS only).
+* To give the active space an icon, open the command palette (⌘K / Ctrl+K) and choose **Change
+  space icon…**, or use **Browser > Icon** on macOS. Choose **None** to remove it.
 
 {% hint style="info" %}
 Spaces have a color in the Arc and Graphite looks, and none in Native. See [Appearance](../settings/appearance.md).

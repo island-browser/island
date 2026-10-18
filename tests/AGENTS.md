@@ -44,6 +44,9 @@ Two independent test systems live side by side here:
 | `chrome/collapsed_rail_test.cpp` | Icon rail metrics: buttons and scrollbar fit 52 DIP, list height with gaps and separator |
 | `agent/plan_graph_test.cpp`, `agent/plan_edits_test.cpp` (fixture `agent/plan_fixture.h`) | Plan graph building and layout (branches, joins, depth), and the plan edit messages |
 | `design/test_native_look_contract.py`, `design/test_reader_extract.py` | Native look color drift guard (pytest); Reader extraction heuristic run against `reader_extract.js` (pytest) |
+| `design/test_segment_outline.py` | Selected segments on Settings, Start and Plan pair the dark fill with an inset `--segment-outline` (pytest) |
+| `space_icon_cache_test.cpp` | `SpaceIconCache` keys (id, size, color), reuse, failed-load retry and `Clear()` |
+| `icon_catalog_test.cpp` | `IconCatalog::LoadSpaceIcon` reads each icon once per key and rejects unknown ids before the reader |
 
 ## Test targets
 

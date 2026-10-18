@@ -217,6 +217,11 @@ In dark theme the selected plate equals the track fill, so the chrome draws a `b
 outline there (`BrowserChrome::NativeSegmentColors`), and the web pages draw the same hairline as an
 inset `--segment-outline` (`#48484A`; `transparent` in light). Blue is still not used for selection.
 
+Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
+(`NativeSwitcherMetrics`). Its Agent row shows the provider name, a status dot (idle, working or
+needs you) and the shortcut keycap. A space with an icon shows only that icon in its switcher
+segment; the name stays in the tooltip and the accessible name.
+
 ### Documented colors
 
 | Role | Token | Light | Dark | Usage |
