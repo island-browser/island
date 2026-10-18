@@ -29,6 +29,7 @@
 #include "research_prompt.h"
 #include "session_store.h"
 #include "sha256.h"
+#include "table_export.h"
 #include "start_tiles.h"
 #include "updater.h"
 
@@ -2753,6 +2754,70 @@ TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
     const auto commands = BrowserWindow::PaletteCommands();
     EXPECT_TRUE(std::any_of(commands.begin(), commands.end(),
                             [](const auto& c) { return c.id == "ask_about_page"; }));
+}
+
+
+constexpr std::string_view kCollectTable =
+    "# Grinders\n\n| Source | Price |\n|---|---|\n| [Shop](https://a.test/one) | 189 |\n";
+
+TEST(BrowserWindowPagesTest, CollectTaskOpensACollectionReport) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetReportPageUrlForTest(std::string(kReportUrl));
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/one"));
+    EXPECT_FALSE(window.CollectFromTabs("price", {}));  // nothing to collect
+    EXPECT_FALSE(window.CollectFromTabs("  ", {0}));    // no question
+
+    ASSERT_TRUE(window.CollectFromTabs("price", {0}));
+    ASSERT_EQ(qw.sent.size(), 1U);
+    EXPECT_NE(qw.sent[0].find("What to collect: price"), std::string::npos);
+    EXPECT_NE(qw.sent[0].find("<page_url>https://a.test/one</page_url>"), std::string::npos);
+    ASSERT_EQ(window.agent_queue().tasks().size(), 1U);
+    EXPECT_EQ(window.agent_queue().tasks()[0].kind, agent::TaskKind::kCollect);
+
+    EXPECT_FALSE(window.CompleteCollect("price", "  \n"));
+    ASSERT_TRUE(window.CompleteCollect("price", kCollectTable));
+    ASSERT_EQ(window.reports().reports.size(), 1U);
+    const ResearchReport& report = window.reports().reports[0];
+    EXPECT_EQ(report.kind, "collection");
+    EXPECT_EQ(report.question, "price");
+    EXPECT_EQ(report.title, "Grinders");
+    const Space& space = SpaceAt(window, window.active_space_index());
+    EXPECT_EQ(space.tabs().back().startup_url(), std::string(kReportUrl) + "#" + report.id);
+}
+
+TEST(BrowserWindowPagesTest, ExportMessageWritesTheChosenFormat) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    ASSERT_TRUE(window->CompleteCollect("price", kCollectTable));
+    const std::string id = window->reports().reports[0].id;
+    const std::filesystem::path target =
+        std::filesystem::temp_directory_path() / "island_export_test_table.csv";
+    std::filesystem::remove(target);
+    window->SetExportPathForTest(target);
+
+    SendReport(*window, id, R"({"type":"export","format":"csv"})");
+    std::ifstream csv(target, std::ios::binary);
+    std::string written((std::istreambuf_iterator<char>(csv)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(written, "\xEF\xBB\xBFSource,Source title,Price\r\n"
+                       "https://a.test/one,Shop,189\r\n");
+
+    SendReport(*window, id, R"({"type":"export","format":"json"})");
+    std::ifstream json_in(target, std::ios::binary);
+    written.assign((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(written,
+              R"([{"Source":"https://a.test/one","Source title":"Shop","Price":"189"}])");
+
+    // A report without a table has nothing to export: nothing is written.
+    std::filesystem::remove(target);
+    window->SetResearchTaskForTest("q");
+    window->CompleteResearch(ReportOutcome("# No table\n\nJust prose."));
+    const std::string prose_id = window->reports().reports[0].id;
+    SendReport(*window, prose_id, R"({"type":"export","format":"csv"})");
+    EXPECT_FALSE(std::filesystem::exists(target));
+    std::filesystem::remove(target);
 }
 
 }  // namespace

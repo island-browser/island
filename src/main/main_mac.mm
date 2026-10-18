@@ -474,6 +474,14 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->ShowQuoteFixture();
         return true;
     }
+    if (island::DevAgentFixtureName(action) == "collect") {
+        app->ShowCollectFixture();
+        return true;
+    }
+    if (action == "report_fixture:collection") {
+        app->ShowCollectionReportFixture();
+        return true;
+    }
     if (action == "plan_fixture") {
         app->OpenPlanFixture();
         return true;

@@ -15,6 +15,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Collect from tabs: the command palette's "Collect from tabs…" opens a Collect sheet in the agent
+  panel. Pick the tabs (pinned tabs start unchecked) and say what to collect; the agent reads each
+  tab and answers with one table, stored as a collection report (a Report tab, shown as TABLE in
+  the palette). The Export menu on a report saves its first table as CSV or JSON (UTF-8 with a
+  byte order mark and CRLF line ends), or the report as Markdown; CSV and JSON are disabled when
+  the report has no table. Reports carry a kind; reports saved by earlier versions load as research.
 - Ask the agent from context: the page context chip above the composer now has a ✕ to clear it,
   and a selection shows as a quote chip. The page context menu adds "Ask agent about selection"
   and "Explain" for a selection, and "Summarize linked page" for a link (the link opens in a peek

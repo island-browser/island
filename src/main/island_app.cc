@@ -240,6 +240,20 @@ void IslandApp::ShowQuoteFixture() {
     }
 }
 
+void IslandApp::ShowCollectFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCollectFixtureForDev();
+    }
+}
+
+void IslandApp::ShowCollectionReportFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCollectionReportFixtureForDev();
+    }
+}
+
 void IslandApp::OpenAgentPagesForDev(int count, int gap_ms) {
     CEF_REQUIRE_UI_THREAD();
     if (browser_window_ != nullptr) {

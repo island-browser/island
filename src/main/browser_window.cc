@@ -21,6 +21,7 @@
 #include "cef_address_parser.h"
 #include "cef_update_fetcher.h"
 #include "clipboard.h"
+#include "collect_prompt.h"
 #include "content_blocker_policy.h"
 #include "design_tokens.h"
 #include "download_path.h"
@@ -1055,6 +1056,57 @@ bool BrowserWindow::AskAgent(std::string prompt, std::string context) {
     return task.state != agent::TaskState::kFailed;
 }
 
+bool BrowserWindow::CollectFromTabs(std::string_view what,
+                                    const std::vector<std::size_t>& indices) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::string asked = std::string(ClipUtf8(TrimmedCopy(what), kMaxCollectWhatBytes));
+    if (closing_ || asked.empty()) {
+        return false;
+    }
+    // Web pages only: a Report, the start page or a settings page has nothing to collect.
+    std::vector<CollectTab> tabs;
+    const std::vector<Tab>& space_tabs = active_space().tabs();
+    for (const std::size_t index : indices) {
+        if (index >= space_tabs.size() || tabs.size() >= kMaxCollectTabs) {
+            continue;
+        }
+        const NavigationSnapshot& nav = space_tabs[index].navigation_state().snapshot();
+        if (IsWebUrl(nav.url)) {
+            tabs.push_back({.index = index, .title = nav.page_title, .url = nav.url});
+        }
+    }
+    if (tabs.empty()) {
+        return false;
+    }
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    const agent::AgentTask task =
+        agent_queue_.Enqueue(agent::TaskKind::kCollect, asked, BuildCollectPrompt(asked, tabs),
+                             static_cast<std::int64_t>(UnixNowMs()));
+    ScheduleLocalPagesRender();
+    return task.state != agent::TaskState::kFailed;
+}
+
+json::Value BrowserWindow::CollectSheetStateJson() const {
+    json::Value tabs = json::Value::MakeArray();
+    const std::vector<Tab>& space_tabs = spaces_[active_space_index_].tabs();
+    for (std::size_t index = 0; index < space_tabs.size(); ++index) {
+        const Tab& tab = space_tabs[index];
+        const NavigationSnapshot& nav = tab.navigation_state().snapshot();
+        if (!IsWebUrl(nav.url)) {
+            continue;
+        }
+        tabs.Push(json::Value::MakeObject()
+                      .Set("index", json::Value::Int(static_cast<std::int64_t>(index)))
+                      .Set("title", json::Value::String(nav.page_title))
+                      .Set("url", json::Value::String(nav.url))
+                      .Set("pinned", json::Value::Bool(tab.pinned())));
+    }
+    return json::Value::MakeObject()
+        .Set("seq", json::Value::Int(static_cast<std::int64_t>(collect_sheet_seq_)))
+        .Set("tabs", std::move(tabs));
+}
+
 bool BrowserWindow::RunAgentMenuCommand(int offset, const AgentContextChip& page,
                                         std::string_view link) {
     // Selections come from web pages only: a Report or the start page is not a page to quote.
@@ -1094,6 +1146,14 @@ void BrowserWindow::RunPaletteCommand(std::string_view id) {
     } else if (id == "agent_tasks") {
         // The Tasks strip sits on top of the panel.
         SetAgentPanelOpen(true);
+    } else if (id == "collect_from_tabs") {
+        // The Collect sheet lives in the panel; without an agent the panel explains the setup.
+        EnsureAgentSession();
+        SetAgentPanelOpen(true);
+        if (!ResolvedAgentCommand().empty()) {
+            ++collect_sheet_seq_;
+            ScheduleLocalPagesRender();
+        }
     } else if (id == "summarize_page" || id == "ask_about_page") {
         const AgentContextChip page = ActiveTabChip();
         if (page.url.empty() || ResolvedAgentCommand().empty()) {
@@ -1137,7 +1197,8 @@ std::string BrowserWindow::AgentPanelStateJson() const {
                  json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
                                                                                 : std::string()))
             .Set("confirmations", ConfirmationsStateJson())
-            .Set("tasks", TasksStateJson());
+            .Set("tasks", TasksStateJson())
+            .Set("collect", CollectSheetStateJson());
     json::Value providers = AgentProvidersStateJson();
     for (auto& [key, value] : providers.object_val) {
         if (key == "provider" || key == "providers" || key == "env_override" ||
@@ -2292,6 +2353,17 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
                           message.BoolOr("include_context", true));
     } else if (type == "clear_context") {
         context_chip_.reset();
+    } else if (type == "collect") {
+        std::vector<std::size_t> indices;
+        if (const json::Value* list = message.FindMember("tabs");
+            list != nullptr && list->IsArray()) {
+            for (const json::Value& item : list->array_val) {
+                if (item.IsInt() && item.int_val >= 0) {
+                    indices.push_back(static_cast<std::size_t>(item.int_val));
+                }
+            }
+        }
+        static_cast<void>(CollectFromTabs(message.StringOr("what", ""), indices));
     } else if (type == "cancel" || type == "task_stop") {
         // Cards carry no origin, so Stop withdraws every open card; a stopped turn's action
         // must not run later.
@@ -2378,6 +2450,14 @@ void BrowserWindow::StartQueuedTask(const agent::AgentTask& task) {
             started = true;  // dev capture: the task is live, nothing is sent
         } else if (task.kind == agent::TaskKind::kResearch) {
             started = StartResearchTask(task);
+        } else if (task.kind == agent::TaskKind::kCollect) {
+            // The collect prompt (the context) names the tabs; the page context does not apply.
+            collect_turns_before_ = TurnsEnded();
+            started = SendToAgent(task.context);
+            if (!started) {
+                start_error_ = agent_session_->error().empty() ? "The agent could not be started."
+                                                               : agent_session_->error();
+            }
         } else {
             started = SendToAgent(task.prompt, task.context);
             if (!started) {
@@ -2445,6 +2525,10 @@ void BrowserWindow::FinishInFlightTurn(bool ok) {
     // Cleared first: the queue starts the next task from inside this call.
     const std::string id = std::move(in_flight_id_);
     in_flight_id_.clear();
+    if (ok) {
+        // Before the queue moves on: the next task's prompt would replace this turn's answer.
+        FinishCollectTurn(id);
+    }
     agent_queue_.OnTurnFinished(id, ok);
     ScheduleLocalPagesRender();
 }
@@ -2687,6 +2771,13 @@ void BrowserWindow::ShowQueueFixtureForDev() {
                              static_cast<std::int64_t>(UnixNowMs()));
     }
     agent_queue_.OnProgress("t1", 3, 7);
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::ShowCollectFixtureForDev() {
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    ++collect_sheet_seq_;
     ScheduleLocalPagesRender();
 }
 
@@ -5121,7 +5212,10 @@ void BrowserWindow::ShowCommandPalette() {
     std::vector<PaletteReportEntry> reports;
     reports.reserve(reports_.reports.size());
     for (const ResearchReport& report : reports_.reports) {
-        reports.push_back({.id = report.id, .title = report.title, .question = report.question});
+        reports.push_back({.id = report.id,
+                           .title = report.title,
+                           .question = report.question,
+                           .kind = report.kind});
     }
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
                            PaletteCommands(), std::move(reports));
@@ -5131,7 +5225,8 @@ std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
     return {{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
             {.id = "agent_tasks", .title = "Agent tasks"},
             {.id = "summarize_page", .title = "Summarize page"},
-            {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"}};
+            {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"},
+            {.id = "collect_from_tabs", .title = "Collect from tabs\xE2\x80\xA6"}};
 }
 
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {

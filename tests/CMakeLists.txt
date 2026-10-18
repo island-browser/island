@@ -47,8 +47,10 @@ add_executable(island_tests
     prefs_store_test.cpp
     reader_mode_test.cpp
     settings_focus_test.cpp
+    collect_prompt_test.cpp
     report_store_test.cpp
     research_prompt_test.cpp
+    table_export_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
@@ -99,8 +101,10 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/collect_prompt.cc"
     "${CMAKE_SOURCE_DIR}/src/main/report_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/research_prompt.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/table_export.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"

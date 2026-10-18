@@ -21,6 +21,11 @@ inline constexpr std::size_t kAgentTitleLimit = 200;
 // Invalid UTF-8 with no lead byte within three bytes of the cut is cut at `limit` as it is.
 [[nodiscard]] std::string_view ClipUtf8(std::string_view text, std::size_t limit);
 
+// Web content for a tagged field of a prompt: "</" becomes "&lt;/" so it cannot close the tag.
+[[nodiscard]] std::string EscapeUntrusted(std::string_view text);
+// A page title as one clipped, escaped line (line breaks become spaces).
+[[nodiscard]] std::string UntrustedTitle(std::string_view title);
+
 // The page context for a page the person is looking at: a tool hint, then the title (when there
 // is one), the URL and the selection (when it is not blank), each inside its own tag. A selection
 // over kAgentSelectionLimit bytes is cut and ends in "…".

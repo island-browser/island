@@ -61,6 +61,11 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void ShowQueueFixture();
     // Developer capture only: the panel with a page chip and a quote chip (`agent_fixture:quote`).
     void ShowQuoteFixture();
+    // Developer capture only: the Collect sheet over the panel (`agent_fixture:collect`).
+    void ShowCollectFixture();
+    // Developer capture only: a collection report with its Export menu open
+    // (`report_fixture:collection`).
+    void ShowCollectionReportFixture();
     // Developer capture only: `count` agent pages opened back to back during the plan fixture.
     void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);

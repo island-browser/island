@@ -311,10 +311,29 @@ class ReportPage(unittest.TestCase):
 
     def test_has_the_three_actions(self) -> None:
         self.assertIn(">Copy Markdown</button>", self.html)
-        self.assertIn(">Save as .md...</button>", self.html)
+        self.assertIn(">Export</button>", self.html)
         self.assertIn(">Continue in agent panel</button>", self.html)
-        for message in ("copy_report", "save_report", "continue_in_agent", '"open_url"'):
+        for message in ("copy_report", "export", "continue_in_agent", '"open_url"'):
             self.assertIn(message, self.html)
+
+    def test_export_menu_offers_csv_json_and_markdown(self) -> None:
+        self.assertIn('id="export-menu"', self.html)
+        for label in (">CSV (.csv)</button>", ">JSON (.json)</button>", ">Markdown (.md)</button>"):
+            self.assertIn(label, self.html)
+        for format_name in ("csv", "json", "md"):
+            self.assertIn(f'data-format="{format_name}"', self.html)
+        # CSV and JSON need a table: they are disabled, with the reason, when there is none.
+        self.assertIn("report.has_table", self.html)
+        self.assertIn("No table in this report", self.html)
+        self.assertIn('id="export-csv"', self.html)
+        self.assertIn('id="export-json"', self.html)
+        # The menu is neutral: no accent fill on hover or focus.
+        menu_css = self.html[self.html.index(".menu button:hover"):]
+        self.assertNotIn("var(--accent)", menu_css[:200])
+
+    def test_a_collection_shows_a_table_icon(self) -> None:
+        self.assertIn('report.kind === "collection"', self.html)
+        self.assertIn('id="kind-icon"', self.html)
 
     def test_never_navigates_by_itself(self) -> None:
         for fragment in ("location", "window.open", "target=", "<form", "href=\""):
@@ -719,6 +738,37 @@ class AgentConfirmationCard(unittest.TestCase):
         css = self.html[self.html.index(".confirm-card") :][:700]
         self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b")
         self.assertNotRegex(css, r"rgba?\(")
+
+
+class AgentCollectSheet(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_sheet_asks_what_to_collect_with_the_example_placeholder(self) -> None:
+        self.assertIn('id="collect-what"', self.html)
+        self.assertIn('placeholder="price, rating and delivery time for each product"', self.html)
+        self.assertIn('id="collect-scrim"', self.html)
+        self.assertIn('role="dialog"', self.html)
+
+    def test_tab_checklist_leaves_pinned_tabs_unchecked(self) -> None:
+        self.assertIn('box.checked = !tab.pinned', self.html)
+        self.assertIn('type: "collect"', self.html)
+        self.assertIn('"collect" in next', self.html)
+        self.assertIn("collect.seq === collectSeq", self.html)
+
+    def test_submit_needs_a_question_and_a_tab(self) -> None:
+        self.assertIn("!collectWhat.value.trim() || !collectChecked().length", self.html)
+        self.assertIn('id="collect-submit" type="submit" disabled', self.html)
+
+    def test_checkboxes_and_focus_are_neutral_not_blue(self) -> None:
+        self.assertIn("accent-color: var(--text)", self.html)
+        sheet_css = self.html[self.html.index(".collect-scrim {"):self.html.index("</style>")]
+        self.assertNotIn("var(--accent", sheet_css)
+        self.assertNotIn("var(--selection", sheet_css)
+
+    def test_tab_titles_are_text_nodes(self) -> None:
+        self.assertIn("title.textContent = tab.title || tab.url", self.html)
+        self.assertIn("url.textContent = tab.url", self.html)
 
 
 class SettingsTrustedSites(unittest.TestCase):

@@ -102,5 +102,30 @@ TEST_F(ReportStoreTest, RemoveDropsOnlyThatReportAndIdsAreStrict) {
     }
 }
 
+
+TEST_F(ReportStoreTest, KindRoundTripsAndV1LoadsAsResearch) {
+    ReportState state;
+    ResearchReport collected = Report("grinders", 2000);
+    collected.kind = std::string(kReportKindCollection);
+    ReportStore::Add(state, std::move(collected));
+    ReportStore::Add(state, Report("essay", 1000));
+    const std::filesystem::path path = dir_ / "reports.json";
+    ASSERT_EQ(ReportStore::Save(path, state), ReportError::kNone);
+    const ReportLoadResult loaded = ReportStore::Load(path);
+    ASSERT_EQ(loaded.error, ReportError::kNone);
+    ASSERT_EQ(loaded.state.reports.size(), 2U);
+    EXPECT_EQ(loaded.state.reports[0].kind, "research");  // newest first: "essay"
+    EXPECT_EQ(loaded.state.reports[1].kind, "collection");
+    EXPECT_EQ(loaded.state.version, ReportState::kCurrentSchemaVersion);
+
+    // A version 1 file has no kind: its reports load as research.
+    std::ofstream(path) << R"({"version":1,"reports":[{"id":"r1","title":"Old","question":"q",)"
+                        << R"("markdown":"# Old","created_ms":5}]})";
+    const ReportLoadResult v1 = ReportStore::Load(path);
+    ASSERT_EQ(v1.error, ReportError::kNone);
+    ASSERT_EQ(v1.state.reports.size(), 1U);
+    EXPECT_EQ(v1.state.reports[0].kind, "research");
+}
+
 }  // namespace
 }  // namespace island

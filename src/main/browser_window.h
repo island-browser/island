@@ -377,6 +377,19 @@ class BrowserWindow : public CefClient,
     void ShowQueueFixtureForDev();
     // Dev capture (`agent_fixture:quote`): the panel with a page chip and a selection quote.
     void ShowQuoteFixtureForDev();
+    // Dev capture (`agent_fixture:collect`): the Collect sheet open over the panel.
+    void ShowCollectFixtureForDev();
+    // Dev capture (`report_fixture:collection`): a collection Report tab with its Export menu open.
+    void ShowCollectionReportFixtureForDev();
+    // Queues a collection of the active space's web tabs at `indices` for `what` (blank or no
+    // web tab: refused). False when the agent could not take it.
+    bool CollectFromTabs(std::string_view what, const std::vector<std::size_t>& indices);
+    // Stores `markdown` as a collection report and opens its Report tab. False when it is blank.
+    bool CompleteCollect(std::string_view question, std::string_view markdown);
+    // Test seam: CSV and JSON exports are written to `path` instead of through the save dialog.
+    void SetExportPathForTest(std::filesystem::path path) {
+        export_path_for_test_ = std::move(path);
+    }
     // The command palette's command list (the window's own commands).
     [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands();
     void SetPlanCloseConfirmationForTest(
@@ -1010,6 +1023,13 @@ class BrowserWindow : public CefClient,
     // conversation does not hold the report yet, hands the report to the agent.
     void ContinueReportInAgent(const ResearchReport& report, CefRefPtr<CefBrowser> source);
     void SaveReportToFile(const ResearchReport& report, CefRefPtr<CefBrowser> source);
+    // The Export menu: "md" saves the Markdown, "csv" and "json" save the report's first table.
+    void ExportReport(const ResearchReport& report, std::string_view format,
+                      CefRefPtr<CefBrowser> source);
+    // The task the in-flight collect turn ended with: stores its table as a report when the turn
+    // produced one. Called before the queue moves on.
+    void FinishCollectTurn(std::string_view task_id);
+    [[nodiscard]] json::Value CollectSheetStateJson() const;
     void ReportPageResult(CefRefPtr<CefBrowser> source, std::string_view kind,
                           std::string_view text) const;
     [[nodiscard]] json::Value ReportsListJson() const;
@@ -1292,6 +1312,13 @@ class BrowserWindow : public CefClient,
     // kClosedTabLimit.
     std::vector<std::string> closed_tab_urls_;
     ClipboardWriter clipboard_writer_ = CopyTextToClipboard;
+    std::optional<std::filesystem::path> export_path_for_test_;
+    // Bumped to open the Collect sheet (the page opens it when the number changes).
+    std::uint64_t collect_sheet_seq_ = 0;
+    // Turns the session had ended when the in-flight collect turn was sent.
+    std::uint64_t collect_turns_before_ = 0;
+    // Dev capture only: the collection fixture's Export menu is opened on load.
+    bool report_fixture_menu_ = false;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).

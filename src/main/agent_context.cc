@@ -49,6 +49,10 @@ void AppendTagged(std::string& out, std::string_view tag, std::string_view value
 
 }  // namespace
 
+std::string EscapeUntrusted(std::string_view text) { return Escaped(text); }
+
+std::string UntrustedTitle(std::string_view title) { return OneLine(title); }
+
 std::string_view ClipUtf8(std::string_view text, std::size_t limit) {
     if (text.size() <= limit) {
         return text;

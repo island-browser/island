@@ -27,6 +27,7 @@
 #include "include/wrapper/cef_helpers.h"
 #include "plan_dev_fixture.h"
 #include "plan_graph.h"
+#include "table_export.h"
 
 namespace island {
 namespace {
@@ -98,10 +99,12 @@ std::string ResultScript(std::string_view kind, std::string_view text) {
 // the page how it went.
 class SaveReportCallback final : public CefRunFileDialogCallback {
   public:
-    SaveReportCallback(CefRefPtr<CefBrowser> browser, std::string markdown, std::string page_url)
+    SaveReportCallback(CefRefPtr<CefBrowser> browser, std::string markdown, std::string page_url,
+                       std::string extension)
         : browser_(std::move(browser)),
           markdown_(std::move(markdown)),
-          page_url_(std::move(page_url)) {}
+          page_url_(std::move(page_url)),
+          extension_(std::move(extension)) {}
 
     void OnFileDialogDismissed(const std::vector<CefString>& file_paths) override {
         CEF_REQUIRE_UI_THREAD();
@@ -111,7 +114,7 @@ class SaveReportCallback final : public CefRunFileDialogCallback {
         }
         std::filesystem::path path(file_paths.front().ToString());
         if (path.extension().empty()) {
-            path += ".md";
+            path += extension_;
         }
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         if (out.is_open()) {
@@ -130,6 +133,7 @@ class SaveReportCallback final : public CefRunFileDialogCallback {
     CefRefPtr<CefBrowser> browser_;
     std::string markdown_;
     std::string page_url_;
+    std::string extension_;  // added when the chosen name has none
 
     IMPLEMENT_REFCOUNTING(SaveReportCallback);
 };
@@ -1126,6 +1130,7 @@ json::Value BrowserWindow::ReportsListJson() const {
                       .Set("id", json::Value::String(report.id))
                       .Set("title", json::Value::String(report.title))
                       .Set("question", json::Value::String(report.question))
+                      .Set("kind", json::Value::String(report.kind))
                       .Set("created_ms", json::Value::Int(report.created_ms)));
     }
     return list;
@@ -1140,10 +1145,14 @@ std::string BrowserWindow::ReportPageStateJson(std::string_view id) const {
                      .Set("title", Value::String(found->title))
                      .Set("question", Value::String(found->question))
                      .Set("markdown", Value::String(found->markdown))
+                     .Set("kind", Value::String(found->kind))
+                     .Set("has_table", Value::Bool(FirstMarkdownTable(found->markdown).has_value()))
                      .Set("created_ms", Value::Int(found->created_ms));
     }
-    return json::Serialize(
-        Value::MakeObject().Set("theme", ThemeJson()).Set("report", std::move(report)));
+    return json::Serialize(Value::MakeObject()
+                               .Set("theme", ThemeJson())
+                               .Set("report", std::move(report))
+                               .Set("open_export", Value::Bool(report_fixture_menu_)));
 }
 
 void BrowserWindow::RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const {
@@ -1193,6 +1202,8 @@ void BrowserWindow::HandleReportPageMessage(const json::Value& message, std::str
         } else {
             ReportPageResult(source, "error", "The clipboard is not available.");
         }
+    } else if (type == "export") {
+        ExportReport(*report, message.StringOr("format", ""), source);
     } else if (type == "save_report") {
         SaveReportToFile(*report, source);
     } else if (type == "continue_in_agent") {
@@ -1210,7 +1221,107 @@ void BrowserWindow::SaveReportToFile(const ResearchReport& report, CefRefPtr<Cef
     source->GetHost()->RunFileDialog(
         FILE_DIALOG_SAVE, "Save report as Markdown", suggested.string(), {".md"},
         new SaveReportCallback(source, report.markdown,
-                               frame != nullptr ? frame->GetURL().ToString() : std::string()));
+                               frame != nullptr ? frame->GetURL().ToString() : std::string(),
+                               ".md"));
+}
+
+void BrowserWindow::ExportReport(const ResearchReport& report, std::string_view format,
+                                 CefRefPtr<CefBrowser> source) {
+    if (format == "md") {
+        SaveReportToFile(report, source);
+        return;
+    }
+    if (format != "csv" && format != "json") {
+        ReportPageResult(source, "error", "Unknown export format.");
+        return;
+    }
+    const std::optional<Table> table = FirstMarkdownTable(report.markdown);
+    if (!table.has_value()) {
+        ReportPageResult(source, "error", "No table in this report.");
+        return;
+    }
+    const std::string content = format == "csv" ? TableToCsv(*table) : TableToJson(*table);
+    if (export_path_for_test_.has_value()) {
+        std::ofstream out(*export_path_for_test_, std::ios::binary | std::ios::trunc);
+        out << content;
+        out.flush();
+        if (out) {
+            ReportPageResult(source, "saved", export_path_for_test_->string());
+        } else {
+            ReportPageResult(source, "error", "Could not write that file.");
+        }
+        return;
+    }
+    if (source == nullptr || source->GetHost() == nullptr) {
+        return;
+    }
+    const std::string extension = "." + std::string(format);
+    std::filesystem::path name = ReportFileName(report.title);
+    name.replace_extension(extension);
+    const CefRefPtr<CefFrame> frame = source->GetMainFrame();
+    source->GetHost()->RunFileDialog(
+        FILE_DIALOG_SAVE, "Export table", (DefaultDownloadsDirectory() / name).string(),
+        {extension},
+        new SaveReportCallback(source, content,
+                               frame != nullptr ? frame->GetURL().ToString() : std::string(),
+                               extension));
+}
+
+// --- Collect from tabs ----------------------------------------------------------
+
+void BrowserWindow::FinishCollectTurn(std::string_view task_id) {
+    if (agent_session_ == nullptr || TaskKindOf(task_id) != agent::TaskKind::kCollect) {
+        return;
+    }
+    std::string question;
+    for (const agent::AgentTask& task : agent_queue_.tasks()) {
+        if (task.id == task_id) {
+            question = task.prompt;
+        }
+    }
+    // The collect prompt asks for the marked table; an unmarked answer is still an answer.
+    const ResearchOutcome outcome = ClassifyResearchTurn(
+        agent_session_->transcript(), collect_turns_before_, agent_session_->error(),
+        /*plan_approved=*/true);
+    if (outcome.kind == ResearchOutcome::Kind::kReport) {
+        static_cast<void>(CompleteCollect(question, outcome.markdown));
+    }
+}
+
+bool BrowserWindow::CompleteCollect(std::string_view question, std::string_view markdown) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || Trimmed(markdown).empty()) {
+        return false;
+    }
+    ResearchReport report;
+    report.title = ReportTitle(markdown, question);
+    report.question = std::string(question);
+    report.markdown = std::string(markdown);
+    report.created_ms = NowMs();
+    report.kind = std::string(kReportKindCollection);
+    const std::string id = ReportStore::Add(reports_, std::move(report));
+    SaveReports();
+    return OpenReportTabImpl(id, {}, /*group_with_plan=*/false);
+}
+
+void BrowserWindow::ShowCollectionReportFixtureForDev() {
+    CEF_REQUIRE_UI_THREAD();
+    ResearchReport report;
+    report.title = "Espresso grinders";
+    report.question = "Price, rating and delivery time for each grinder";
+    report.kind = std::string(kReportKindCollection);
+    report.created_ms = NowMs();
+    report.markdown =
+        "# Espresso grinders\n\nCollected from 3 tabs.\n\n"
+        "| Source | Price | Rating | Delivery |\n"
+        "|---|---|---|---|\n"
+        "| [Grinder Shop](https://shop.example/a) | 189 EUR | 4.6 | 2 days |\n"
+        "| [Coffee Gear](https://gear.example/b) | 219 EUR | 4.8 | 1 day |\n"
+        "| [Bean House](https://beans.example/c) | 175 EUR | 4.4 | 5 days |\n";
+    // Dev capture only: kept in memory, so the person's Reports file is not touched.
+    const std::string id = ReportStore::Add(reports_, std::move(report));
+    report_fixture_menu_ = true;
+    static_cast<void>(OpenReportTabImpl(id, {}, /*group_with_plan=*/false));
 }
 
 void BrowserWindow::ContinueReportInAgent(const ResearchReport& report,

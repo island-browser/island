@@ -289,6 +289,37 @@ textarea::placeholder { color: var(--text-2); }
 .send svg { width: 14px; height: 14px; }
 .hint { font: 10.5px/1.4 var(--mono); color: var(--text-2); text-align: center; margin-top: 7px; letter-spacing: .02em; }
 .hint kbd { font: 10px/1.3 var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); color: var(--text); }
+/* The Collect sheet: neutral surfaces and rows; checkboxes take the text colour, not blue */
+.collect-scrim { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center;
+  justify-content: center; padding: 16px; background: color-mix(in srgb, var(--text) 16%, transparent); }
+.collect-scrim[hidden] { display: none; }
+.collect-sheet { width: 100%; max-width: 380px; max-height: 80vh; display: flex; flex-direction: column;
+  gap: 10px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .18); }
+.collect-sheet h2 { margin: 0; font: 600 14px/1.3 var(--font); color: var(--text); }
+.collect-sheet label, .collect-sheet .field-label { font: 500 10.5px/1.4 var(--mono); color: var(--text-2);
+  letter-spacing: .04em; text-transform: uppercase; }
+.collect-sheet .field-label { margin: 0; }
+.collect-what { width: 100%; font: 13px/1.4 var(--font); color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+.collect-what::placeholder { color: var(--text-2); }
+.collect-list { min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.collect-list:empty::before { content: "No web tabs to collect from."; display: block; padding: 8px;
+  color: var(--text-2); font: 13px/1.4 var(--font); }
+.collect-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.collect-row:hover { background: var(--surface-2); }
+.collect-row input { margin: 3px 0 0; flex: none; accent-color: var(--text); }
+.collect-row .row-text { min-width: 0; display: flex; flex-direction: column; }
+.collect-row .row-title { font: 13px/1.35 var(--font); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collect-row .row-url { font: 11px/1.35 var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.collect-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.collect-btn { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 8px;
+  padding: 6px 12px; font: 500 13px/1.3 var(--font); cursor: pointer; }
+.collect-btn:hover:not(:disabled) { background: var(--surface-2); }
+.collect-btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
+.collect-btn:disabled { opacity: .45; cursor: default; }
+.collect-btn:focus-visible, .collect-what:focus-visible, .collect-row input:focus-visible {
+  outline: 2px solid var(--text-2); outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -324,6 +355,20 @@ textarea::placeholder { color: var(--text-2); }
   </div>
   <div class="hint"><kbd>&crarr;</kbd> send &middot; <kbd>&#8679;&crarr;</kbd> new line &middot; <kbd>Esc</kbd> stop / decline</div>
 </footer>
+<div class="collect-scrim" id="collect-scrim" hidden>
+  <form class="collect-sheet" id="collect-sheet" role="dialog" aria-modal="true" aria-labelledby="collect-title">
+    <h2 id="collect-title">Collect from tabs</h2>
+    <label for="collect-what">What to collect</label>
+    <input class="collect-what" id="collect-what" type="text" autocomplete="off"
+      placeholder="price, rating and delivery time for each product">
+    <p class="field-label" id="collect-tabs-label">Tabs</p>
+    <div class="collect-list" id="collect-list" role="group" aria-labelledby="collect-tabs-label"></div>
+    <div class="collect-actions">
+      <button class="collect-btn" id="collect-cancel" type="button">Cancel</button>
+      <button class="collect-btn primary" id="collect-submit" type="submit" disabled>Collect</button>
+    </div>
+  </form>
+</div>
 <script>
 "use strict";
 (function () {
@@ -979,12 +1024,91 @@ textarea::placeholder { color: var(--text-2); }
   document.getElementById("new-chat").addEventListener("click", function () { post({ type: "new_chat" }); });
   document.getElementById("close").addEventListener("click", function () { post({ type: "close_panel" }); });
 
+  // The Collect sheet opens each time the panel's sequence number moves (the palette command).
+  var collectSeq = 0;
+  var collectScrim = document.getElementById("collect-scrim");
+  var collectSheet = document.getElementById("collect-sheet");
+  var collectWhat = document.getElementById("collect-what");
+  var collectList = document.getElementById("collect-list");
+  var collectSubmit = document.getElementById("collect-submit");
+
+  function collectChecked() {
+    return Array.prototype.filter.call(collectList.querySelectorAll("input[type=checkbox]"),
+      function (box) { return box.checked; });
+  }
+  function collectRender() {
+    collectSubmit.disabled = !collectWhat.value.trim() || !collectChecked().length;
+  }
+  function closeCollect() {
+    collectScrim.hidden = true;
+  }
+  function openCollect(tabs) {
+    collectWhat.value = "";
+    collectList.textContent = "";
+    tabs.forEach(function (tab) {
+      var row = document.createElement("label");
+      row.className = "collect-row";
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = String(tab.index);
+      box.checked = !tab.pinned;  // pinned tabs are the ones the person keeps; not collected by default
+      var text = document.createElement("span");
+      text.className = "row-text";
+      var title = document.createElement("span");
+      title.className = "row-title";
+      title.textContent = tab.title || tab.url;
+      var url = document.createElement("span");
+      url.className = "row-url";
+      url.textContent = tab.url;
+      text.appendChild(title);
+      text.appendChild(url);
+      row.appendChild(box);
+      row.appendChild(text);
+      collectList.appendChild(row);
+    });
+    collectScrim.hidden = false;
+    collectRender();
+    collectWhat.focus();
+  }
+  function showCollect(collect) {
+    if (!collect || collect.seq === collectSeq) return;
+    collectSeq = collect.seq;
+    openCollect(collect.tabs || []);
+  }
+  collectWhat.addEventListener("input", collectRender);
+  collectList.addEventListener("change", collectRender);
+  collectSheet.addEventListener("submit", function (event) {
+    event.preventDefault();
+    var what = collectWhat.value.trim();
+    var indices = collectChecked().map(function (box) { return Number(box.value); });
+    if (!what || !indices.length) return;
+    post({ type: "collect", what: what, tabs: indices });
+    closeCollect();
+    input.focus();
+  });
+  document.getElementById("collect-cancel").addEventListener("click", function () {
+    closeCollect();
+    input.focus();
+  });
+  collectScrim.addEventListener("click", function (event) {
+    if (event.target === collectScrim) closeCollect();
+  });
+  collectScrim.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeCollect();
+      input.focus();
+    }
+  }, true);
+
   window.islandRender = function (next) {
     if (next.theme) { state.theme = next.theme; applyTheme(next.theme); }
     if (next.session) state.session = next.session;
     if ("context" in next) state.context = next.context;
     if ("context_chip" in next) state.context_chip = next.context_chip;
     if ("tasks" in next) state.tasks = next.tasks || [];
+    if ("collect" in next) showCollect(next.collect);
     if ("confirmations" in next) state.confirmations = next.confirmations || [];
     if ("endpoint" in next) state.endpoint = next.endpoint;
     if ("provider" in next) state.provider = next.provider;

@@ -13,6 +13,9 @@
 
 namespace island {
 
+inline constexpr std::string_view kReportKindResearch = "research";
+inline constexpr std::string_view kReportKindCollection = "collection";
+
 struct ResearchReport {
     // "r" followed by decimal digits: safe in a URL fragment and in JavaScript.
     std::string id;
@@ -20,12 +23,15 @@ struct ResearchReport {
     std::string question;
     std::string markdown;
     std::int64_t created_ms = 0;  // Unix time, milliseconds
+    // "research" for a Research answer, "collection" for a table collected
+    // from tabs. Older files have no kind and load as "research".
+    std::string kind = std::string(kReportKindResearch);
 
     bool operator==(const ResearchReport&) const = default;
 };
 
 struct ReportState {
-    static constexpr int kCurrentSchemaVersion = 1;
+    static constexpr int kCurrentSchemaVersion = 2;
     // Oldest reports beyond this many are dropped on Add().
     static constexpr std::size_t kMaxReports = 100;
     // A single report is clipped to this many bytes (on a UTF-8 boundary).

@@ -29,8 +29,10 @@ std::string ClipUtf8(std::string text, std::size_t limit) {
 }
 
 ReportLoadResult ParseState(const json::Value& root) {
+    // Version 1 (no kind) loads as research reports; the next save writes the current version.
     if (!root.IsObject() || !root.HasRequiredInt("version") ||
-        root.FindMember("version")->int_val != ReportState::kCurrentSchemaVersion ||
+        (root.FindMember("version")->int_val != 1 &&
+         root.FindMember("version")->int_val != ReportState::kCurrentSchemaVersion) ||
         !root.HasRequiredArray("reports")) {
         return Fail(ReportError::kSchemaError);
     }
@@ -50,6 +52,10 @@ ReportLoadResult ParseState(const json::Value& root) {
         report.question = value.FindMember("question")->string_val;
         report.markdown = value.FindMember("markdown")->string_val;
         report.created_ms = value.FindMember("created_ms")->int_val;
+        const json::Value* kind = value.FindMember("kind");
+        if (kind != nullptr && kind->IsString() && kind->string_val == kReportKindCollection) {
+            report.kind = std::string(kReportKindCollection);
+        }
         state.reports.push_back(std::move(report));
     }
     return {ReportError::kNone, std::move(state)};
@@ -76,6 +82,8 @@ std::string Serialize(const ReportState& state) {
         w.StringValue(report.markdown);
         w.Key("created_ms");
         w.IntValue(report.created_ms);
+        w.Key("kind");
+        w.StringValue(report.kind);
         w.EndObject();
     }
     w.EndArray();

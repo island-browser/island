@@ -79,6 +79,8 @@ struct PaletteReportEntry {
     std::string id;
     std::string title;
     std::string question;
+    // "research" or "collection" (a table collected from tabs; shown as TABLE).
+    std::string kind = "research";
 
     bool operator==(const PaletteReportEntry&) const = default;
 };

@@ -69,7 +69,7 @@ std::string PaletteKindLabel(const PaletteEntry& entry) {
         case PaletteEntryKind::kCommand:
             return "COMMAND";
         case PaletteEntryKind::kReport:
-            return "REPORT";
+            return entry.report.kind == "collection" ? "TABLE" : "REPORT";
     }
     return "";
 }
@@ -97,7 +97,9 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
         case PaletteEntryKind::kCommand:
             return "Run command: " + entry.command.title;
         case PaletteEntryKind::kReport:
-            return "Open research report: " + entry.report.title;
+            return (entry.report.kind == "collection" ? "Open collected table: "
+                                                      : "Open research report: ") +
+                   entry.report.title;
     }
     return "Palette result";
 }
