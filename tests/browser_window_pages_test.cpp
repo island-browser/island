@@ -1261,6 +1261,8 @@ TEST(BrowserWindowPagesTest, RetryOfAStepThatDidNotFailSendsNothing) {
 TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivatesThem) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    // A research that runs (not one waiting for approval): its agent opens pages into the plan.
+    window->SetResearchTaskForTest("sample");
     window->OpenPlanFixtureTab();
     std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
     plan[2].status = "in_progress";
@@ -1286,6 +1288,8 @@ TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivat
 TEST(BrowserWindowPagesTest, AnAgentOpenedResearchPageIsTheActiveTabItsToolsRead) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    // A research that runs (not one waiting for approval): its agent opens pages into the plan.
+    window->SetResearchTaskForTest("sample");
     window->OpenPlanFixtureTab();
 
     ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));

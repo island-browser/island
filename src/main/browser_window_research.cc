@@ -575,7 +575,8 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
     if (!url.has_value()) {
         return false;
     }
-    if (!research_.has_value() || !plan_tab_.has_value()) {
+    if (!ResearchOwnsAgent()) {
+        // Ordinary chat (or a plan waiting for approval): the page joins the person's space.
         AppendTabToActiveSpace(std::move(*url));
         return true;
     }

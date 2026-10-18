@@ -12,6 +12,7 @@
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
 #include "json_util.h"
+#include "research_prompt.h"
 #include "space.h"
 
 // Headless coverage of the agent seams: the tools agents call resolve to the
@@ -147,6 +148,51 @@ TEST(WindowAgentHostTest, InChatPageToolsWithoutAnIndexActOnTheActiveTab) {
     // Listing shows the active space.
     const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
     EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), ActiveSpace(*window).tab_count());
+}
+
+TEST(WindowAgentHostTest, APlanAwaitingApprovalLeavesChatInThePersonsSpace) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    WindowAgentHost host(*window);
+    ASSERT_FALSE(Call(host, "browser_open_tab",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/mine")))
+                     .is_error);
+    const std::size_t person_space = window->active_space_index();
+    ASSERT_TRUE(window->CreateSpace("Research"));
+    window->SetResearchTaskForTest("q");
+    window->OpenPlanFixtureTab();
+    ASSERT_NE(window->active_space_index(), person_space);
+
+    // The plan waits for approval: no turn runs, so the agent's calls are ordinary chat again.
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+    ASSERT_TRUE(window->research_running());
+    ASSERT_FALSE(Call(host, "browser_switch_space",
+                      Value::MakeObject().Set("space", Value::Int(static_cast<int>(person_space))))
+                     .is_error);
+
+    const BrowserWindow::AgentTabLookup lookup = window->ResolveAgentTab(std::nullopt);
+    ASSERT_TRUE(lookup.tab.has_value());
+    EXPECT_EQ(lookup.tab->space, person_space);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[lookup.tab->tab].startup_url(), "https://docs.test/mine");
+    const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
+    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), ActiveSpace(*window).tab_count());
+
+    // A page call without an index reads the person's tab, not the Plan's.
+    const agent::ToolResult read = Call(host, "page_read");
+    EXPECT_TRUE(read.is_error);
+    EXPECT_NE(read.content[0].text.find("active tab"), std::string::npos);
+
+    // A page the agent opens now lands in the person's space, not in the Plan's group.
+    const std::size_t plan_space_tabs = window->spaces()[person_space + 1].tab_count();
+    ASSERT_FALSE(Call(host, "browser_open_tab",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/chat")))
+                     .is_error);
+    EXPECT_EQ(window->spaces()[person_space + 1].tab_count(), plan_space_tabs);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[ActiveSpace(*window).active_tab_index()].startup_url(),
+              "https://docs.test/chat");
 }
 
 TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {

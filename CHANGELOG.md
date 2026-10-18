@@ -44,9 +44,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- Agent tools without a tab index act on the agent's own page, and tab indices refer to the
-  agent's space (the Plan's space during research). When that page is missing or closed, the tool
-  reports it instead of using the page on screen.
+- In ordinary chat, agent tools act on the window the person sees: calls without a tab index use the
+  active tab, and indices refer to its space. While a research runs, they act on the agent's own
+  research page in the Plan's space; a plan waiting for approval is not a running research. When
+  that page is missing or closed, the tool reports it instead of using the page on screen.
 - Choosing "Change space icon…" from the command palette opens the icon picker after the palette
   closes, not inside its own submit.
 - Focusing or blurring the Native address field repaints only its focus colors, not the whole

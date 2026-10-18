@@ -210,7 +210,8 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 - Agent tool targets (`BrowserWindow::ResolveAgentTab`, `window_agent_host.cc`). In ordinary chat the
   agent works with the window the person sees: tab indices and calls without an index refer to the
   active space and its active tab (`browser_list_tabs` lists that space). While a research runs
-  (`ResearchOwnsAgent`), the agent works in the Plan's space: indices and the listing refer to it,
+  and no plan waits for approval (`ResearchOwnsAgent`), the agent works in the Plan's space: indices
+  and the listing refer to it, and `browser_open_tab` files pages into the Plan's group;
   and a call without an index acts on `agent_tab_id_`, the agent's most recent research page
   (recorded for each research child). If that page is missing or closed, the tool errors and never
   falls back to the person's tab. Page tools need a live browser and never activate a page;

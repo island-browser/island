@@ -848,7 +848,10 @@ bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
 }
 
 bool BrowserWindow::ResearchOwnsAgent() const {
-    return research_.has_value() && plan_tab_.has_value() && TabLocation(*plan_tab_).has_value();
+    // A plan that waits for approval runs no turn, so the agent is in ordinary chat again: its
+    // calls address the window the person sees, as the sidebar's context does.
+    return research_.has_value() && !research_->awaiting_approval && plan_tab_.has_value() &&
+           TabLocation(*plan_tab_).has_value();
 }
 
 std::size_t BrowserWindow::AgentSpaceIndex() const {
