@@ -17,8 +17,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
-- The Native footer's Agent row measures the provider name against the laid-out row, so it shows
-  the whole name ("Claude Code") and ellipsizes only when it does not fit; the row's extra gaps are gone.
 - Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon on macOS or from the
   command palette ("Change space icon…") on every platform. The choice persists in the session
   (saved at once) and appears in the Native, Arc and Graphite switchers and the collapsed rail,
@@ -26,6 +24,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Native space segments with an icon show only that centered icon in equal-width segments (the
+  name stays in the tooltip, the accessible name and the sidebar header). Spaces without an icon
+  keep their name when it fits, else their initial, never a lone ellipsis.
+- Polished the Native sidebar footer into one aligned, hairline-separated control group with a
+  raised space track, same-height ghost actions, and a quieter tinted Agent row.
+- Native's Back and Forward buttons share one continuous toolbar surface, removing the thin
+  rail-colored seams beside the ghost-button group.
 - Selected segments use a neutral raised plate with normal text in every look; blue is reserved
   for actions and keyboard focus.
 - Native's Agent entry shows the provider name with a status dot (idle or working) and the
@@ -37,6 +42,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- The Native footer's Agent name fills the room between "Agent" and its status dot, measured from
+  the laid-out row, so "Claude Code" shows in full and ellipsizes only when it does not fit.
+- Arc and Graphite space chips keep their natural width; the equal-width track and centered labels
+  apply to Native only.
 - Opening the agent panel no longer hides the page and the toolbar.
 - The Native address field shows one clear accent focus ring in either theme instead of a second
   inner ring.
@@ -61,15 +70,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
-- Native space segments with an icon now show only that centered 16 DIP icon in equal-width
-  segments (the name stays in the tooltip, the accessible name and the sidebar header). Spaces
-  without an icon keep their name when it fits, else their initial, never a lone ellipsis.
-- Arc and Graphite space chips keep their natural width again; the equal-width track and centered
-  labels apply to Native only.
-- Polished the Native sidebar footer into one aligned, hairline-separated control group with a
-  raised space track, same-height ghost actions, and a quieter tinted Agent row.
-- Native's Back and Forward buttons now share one continuous toolbar surface, removing the thin
-  rail-colored seams beside the ghost-button group.
 - The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
   control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
   the most visited sites (from history, one per host, opened in the current tab). Tab and
