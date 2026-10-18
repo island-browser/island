@@ -384,6 +384,9 @@ constexpr int kNativeSegmentRadiusDip = 6;
 constexpr int kFaviconPlateRadiusDip = 6;
 constexpr int kRowFillRadiusDip = 8;
 constexpr int kPatchPollMs = 150;
+// After the bounded burst the poll ticks once a second: CEF reports no scroll events, so a
+// scrolled tab list is followed within a second without waking on every pointer move.
+constexpr int kPatchIdlePollMs = 1000;
 
 CefRefPtr<CefImage> BuildRowImage(const RowImageSpec& spec) {
     CefRefPtr<CefImage> image = CefImage::CreateImage();
@@ -2116,6 +2119,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     UpdateTabStripPreferredSize();
     RebuildCollapsedTabs();
     ApplyCollectionTheme();
+    // Tab, space and sidebar changes move the patched rows without any pointer activity.
+    PushCornerPatches();
 }
 
 void BrowserChrome::RebuildCollapsedTabs() {
@@ -2325,6 +2330,8 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     ApplyCollectionTheme();
     sidebar_->Layout();
     collapsed_rail_->Layout();
+    // Tab, space and sidebar changes move the patched rows without any pointer activity.
+    PushCornerPatches();
 }
 
 void BrowserChrome::AttachBrowserView(CefRefPtr<CefBrowserView> browser_view) {
@@ -2756,6 +2763,8 @@ void BrowserChrome::SetSidebarExpanded(bool expanded) {
     root_delegate_->SetSidebarExpanded(expanded);
     ApplyLayoutTokens();
     root_delegate_->OnLayoutChanged(root_, root_->GetBounds());
+    // Tab, space and sidebar changes move the patched rows without any pointer activity.
+    PushCornerPatches();
 }
 
 void BrowserChrome::SetAgentPanelView(CefRefPtr<CefView> view) {
@@ -3606,10 +3615,14 @@ void BrowserChrome::PushCornerPatches() {
     patch_poll_unchanged_ticks_ = 0;
     static_cast<void>(RefreshCornerPatches());
 #if defined(__APPLE__)
-    // Only macOS has a native overlay to feed. Layout and pointer activity wake this bounded
-    // poll so scrolling rows are followed without keeping a timer alive forever while idle.
-    SchedulePatchPoll();
+    // Only macOS has a native overlay to feed. Layout, pointer, tab and space changes wake the
+    // poll, which then ticks quickly for a bounded burst and slowly after it.
+    SchedulePatchPoll(kPatchPollMs);
 #endif
+}
+
+int BrowserChrome::CornerPatchPollDelayMs(const CornerPatchPollState& state) {
+    return state.continue_polling ? kPatchPollMs : kPatchIdlePollMs;
 }
 
 BrowserChrome::CornerPatchPollState BrowserChrome::AdvanceCornerPatchPoll(
@@ -3619,7 +3632,7 @@ BrowserChrome::CornerPatchPollState BrowserChrome::AdvanceCornerPatchPoll(
             .continue_polling = next < CornerPatchPollUnchangedLimit()};
 }
 
-void BrowserChrome::SchedulePatchPoll() {
+void BrowserChrome::SchedulePatchPoll(int delay_ms) {
     if (patch_poll_pending_ || detached_ || !corner_sink_) {
         return;
     }
@@ -3633,13 +3646,11 @@ void BrowserChrome::SchedulePatchPoll() {
                                        chrome->patch_poll_unchanged_ticks_,
                                        chrome->RefreshCornerPatches());
                                    chrome->patch_poll_unchanged_ticks_ = state.unchanged_ticks;
-                                   if (state.continue_polling) {
-                                       chrome->SchedulePatchPoll();
-                                   }
+                                   chrome->SchedulePatchPoll(CornerPatchPollDelayMs(state));
                                }
                            },
                            alive_)),
-                       kPatchPollMs);
+                       delay_ms);
 }
 
 void BrowserChrome::RefreshRowHover() {

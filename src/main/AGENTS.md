@@ -28,7 +28,7 @@ platform executable links.
 | `start_tiles.{h,cc}` | CEF-free speed-dial model for the start page: `BuildStartTiles` turns the most-visited history into at most six `{title, url, host}` tiles (http/https only, no credentials, one per host, host as the label fallback); `IsWebTileUrl` guards `open_tile`. `BrowserWindow` refreshes them on the page's `ready` message from `HistoryRecorder::MostVisitedAsync`, which groups visits by `WebUrlHost` before its limit of six applies |
 | `cef_address_parser.{h,cc}` | CEF-dependent URL parsing behind the policy seam |
 | `design_tokens.{h,cc}` | `ArgbColor`, the token palette shared with `tests/design/`, the Arc `canvas/selected/hover/well/plate` surfaces, `AppearanceSettings` and `ChromeTokens::Customized` (tint, density, radius, inset, shadow, side, font) |
-| `page_card.h`, `macos/page_card_mac.mm` | Native macOS overlay that rounds and shadows the page card and repaints row/pill corners (`PageCardStyle`, `CornerPatch`); no-op elsewhere |
+| `page_card.h`, `macos/page_card_mac.mm` | Native macOS overlay that rounds and shadows the page card and repaints row/pill corners (`PageCardStyle`, `CornerPatch`); no-op elsewhere. `BrowserChrome::PushCornerPatches` runs on layout, pointer, tab-strip, space-switcher and sidebar changes and starts a 150 ms poll burst (8 quiet ticks), then a 1 s tick (`CornerPatchPollDelayMs`), because CEF reports no scroll events |
 | `row_raster.{h,cc}` | CEF-free rounded-rect raster used for favicon plates (and tested) |
 | `icon_catalog.{h,cc}` | Resolves icon names/sizes/scales against `resources/island/icons/manifest.json` |
 | `app_resources.{h,cc}` | Runtime resource-directory resolution (fonts, icons) |

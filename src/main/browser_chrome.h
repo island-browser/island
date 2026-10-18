@@ -412,6 +412,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr std::size_t CornerPatchPollUnchangedLimit() { return 8; }
     [[nodiscard]] static CornerPatchPollState AdvanceCornerPatchPoll(std::size_t unchanged_ticks,
                                                                      bool patches_changed);
+    // The next poll tick: quick inside the bounded burst, one slow tick (about 1 s) after it.
+    [[nodiscard]] static int CornerPatchPollDelayMs(const CornerPatchPollState& state);
     // The corner patch that rounds the address plate at `bounds` (window DIP). Native's address
     // sits in the always-shown toolbar; the other looks' address lives in the expanded sidebar
     // only, so it has no patch while the sidebar is collapsed.
@@ -1090,7 +1092,7 @@ class BrowserChrome final : public NavigationObserver {
     void RefreshRowHover();
     [[nodiscard]] bool RefreshCornerPatches();
     void PushCornerPatches();
-    void SchedulePatchPoll();
+    void SchedulePatchPoll(int delay_ms);
     void ApplyCollapsedRailTheme();
     void UpdateAddressFocusLeadingEdge();
 

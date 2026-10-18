@@ -241,6 +241,19 @@ TEST(BrowserWindowTest,
     EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/true), arc.border);
 }
 
+TEST(BrowserWindowTest, CornerPatchPollKeepsASlowTickAfterTheQuietBurst) {
+    // Inside the burst the poll ticks quickly; after it, scrolling (which CEF does not report) is
+    // still followed by one slow tick, so the poll is never left without a next tick.
+    const int quick = BrowserChrome::CornerPatchPollDelayMs(
+        {.unchanged_ticks = 0, .continue_polling = true});
+    const int slow = BrowserChrome::CornerPatchPollDelayMs(
+        {.unchanged_ticks = BrowserChrome::CornerPatchPollUnchangedLimit(),
+         .continue_polling = false});
+    EXPECT_GT(quick, 0);
+    EXPECT_GT(slow, quick);
+    EXPECT_LE(slow, 1000);
+}
+
 TEST(BrowserWindowTest, CornerPatchPollingStopsAfterAQuietStreakAndResetsOnChange) {
     BrowserChrome::CornerPatchPollState state;
     for (std::size_t tick = 0; tick < BrowserChrome::CornerPatchPollUnchangedLimit(); ++tick) {
