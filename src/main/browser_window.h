@@ -297,6 +297,16 @@ class BrowserWindow : public CefClient,
     // attached view to reach the minimum browser age.
     [[nodiscard]] std::size_t ViewSwapCountForTest() const noexcept { return view_swap_count_; }
     [[nodiscard]] bool ViewSwapPendingForTest() const noexcept { return view_swap_pending_; }
+    // Space-icon picker: shows counted before the palette guard, so headless tests see them.
+    [[nodiscard]] std::size_t SpaceIconPickerShowsForTest() const noexcept {
+        return space_icon_picker_shows_;
+    }
+    [[nodiscard]] bool SpaceIconPickerScheduledForTest() const noexcept {
+        return space_icon_picker_scheduled_;
+    }
+    void RunScheduledSpaceIconPickerForTest() { RunScheduledSpaceIconPicker(); }
+    // Headless windows have no CEF task queue: scheduling records the task without posting it.
+    void DisableUiTaskPostingForTest() { ui_tasks_enabled_for_test_ = false; }
     // Real-gate seams: headless tests identify the tab represented by the content slot and drive
     // the same creation-age, generation and fallback callbacks production uses.
     void SetViewSwapTimeForTest(std::chrono::milliseconds since_epoch);
@@ -517,6 +527,11 @@ class BrowserWindow : public CefClient,
     void ShowCommandPalette();
     // Reopens the palette listing only the space icons (and None) for the active space.
     void ShowSpaceIconPicker();
+    // Queues ShowSpaceIconPicker on the next UI task. The palette's own submit runs inside its
+    // key/button dispatch and has just released its overlay, so the picker must not re-show
+    // the palette there.
+    void ScheduleSpaceIconPicker();
+    void RunScheduledSpaceIconPicker();
     // Opens the rename overlay for the active space. Menu-driven on macOS (no
     // key equivalent); F2 is the cross-platform accelerator.
     void BeginSpaceRenaming();
@@ -1016,6 +1031,9 @@ class BrowserWindow : public CefClient,
     std::map<std::string, TabId> plan_node_tabs_;
     // True while the command palette is the space-icon picker (no tabs, no history rows).
     bool space_icon_picker_open_ = false;
+    bool space_icon_picker_scheduled_ = false;
+    bool ui_tasks_enabled_for_test_ = true;
+    std::size_t space_icon_picker_shows_ = 0;
     bool closing_plan_after_confirmation_ = false;
     // Why the last plan action was refused (depth limit, agent busy); empty when none.
     std::string plan_notice_;

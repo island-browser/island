@@ -4708,11 +4708,36 @@ void BrowserWindow::ShowCommandPalette() {
 
 void BrowserWindow::ShowSpaceIconPicker() {
     CEF_REQUIRE_UI_THREAD();
+    ++space_icon_picker_shows_;
     if (closing_ || command_palette_ == nullptr) {
         return;
     }
     space_icon_picker_open_ = true;
     command_palette_->Show({}, {}, {}, SpaceIconPaletteCommands(), {});
+}
+
+void BrowserWindow::ScheduleSpaceIconPicker() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_icon_picker_scheduled_) {
+        return;
+    }
+    space_icon_picker_scheduled_ = true;
+    if (!ui_tasks_enabled_for_test_) {
+        // Headless tests have no CEF task queue; they run RunScheduledSpaceIconPickerForTest.
+        return;
+    }
+    // Runs after the palette's released overlay has been destroyed by its posted task (FIFO).
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window) {
+                                window->RunScheduledSpaceIconPicker();
+                            },
+                            CefRefPtr<BrowserWindow>(this))));
+}
+
+void BrowserWindow::RunScheduledSpaceIconPicker() {
+    CEF_REQUIRE_UI_THREAD();
+    space_icon_picker_scheduled_ = false;
+    ShowSpaceIconPicker();
 }
 
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
@@ -4807,7 +4832,7 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             if (selection.command.id == "sleep_inactive_tabs") {
                 static_cast<void>(SleepInactiveTabsNow());
             } else if (selection.command.id == kChangeSpaceIconCommandId) {
-                ShowSpaceIconPicker();
+                ScheduleSpaceIconPicker();
                 return;  // the picker keeps the focus
             }
             break;

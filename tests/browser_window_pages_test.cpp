@@ -1618,6 +1618,23 @@ TEST(BrowserWindowPagesTest, AStaleFallbackTimerDoesNothingToANewerAttachedView)
     EXPECT_TRUE(window->ViewSwapPendingForTest());
 }
 
+TEST(BrowserWindowPagesTest, ChangeSpaceIconSubmitShowsThePickerOnTheNextTaskNotInline) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->DisableUiTaskPostingForTest();
+    PaletteSelection selection;
+    selection.kind = PaletteEntryKind::kCommand;
+    selection.command = {.id = std::string(kChangeSpaceIconCommandId), .title = "Change"};
+    // The palette is still inside its own submit: the picker must not re-show it there.
+    window->OnCommandPaletteSubmitted(selection, "");
+    EXPECT_EQ(window->SpaceIconPickerShowsForTest(), 0U);
+    EXPECT_TRUE(window->SpaceIconPickerScheduledForTest());
+    // A second submit before the posted task runs does not queue a second picker.
+    window->OnCommandPaletteSubmitted(selection, "");
+    window->RunScheduledSpaceIconPickerForTest();
+    EXPECT_EQ(window->SpaceIconPickerShowsForTest(), 1U);
+    EXPECT_FALSE(window->SpaceIconPickerScheduledForTest());
+}
+
 TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothing) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     std::vector<std::string> sent;
