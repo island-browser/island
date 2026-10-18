@@ -836,7 +836,8 @@ class BrowserWindow : public CefClient,
     void OpenResearchSpace(const std::string& name);
     // Adds one browser page or result below the Plan tab and records the node -> tab mapping.
     // A background child (`activate` false) changes neither the selection nor the content view.
-    // Without a Plan tab in the active space it opens as an ordinary tab.
+    // If another space is active, the child stays grouped in the Plan's space in the background.
+    // Without a tracked Plan tab it opens as an ordinary tab in the active space.
     [[nodiscard]] TabId AppendPlanChildTab(std::string startup_url, std::string node_id,
                                            std::string label, bool activate);
     // The part of AppendPlanChildTab that needs the Plan's space: an activated child makes that

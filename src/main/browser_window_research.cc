@@ -525,12 +525,14 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
                                         std::string label, bool activate) {
     const std::optional<std::pair<std::size_t, std::size_t>> location =
         plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
-    if (!location.has_value() || location->first != active_space_index_) {
-        // The agent tools address the active space, so a Plan hub elsewhere gets no group: the
-        // page opens as an ordinary tab and the view stays where the person left it.
+    if (!location.has_value()) {
         AppendTabToActiveSpace(std::move(startup_url));
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
+    // Do not pull the person away from another space. The page still belongs to the research,
+    // so append it to the Plan's group in the background; it becomes active only when the Plan
+    // space is already active and the caller needs the agent's page tools to address it.
+    activate = activate && location->first == active_space_index_;
     return AppendChildOfPlan(location->first, std::move(startup_url), std::move(node_id),
                              std::move(label), activate);
 }

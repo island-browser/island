@@ -1595,21 +1595,25 @@ TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothi
     EXPECT_TRUE(sent.empty());
 }
 
-TEST(BrowserWindowPagesTest, AnAgentThatCreatesItsOwnSpaceStillGetsOrdinaryTabs) {
+TEST(BrowserWindowPagesTest, AnAgentPageOpenedFromAnotherSpaceStaysGroupedInThePlanSpace) {
     const ScopedAgentCommand command("true");
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
     window->SetAgentSendForTest([](std::string) { return true; });
     ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
-    ASSERT_TRUE(window->CreateSpace("Agent's own"));
+    ASSERT_TRUE(window->CreateSpace("Person's space"));
+    const TabId persons_tab = window->active_tab_id();
     const std::size_t plan_space_tabs = SpaceAt(*window, 1).tab_count();
 
     ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
 
-    // The hub stays in the research space; the page is an ordinary tab of the active space.
-    EXPECT_EQ(SpaceAt(*window, 1).tab_count(), plan_space_tabs);
-    ASSERT_EQ(SpaceAt(*window, 2).tab_count(), 2U);
-    EXPECT_FALSE(SpaceAt(*window, 2).tabs()[1].group_parent().has_value());
+    const Space& research = SpaceAt(*window, 1);
+    ASSERT_EQ(research.tab_count(), plan_space_tabs + 1);
+    EXPECT_EQ(research.tabs().back().group_parent(), research.tabs().front().id());
+    EXPECT_EQ(research.tabs().back().startup_url(), "https://reviews.test/laptop");
+    EXPECT_EQ(window->active_space_index(), 2U);
+    EXPECT_EQ(window->active_tab_id(), persons_tab);
+    EXPECT_EQ(SpaceAt(*window, 2).tab_count(), 1U);
 }
 
 TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {

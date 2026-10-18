@@ -20,6 +20,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Opening the agent panel no longer hides the page and the toolbar.
 - The Native address field shows one clear accent focus ring instead of a second inner ring.
 - Settings uses each look's selected-segment color instead of forcing Native's dark gray.
+- Agent-opened research pages stay grouped in the Plan's space without interrupting another space.
 
 ## [0.7.1] - 2026-10-17
 
