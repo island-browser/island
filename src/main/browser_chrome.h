@@ -374,6 +374,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
     [[nodiscard]] static ArgbColor TextfieldFocusRingColor(const ChromeTokens& tokens,
                                                            bool address_focused);
+    [[nodiscard]] static ArgbColor TextfieldOutlineColor(const ChromeTokens& tokens,
+                                                         bool address_focused);
     struct CornerPatchPollState {
         std::size_t unchanged_ticks = 0;
         bool continue_polling = true;

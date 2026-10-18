@@ -4263,7 +4263,9 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     window->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder, tokens.text_secondary.argb);
     window->SetThemeColor(CEF_ColorTextfieldSelectionBackground, tokens.accent.argb);
     window->SetThemeColor(CEF_ColorTextfieldSelectionForeground, tokens.background.argb);
-    window->SetThemeColor(CEF_ColorTextfieldOutline, tokens.border.argb);
+    window->SetThemeColor(
+        CEF_ColorTextfieldOutline,
+        BrowserChrome::TextfieldOutlineColor(tokens, address_focus_ring_suppressed_).argb);
     window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
     // CEF installs its own two-DIP FocusRing inside every textfield. While the Native address
     // field is focused, make that shared ring transparent so Chromium cannot add a contrasting

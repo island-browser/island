@@ -224,10 +224,14 @@ TEST(BrowserWindowTest, GivenNativeAddressFocusWhenTextfieldRingResolvedThenItIs
     const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
 
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(native, /*address_focused=*/true),
-              ArgbColor{});
+              (ArgbColor{.argb = 0x013A3A3DU}));
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(native, /*address_focused=*/false),
               native.accent);
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.accent);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(native, /*address_focused=*/true), native.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(native, /*address_focused=*/false),
+              native.border);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/true), arc.border);
 }
 
 TEST(BrowserWindowTest, CornerPatchPollingStopsAfterAQuietStreakAndResetsOnChange) {
