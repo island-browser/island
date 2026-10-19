@@ -44,6 +44,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- The Native address field's focus ring is one even 2 DIP accent ring that follows the 8 pt radius,
+  with no step at the globe and reload ends.
 - Arc and Graphite space chips show their full names when every chip fits the sidebar. A chip that
   does not fit shows its icon alone, never an icon beside a lone initial.
 - Native's selected tab row draws its close × and its generic globe in white (the × at 70%).

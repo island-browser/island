@@ -241,6 +241,10 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `kWorking` or `kNeedsYou`, and the status is refreshed from `RefreshAgentEntry`. The row's views
   are currently three focus stops; the meta and keycap labels should not be (review item M4, open).
 
+- Native address controls (location glyph, shield, field holder, reload, reader, agent dot) sit in
+  `address_inner_`, which takes the ring inset. While the field is focused `ComputeCornerPatches`
+  rounds that panel's corners to the inner radius (8 - 2 = 6) with the accent as the outside color,
+  so the 2 DIP ring keeps one width at the ends; square child corners would cut a notch into it.
 - Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
   clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
   grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyAddressFocusColors`

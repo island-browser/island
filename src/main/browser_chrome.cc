@@ -1250,6 +1250,15 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     // read as a single outlined field.
     address_layout_ = address_row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
     CefRefPtr<CefBoxLayout> address_layout = address_layout_;
+    // Every control sits in one inner panel that takes the ring inset. Its four corners are the
+    // only rounded edges the focus ring has to follow (ComputeCornerPatches); square child corners
+    // at the inset would cut a notch into the ring at the globe and reload ends.
+    address_inner_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    CefBoxLayoutSettings inner_settings;
+    inner_settings.horizontal = static_cast<int>(true);
+    inner_settings.between_child_spacing = 0;
+    inner_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
+    CefRefPtr<CefBoxLayout> inner_layout = address_inner_->SetToBoxLayout(inner_settings);
 
     address_location_icon_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     address_location_icon_->SetID(static_cast<int>(ChromeViewId::kAddressLocationIcon));
@@ -1258,7 +1267,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_location_icon_->SetFocusable(false);
     address_location_icon_->SetMinimumSize(
         CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
-    address_row->AddChildView(address_location_icon_);
+    address_inner_->AddChildView(address_location_icon_);
 
     // Native address indicators (spec §3): the shield sits at the left edge, the agent dot at the
     // right. Both stay hidden until SetAddressIndicators has something to show.
@@ -1269,7 +1278,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_shield_button_->SetFocusable(true);
     address_shield_button_->SetMinimumSize(CefSize(kIndicatorDip, kIndicatorDip));
     address_shield_button_->SetVisible(false);
-    address_row->AddChildView(address_shield_button_);
+    address_inner_->AddChildView(address_shield_button_);
 
     textfield_delegate_ = new TextfieldDelegate(
         this, CefSize(tokens_.spacing_6_dip * 4, control_height - kHairlineDip * 2));
@@ -1285,6 +1294,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     {
         CefBoxLayoutSettings holder_settings;
         holder_settings.horizontal = static_cast<int>(true);
+        // The field fills the holder's full height, so its edges line up with the controls beside
+        // it.
+        holder_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
         CefRefPtr<CefBoxLayout> holder_layout =
             address_field_holder_->SetToBoxLayout(holder_settings);
         address_field_holder_->AddChildView(address_field_);
@@ -1301,8 +1313,8 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
         address_field_holder_->AddChildView(address_idle_label_);
         holder_layout->SetFlexForView(address_idle_label_, 1);
     }
-    address_row->AddChildView(address_field_holder_);
-    address_layout->SetFlexForView(address_field_holder_, 1);
+    address_inner_->AddChildView(address_field_holder_);
+    inner_layout->SetFlexForView(address_field_holder_, 1);
 
     reload_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     reload_button_->SetID(static_cast<int>(ChromeViewId::kReload));
@@ -1311,7 +1323,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     reload_button_->SetFocusable(true);
     reload_button_->SetMinimumSize(
         CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
-    address_row->AddChildView(reload_button_);
+    address_inner_->AddChildView(reload_button_);
 
     // Reader view toggle: a quiet "Aa" cell at the end of the pill (no icon asset is needed, and
     // the glyph is what every reader mode uses). It is disabled on pages that are not web pages.
@@ -1323,7 +1335,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     reader_button_->SetEnabled(false);
     reader_button_->SetMinimumSize(
         CefSize(control_height - kHairlineDip * 2, control_height - kHairlineDip * 2));
-    address_row->AddChildView(reader_button_);
+    address_inner_->AddChildView(reader_button_);
 
     address_agent_dot_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     address_agent_dot_->SetID(static_cast<int>(ChromeViewId::kAddressAgentDot));
@@ -1332,7 +1344,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_agent_dot_->SetFocusable(true);
     address_agent_dot_->SetMinimumSize(CefSize(kIndicatorDip, kIndicatorDip));
     address_agent_dot_->SetVisible(false);
-    address_row->AddChildView(address_agent_dot_);
+    address_inner_->AddChildView(address_agent_dot_);
+    address_row->AddChildView(address_inner_);
+    address_layout->SetFlexForView(address_inner_, 1);
     sidebar_->AddChildView(address_row);
 
     validation_message_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
@@ -2676,7 +2690,7 @@ void BrowserChrome::ApplyLookStructure() {
     address_idle_label_->SetVisible(native_idle);
     address_field_->SetVisible(!native_idle);
     address_layout_ = address_row_->SetToBoxLayout(OutlinedLayout(address_style.outline_dip));
-    address_layout_->SetFlexForView(address_field_holder_, 1);
+    address_layout_->SetFlexForView(address_inner_, 1);
     const int navigation_size = NavigationButtonSize();
     navigation_row_delegate_->SetPreferredSize(
         CefSize(native ? 2 * navigation_size + tokens_.spacing_1_dip : 0, navigation_size));
@@ -3294,6 +3308,7 @@ void BrowserChrome::ApplyControlTheme() {
     // surface fill; the row around them paints the hairline (accent on focus).
     address_location_icon_->SetBackgroundColor(address_well.argb);
     address_field_->SetBackgroundColor(address_well.argb);
+    address_inner_->SetBackgroundColor(address_well.argb);
     address_field_holder_->SetBackgroundColor(address_well.argb);
     reload_button_->SetBackgroundColor(address_well.argb);
     reader_button_->SetBackgroundColor(address_well.argb);
@@ -3608,6 +3623,20 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
             {.x = address.x, .y = address.y, .width = address.width, .height = address.height},
             sidebar_expanded_)) {
         patches.push_back(*patch);
+    }
+    if (tokens_.look == LookPreset::kNative && address_inner_ != nullptr &&
+        address_field_ != nullptr && address_field_->HasFocus()) {
+        // The focused ring is the accent behind the inner panel: round its corners to the ring's
+        // inner radius so the ring keeps one even width around the globe and reload ends.
+        const WindowRect inner = InWindow(address_inner_);
+        if (inner.width > 0 && inner.height > 0) {
+            patches.push_back({.x = inner.x,
+                               .y = inner.y,
+                               .width = inner.width,
+                               .height = inner.height,
+                               .radius = NativeAddressRadiusDip() - kNativeFocusRingDip,
+                               .outside = AddressOutlineColor(tokens_, /*focused=*/true)});
+        }
     }
     if (tokens_.look == LookPreset::kNative && sidebar_expanded_) {
         const WindowRect agent = InWindow(agent_row_);
