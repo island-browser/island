@@ -197,13 +197,14 @@ void DimPremultipliedBgra(std::vector<std::uint8_t>& pixels, double alpha) {
     }
 }
 
-// A reduced-alpha copy of |source| (the icon of a sleeping tab); the original when the image
-// has no bitmap representation to copy.
-CefRefPtr<CefImage> DimmedImage(const CefRefPtr<CefImage>& source, double alpha) {
+// A copy of |source| with every premultiplied BGRA pixel passed through |edit|; the original when
+// the image has no bitmap representation to copy.
+template <typename Edit>
+CefRefPtr<CefImage> EditedImage(const CefRefPtr<CefImage>& source, Edit edit) {
     if (source == nullptr) {
         return source;
     }
-    CefRefPtr<CefImage> dimmed = CefImage::CreateImage();
+    CefRefPtr<CefImage> edited = CefImage::CreateImage();
     bool copied = false;
     for (const float scale : {1.0F, 2.0F}) {
         if (!source->HasRepresentation(scale)) {
@@ -218,15 +219,39 @@ CefRefPtr<CefImage> DimmedImage(const CefRefPtr<CefImage>& source, double alpha)
         }
         std::vector<std::uint8_t> pixels(data->GetSize());
         data->GetData(pixels.data(), pixels.size(), 0);
-        DimPremultipliedBgra(pixels, alpha);
-        copied = dimmed->AddBitmap(scale, width, height, CEF_COLOR_TYPE_BGRA_8888,
+        edit(pixels);
+        copied = edited->AddBitmap(scale, width, height, CEF_COLOR_TYPE_BGRA_8888,
                                    CEF_ALPHA_TYPE_PREMULTIPLIED, pixels.data(), pixels.size()) ||
                  copied;
     }
-    return copied ? dimmed : source;
+    return copied ? edited : source;
+}
+
+// A reduced-alpha copy of |source| (the icon of a sleeping tab).
+CefRefPtr<CefImage> DimmedImage(const CefRefPtr<CefImage>& source, double alpha) {
+    return EditedImage(source, [alpha](std::vector<std::uint8_t>& pixels) {
+        DimPremultipliedBgra(pixels, alpha);
+    });
+}
+
+// A white copy of a monochrome glyph at |opacity|: the glyph's shape and alpha stay, its color
+// becomes white (premultiplied white has every channel equal to its alpha).
+CefRefPtr<CefImage> WhiteGlyphImage(const CefRefPtr<CefImage>& source, double opacity) {
+    return EditedImage(source, [opacity](std::vector<std::uint8_t>& pixels) {
+        for (std::size_t i = 0; i + 3 < pixels.size(); i += 4) {
+            const auto alpha =
+                static_cast<std::uint8_t>(static_cast<double>(pixels[i + 3]) * opacity + 0.5);
+            pixels[i] = alpha;
+            pixels[i + 1] = alpha;
+            pixels[i + 2] = alpha;
+            pixels[i + 3] = alpha;
+        }
+    });
 }
 
 constexpr double kSleepingIconAlpha = 0.42;
+// The close × on Native's selected (blue) row: white at 70%.
+constexpr double kSelectedCloseOpacity = 0.7;
 constexpr double kSleepingTitleMix = 0.55;
 
 // The title color of a sleeping row: faded toward the row fill.
@@ -3447,16 +3472,27 @@ void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
              ? row_colors.title
              : (entry.sleeping ? SleepingTitleColor(colors.title, bg) : colors.title))
             .argb);
-    views.close->SetEnabledTextColors(colors.trailing.argb);
+    // Native's selected row is a blue fill with white text, so its glyphs turn white too; the
+    // close × is 70% white, the generic globe is full white.
+    const bool on_selection = tokens_.look == LookPreset::kNative && entry.active;
+    views.close->SetEnabledTextColors(
+        (on_selection ? MixColor(bg, {.argb = 0xFFFFFFFFU}, kSelectedCloseOpacity)
+                      : colors.trailing)
+            .argb);
     if (views.favicon_source != nullptr) {
-        const CefRefPtr<CefImage> source =
-            entry.sleeping ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
-                           : views.favicon_source;
+        CefRefPtr<CefImage> source = entry.sleeping
+                                         ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
+                                         : views.favicon_source;
+        if (on_selection && !views.favicon_is_page) {
+            source = WhiteGlyphImage(source, 1.0);
+        }
         SetAllStateImages(views.favicon,
                           BuildFaviconImage(source, views.favicon_is_page, tokens_.plate));
     }
     if (views.trailing_source != nullptr) {
-        SetAllStateImages(views.close, views.trailing_source);
+        SetAllStateImages(views.close, on_selection ? WhiteGlyphImage(views.trailing_source,
+                                                                      kSelectedCloseOpacity)
+                                                    : views.trailing_source);
     }
 }
 

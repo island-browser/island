@@ -44,6 +44,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- Native's selected tab row draws its close × and its generic globe in white (the × at 70%).
 - In ordinary chat, agent tools act on the window the person sees: calls without a tab index use the
   active tab, and indices refer to its space. While a research runs, they act on the agent's own
   research page in the Plan's space; a plan waiting for approval is not a running research. When
