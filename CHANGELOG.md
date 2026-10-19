@@ -24,10 +24,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
-- Native's Agent entry shows an open panel as the neutral raised plate with normal text, not a blue
-  label.
 - Command palette rows on Native: the selected row is the neutral raised plate with normal text,
   not blue. Blue stays for the active tab and focus rings.
+- Native's Agent entry shows an open panel as the neutral raised plate with normal text, not a blue
+  label.
 - Native space segments with an icon show only that centered icon in equal-width segments (the
   name stays in the tooltip, the accessible name and the sidebar header). Spaces without an icon
   keep their name when it fits, else their initial, never a lone ellipsis.
@@ -48,15 +48,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- Plan child rows show the page title, or the host before the page loads, not the raw address. The
-  Plan's instruction field spans the inspector at 30 pt with a 6 pt radius.
-- With Island's Light or Dark theme, web pages get the same prefers-color-scheme (and scrollbars);
-  System follows the OS.
-- The Native address field's focus ring is one even 2 DIP accent ring that follows the 8 pt radius,
-  with no step at the globe and reload ends.
+- Native's selected tab row draws its close × and its generic globe in white (the × at 70%).
 - Arc and Graphite space chips show their full names when every chip fits the sidebar. A chip that
   does not fit shows its icon alone, never an icon beside a lone initial.
-- Native's selected tab row draws its close × and its generic globe in white (the × at 70%).
+- The Native address field's focus ring is one even 2 DIP accent ring that follows the 8 pt radius,
+  with no step at the globe and reload ends.
+- With Island's Light or Dark theme, web pages get the same prefers-color-scheme (and scrollbars);
+  System follows the OS.
+- Plan child rows show the page title, or the host before the page loads, not the raw address. The
+  Plan's instruction field spans the inspector at 30 pt with a 6 pt radius.
 - In ordinary chat, agent tools act on the window the person sees: calls without a tab index use the
   active tab, and indices refer to its space. While a research runs, they act on the agent's own
   research page in the Plan's space; a plan waiting for approval is not a running research. When

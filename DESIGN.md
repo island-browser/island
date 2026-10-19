@@ -217,6 +217,14 @@ In dark theme the selected plate equals the track fill, so the chrome draws a `b
 outline there (`BrowserChrome::NativeSegmentColors`), and the web pages draw the same hairline as an
 inset `--segment-outline` (`#48484A`; `transparent` in light). Blue is still not used for selection.
 
+0.7.2 applies the same rule to the other Native selections. The command palette's highlighted row is
+the `segment_selected` plate with `text`, not the blue `selection` fill (the palette redesign itself
+is later work). The open Agent entry is the same plate with normal text. On the selected (blue)
+tab row, the close × is white at 70% and the generic globe is white. The address field's focus ring
+is one 2 DIP accent ring that follows the 8 pt radius: the controls sit in an inner panel whose
+corners take the 6 pt inner radius. The Plan's instruction field is 30 pt tall with radius 6 and
+`border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
+
 Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
 (`NativeSwitcherMetrics`). Its Agent row shows the provider name, a status dot (idle, working or
 needs you) and the shortcut keycap. A space with an icon shows only that icon in its switcher
