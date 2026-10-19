@@ -1899,6 +1899,29 @@ std::string BrowserChrome::CollapsedRailSpaceTooltip(const SpaceSwitcherEntrySna
     return entry.name;
 }
 
+namespace {
+
+// Whether every Arc or Graphite chip can show its full name inside `budget_dip`. A chip is its
+// icon or color dot, a gap, the name at Native's estimated 7 DIP per character (12 pt labels),
+// and the chip's inside padding.
+bool ChipNamesFit(const std::vector<SpaceSwitcherEntrySnapshot>& entries, int budget_dip,
+                  int icon_dip, int dot_dip, int gap_dip, int padding_dip) {
+    constexpr int kCharDip = 7;
+    int total = 0;
+    for (const SpaceSwitcherEntrySnapshot& entry : entries) {
+        int characters = 0;
+        for (std::size_t index = 0; index < entry.name.size();
+             index = AdvanceUtf8Character(entry.name, index)) {
+            ++characters;
+        }
+        const int mark = entry.icon_id.empty() ? dot_dip : icon_dip;
+        total += mark + gap_dip + characters * kCharDip + padding_dip;
+    }
+    return total <= budget_dip;
+}
+
+}  // namespace
+
 std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry) {
     if (entry.active) {
         return TruncateCollectionTitle(entry.name);
@@ -1915,8 +1938,17 @@ std::string BrowserChrome::SpacePillLabel(const SpaceSwitcherEntrySnapshot& entr
 }
 
 std::string BrowserChrome::SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& entry,
-                                             std::size_t space_count, LookPreset look) {
+                                             std::size_t space_count, LookPreset look,
+                                             bool chip_names_fit) {
     if (look != LookPreset::kNative) {
+        // Arc and Graphite: the full name when every chip fits, else an icon alone; an initial
+        // is only for a space with no icon and no room for its name.
+        if (entry.active || (chip_names_fit && !entry.name.empty())) {
+            return TruncateCollectionTitle(entry.name);
+        }
+        if (!entry.icon_id.empty()) {
+            return std::string();
+        }
         return SpacePillLabel(entry);
     }
     if (!entry.icon_id.empty()) {
@@ -2282,6 +2314,12 @@ void BrowserChrome::SetSpaceSwitcherEntries(
     const bool native = tokens_.look == LookPreset::kNative;
     const BrowserChrome::NativeSwitcherMetrics switcher = BrowserChrome::NativeSwitcherSizes();
     const int pill_height = native ? switcher.segment_dip : RowHeight();
+    // Arc and Graphite chips keep their natural width, so their names show whenever the whole
+    // row fits the sidebar; the budget is the sidebar width less its inner margins.
+    const bool chip_names_fit =
+        !native && ChipNamesFit(entries, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip,
+                                /*icon_dip=*/16, tokens_.spacing_2_dip, tokens_.spacing_1_dip,
+                                2 * tokens_.spacing_2_dip);
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         const bool native_icon = native && !entry.icon_id.empty();
@@ -2318,7 +2356,7 @@ void BrowserChrome::SetSpaceSwitcherEntries(
             new CollectionButtonDelegate(this, CollectionButtonAction::kActivateSpace, index);
         space_button_delegates_.push_back(name_delegate);
         views.name = CefLabelButton::CreateLabelButton(
-            name_delegate, SpaceSegmentLabel(entry, entries.size(), tokens_.look));
+            name_delegate, SpaceSegmentLabel(entry, entries.size(), tokens_.look, chip_names_fit));
         views.name->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntryName));
         views.name->SetAccessibleName(SpaceEntryAccessibleName(entry));
         views.name->SetTooltipText(entry.name);

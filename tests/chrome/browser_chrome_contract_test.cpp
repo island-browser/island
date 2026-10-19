@@ -510,8 +510,21 @@ TEST(BrowserChromeNativeContractTest, GivenIconSegmentsThenTheyShowOnlyTheIcon) 
         EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 2, LookPreset::kNative), "");
         EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kNative), "");
     }
+    // Arc and Graphite: an icon never sits beside a lone initial. Its name shows when the chips
+    // fit; otherwise the icon stands alone and the name stays in the tooltip.
     const SpaceSwitcherEntrySnapshot arc = {.name = "Work", .icon_id = "briefcase"};
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(arc, 5, LookPreset::kArc), "W");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(arc, 5, LookPreset::kArc), "");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(arc, 5, LookPreset::kArc, /*chip_names_fit=*/true),
+              "Work");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenArcAndGraphiteChipsThenNamesShowWhenTheyFit) {
+    const SpaceSwitcherEntrySnapshot inactive = {.name = "Space 2", .active = false};
+    for (const LookPreset look : {LookPreset::kArc, LookPreset::kGraphite}) {
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(inactive, 3, look, /*chip_names_fit=*/true),
+                  "Space 2");
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(inactive, 3, look), "S");
+    }
 }
 
 TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitialNeverLoneEllipsis) {

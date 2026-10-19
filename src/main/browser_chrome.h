@@ -927,8 +927,11 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static std::string TabCloseAccessibleName(const TabStripEntrySnapshot& entry);
     // Inactive space pills show only an initial; the active one shows the name.
     [[nodiscard]] static std::string SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry);
+    // The label of one space segment. Native: the icon alone, else the name or initial by room.
+    // Arc and Graphite: the name when `chip_names_fit`, else the icon alone or the initial.
     [[nodiscard]] static std::string SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& entry,
-                                                       std::size_t space_count, LookPreset look);
+                                                       std::size_t space_count, LookPreset look,
+                                                       bool chip_names_fit = false);
     [[nodiscard]] static std::string SpaceEntryAccessibleName(
         const SpaceSwitcherEntrySnapshot& entry);
 
