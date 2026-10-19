@@ -10,13 +10,34 @@ void Tab::SetStartupUrl(std::string url) { startup_url_ = std::move(url); }
 
 const std::string& Tab::startup_url() const noexcept { return startup_url_; }
 
+namespace {
+
+// The host of a web address ("developer.example.com" for "https://developer.example.com/a?b"),
+// or the address itself when it has none.
+std::string HostOf(const std::string& url) {
+    std::string rest = url;
+    const std::size_t scheme_end = rest.find("://");
+    if (scheme_end != std::string::npos) {
+        rest = rest.substr(scheme_end + 3);
+    }
+    rest = rest.substr(0, rest.find_first_of("/?#"));
+    const std::size_t at = rest.rfind('@');
+    if (at != std::string::npos) {
+        rest = rest.substr(at + 1);
+    }
+    return rest.empty() ? url : rest;
+}
+
+}  // namespace
+
 std::string Tab::DisplayTitle() const {
     const std::string& page_title = navigation_state_.snapshot().page_title;
     if (!page_title.empty()) {
         return page_title;
     }
     if (browser_view_ == nullptr && startup_url_.rfind("http", 0) == 0) {
-        return startup_url_;
+        // Before the page loads its host names it; the full address is in the agent's url field.
+        return HostOf(startup_url_);
     }
     return "Island";
 }

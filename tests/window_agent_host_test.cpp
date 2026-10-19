@@ -119,7 +119,8 @@ TEST(WindowAgentHostTest, ListTabsTitlesAnUnshownPageLikeTheSidebar) {
     const auto& listed = tabs.FindMember("tabs")->array_val;
     ASSERT_EQ(listed.size(), 2U);
     EXPECT_EQ(listed[1].StringOr("title", ""), ActiveSpace(*window).tabs()[1].DisplayTitle());
-    EXPECT_EQ(listed[1].StringOr("title", ""), "https://docs.test/a");
+    EXPECT_EQ(listed[1].StringOr("title", ""), "docs.test");
+    EXPECT_EQ(listed[1].StringOr("url", ""), "https://docs.test/a");
 }
 
 TEST(WindowAgentHostTest, InChatPageToolsWithoutAnIndexActOnTheActiveTab) {

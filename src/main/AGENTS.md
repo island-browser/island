@@ -194,7 +194,7 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   background child in the Plan's space and does not move their selection. Never swap the content
   view twice in one turn: that crashed CEF a few
   seconds later. The dev fixture appends background children (`activate=false`, no browser until
-  first shown; their `Tab::DisplayTitle` is the address and `EffectiveUrl` saves the startup
+  first shown; their `Tab::DisplayTitle` is the host (the full address stays in the agent's `url`) and `EffectiveUrl` saves the startup
   URL). Children sit right after the Plan tab's last child; a pinned Plan's children start the
   unpinned tabs, so the pinned group stays whole (`Space::AppendChildTab`). `NormalizeGroups`
   re-places a parent's children behind it after moves, pinning and restore; only the child the

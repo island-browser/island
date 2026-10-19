@@ -48,6 +48,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- Plan child rows show the page title, or the host before the page loads, not the raw address. The
+  Plan's instruction field spans the inspector at 30 pt with a 6 pt radius.
 - With Island's Light or Dark theme, web pages get the same prefers-color-scheme (and scrollbars);
   System follows the OS.
 - The Native address field's focus ring is one even 2 DIP accent ring that follows the 8 pt radius,
