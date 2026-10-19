@@ -28,7 +28,7 @@ platform executable links.
 | `start_tiles.{h,cc}` | CEF-free speed-dial model for the start page: `BuildStartTiles` turns the most-visited history into at most six `{title, url, host}` tiles (http/https only, no credentials, one per host, host as the label fallback); `IsWebTileUrl` guards `open_tile`. `BrowserWindow` refreshes them on the page's `ready` message from `HistoryRecorder::MostVisitedAsync`, which groups visits by `WebUrlHost` before its limit of six applies |
 | `cef_address_parser.{h,cc}` | CEF-dependent URL parsing behind the policy seam |
 | `design_tokens.{h,cc}` | `ArgbColor`, the token palette shared with `tests/design/`, the Arc `canvas/selected/hover/well/plate` surfaces, `AppearanceSettings` and `ChromeTokens::Customized` (tint, density, radius, inset, shadow, side, font) |
-| `page_card.h`, `macos/page_card_mac.mm` | Native macOS overlay that rounds and shadows the page card and repaints row/pill corners (`PageCardStyle`, `CornerPatch`); no-op elsewhere |
+| `page_card.h`, `macos/page_card_mac.mm` | Native macOS overlay that rounds and shadows the page card and repaints row/pill corners (`PageCardStyle`, `CornerPatch`); no-op elsewhere. `BrowserChrome::PushCornerPatches` runs on layout, pointer, tab-strip, space-switcher and sidebar changes and starts a 150 ms poll burst (8 quiet ticks), then a 1 s tick (`CornerPatchPollDelayMs`), because CEF reports no scroll events |
 | `row_raster.{h,cc}` | CEF-free rounded-rect raster used for favicon plates (and tested) |
 | `icon_catalog.{h,cc}` | Resolves icon names/sizes/scales against `resources/island/icons/manifest.json` |
 | `app_resources.{h,cc}` | Runtime resource-directory resolution (fonts, icons) |
@@ -39,7 +39,8 @@ platform executable links.
 | `sidebar_state.{h,cc}`, `collapsed_rail.h` | CEF-free expand/collapse state (persistent choice in prefs `sidebar_collapsed`, transient expansion while editing the address from the icon rail) and the icon rail's metrics plus the space-dot raster |
 | `favicon_policy.h` | CEF-free favicon rules: web pages only, 16 DIP downloads, stale-result and clear-on-navigation checks (bookkeeping lives on `Tab`) |
 | `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam |
-| `space.{h,cc}` | Named, colored space owning ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext` |
+| `space.{h,cc}`, `space_icon.h` | Named, colored space with an optional validated Lucide icon id, ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext`. `space_icon.h` owns `kSpaceIconChoices` (24 ids) and `SpaceIconPaletteCommands()` |
+| `space_icon_cache.h` | Template cache of rasterized space icons keyed by id, size and color (`SpaceIconCache<Image>`); a failed load is retried and `Clear()` drops entries. Used by `IconCatalog::LoadSpaceIcon` so switchers do not reread PNGs on each update |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
 | `pages/settings.html` | Settings shell: a section list (`data-pane` items, `aria-current`) over one `<section id=...>` pane at a time, sidebar search over rows, version footer. `settings.appearance.base_look` decides whether Space colors and Sidebar tint show (hidden for Native). Native-side focus requests (`ShowSettingsSection`, dev `settings:<section>`) carry a `focus_seq` from `SettingsFocus` (`settings_focus.h`), so the page opens a repeated section again; they wait until the page has loaded (`LocalPage::loaded()`) |
@@ -189,16 +190,74 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   is the Plan hub, so the view swaps once) and the research prompt no longer asks the agent to
   create one. `OpenAgentTab` appends the page as a child and activates it
   (`AppendPlanChildTab(..., activate=true)`) so the agent's page tools find a live browser: one
-  swap per MCP call. Never swap the content view twice in one turn: that crashed CEF a few
+  swap per MCP call. If the person has switched to another space, the page instead opens as a
+  background child in the Plan's space and does not move their selection. Never swap the content
+  view twice in one turn: that crashed CEF a few
   seconds later. The dev fixture appends background children (`activate=false`, no browser until
-  first shown; their `Tab::DisplayTitle` is the address and `EffectiveUrl` saves the startup
+  first shown; their `Tab::DisplayTitle` is the host (the full address stays in the agent's `url`) and `EffectiveUrl` saves the startup
   URL). Children sit right after the Plan tab's last child; a pinned Plan's children start the
   unpinned tabs, so the pinned group stays whole (`Space::AppendChildTab`). `NormalizeGroups`
   re-places a parent's children behind it after moves, pinning and restore; only the child the
-  person dragged away is ungrouped. A hub outside the active space (an agent that made its own
-  space) gets no group. `BrowserWindow` maps the running `BuildPlanGraph` node id to the opened
-  `TabId`. `NavigateTab` and the agent's back/forward/reload refuse the Plan tab
-  (`IsPlanTabIndex`). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
+  person dragged away is ungrouped. An ordinary tab dropped inside a child run lands after the
+  complete run, and `MoveTab` reports whether its final position changed. `BrowserWindow` maps
+  the running `BuildPlanGraph` node id to the opened `TabId`. `NavigateTab` and the agent's
+  back/forward/reload refuse the Plan tab
+  (`IsPlanTabIndex`; `IsAgentPlanTab` for the agent's targets). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
   every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
   deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
   the page has no live frame; removing the Plan's space stops the research (no dialog).
+
+- Agent tool targets (`BrowserWindow::ResolveAgentTab`, `window_agent_host.cc`). In ordinary chat the
+  agent works with the window the person sees: tab indices and calls without an index refer to the
+  active space and its active tab (`browser_list_tabs` lists that space). While a research runs and
+  no plan waits for approval (`ResearchOwnsAgent`), the agent works in the Plan's space: indices and
+  the listing refer to it, `browser_open_tab` files pages into the Plan's group, and a call without
+  an index acts on `agent_tab_id_`, the agent's most recent research page. That id is recorded for
+  each research child and cleared when a research starts or ends. If the page is missing or closed,
+  the tool errors and never falls back to the person's tab. Page tools need a live browser and never
+  activate a page. A research page without a browser gets a `NoLivePageText` error that tells the
+  agent to report the source unread, because activating it would move the person's view.
+  `browser_navigate` and pinning change a page in another space in place; `browser_activate_tab`
+  switches the person's space on purpose; `browser_close_tab` works only in the space on screen.
+
+- Space icons (add one): (1) add the locked Lucide SVG source (see `tools/icon_pipeline/AGENTS.md`) and its
+  entry in `tools/icon_pipeline/icon-sources.lock.json`; the pipeline pins that file with `kLockHash` in
+  `tools/icon_pipeline/icon_pipeline.cc`, so update the constant with the lock; (2) add its entry to
+  `kSpaceIconChoices` in `space_icon.h` (the array size changes with it); (3) run
+  `tools/icon_pipeline/run.sh generate` to regenerate the PNGs and `run.sh verify` to check them; (4) update the PNG count in the root
+  `CMakeLists.txt` (`816` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
+  The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
+  switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
+  none.
+- Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
+  (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
+  the icon. Each command submit must reach the host after the palette released its overlay, so the
+  picker is scheduled with `ScheduleSpaceIconPicker` (a posted task). To add another palette command,
+  append a `PaletteCommandEntry` to the command list in `BrowserWindow::ShowCommandPalette` and
+  handle its id in `OnCommandPaletteSubmitted`. Return re-applies the field's text through
+  `CommandPaletteModel::SetQuery`, which is a no-op for an unchanged query: resetting the highlight
+  there once made Return submit row 0 whatever the arrow keys chose (so the icon picker never
+  opened).
+- Web color mode: the Light and Dark themes also set the pages' `prefers-color-scheme` (and
+  scrollbars) through `CefRequestContext::SetChromeColorScheme`. `BrowserWindow::ApplyWebColorScheme`
+  runs from `ApplyTheme` and `Space::SetWebColorScheme` stores the mode, so a context created later
+  gets it too; System passes `CEF_COLOR_VARIANT_SYSTEM`. The setter compares the current mode first,
+  because the color-mode change notifies the theme path again.
+- Native's Agent row (`kRailAgentButton`) has three views: the name (`agent_button_`, fitted by
+  `FitAgentEntryName` to the room between the label and the status dot), the status dot and the
+  keycap (`agent_keycap_`). `AgentEntryStatus` drives the dot: `AgentActivity` is `kIdle`,
+  `kWorking` or `kNeedsYou`, and the status is refreshed from `RefreshAgentEntry`. The row's views
+  are currently three focus stops; the meta and keycap labels should not be (review item M4, open).
+
+- Native address controls (location glyph, shield, field holder, reload, reader, agent dot) sit in
+  `address_inner_`, which takes the ring inset. While the field is focused `ComputeCornerPatches`
+  rounds that panel's corners to the inner radius (8 - 2 = 6) with the accent as the outside color,
+  so the 2 DIP ring keeps one width at the ends; square child corners would cut a notch into it.
+- Native address focus ring: Chromium's inner textfield ring is `CEF_ColorFocusableBorderFocused`,
+  clamped to a minimum contrast against `CEF_ColorWindowBackground`; a dark ring is lifted to a
+  grey (94,94,94). While the Native address field is focused `BrowserWindow::ApplyAddressFocusColors`
+  sets the ring to the plate fill and the window background to the opposite extreme
+  (`BrowserChrome::TextfieldFocusRingColor/Backdrop`), so only the row's accent ring shows. Focus
+  and blur call `SetAddressFocusRingSuppressed`, which repaints just those colors and calls
+  `ThemeChanged` (the chrome reapplies its colors); it never runs a full `ApplyTheme`, and other
+  looks skip the repaint because their helpers do not change.

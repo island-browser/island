@@ -13,6 +13,86 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-19
+
+### Added
+
+- Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon on macOS or from the
+  command palette ("Change space icon…") on every platform. The choice persists in the session
+  (saved at once) and appears in the Native, Arc and Graphite switchers and the collapsed rail,
+  where the active space keeps a selected plate. A non-string `icon` in a session is ignored.
+
+### Changed
+
+- Command palette rows on Native: the selected row is the neutral raised plate with normal text,
+  not blue. Blue stays for the active tab and focus rings.
+- Native's Agent entry shows an open panel as the neutral raised plate with normal text, not a blue
+  label.
+- Native space segments with an icon show only that centered icon in equal-width segments (the
+  name stays in the tooltip, the accessible name and the sidebar header). Spaces without an icon
+  keep their name when it fits, else their initial, never a lone ellipsis.
+- Polished the Native sidebar footer into one aligned, hairline-separated control group with a
+  raised space track, same-height ghost actions, and a quieter tinted Agent row.
+- Native's Back and Forward buttons share one continuous toolbar surface, removing the thin
+  rail-colored seams beside the ghost-button group.
+- Selected segments use a neutral raised plate with normal text in every look; blue is reserved
+  for actions and keyboard focus.
+- Native's Agent entry shows the provider name with a status dot (idle or working) and the
+  shortcut keycap, on the sidebar's bottom row.
+- Streaming agent status updates use the session's permission count instead of repeatedly scanning
+  the full transcript.
+- macOS rounded-corner patches stop their quick polling after the chrome settles, wake on layout,
+  pointer, tab, space and sidebar changes, and follow scrolling within about a second.
+- Downgrade note: 0.7.1 ignores a space's `icon` and rewrites the session without it, so going
+  0.7.2 → 0.7.1 → 0.7.2 drops every chosen space icon.
+
+### Fixed
+
+- Native's selected tab row draws its close × and its generic globe in white (the × at 70%).
+- Arc and Graphite space chips show their full names when every chip fits the sidebar. A chip that
+  does not fit shows its icon alone, never an icon beside a lone initial.
+- The Native address field's focus ring is one even 2 DIP accent ring that follows the 8 pt radius,
+  with no step at the globe and reload ends.
+- With Island's Light or Dark theme, web pages get the same prefers-color-scheme (and scrollbars);
+  System follows the OS.
+- Plan child rows show the page title, or the host before the page loads, not the raw address. The
+  Plan's instruction field spans the inspector at 30 pt with a 6 pt radius.
+- In ordinary chat, agent tools act on the window the person sees: calls without a tab index use the
+  active tab, and indices refer to its space. While a research runs, they act on the agent's own
+  research page in the Plan's space; a plan waiting for approval is not a running research. When
+  that page is missing or closed, the tool reports it instead of using the page on screen.
+- Choosing "Change space icon…" from the command palette with the keyboard opens the icon picker.
+  Return re-applied the unchanged query, which reset the arrowed row, so it submitted the first row
+  instead.
+- Focusing or blurring the Native address field repaints only its focus colors, not the whole
+  window.
+- Selected segments on the Settings, Start and Plan pages have an outline in dark theme, so the
+  selected option is distinguishable.
+- The Native footer's Agent name fills the room between "Agent" and its status dot, measured from
+  the laid-out row, so "Claude Code" shows in full and ellipsizes only when it does not fit.
+- Arc and Graphite space chips keep their natural width; the equal-width track and centered labels
+  apply to Native only.
+- Opening the agent panel no longer hides the page and the toolbar.
+- The Native address field shows one clear accent focus ring in either theme instead of a second
+  inner ring.
+- Focusing the address field on an Island page no longer exposes its embedded data URL; the start
+  page stays empty and other built-in pages use short `island://` addresses.
+- Settings uses each look's selected-segment color instead of forcing Native's dark gray.
+- Agent-opened research pages stay grouped in the Plan's space without interrupting another space.
+- Moving a regular tab into a research group places it after the group without reporting a
+  phantom move.
+- Closing a split-view window detaches both page panes and the divider cleanly.
+- Windows prefers Segoe UI Variable for Native chrome and falls back to Segoe UI.
+- Settings and other internal pages respect the same young-browser swap guard as ordinary tabs.
+- The research prompt asks the agent not to purchase, post or delete on a site or type passwords or
+  payment details, which the Plan's limits and the README state; a step that needs them asks first.
+
+### Known limitations
+
+- Research reads each source while its space is shown. If you switch to another space, the
+  research's pages that have not been shown yet have no browser: the agent reports those sources
+  as unread instead of reading them, and does not activate them. Background reading is not in 0.7.2.
+
 ## [0.7.1] - 2026-10-17
 
 ### Fixed
@@ -389,7 +469,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2
 [0.7.1]: https://github.com/island-browser/island/releases/tag/v0.7.1
 [0.7.0]: https://github.com/island-browser/island/releases/tag/v0.7.0
 [0.6.2]: https://github.com/island-browser/island/releases/tag/v0.6.2

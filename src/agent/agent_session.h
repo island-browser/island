@@ -71,6 +71,9 @@ class AgentSession {
     [[nodiscard]] AcpState state() const noexcept;
     [[nodiscard]] bool busy() const noexcept;
     [[nodiscard]] bool running() const noexcept { return process_ != nullptr; }
+    [[nodiscard]] std::size_t pending_permission_count() const noexcept {
+        return client_ != nullptr ? client_->pending_permission_count() : 0;
+    }
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
     [[nodiscard]] const AgentTranscript& transcript() const noexcept { return transcript_; }
     [[nodiscard]] const AgentSessionConfig& config() const noexcept { return config_; }

@@ -186,6 +186,24 @@ std::string LocalPage::PageUrl(LocalPageKind kind) {
            CefBase64Encode(html.data(), html.size()).ToString();
 }
 
+std::string_view LocalPage::DisplayUrl(LocalPageKind kind) noexcept {
+    switch (kind) {
+        case LocalPageKind::kAgent:
+            return "island://agent";
+        case LocalPageKind::kSettings:
+            return "island://settings";
+        case LocalPageKind::kTabOverview:
+            return "island://tabs";
+        case LocalPageKind::kStart:
+            return {};
+        case LocalPageKind::kReport:
+            return "island://report";
+        case LocalPageKind::kPlan:
+            return "island://plan";
+    }
+    return "island://local-page";
+}
+
 std::optional<json::Value> LocalPage::DecodeMessage(std::string_view console_text) {
     if (console_text.substr(0, kMessagePrefix.size()) != kMessagePrefix) return std::nullopt;
     std::optional<json::Value> message = json::Parse(console_text.substr(kMessagePrefix.size()));

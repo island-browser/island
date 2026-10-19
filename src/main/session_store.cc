@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "json_util.h"
+#include "space_icon.h"
 
 namespace island {
 
@@ -72,6 +73,10 @@ void WriteSpaceState(json::Writer& w, const SpaceState& space) {
     w.StringValue(space.name);
     w.Key("color_argb");
     w.UintValue(space.color_argb);
+    if (!space.icon_id.empty()) {
+        w.Key("icon");
+        w.StringValue(space.icon_id);
+    }
 
     w.Key("tabs");
     w.StartArray();
@@ -182,6 +187,12 @@ LoadResult ParseSessionState(const json::Value& root) {
             return {SessionState::Default(), SessionError::kSchemaError};
         }
         space_state.color_argb = static_cast<std::uint32_t>(color);
+        if (const json::Value* icon = space_val.FindMember("icon")) {
+            // A wrong-typed icon is ignored like an unknown id; it must not drop the session.
+            if (icon->IsString()) {
+                space_state.icon_id = NormalizeSpaceIconId(icon->string_val);
+            }
+        }
 
         // Parse tabs
         const json::Array& tabs_arr = space_val.FindMember("tabs")->array_val;

@@ -3,11 +3,12 @@
 #include <algorithm>
 
 #include "include/cef_request_context_handler.h"
+#include "space_icon.h"
 
 namespace island {
 
-Space::Space(SpaceId id, std::string name, SpaceColor color)
-    : id_(id), name_(std::move(name)), color_(color) {}
+Space::Space(SpaceId id, std::string name, SpaceColor color, std::string icon_id)
+    : id_(id), name_(std::move(name)), color_(color), icon_id_(NormalizeSpaceIconId(icon_id)) {}
 
 SpaceId Space::id() const noexcept { return id_; }
 
@@ -15,9 +16,13 @@ const std::string& Space::name() const noexcept { return name_; }
 
 SpaceColor Space::color() const noexcept { return color_; }
 
+const std::string& Space::icon_id() const noexcept { return icon_id_; }
+
 void Space::Rename(std::string name) { name_ = std::move(name); }
 
 void Space::SetColor(SpaceColor color) { color_ = color; }
+
+void Space::SetIconId(std::string icon_id) { icon_id_ = NormalizeSpaceIconId(icon_id); }
 
 const std::vector<Tab>& Space::tabs() const noexcept { return tabs_; }
 
@@ -233,7 +238,8 @@ bool Space::MoveTab(std::size_t from_index, std::size_t to_index) {
         }
     }
     NormalizeGroups(moved_id);
-    return true;
+    const std::optional<std::size_t> moved_index = IndexOfTab(moved_id);
+    return moved_index.has_value() && *moved_index != from_index;
 }
 
 bool Space::SetTabPinned(TabId id, bool pinned) {
@@ -253,7 +259,8 @@ bool Space::SetTabPinned(TabId id, bool pinned) {
     // (just after the remaining pinned tabs) is count.
     const std::size_t count = pinned_count();
     const std::size_t target = pinned ? count - 1 : count;
-    return MoveTab(*index, target);
+    static_cast<void>(MoveTab(*index, target));
+    return true;
 }
 
 std::size_t Space::pinned_count() const noexcept {
@@ -294,6 +301,18 @@ void Space::CreateRequestContextIfNeeded(const std::string& cache_path) const {
     // is not yet initialized (e.g. in tests) because it dereferences a null
     // global context reference.
     request_context_ = CefRequestContext::CreateContext(settings, nullptr);
+    if (web_color_scheme_ != CEF_COLOR_VARIANT_SYSTEM) {
+        request_context_->SetChromeColorScheme(web_color_scheme_, 0);
+    }
+}
+
+void Space::SetWebColorScheme(cef_color_variant_t scheme) {
+    web_color_scheme_ = scheme;
+    // Only a live context needs the call; the check keeps a color-mode notification that
+    // re-enters the theme path from calling back into the context.
+    if (request_context_ && request_context_->GetChromeColorSchemeMode() != scheme) {
+        request_context_->SetChromeColorScheme(scheme, 0);
+    }
 }
 
 CefRefPtr<CefRequestContext> Space::request_context() const noexcept {

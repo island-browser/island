@@ -30,8 +30,9 @@ not bundle a model: it starts the agent program you already use.
 
 **Research you can steer.** Ask a question in Research mode and the agent first proposes a plan.
 You see it as a graph in a pinned Plan tab. You edit it, skip branches, add your own, and nothing
-runs until you press **Run plan**. The plan states its limits up front: it signs in to a site only
-after asking you, and it never purchases, posts or deletes. The agent cannot approve its own plan.
+runs until you press **Run plan**. The plan lists its limits up front: the agent is asked to sign in to a
+site only after asking you, and not to purchase, post or delete. Island does not yet enforce those
+limits in code. The agent cannot approve its own plan.
 
 **Privacy is built in.** Ads and trackers are blocked natively, before subresources load, on
 Brave's open-source `adblock` engine with EasyList and EasyPrivacy. History search runs on your

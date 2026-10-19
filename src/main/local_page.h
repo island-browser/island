@@ -71,6 +71,9 @@ class LocalPage final {
 
     // The data: URL a page's browser loads.
     [[nodiscard]] static std::string PageUrl(LocalPageKind kind);
+    // The short address Island shows instead of the embedded data: document. The start page is
+    // intentionally empty so focusing the address field presents its placeholder.
+    [[nodiscard]] static std::string_view DisplayUrl(LocalPageKind kind) noexcept;
     // Decodes a console line from a page; std::nullopt for anything that is
     // not a well-formed page message.
     [[nodiscard]] static std::optional<json::Value> DecodeMessage(std::string_view console_text);

@@ -12,6 +12,7 @@
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
 #include "json_util.h"
+#include "research_prompt.h"
 #include "space.h"
 
 // Headless coverage of the agent seams: the tools agents call resolve to the
@@ -118,13 +119,128 @@ TEST(WindowAgentHostTest, ListTabsTitlesAnUnshownPageLikeTheSidebar) {
     const auto& listed = tabs.FindMember("tabs")->array_val;
     ASSERT_EQ(listed.size(), 2U);
     EXPECT_EQ(listed[1].StringOr("title", ""), ActiveSpace(*window).tabs()[1].DisplayTitle());
-    EXPECT_EQ(listed[1].StringOr("title", ""), "https://docs.test/a");
+    EXPECT_EQ(listed[1].StringOr("title", ""), "docs.test");
+    EXPECT_EQ(listed[1].StringOr("url", ""), "https://docs.test/a");
+}
+
+TEST(WindowAgentHostTest, InChatPageToolsWithoutAnIndexActOnTheActiveTab) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_FALSE(Call(host, "browser_open_tab",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/agent")))
+                     .is_error);
+    const std::size_t agent_space = window->active_space_index();
+    const std::size_t agent_tab = ActiveSpace(*window).active_tab_index();
+    ASSERT_TRUE(window->CreateSpace("Personal"));
+
+    // No research runs: a call without an index is about the tab the person is viewing.
+    EXPECT_FALSE(Call(host, "browser_navigate",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/next")))
+                     .is_error);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "https://docs.test/next");
+    EXPECT_EQ(window->spaces()[agent_space].tabs()[agent_tab].startup_url(),
+              "https://docs.test/agent");
+
+    // Reads without an index report the active tab, not an agent page.
+    const agent::ToolResult read = Call(host, "page_read");
+    EXPECT_TRUE(read.is_error);
+    EXPECT_NE(read.content[0].text.find("active tab"), std::string::npos);
+
+    // Listing shows the active space.
+    const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
+    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), ActiveSpace(*window).tab_count());
+}
+
+TEST(WindowAgentHostTest, APlanAwaitingApprovalLeavesChatInThePersonsSpace) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    WindowAgentHost host(*window);
+    ASSERT_FALSE(Call(host, "browser_open_tab",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/mine")))
+                     .is_error);
+    const std::size_t person_space = window->active_space_index();
+    ASSERT_TRUE(window->CreateSpace("Research"));
+    window->SetResearchTaskForTest("q");
+    window->OpenPlanFixtureTab();
+    ASSERT_NE(window->active_space_index(), person_space);
+
+    // The plan waits for approval: no turn runs, so the agent's calls are ordinary chat again.
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+    ASSERT_TRUE(window->research_running());
+    ASSERT_FALSE(Call(host, "browser_switch_space",
+                      Value::MakeObject().Set("space", Value::Int(static_cast<int>(person_space))))
+                     .is_error);
+
+    const BrowserWindow::AgentTabLookup lookup = window->ResolveAgentTab(std::nullopt);
+    ASSERT_TRUE(lookup.tab.has_value());
+    EXPECT_EQ(lookup.tab->space, person_space);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[lookup.tab->tab].startup_url(), "https://docs.test/mine");
+    const Value tabs = *json::Parse(Call(host, "browser_list_tabs").content[0].text);
+    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), ActiveSpace(*window).tab_count());
+
+    // A page call without an index reads the person's tab, not the Plan's.
+    const agent::ToolResult read = Call(host, "page_read");
+    EXPECT_TRUE(read.is_error);
+    EXPECT_NE(read.content[0].text.find("active tab"), std::string::npos);
+
+    // A page the agent opens now lands in the person's space, not in the Plan's group.
+    const std::size_t plan_space_tabs = window->spaces()[person_space + 1].tab_count();
+    ASSERT_FALSE(Call(host, "browser_open_tab",
+                      Value::MakeObject().Set("url", Value::String("https://docs.test/chat")))
+                     .is_error);
+    EXPECT_EQ(window->spaces()[person_space + 1].tab_count(), plan_space_tabs);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[ActiveSpace(*window).active_tab_index()].startup_url(),
+              "https://docs.test/chat");
+}
+
+TEST(WindowAgentHostTest, ANewResearchDoesNotInheritThePreviousAgentPage) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->SetResearchTaskForTest("first");
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    // The research children are recorded as the agent's pages, so a call without an index
+    // reaches the first research's last page.
+    ASSERT_TRUE(window->ResolveAgentTab(std::nullopt).tab.has_value());
+
+    ResearchOutcome cancelled;
+    cancelled.kind = ResearchOutcome::Kind::kCancelled;
+    cancelled.message = "Research cancelled.";
+    window->CompleteResearch(cancelled);
+    window->SetResearchTaskForTest("second");
+
+    // The second research has not opened a page yet: the old one must not answer for it.
+    const BrowserWindow::AgentTabLookup lookup = window->ResolveAgentTab(std::nullopt);
+    EXPECT_FALSE(lookup.tab.has_value());
+    EXPECT_EQ(lookup.error, BrowserWindow::AgentTabError::kNoAgentPage);
+}
+
+TEST(WindowAgentHostTest, AResearchPageWithoutABrowserSaysNotToActivateIt) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->SetResearchTaskForTest("q");
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    WindowAgentHost host(*window);
+
+    // The headless window has no browsers, so the research's last page is not shown.
+    for (const agent::ToolResult& result :
+         {Call(host, "page_read"), Call(host, "browser_back"),
+          Call(host, "page_read", Value::MakeObject().Set("tab", Value::Int(2)))}) {
+        EXPECT_TRUE(result.is_error);
+        EXPECT_NE(result.content[0].text.find("no live page"), std::string::npos)
+            << result.content[0].text;
+        EXPECT_NE(result.content[0].text.find("Do not activate it"), std::string::npos)
+            << result.content[0].text;
+    }
 }
 
 TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest("data:text/html,plan");
     window->OpenPlanFixtureTab();
+    window->TargetAgentPageForTest(0, 0);
     WindowAgentHost host(*window);
     ASSERT_TRUE(window->IsPlanTabIndex(std::nullopt));
 
@@ -146,6 +262,7 @@ TEST(WindowAgentHostTest, PageToolsRefuseThePlanTabEvenAfterItIsActivated) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest("data:text/html,plan");
     window->OpenPlanFixtureTab();
+    window->TargetAgentPageForTest(0, 0);
     WindowAgentHost host(*window);
     ASSERT_TRUE(window->IsPlanTabIndex(std::nullopt));
 

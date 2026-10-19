@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <utility>
 
+#include "space_icon.h"
+
 namespace island {
 namespace {
 
@@ -98,6 +100,31 @@ PaletteMatchRank ClassifyPaletteMatch(std::string_view candidate, std::string_vi
         return PaletteMatchRank::kSubsequence;
     }
     return PaletteMatchRank::kNone;
+}
+
+std::vector<PaletteCommandEntry> SpaceIconPaletteCommands() {
+    std::vector<PaletteCommandEntry> commands;
+    commands.reserve(kSpaceIconChoices.size() + 1U);
+    commands.push_back({.id = std::string(kSpaceIconCommandPrefix) + "none", .title = "None"});
+    for (const SpaceIconChoice& choice : kSpaceIconChoices) {
+        commands.push_back({.id = std::string(kSpaceIconCommandPrefix) + std::string(choice.id),
+                            .title = std::string(choice.label)});
+    }
+    return commands;
+}
+
+std::optional<std::string> ParseSpaceIconCommandId(std::string_view command_id) {
+    if (command_id.substr(0, kSpaceIconCommandPrefix.size()) != kSpaceIconCommandPrefix) {
+        return std::nullopt;
+    }
+    const std::string_view icon = command_id.substr(kSpaceIconCommandPrefix.size());
+    if (icon == "none") {
+        return std::string();
+    }
+    if (!IsKnownSpaceIconId(icon)) {
+        return std::nullopt;
+    }
+    return std::string(icon);
 }
 
 std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
@@ -247,6 +274,11 @@ void CommandPaletteModel::SetSpaces(std::vector<PaletteSpaceEntry> spaces) {
 }
 
 void CommandPaletteModel::SetQuery(std::string query) {
+    if (query == query_) {
+        // The same draft (the query field echoes it on Return) keeps the highlight the user
+        // moved with the arrow keys and any rejection the last submit surfaced.
+        return;
+    }
     query_ = std::move(query);
     highlighted_index_ = 0;
     last_rejection_.reset();

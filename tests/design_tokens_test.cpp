@@ -101,6 +101,7 @@ TEST(NativeLookTokensTest, LightMatchesTheSpec) {
     EXPECT_EQ(t.warning_text.argb, 0xFF6A4A00U);
     EXPECT_EQ(t.success.argb, 0xFF248A3DU);
     EXPECT_EQ(t.danger.argb, 0xFFD70015U);
+    EXPECT_EQ(t.segment_selected.argb, 0xFFE3E3E8U);
     EXPECT_EQ(t.branch[0].argb, 0xFF0A64D8U);
     EXPECT_EQ(t.branch[1].argb, 0xFF8E44ADU);
     EXPECT_EQ(t.branch[2].argb, 0xFFC25400U);
@@ -128,6 +129,7 @@ TEST(NativeLookTokensTest, DarkMatchesTheSpec) {
     EXPECT_EQ(t.warning_text.argb, 0xFFFFD60AU);
     EXPECT_EQ(t.success.argb, 0xFF30D158U);
     EXPECT_EQ(t.danger.argb, 0xFFFF453AU);
+    EXPECT_EQ(t.segment_selected.argb, 0xFF3A3A3DU);
     EXPECT_EQ(t.branch[0].argb, 0xFF0A84FFU);
     EXPECT_EQ(t.branch[1].argb, 0xFFBF5AF2U);
     EXPECT_EQ(t.branch[2].argb, 0xFFFF9F0AU);
@@ -144,6 +146,15 @@ TEST(NativeLookTokensTest, EveryTextPairPassesAa) {
         EXPECT_GE(ContrastRatio(white, t.selection), 4.5);
         EXPECT_GE(ContrastRatio(t.accent_text, t.accent_soft), 4.5);
         EXPECT_GE(ContrastRatio(t.warning_text, t.warning_bg), 4.5);
+    }
+}
+
+TEST(ChromeTokensTest, EveryLookUsesTheNeutralSelectedSegmentPlate) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        EXPECT_EQ(ChromeTokens::ForLook(look, ChromeTheme::kLight).segment_selected.argb,
+                  0xFFE3E3E8U);
+        EXPECT_EQ(ChromeTokens::ForLook(look, ChromeTheme::kDark).segment_selected.argb,
+                  0xFF3A3A3DU);
     }
 }
 

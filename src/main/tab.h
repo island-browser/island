@@ -44,7 +44,7 @@ class Tab {
     [[nodiscard]] const std::string& startup_url() const noexcept;
 
     // The row title everyone shows (sidebar, agent tab list): the page title, else a never-shown
-    // web page (a background research page) names its address, else "Island".
+    // web page (a background research page) names its host, else "Island".
     [[nodiscard]] std::string DisplayTitle() const;
 
     // Arc-style pinned tabs sit in their own group at the top of the sidebar

@@ -433,18 +433,21 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
                                          ChromeViewId::kRailFooter, ChromeViewId::kActivePage}));
     const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
     ASSERT_NE(footer, nullptr);
-    // Top to bottom: the switcher row, then the full-width Agent button at the very bottom
-    // (the brief's bottom-up order: Agent first, then the switcher row above it).
-    EXPECT_EQ(ChildIds(*footer),
-              (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
-                                         ChromeViewId::kRailAgentButton}));
+    // kDivider is the one-DIP hairline immediately above the footer. Top to bottom inside it:
+    // the switcher row, then the aligned Agent row at the very bottom.
+    EXPECT_EQ(ChildIds(*footer), (std::vector<ChromeViewId>{ChromeViewId::kRailSwitcherRow,
+                                                            ChromeViewId::kRailAgentRow}));
+    const ChromeViewTreeNode* agent_row = FindChild(*footer, ChromeViewId::kRailAgentRow);
+    ASSERT_NE(agent_row, nullptr);
+    EXPECT_EQ(ChildIds(*agent_row), (std::vector<ChromeViewId>{ChromeViewId::kRailAgentButton,
+                                                               ChromeViewId::kRailAgentMeta,
+                                                               ChromeViewId::kRailAgentKeycap}));
     const ChromeViewTreeNode* switcher_row = FindChild(*footer, ChromeViewId::kRailSwitcherRow);
     ASSERT_NE(switcher_row, nullptr);
     EXPECT_EQ(ChildIds(*switcher_row),
-              (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcher,
-                                         ChromeViewId::kRailNewSpaceButton,
-                                         ChromeViewId::kRailTabsButton,
-                                         ChromeViewId::kRailSettingsButton}));
+              (std::vector<ChromeViewId>{
+                  ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailNewSpaceButton,
+                  ChromeViewId::kRailTabsButton, ChromeViewId::kRailSettingsButton}));
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailSwitcherRow), 1076);
 }
 
@@ -476,8 +479,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFoll
 
 TEST(BrowserChromeNativeContractTest, GivenNativeSpacesWhenProjectedThenEachSegmentHasNoColorMark) {
     const std::vector<TabStripEntrySnapshot> tabs = {{.title = "Island"}};
-    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
-        {.name = "Default", .active = true}, {.name = "Work"}};
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {{.name = "Default", .active = true},
+                                                            {.name = "Work"}};
     const ChromeViewTreeNode tree =
         BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
     const ChromeViewTreeNode* switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
@@ -489,12 +492,67 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSpacesWhenProjectedThenEachSegm
     }
 }
 
+TEST(BrowserChromeContractTest, GivenAnIconThenItReplacesTheArcColorMark) {
+    const std::vector<SpaceSwitcherEntrySnapshot> spaces = {
+        {.name = "Work", .icon_id = "briefcase", .active = true}};
+    const ChromeViewTreeNode tree = BrowserChrome::CollectionCountContract({}, spaces);
+    const ChromeViewTreeNode* switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
+    ASSERT_NE(switcher, nullptr);
+    ASSERT_EQ(switcher->children.size(), 1U);
+    EXPECT_EQ(ChildIds(switcher->children[0]),
+              (std::vector<ChromeViewId>{ChromeViewId::kSpaceSwitcherEntryName}));
+}
+
+TEST(BrowserChromeNativeContractTest, GivenIconSegmentsThenTheyShowOnlyTheIcon) {
+    for (const bool active : {false, true}) {
+        const SpaceSwitcherEntrySnapshot icon = {
+            .name = "Work", .icon_id = "briefcase", .active = active};
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 2, LookPreset::kNative), "");
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(icon, 5, LookPreset::kNative), "");
+    }
+    // Arc and Graphite: an icon never sits beside a lone initial. Its name shows when the chips
+    // fit; otherwise the icon stands alone and the name stays in the tooltip.
+    const SpaceSwitcherEntrySnapshot arc = {.name = "Work", .icon_id = "briefcase"};
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(arc, 5, LookPreset::kArc), "");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(arc, 5, LookPreset::kArc, /*chip_names_fit=*/true),
+              "Work");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenArcAndGraphiteChipsThenNamesShowWhenTheyFit) {
+    const SpaceSwitcherEntrySnapshot inactive = {.name = "Space 2", .active = false};
+    for (const LookPreset look : {LookPreset::kArc, LookPreset::kGraphite}) {
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(inactive, 3, look, /*chip_names_fit=*/true),
+                  "Space 2");
+        EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(inactive, 3, look), "S");
+    }
+}
+
+TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitialNeverLoneEllipsis) {
+    const SpaceSwitcherEntrySnapshot shorty = {.name = "Home", .active = false};
+    const SpaceSwitcherEntrySnapshot longer = {.name = "Personal projects", .active = false};
+    const SpaceSwitcherEntrySnapshot lower = {.name = "École supérieure", .active = false};
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 1, LookPreset::kNative), "Home");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 5, LookPreset::kNative), "H");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative),
+              "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 4, LookPreset::kNative), "P");
+    for (std::size_t count = 1; count <= 8; ++count) {
+        for (const SpaceSwitcherEntrySnapshot* entry : {&shorty, &longer, &lower}) {
+            const std::string label = BrowserChrome::SpaceSegmentLabel(*entry, count,
+                                                                       LookPreset::kNative);
+            EXPECT_NE(label, "\xE2\x80\xA6");
+            EXPECT_FALSE(label.empty());
+        }
+    }
+}
+
 TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAndClosedDiffer) {
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
-    const auto open = BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
-    EXPECT_EQ(open.fill, light.accent_soft);
-    EXPECT_EQ(open.text, light.accent_text);
+    const auto open =
+        BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
+    EXPECT_EQ(open.fill, light.segment_selected);
+    EXPECT_EQ(open.text, light.text);
     const auto closed =
         BrowserChrome::NativeAgentEntryColors(light, /*open=*/false, /*hovered=*/false);
     EXPECT_EQ(closed.fill, light.canvas);
@@ -507,18 +565,21 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
 
 TEST(BrowserChromeNativeContractTest, GivenNativeSwitcherWhenSizedThenSegmentsFitTheTrack) {
     const BrowserChrome::NativeSwitcherMetrics sizes = BrowserChrome::NativeSwitcherSizes();
-    // Spec §3: a 24 DIP track and 24 DIP icon buttons; the segments sit inside its 2 DIP inset.
-    EXPECT_EQ(sizes.row_dip, 24);
-    EXPECT_EQ(sizes.button_dip, 24);
+    // Footer polish: same-height controls on an 8 DIP rhythm; segments inset in the track.
+    EXPECT_EQ(sizes.row_dip, 28);
+    EXPECT_EQ(sizes.button_dip, sizes.row_dip);
+    EXPECT_EQ(sizes.agent_dip, sizes.row_dip);
+    EXPECT_EQ(sizes.footer_gap_dip, 8);
     EXPECT_EQ(sizes.track_inset_dip, 2);
-    EXPECT_EQ(sizes.segment_dip, 20);
+    EXPECT_EQ(sizes.segment_dip, 24);
     EXPECT_EQ(sizes.segment_dip + 2 * sizes.track_inset_dip, sizes.row_dip);
 }
 
-TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelectedOneIsSurface) {
+TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelectedIsNeutral) {
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const auto active = BrowserChrome::NativeSegmentColors(light, /*active=*/true);
-    EXPECT_EQ(active.fill, light.surface);
+    EXPECT_EQ(active.fill.argb, 0xFFE3E3E8U);
+    EXPECT_EQ(active.outline, active.fill);
     EXPECT_EQ(active.title, light.text);
     const auto idle = BrowserChrome::NativeSegmentColors(light, /*active=*/false);
     EXPECT_EQ(idle.fill, light.fill);
@@ -527,8 +588,104 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenTheSelec
 
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const auto dark_active = BrowserChrome::NativeSegmentColors(dark, /*active=*/true);
-    EXPECT_EQ(dark_active.fill.argb, 0xFF636366U);
-    EXPECT_NE(dark_active.fill, dark.fill);
+    EXPECT_EQ(dark_active.fill.argb, 0xFF3A3A3DU);
+    EXPECT_EQ(dark_active.outline, dark.border_strong);
+    EXPECT_NE(dark_active.fill, dark.accent);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNavigationButtonsThenTheirRowSharesTheirSurface) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens native = ChromeTokens::ForLook(LookPreset::kNative, theme);
+        EXPECT_EQ(BrowserChrome::NavigationRowSurface(native), native.surface_secondary);
+
+        const ChromeTokens arc = ChromeTokens::ForLook(LookPreset::kArc, theme);
+        EXPECT_EQ(BrowserChrome::NavigationRowSurface(arc), arc.canvas);
+
+        const ChromeTokens graphite = ChromeTokens::ForLook(LookPreset::kGraphite, theme);
+        EXPECT_EQ(BrowserChrome::NavigationRowSurface(graphite), graphite.canvas);
+    }
+}
+
+}  // namespace
+TEST(BrowserChromeContractTest, GivenAFixedWidthColumnWhenSizedThenNeitherDimensionIsZero) {
+    // CEF ignores a delegate size with a zero dimension, which let the agent panel's content
+    // pick its own width and cover the page.
+    const auto open = BrowserChrome::FixedWidthColumnFor(BrowserChrome::AgentPanelWidthDip());
+    EXPECT_EQ(open.width, BrowserChrome::AgentPanelWidthDip());
+    EXPECT_GT(open.min_height, 0);
+    EXPECT_GT(open.max_height, open.min_height);
+
+    EXPECT_EQ(BrowserChrome::FixedWidthColumnFor(0), BrowserChrome::FixedWidthColumn{});
+}
+
+}  // namespace island
+
+namespace island {
+namespace {
+
+TEST(BrowserChromeNativeContractTest, GivenAgentStatusWhenLabeledThenQueueProgressReplacesTheName) {
+    AgentEntryStatus status{.provider_name = "Claude Code"};
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "Claude Code");
+    status.activity = AgentActivity::kWorking;
+    status.queue_done = 3;
+    status.queue_total = 7;
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "3/7");
+    status.queue_done = 9;  // never "9/7"
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "7/7");
+    EXPECT_EQ(BrowserChrome::AgentEntryDescription(status), "Claude Code, working, task 7/7");
+    const AgentEntryStatus longer{.provider_name = "A very long provider name"};
+    // The full name; the view fits it to the measured room (see FitAgentEntryText).
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(longer), "A very long provider name");
+    EXPECT_EQ(BrowserChrome::AgentEntryDescription({.activity = AgentActivity::kNeedsYou}),
+              "Agent, needs you");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenAgentActivityWhenColoredThenEachStateIsDistinct) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+        const ArgbColor idle = BrowserChrome::AgentStatusDotColor(tokens, AgentActivity::kIdle);
+        const ArgbColor working =
+            BrowserChrome::AgentStatusDotColor(tokens, AgentActivity::kWorking);
+        const ArgbColor needs =
+            BrowserChrome::AgentStatusDotColor(tokens, AgentActivity::kNeedsYou);
+        EXPECT_NE(idle.argb, working.argb);
+        EXPECT_NE(working.argb, needs.argb);
+        EXPECT_NE(idle.argb, needs.argb);
+    }
+}
+
+}  // namespace
+}  // namespace island
+
+namespace island {
+namespace {
+
+// Fake measure: seven DIP per code point, so the expectations below count code points.
+int CodePointWidth(std::string_view text) {
+    int width = 0;
+    for (const char byte : text) {
+        if ((static_cast<unsigned char>(byte) & 0xC0U) != 0x80U) {
+            width += 7;
+        }
+    }
+    return width;
+}
+
+TEST(BrowserChromeNativeContractTest, GivenANameThatFitsWhenFittedThenItIsKept) {
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("Claude Code", 77, CodePointWidth), "Claude Code");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenANameThatDoesNotFitThenItEndsWithAnEllipsisInside) {
+    // Nine code points plus the ellipsis is 70 DIP: "A very lo" and the ellipsis.
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("A very long provider name", 70, CodePointWidth),
+              "A very lo\xE2\x80\xA6");
+    // A multi-byte character is never split.
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("\xCE\xA9mega sphere", 49, CodePointWidth),
+              "\xCE\xA9mega\xE2\x80\xA6");
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNoRoomThenOnlyTheEllipsisRemains) {
+    EXPECT_EQ(BrowserChrome::FitAgentEntryText("Claude Code", 0, CodePointWidth), "\xE2\x80\xA6");
 }
 
 }  // namespace

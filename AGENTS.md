@@ -53,6 +53,8 @@
 - Tab sleep (inactive background tabs release their `CefBrowser`; Settings → Tabs, palette command) and
   Peek (a floating single-window card with its own browser, opened from Cmd/middle-click, the
   context menu or new-tab opens) were added on 2026-10-15; see `src/main/AGENTS.md`.
+- Spaces can use one of 24 bundled Lucide icons. The optional id is stored in the session; the
+  sidebar switcher and collapsed rail fall back to their previous color mark/initial when absent.
 - Agentic integration is in scope as of 2026-10-06 at the project owner's request: the CEF-free
   `src/agent/` kernel provides an MCP tools endpoint (`http://127.0.0.1:<port>/mcp`, bearer token,
   discovery file) and an ACP client that runs an agent in the sidebar. GitHub Actions triggers

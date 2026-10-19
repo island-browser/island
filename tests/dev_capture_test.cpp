@@ -57,5 +57,15 @@ TEST(DevCaptureActions, SettingsActionOpensANamedSection) {
     EXPECT_TRUE(DevSettingsSectionName("navigate:settings:shortcuts").empty());
 }
 
+TEST(DevCaptureActions, ParsesSpaceIconActions) {
+    EXPECT_EQ(ParseDevSpaceIconAction("space_icon:1=briefcase"),
+              (DevSpaceIconAction{.index = 1, .icon_id = "briefcase"}));
+    EXPECT_EQ(ParseDevSpaceIconAction("space_icon:0=none"),
+              (DevSpaceIconAction{.index = 0, .icon_id = ""}));
+    EXPECT_FALSE(ParseDevSpaceIconAction("space_icon:x=home").has_value());
+    EXPECT_FALSE(ParseDevSpaceIconAction("space_icon:0=unknown").has_value());
+    EXPECT_FALSE(ParseDevSpaceIconAction("space_icon:0=").has_value());
+}
+
 }  // namespace
 }  // namespace island

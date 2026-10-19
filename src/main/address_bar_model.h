@@ -28,6 +28,7 @@ class AddressBarModel {
     [[nodiscard]] const AddressBarSnapshot& snapshot() const noexcept;
 
     void UpdateCommittedUrl(std::string url);
+    void UpdateInternalPage(std::string display_url);
     void Focus();
     void SetEditText(std::string text);
     [[nodiscard]] std::optional<std::string> Submit(const ValidatedAddress& address);
@@ -35,9 +36,10 @@ class AddressBarModel {
     void Escape();
 
   private:
+    void UpdateCommittedText(std::string text);
     void RestoreCommittedState();
 
-    std::string committed_url_;
+    std::string committed_text_;
     AddressBarSnapshot snapshot_;
 };
 

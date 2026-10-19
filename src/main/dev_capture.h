@@ -14,12 +14,12 @@
 //       `research:<question>` starts a Research task and `open_report` opens the newest stored
 //       report in a new tab, `plan_fixture` opens a Plan tab with the sample research plan
 //       waiting for approval, `agent_pages:<count>[:<gap>]` opens that many agent pages through
-//       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and `cheatsheet` opens the shortcut cheatsheet.
-//       `settings:<section>` opens Settings on one section (appearance, shortcuts, ...).
-//       `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
-//       density, font,
-//       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the
-//       Settings > Appearance path.
+//       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and
+//       `cheatsheet` opens the shortcut cheatsheet. `settings:<section>` opens Settings on one
+//       section (appearance, shortcuts, ...). `appearance:<key>=<value>` (sidebar_tint,
+//       sidebar_side, card_radius, density, font, card_shadow, full_bleed, reset) and
+//       `space_color:<index>=#RRGGBB` run the Settings > Appearance path. `space_icon:<index>=<id>`
+//       chooses a space icon.
 //   --island-dev-capture=/tmp/shot.png
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4
@@ -29,6 +29,8 @@
 //
 // Run captures with a scratch HOME so theme actions never touch real prefs.
 
+#include <cstddef>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,6 +58,16 @@ struct DevCaptureOptions {
 // The Settings section a `settings:<section>` action opens ("settings:shortcuts" -> "shortcuts"),
 // or "" when the action is not one.
 [[nodiscard]] std::string_view DevSettingsSectionName(std::string_view action);
+
+struct DevSpaceIconAction {
+    std::size_t index = 0;
+    std::string icon_id;
+
+    bool operator==(const DevSpaceIconAction&) const = default;
+};
+
+// Parses `space_icon:<index>=<known-id>`; `none` clears it. Malformed and unknown ids are ignored.
+[[nodiscard]] std::optional<DevSpaceIconAction> ParseDevSpaceIconAction(std::string_view action);
 
 }  // namespace island
 
