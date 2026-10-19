@@ -24,6 +24,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Command palette rows on Native: the selected row is the neutral raised plate with normal text,
+  not blue. Blue stays for the active tab and focus rings.
 - Native space segments with an icon show only that centered icon in equal-width segments (the
   name stays in the tooltip, the accessible name and the sidebar header). Spaces without an icon
   keep their name when it fits, else their initial, never a lone ellipsis.

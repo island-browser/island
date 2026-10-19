@@ -234,7 +234,10 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   the icon. Each command submit must reach the host after the palette released its overlay, so the
   picker is scheduled with `ScheduleSpaceIconPicker` (a posted task). To add another palette command,
   append a `PaletteCommandEntry` to the command list in `BrowserWindow::ShowCommandPalette` and
-  handle its id in `OnCommandPaletteSubmitted`.
+  handle its id in `OnCommandPaletteSubmitted`. Return re-applies the field's text through
+  `CommandPaletteModel::SetQuery`, which is a no-op for an unchanged query: resetting the highlight
+  there once made Return submit row 0 whatever the arrow keys chose (so the icon picker never
+  opened).
 - Native's Agent row (`kRailAgentButton`) has three views: the name (`agent_button_`, fitted by
   `FitAgentEntryName` to the room between the label and the status dot), the status dot and the
   keycap (`agent_keycap_`). `AgentEntryStatus` drives the dot: `AgentActivity` is `kIdle`,
