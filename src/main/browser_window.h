@@ -997,6 +997,8 @@ class BrowserWindow : public CefClient,
     void ActivatePaletteSpace(SpaceId id);
     void SubmitPaletteUrl(std::string_view query, const ValidatedAddress& address);
     void ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, bool notify_views);
+    // Sets every space's web color mode (prefers-color-scheme) from the theme preference.
+    void ApplyWebColorScheme();
     void PublishChromeSnapshot();
     void DetachChromeAndObservers();
     void ApplySidebarState();

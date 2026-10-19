@@ -244,6 +244,11 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `kWorking` or `kNeedsYou`, and the status is refreshed from `RefreshAgentEntry`. The row's views
   are currently three focus stops; the meta and keycap labels should not be (review item M4, open).
 
+- Web color mode: the Light and Dark themes also set the pages' `prefers-color-scheme` (and
+  scrollbars) through `CefRequestContext::SetChromeColorScheme`. `BrowserWindow::ApplyWebColorScheme`
+  runs from `ApplyTheme` and `Space::SetWebColorScheme` stores the mode, so a context created later
+  gets it too; System passes `CEF_COLOR_VARIANT_SYSTEM`. The setter compares the current mode first,
+  because the color-mode change notifies the theme path again.
 - Native address controls (location glyph, shield, field holder, reload, reader, agent dot) sit in
   `address_inner_`, which takes the ring inset. While the field is focused `ComputeCornerPatches`
   rounds that panel's corners to the inner radius (8 - 2 = 6) with the accent as the outside color,

@@ -712,9 +712,36 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
     }
 }
 
+namespace {
+
+// Island's Light or Dark theme is also the pages' color mode; System leaves it to the OS.
+cef_color_variant_t WebColorSchemeFor(ThemePreference preference) {
+    switch (preference) {
+        case ThemePreference::kLight:
+            return CEF_COLOR_VARIANT_LIGHT;
+        case ThemePreference::kDark:
+            return CEF_COLOR_VARIANT_DARK;
+        case ThemePreference::kSystem:
+            break;
+    }
+    return CEF_COLOR_VARIANT_SYSTEM;
+}
+
+}  // namespace
+
+void BrowserWindow::ApplyWebColorScheme() {
+    const cef_color_variant_t scheme = WebColorSchemeFor(prefs_.theme);
+    for (Space& space : spaces_) {
+        space.SetWebColorScheme(scheme);
+    }
+}
+
 Space& BrowserWindow::AppendSpace(std::string name) {
-    return spaces_.emplace_back(SpaceId{NextSpaceId()}, std::move(name),
-                                kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]);
+    Space& created =
+        spaces_.emplace_back(SpaceId{NextSpaceId()}, std::move(name),
+                             kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]);
+    created.SetWebColorScheme(WebColorSchemeFor(prefs_.theme));
+    return created;
 }
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
@@ -4441,6 +4468,7 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
     ApplyAddressFocusColors(window, tokens);
     window->SetThemeColor(CEF_ColorFocusableBorderUnfocused, tokens.border.argb);
+    ApplyWebColorScheme();
     if (notify_views) {
         window->ThemeChanged();
     }

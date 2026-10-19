@@ -108,6 +108,10 @@ class Space {
     // U2: returns the space's CefRequestContext, creating it lazily on first access.
     [[nodiscard]] CefRefPtr<CefRequestContext> request_context() const noexcept;
 
+    // The color mode the space's pages see (prefers-color-scheme and scrollbars). Applied to the
+    // context now when it exists, and when it is created.
+    void SetWebColorScheme(cef_color_variant_t scheme);
+
   private:
     void CreateRequestContextIfNeeded(const std::string& cache_path) const;
     void MaintainActiveIndexAfterRemoval(std::size_t removed_index);
@@ -120,6 +124,7 @@ class Space {
     std::size_t active_tab_index_ = 0;
     std::optional<SplitPairing> split_;
     mutable CefRefPtr<CefRequestContext> request_context_;
+    cef_color_variant_t web_color_scheme_ = CEF_COLOR_VARIANT_SYSTEM;
 };
 
 }  // namespace island

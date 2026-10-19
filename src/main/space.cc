@@ -301,6 +301,18 @@ void Space::CreateRequestContextIfNeeded(const std::string& cache_path) const {
     // is not yet initialized (e.g. in tests) because it dereferences a null
     // global context reference.
     request_context_ = CefRequestContext::CreateContext(settings, nullptr);
+    if (web_color_scheme_ != CEF_COLOR_VARIANT_SYSTEM) {
+        request_context_->SetChromeColorScheme(web_color_scheme_, 0);
+    }
+}
+
+void Space::SetWebColorScheme(cef_color_variant_t scheme) {
+    web_color_scheme_ = scheme;
+    // Only a live context needs the call; the check keeps a color-mode notification that
+    // re-enters the theme path from calling back into the context.
+    if (request_context_ && request_context_->GetChromeColorSchemeMode() != scheme) {
+        request_context_->SetChromeColorScheme(scheme, 0);
+    }
 }
 
 CefRefPtr<CefRequestContext> Space::request_context() const noexcept {
