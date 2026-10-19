@@ -551,8 +551,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const auto open =
         BrowserChrome::NativeAgentEntryColors(light, /*open=*/true, /*hovered=*/false);
-    EXPECT_EQ(open.fill, light.canvas);
-    EXPECT_EQ(open.text, light.accent_text);
+    EXPECT_EQ(open.fill, light.segment_selected);
+    EXPECT_EQ(open.text, light.text);
     const auto closed =
         BrowserChrome::NativeAgentEntryColors(light, /*open=*/false, /*hovered=*/false);
     EXPECT_EQ(closed.fill, light.canvas);

@@ -24,6 +24,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Native's Agent entry shows an open panel as the neutral raised plate with normal text, not a blue
+  label.
 - Command palette rows on Native: the selected row is the neutral raised plate with normal text,
   not blue. Blue stays for the active tab and focus rings.
 - Native space segments with an icon show only that centered icon in equal-width segments (the

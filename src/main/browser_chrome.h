@@ -549,9 +549,10 @@ class BrowserChrome final : public NavigationObserver {
     };
     [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
                                                                   bool open, bool hovered) {
-        return {.fill = hovered ? tokens.hover : tokens.canvas,
-                .text = open ? tokens.accent_text : tokens.text,
-                .sparkle = tokens.accent};
+        // An open panel shows as the neutral raised plate with normal text, never a blue label.
+        const ArgbColor fill =
+            open ? tokens.segment_selected : (hovered ? tokens.hover : tokens.canvas);
+        return {.fill = fill, .text = tokens.text, .sparkle = tokens.accent};
     }
     // The label next to the status dot: queue progress "3/7" while a queue runs, otherwise the
     // provider name. (The view elides a long name with an ellipsis before the keycap.)
