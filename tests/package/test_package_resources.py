@@ -96,3 +96,24 @@ class PackageResourceTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
+
+
+class IconCountAgreementTests(unittest.TestCase):
+    def test_packager_icon_count_matches_the_cmake_gate(self) -> None:
+        import re
+        import sys
+
+        sys.path.insert(0, str(REPOSITORY / "scripts"))
+        try:
+            from package_resources import EXPECTED_ICON_OUTPUTS
+        finally:
+            sys.path.pop(0)
+        cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
+        match = re.search(r"_island_icon_output_count EQUAL (\d+)", cmake)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(int(match.group(1)), EXPECTED_ICON_OUTPUTS)
+        manifest = json.loads(
+            (REPOSITORY / "resources/island/icons/manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(len(manifest["outputs"]), EXPECTED_ICON_OUTPUTS)

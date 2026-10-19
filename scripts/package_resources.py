@@ -20,6 +20,9 @@ FONT_FILES: Final = (
 )
 ICON_LICENSE: Final = "LICENSE-LUCIDE-ISC-AND-FEATHER-MIT.txt"
 ICON_MANIFEST: Final = "manifest.json"
+# Must equal the icon gate in the root CMakeLists.txt (`_island_icon_output_count EQUAL ...`);
+# tests/package/test_package_resources.py checks that they agree. Update both when icons are added.
+EXPECTED_ICON_OUTPUTS: Final = 816
 ICON_OUTPUT_PREFIX: Final = "resources/island/icons/"
 
 
@@ -46,8 +49,10 @@ def validate_runtime_resources(resources: Path) -> tuple[Path, ...]:
     except json.JSONDecodeError as error:
         raise ResourceValidationError(f"invalid icon manifest: {manifest_path}") from error
     outputs = manifest.get("outputs")
-    if not isinstance(outputs, list) or len(outputs) != 240:
-        raise ResourceValidationError("icon manifest must declare exactly 240 PNG resources")
+    if not isinstance(outputs, list) or len(outputs) != EXPECTED_ICON_OUTPUTS:
+        raise ResourceValidationError(
+            f"icon manifest must declare exactly {EXPECTED_ICON_OUTPUTS} PNG resources"
+        )
 
     icon_root = manifest_path.parent
     resolved_icon_root = icon_root.resolve()
