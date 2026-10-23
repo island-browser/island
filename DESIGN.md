@@ -355,8 +355,9 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   Branch labels ("Branch A") always accompany the color.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
-  buttons use `--text` as background with `--surface` foreground; the accent marks focus and the
-  active/selected state only.
+  buttons use `--text` as background with `--surface` foreground; the accent marks the
+  active/selected state only. The agent panel is the exception for focus: it draws a neutral
+  2 px `--text-2` ring (see below), never the accent.
 - **Agent panel (native, `pages/agent.html`):**
   - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
     opens the provider menu; a status pill sits beside it. The pill reads "Waiting for approval"
@@ -377,7 +378,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     "Ask about this tab or anything". The card's border shows focus; the textarea draws no ring.
     Keyboard hints sit below in `--text-3`, 11 px.
   - *Focus:* buttons take a neutral 2 px ring, `box-shadow: 0 0 0 2px var(--text-2)`, which follows
-    each element's radius. There is no outline and no blue focus ring, and the ring never appears
+    each element's radius. A Collect checkbox rings its whole row, because a native checkbox may not
+    paint the ring itself. There is no outline and no blue focus ring, and the ring never appears
     on mouse focus. Selected and pressed states use neutral raised plates (`--fill`,
     `--segment-selected`), never blue.
   - *Confirmation card:* a `.card.confirm-card` above the composer on a `--surface` plate with a
@@ -391,8 +393,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     its state as text (Queued, Running, Needs you, Done, Failed, Stopped), in compact 12 px rows.
     A running or waiting row takes a neutral `--fill` plate, and "Needs you" is `--warn-text`.
     Queued rows have Move up, Move down and Remove buttons; running ones have Stop. A queued chat
-    message sits under the conversation with a dashed outline at 65 % opacity and the tag
-    "Queued · #n".
+    message sits under the conversation as a bubble with a 1 px dashed `--border-2` border at
+    65 % opacity and the tag "Queued · #n".
   - *Chips in the composer's bottom row:* the page chip (a share toggle, with a ✕ that removes the
     page context) and, for a selection, a quote chip. Both share the 22 px chip style and
     ellipsize on one line.

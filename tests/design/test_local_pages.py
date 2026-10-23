@@ -753,6 +753,33 @@ class AgentPanelLook(unittest.TestCase):
             with self.subTest(color=match.group(0)):
                 self.assertIn(match.group(0).upper(), ("#FFF", "#FFFFFF"))
 
+    def test_the_send_button_stays_on_the_right_when_the_chip_row_is_hidden(self) -> None:
+        # With #chiprow hidden, the send button is the row's only child: it must still sit right.
+        rule = re.search(r"\n\.send \{([^}]*)\}", self.html)
+        self.assertIsNotNone(rule)
+        self.assertIn("margin-left: auto", rule.group(1))
+        self.assertIn('id="chiprow" hidden', self.html)
+
+    def test_a_queued_bubble_has_a_one_pixel_dashed_neutral_border(self) -> None:
+        self.assertIn(".user.queued .bubble { opacity: .65; border: 1px dashed var(--border-2); }", self.html)
+        self.assertNotIn("border-style: dashed", self.html)
+
+    def test_every_working_pill_pulses_whatever_the_session_state(self) -> None:
+        self.assertRegex(
+            self.html,
+            r'\.status-pill\[data-tone="busy"\] \.dot, [^{]*\{\s*animation: pulse',
+        )
+
+    def test_a_long_tool_name_ellipsizes_and_the_host_takes_the_rest(self) -> None:
+        name = re.search(r"\.tool \.name \{([^}]*)\}", self.html)
+        self.assertIsNotNone(name)
+        for fragment in ("overflow: hidden", "text-overflow: ellipsis", "min-width: 0", "max-width: 70%"):
+            self.assertIn(fragment, name.group(1))
+        self.assertRegex(self.html, r"\.tool \.host \{[^}]*flex: 1 1 0")
+
+    def test_a_collect_checkbox_rings_its_row_on_keyboard_focus(self) -> None:
+        self.assertIn(".collect-row:has(input:focus-visible) { box-shadow: 0 0 0 2px var(--text-2); }", self.html)
+
     def test_the_tool_row_is_one_line_with_a_spoken_status(self) -> None:
         node = self.html[self.html.index("function toolNode") :][:900]
         self.assertIn('el("span", "name"', node)
