@@ -16,7 +16,7 @@ each artifact).
 | `__init__.py` | Makes this a package so tests can use `from .package_fixture import …` |
 | `package_fixture.py` | `PackageFixture` dataclass: synthesizes a throwaway build tree and repository root |
 | `test_package.py` | Archive layout, tar/zip contents, and hashing for each target |
-| `test_package_resources.py` | Resource manifest completeness and digests |
+| `test_package_resources.py` | Resource manifest completeness and digests, plus bounded CMake icon staging |
 | `test_installers.py` | `scripts/installers.py`: installer names, checksum recording, Debian versions, the macOS signing order, the ISCC command, and a real `.deb` build when `dpkg-deb` is present |
 | `test_release_assets.py` | `scripts/release_assets.py`: the archive-plus-installer release set and the combined `SHA256SUMS.txt` the in-browser updater verifies against |
 
@@ -43,6 +43,6 @@ This is the "Run package unit tests" step of the `portable` job in `.github/work
 
 ### Internal
 
-- `scripts/package.py`, `scripts/package_resources.py`
+- `scripts/package.py`, `scripts/package_resources.py`, root `CMakeLists.txt`
 
 <!-- MANUAL: -->
