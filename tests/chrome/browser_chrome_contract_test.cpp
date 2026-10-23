@@ -533,13 +533,12 @@ TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitial
     const SpaceSwitcherEntrySnapshot lower = {.name = "École supérieure", .active = false};
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 1, LookPreset::kNative), "Home");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 5, LookPreset::kNative), "H");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative),
-              "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative), "P");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 4, LookPreset::kNative), "P");
     for (std::size_t count = 1; count <= 8; ++count) {
         for (const SpaceSwitcherEntrySnapshot* entry : {&shorty, &longer, &lower}) {
-            const std::string label = BrowserChrome::SpaceSegmentLabel(*entry, count,
-                                                                       LookPreset::kNative);
+            const std::string label =
+                BrowserChrome::SpaceSegmentLabel(*entry, count, LookPreset::kNative);
             EXPECT_NE(label, "\xE2\x80\xA6");
             EXPECT_FALSE(label.empty());
         }
@@ -579,7 +578,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const auto active = BrowserChrome::NativeSegmentColors(light, /*active=*/true);
     EXPECT_EQ(active.fill.argb, 0xFFE3E3E8U);
-    EXPECT_EQ(active.outline, active.fill);
+    // Light gets the same 1 DIP hairline as dark so the raised plate reads on the track.
+    EXPECT_EQ(active.outline, light.border_strong);
     EXPECT_EQ(active.title, light.text);
     const auto idle = BrowserChrome::NativeSegmentColors(light, /*active=*/false);
     EXPECT_EQ(idle.fill, light.fill);
@@ -591,6 +591,19 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     EXPECT_EQ(dark_active.fill.argb, 0xFF3A3A3DU);
     EXPECT_EQ(dark_active.outline, dark.border_strong);
     EXPECT_NE(dark_active.fill, dark.accent);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeKeycapsThenLightPlateIsStrongerThanTheFill) {
+    const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const auto light_keycap = BrowserChrome::NativeKeycapColors(light);
+    EXPECT_EQ(light_keycap.fill, light.border_strong);
+    EXPECT_NE(light_keycap.fill, light.fill);
+    EXPECT_EQ(light_keycap.text, light.text);
+
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const auto dark_keycap = BrowserChrome::NativeKeycapColors(dark);
+    EXPECT_EQ(dark_keycap.fill, dark.fill);
+    EXPECT_EQ(dark_keycap.text, dark.text_secondary);
 }
 
 TEST(BrowserChromeNativeContractTest, GivenNavigationButtonsThenTheirRowSharesTheirSurface) {

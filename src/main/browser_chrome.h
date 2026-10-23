@@ -30,6 +30,7 @@
 #include "icon_catalog.h"
 #include "include/cef_image.h"
 #include "navigation_state.h"
+#include "overlay_card.h"
 #include "page_card.h"
 #include "row_raster.h"
 #include "sidebar_state.h"
@@ -560,6 +561,18 @@ class BrowserChrome final : public NavigationObserver {
             open ? tokens.segment_selected : (hovered ? tokens.hover : tokens.canvas);
         return {.fill = fill, .text = tokens.text, .sparkle = tokens.accent};
     }
+    struct KeycapColors {
+        ArgbColor fill;
+        ArgbColor text;
+    };
+    // Keycap plates for Native rows (⌘J, palette shortcuts). Native light needs the stronger
+    // border_strong plate: `fill` is too close to the source-list canvas to read. Dark keeps the
+    // fill/text_secondary pairing.
+    [[nodiscard]] static KeycapColors NativeKeycapColors(const ChromeTokens& tokens) {
+        return ThemeOfTokens(tokens) == ChromeTheme::kLight
+                   ? KeycapColors{tokens.border_strong, tokens.text}
+                   : KeycapColors{tokens.fill, tokens.text_secondary};
+    }
     // The label next to the status dot: queue progress "3/7" while a queue runs, otherwise the
     // provider name. (The view elides a long name with an ellipsis before the keycap.)
     [[nodiscard]] static std::string AgentEntryMetaText(const AgentEntryStatus& status) {
@@ -649,14 +662,8 @@ class BrowserChrome final : public NavigationObserver {
     };
     [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
                                                             bool active) {
-        const std::uint32_t surface = tokens.surface.argb;
-        const int brightness = static_cast<int>((surface >> 16U) & 0xFFU) * 299 +
-                               static_cast<int>((surface >> 8U) & 0xFFU) * 587 +
-                               static_cast<int>(surface & 0xFFU) * 114;
-        const bool dark = brightness < 128000;
         return {.track = tokens.fill,
-                .outline = active && dark ? tokens.border_strong
-                                          : (active ? tokens.segment_selected : tokens.fill),
+                .outline = active ? tokens.border_strong : tokens.fill,
                 .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
