@@ -883,15 +883,17 @@ class BrowserWindow : public CefClient,
         agent::ConfirmationRequest request;
         std::function<void(agent::ConfirmationAnswer)> done;
         std::chrono::steady_clock::time_point deadline;
+        // The tab the card was raised for (identity, not position), its space, and its origin.
         TabId tab_id;
         SpaceId space_id;
+        std::string origin;
     };
     [[nodiscard]] std::chrono::steady_clock::time_point ConfirmationNow() const;
     // Removes the entry at `index` and reports `answer` to its callback.
     void FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer);
     void CancelPendingConfirmations();
-    // Answers kWithdrawn to every card whose target tab is no longer where it was when the card
-    // was raised (closed, moved, or its space switched away from).
+    // Answers kWithdrawn to every card whose target is no longer the tab it was raised for: closed,
+    // moved to another index or space, or navigated to another origin.
     void CancelStaleConfirmations();
     [[nodiscard]] bool ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const;
     void ExpireConfirmations();

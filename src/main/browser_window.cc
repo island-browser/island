@@ -5800,6 +5800,16 @@ std::chrono::steady_clock::time_point BrowserWindow::ConfirmationNow() const {
     return std::chrono::steady_clock::now() + confirmation_clock_offset_;
 }
 
+namespace {
+
+// The origin a card is raised for: the page's committed URL, or its start URL before the first load.
+std::string AgentTabOrigin(const Tab& tab) {
+    const std::string& url = tab.navigation_state().snapshot().url;
+    return FaviconOrigin(url.empty() ? tab.startup_url() : url);
+}
+
+}  // namespace
+
 void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
                                      std::function<void(agent::ConfirmationAnswer)> done) {
     CEF_REQUIRE_UI_THREAD();
@@ -5807,21 +5817,22 @@ void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
         done(agent::ConfirmationAnswer::kWithdrawn);
         return;
     }
-    // The tab the action targets (the active tab when the request names none) is the one marked
-    // "waiting for you".
-    const Space& space = active_space();
-    TabId tab_id;
-    SpaceId space_id = space.id();
-    if (request.tab.has_value() && *request.tab < space.tab_count()) {
-        tab_id = space.tabs()[*request.tab].id();
-    } else if (const Tab* active = active_tab(); active != nullptr) {
-        tab_id = active->id();
+    // The card belongs to the tab the action targets: the one ResolveAgentTab names now, which is
+    // the Plan's agent page during a research and the active tab otherwise. The card keeps that
+    // tab's identity, not its position, and is marked "waiting for you" there.
+    const AgentTabLookup lookup = ResolveAgentTab(request.tab);
+    if (!lookup.tab.has_value()) {
+        done(agent::ConfirmationAnswer::kWithdrawn);
+        return;
     }
+    const Space& space = spaces_[lookup.tab->space];
+    const Tab& tab = space.tabs()[lookup.tab->tab];
     pending_confirmations_.push_back({.request = std::move(request),
                                       .done = std::move(done),
                                       .deadline = ConfirmationNow() + kConfirmationTimeout,
-                                      .tab_id = tab_id,
-                                      .space_id = space_id});
+                                      .tab_id = tab.id(),
+                                      .space_id = space.id(),
+                                      .origin = AgentTabOrigin(tab)});
     // The panel is not opened: the agent dot and the Agent button dot tell the person.
     ArmConfirmationTimer();
     RefreshConfirmationUi();
@@ -5866,16 +5877,17 @@ void BrowserWindow::AnswerConfirmation(std::string_view id, agent::ConfirmationA
 }
 
 bool BrowserWindow::ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const {
-    const Space& space = active_space();
-    if (space.id() != pending.space_id) {
+    // The action re-resolves the card's tab when it runs, so the card is current only while that
+    // same resolution still names the tab it was raised for. Viewing another tab or space does not
+    // change the resolution of a card for the research page; a reshuffled index does.
+    const AgentTabLookup lookup = ResolveAgentTab(pending.request.tab);
+    if (!lookup.tab.has_value()) {
         return false;
     }
-    const std::optional<std::size_t>& named = pending.request.tab;
-    if (named.has_value()) {
-        return *named < space.tab_count() && space.tabs()[*named].id() == pending.tab_id;
-    }
-    const Tab* active = active_tab();
-    return active != nullptr && active->id() == pending.tab_id;
+    const Space& space = spaces_[lookup.tab->space];
+    const Tab& tab = space.tabs()[lookup.tab->tab];
+    return space.id() == pending.space_id && tab.id() == pending.tab_id &&
+           AgentTabOrigin(tab) == pending.origin;
 }
 
 void BrowserWindow::CancelStaleConfirmations() {

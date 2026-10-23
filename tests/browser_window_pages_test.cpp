@@ -2297,6 +2297,81 @@ TEST(BrowserWindowPagesTest, NamedBackgroundTabCardSurvivesTabSwitches) {
     EXPECT_FALSE(window->HasPendingConfirmation());
 }
 
+// A research owns the agent: its page sits in the Plan's space while the person works in another.
+// Returns the research page's location.
+BrowserWindow::AgentTabRef StartResearchWithPersonElsewhere(BrowserWindow& window) {
+    window.SetPlanPageUrlForTest("data:text/html,plan");
+    window.SetResearchTaskForTest("q");
+    window.OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    const BrowserWindow::AgentTabLookup research = window.ResolveAgentTab(std::nullopt);
+    EXPECT_TRUE(research.tab.has_value());
+    const BrowserWindow::AgentTabRef page = research.tab.value_or(BrowserWindow::AgentTabRef{});
+    EXPECT_TRUE(window.CreateSpace("Mine"));
+    EXPECT_TRUE(window.OpenNewTab("https://mine.test/"));
+    EXPECT_NE(window.active_space_index(), page.space);
+    return page;
+}
+
+TEST(BrowserWindowPagesTest, ResearchCardStaysOnTheResearchPageWhenThePersonLooksElsewhere) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BrowserWindow::AgentTabRef page = StartResearchWithPersonElsewhere(*window);
+    std::vector<agent::ConfirmationAnswer> answers;
+    // No tab named: the card targets the research page, not the tab the person is viewing.
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
+
+    // Activating another tab, and switching back to the research space, does not withdraw it.
+    window->SelectTab(0);
+    EXPECT_TRUE(window->SelectSpaceIndex(page.space));
+    EXPECT_TRUE(answers.empty());
+    EXPECT_TRUE(window->HasPendingConfirmation());
+
+    // On the research page the mark shows; the card then answers normally.
+    window->SelectTab(page.tab);
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+}
+
+TEST(BrowserWindowPagesTest, ResearchCardWithAnIndexIsWithdrawnWhenThatIndexMoves) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BrowserWindow::AgentTabRef page = StartResearchWithPersonElsewhere(*window);
+    std::vector<agent::ConfirmationAnswer> answers;
+    agent::ConfirmationRequest request = MakeConfirmation("c1");
+    request.tab = page.tab;
+    window->ShowConfirmation(std::move(request),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    EXPECT_TRUE(answers.empty());
+
+    // Pinning the research page moves it to the front of the Plan's space: the index the card
+    // names now holds another tab, so the card must not act on it.
+    const TabId research_id = window->spaces()[page.space].tabs()[page.tab].id();
+    ASSERT_TRUE(window->SetAgentTabPinned(page.tab, true));
+    ASSERT_NE(window->spaces()[page.space].tabs()[page.tab].id(), research_id);
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, ResearchCardIsWithdrawnWhenItsPageLeavesTheOrigin) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    StartResearchWithPersonElsewhere(*window);
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    // The agent's page moves to another origin (headless: its start URL changes).
+    ASSERT_TRUE(window->NavigateAgentTab(std::nullopt, "https://other.test/"));
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+}
+
 TEST(BrowserWindowPagesTest, StopAndNewChatWithdrawOpenCards) {
     const ScopedNoAgentEnv no_env;
     CefRefPtr<BrowserWindow> window = MakeWindow();

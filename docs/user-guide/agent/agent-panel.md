@@ -72,7 +72,7 @@ The agent asks before:
 
 The agent never types into a password or sign-in code field. Island refuses that action and tells the agent so.
 
-When a card is no longer valid, it goes away by itself, and the action does not run. That happens when the tab closes or moves to another place, when you switch to another space, or when you press Stop. The agent is told to ask again.
+When a card is no longer valid, it goes away by itself, and the action does not run. That happens when the tab the card is for closes, moves to another place, or opens another site, and when you press Stop. A card stays when you switch tabs or spaces, as long as its tab is still there. The one exception is a card that names no tab during ordinary chat: it is for the tab you are viewing, so switching away removes it. During a research, a card with no tab is for the agent's own page, so it stays while you look elsewhere. The agent is told to ask again.
 
 The address-field agent dot and the indicator on the sidebar Agent entry turn orange while a card waits for you.
 
