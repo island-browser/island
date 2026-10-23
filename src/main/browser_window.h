@@ -691,6 +691,8 @@ class BrowserWindow : public CefClient,
         return address_focus_repaint_;
     }
     void ApplyAddressFocusColors(CefRefPtr<CefWindow> window, const ChromeTokens& tokens) const;
+    // True while the welcome or the command palette is shown (both paint the neutral ring).
+    [[nodiscard]] bool OverlayFocusRingShown() const;
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
@@ -720,7 +722,7 @@ class BrowserWindow : public CefClient,
 
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
-    void OnWelcomeFocusRingReleased() override;
+    void OnOverlayFocusRingChanged() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;

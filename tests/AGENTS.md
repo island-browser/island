@@ -30,7 +30,7 @@ Two independent test systems live side by side here:
 | `tab_test.cpp` | Move-only `Tab` model |
 | `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
 | `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
-| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow` |
+| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow`; Native ThemeJson look and palette command icon contracts |
 | `history_recorder_test.cpp` | History URL/privacy filtering, deduplication and visit ranking, cap compaction, reopen rebuild, and clear |
 | `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |

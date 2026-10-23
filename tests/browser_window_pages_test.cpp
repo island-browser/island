@@ -150,6 +150,7 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
     }
+    EXPECT_EQ(theme->StringOr("look", ""), "native");
     EXPECT_EQ(theme->StringOr("font", ""),
               "ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif");
     EXPECT_FALSE(theme->BoolOr("dark", true));
@@ -2791,6 +2792,25 @@ TEST(BrowserWindowPagesTest, PaletteListsAgentTasks) {
     });
     ASSERT_NE(found, commands.end());
     EXPECT_EQ(found->title, "Agent tasks");
+}
+
+TEST(BrowserWindowPagesTest, PaletteCommandsCarryDistinctMeaningfulIcons) {
+    const std::vector<PaletteCommandEntry> commands = BrowserWindow::PaletteCommands();
+    const std::pair<std::string_view, PaletteRowIcon> expected[] = {
+        {"sleep_inactive_tabs", PaletteRowIcon::kMoon},
+        {kChangeSpaceIconCommandId, PaletteRowIcon::kPalette},
+        {"agent_tasks", PaletteRowIcon::kSparkles},
+        {"summarize_page", PaletteRowIcon::kSparkles},
+        {"ask_about_page", PaletteRowIcon::kSparkles},
+        {"collect_from_tabs", PaletteRowIcon::kTable},
+    };
+    for (const auto& [id, icon] : expected) {
+        const auto found = std::find_if(commands.begin(), commands.end(),
+                                        [&](const auto& command) { return command.id == id; });
+        ASSERT_NE(found, commands.end()) << id;
+        EXPECT_EQ(found->icon, icon) << id;
+        EXPECT_NE(found->icon, PaletteRowIcon::kKind) << id;
+    }
 }
 
 TEST(BrowserWindowPagesTest, TheQueueFixtureShowsOneRunningAndTwoQueuedTasks) {

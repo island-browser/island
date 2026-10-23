@@ -3498,6 +3498,13 @@ void BrowserWindow::ApplyAddressFocusColors(CefRefPtr<CefWindow> window,
     window->SetThemeColor(
         CEF_ColorFocusableBorderFocused,
         BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+    if (OverlayFocusRingShown()) {
+        // A shown overlay (welcome or palette) owns the one neutral ring: no accent anywhere.
+        window->SetThemeColor(
+            CEF_ColorWindowBackground,
+            BrowserChrome::TextfieldFocusRingBackdrop(tokens, /*address_focused=*/true).argb);
+        window->SetThemeColor(CEF_ColorFocusableBorderFocused, tokens.border_strong.argb);
+    }
 }
 
 void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
@@ -5546,13 +5553,23 @@ void BrowserWindow::ShowCommandPalette() {
 }
 
 std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
-    return {
-        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
-        {.id = std::string(kChangeSpaceIconCommandId), .title = "Change space icon\xE2\x80\xA6"},
-        {.id = "agent_tasks", .title = "Agent tasks", .shortcut_action_id = "toggle_agent"},
-        {.id = "summarize_page", .title = "Summarize page"},
-        {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"},
-        {.id = "collect_from_tabs", .title = "Collect from tabs\xE2\x80\xA6"}};
+    return {{.id = "sleep_inactive_tabs",
+             .title = "Sleep inactive tabs now",
+             .icon = PaletteRowIcon::kMoon},
+            {.id = std::string(kChangeSpaceIconCommandId),
+             .title = "Change space icon\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kPalette},
+            {.id = "agent_tasks",
+             .title = "Agent tasks",
+             .icon = PaletteRowIcon::kSparkles,
+             .shortcut_action_id = "toggle_agent"},
+            {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles},
+            {.id = "ask_about_page",
+             .title = "Ask about page\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kSparkles},
+            {.id = "collect_from_tabs",
+             .title = "Collect from tabs\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kTable}};
 }
 
 void BrowserWindow::ShowSpaceIconPicker() {
@@ -6113,11 +6130,31 @@ void BrowserWindow::OnWelcomeThemeChanged(ThemePreference preference) {
     }
 }
 
-void BrowserWindow::OnWelcomeFocusRingReleased() {
+void BrowserWindow::OnOverlayFocusRingChanged() {
     CEF_REQUIRE_UI_THREAD();
-    if (window_ != nullptr) {
-        ApplyAddressFocusColors(window_, ResolvedTokens(ResolvedChromeTheme()));
+    if (closing_ || window_ == nullptr) {
+        return;
     }
+    // The welcome and the palette share one neutral ring while shown; hiding either hands the
+    // window's ring back to the address field (ApplyAddressFocusColors decides which).
+    ApplyAddressFocusColors(window_, ResolvedTokens(ResolvedChromeTheme()));
+    window_->ThemeChanged();
+    // Chromium's browser compositor can sit above a CefWindow overlay on macOS. Hide only the
+    // attached page views while the first-run welcome is visible so the start page controls can
+    // never paint through the scrim; the chrome and the welcome card remain laid out normally.
+    if (chrome_ != nullptr) {
+        const bool page_visible = welcome_ == nullptr || !welcome_->visible();
+        for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
+            if (view != nullptr) {
+                view->SetVisible(page_visible);
+            }
+        }
+    }
+}
+
+bool BrowserWindow::OverlayFocusRingShown() const {
+    return (welcome_ != nullptr && welcome_->visible()) ||
+           (command_palette_ != nullptr && command_palette_->visible());
 }
 
 void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources) {

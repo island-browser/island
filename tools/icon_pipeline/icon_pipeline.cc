@@ -30,7 +30,7 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view kLockHash =
-    "942b9bac7e5b0c61c2697f1a20f175d44aeaada3730523614f87982be1c44106";
+    "c8e27759c45d103094716767da6b8e2a9b8991b7207d6ca00bca7ef8f2e2525c";
 constexpr std::array<int, 4> kDips = {13, 15, 16, 17};
 constexpr std::array<int, 2> kScales = {1, 2};
 
@@ -45,7 +45,7 @@ struct Tone {
     std::string_view hex;
 };
 
-constexpr std::array<Icon, 34> kIcons = {
+constexpr std::array<Icon, 37> kIcons = {
     {{"chevron-left", "chevron-left.svg",
       "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"},
      {"chevron-right", "chevron-right.svg",
@@ -85,6 +85,9 @@ constexpr std::array<Icon, 34> kIcons = {
      {"newspaper", "newspaper.svg",
       "f5147e2a92a0ca16edea01782b09afeea7f9ebcda029d3f38ae93a3058ed1b78"},
      {"palette", "palette.svg", "b0a958ba9889f89c40df6e1c168b8a7aa20f6309780e795c5bce00a4bc11bff6"},
+     {"clock", "clock.svg", "e9d3e3acf4d1c280fcf8092293439dc0a4756a908ceb859de144b12451cd1cb9"},
+     {"moon", "moon.svg", "ecc765994dc323f36bcb71b0dbab90bb4d429241a74c9f6e925d8eda8bf3b49b"},
+     {"table-2", "table-2.svg", "23eaa37f489e6f2015ac017c72cf97ce2fbbe714c2e0c7a1577b32223ae06a8f"},
      {"dumbbell", "dumbbell.svg",
       "058a51e1fd42319d7eee4988a68bee4a23bc94fc69cb8aa1450835246126382d"},
      {"wallet", "wallet.svg", "76c9596f629a2abf9cfabb573452f3113ed7e9502c699aa811e630f156eb7556"},

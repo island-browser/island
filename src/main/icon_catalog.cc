@@ -45,6 +45,14 @@ std::string_view IconFilename(ChromeIcon icon) {
             return "newspaper";
         case ChromeIcon::kBookOpen:
             return "book-open";
+        case ChromeIcon::kPalette:
+            return "palette";
+        case ChromeIcon::kClock:
+            return "clock";
+        case ChromeIcon::kMoon:
+            return "moon";
+        case ChromeIcon::kTable:
+            return "table-2";
     }
     return {};
 }

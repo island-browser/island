@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "include/base/cef_callback.h"
-#include "include/cef_color_ids.h"
 #include "include/cef_image.h"
 #include "include/cef_task.h"
 #include "include/views/cef_box_layout.h"
@@ -46,6 +45,11 @@ constexpr std::size_t kNoteLineChars = 64;
 constexpr std::uint32_t kScrimArgb = 0x33000000U;
 constexpr std::uint32_t kTransparentArgb = 0x00000000U;
 
+// Native's appearance switcher: the sidebar switcher's track inset and 24 DIP plates.
+constexpr int kSegmentInsetDip = 2;
+constexpr int kSegmentGapDip = 2;
+constexpr int kSegmentPlateDip = 24;
+
 void SetAllStateImages(CefRefPtr<CefLabelButton> button, CefRefPtr<CefImage> image) {
     for (const cef_button_state_t state : {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED,
                                            CEF_BUTTON_STATE_PRESSED, CEF_BUTTON_STATE_DISABLED}) {
@@ -53,8 +57,6 @@ void SetAllStateImages(CefRefPtr<CefLabelButton> button, CefRefPtr<CefImage> ima
     }
 }
 
-// Native's card is a 12 DIP rounded surface, so its top and bottom caps are 12 DIP tall and
-// carry the corners. Arc and Graphite keep their hairline: the caps are one DIP of border.
 int CardCapHeightDip(LookPreset look) {
     return look == LookPreset::kNative ? kNativeCardRadiusDip : kHairlineDip;
 }
@@ -177,6 +179,8 @@ class WelcomeFlow::WelcomeSurfaceDelegate final : public CefPanelDelegate {
 
     void Detach() { flow_ = nullptr; }
 
+    void SetPreferredSize(CefSize preferred_size) { preferred_size_ = preferred_size; }
+
     CefSize GetPreferredSize(CefRefPtr<CefView>) override { return preferred_size_; }
 
     void OnThemeChanged(CefRefPtr<CefView> view) override {
@@ -242,7 +246,12 @@ WelcomeFlow::WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, Chr
         settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
         scrim_panel_->SetToBoxLayout(settings);
     }
-    scrim_panel_->AddChildView(shadow_.Wrap(panel_, ThemeOfTokens(tokens_)));
+    // OverlayShadow is a stack of square CEF panels. Keep it for the legacy looks, but do not put
+    // that square box behind Native's genuinely rounded cap raster; the 20% scrim supplies the
+    // separation there without reintroducing square corners around the card.
+    scrim_panel_->AddChildView(tokens_.look == LookPreset::kNative
+                                   ? panel_
+                                   : shadow_.Wrap(panel_, ThemeOfTokens(tokens_)));
     ApplyColors();
 }
 
@@ -315,13 +324,26 @@ void WelcomeFlow::BuildViews() {
 
     button_delegate_ = new WelcomeButtonDelegate(this);
 
-    // Top and bottom raster caps make the Native card radius real even though cef_views has no
-    // corner-radius API; the middle paints the side hairlines around the content surface.
+    // The cap panels own the exact 12 DIP corner bands. The image buttons are stretched inside
+    // them with zero insets; this avoids CefLabelButton's default padding, which previously made
+    // the top cap a detached, narrower strip. Arc and Graphite keep their one-DIP hairline caps.
     const int cap_height = CardCapHeightDip(tokens_.look);
-    card_top_cap_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
-    card_top_cap_->SetFocusable(false);
-    card_top_cap_->SetMinimumSize(CefSize(WidthDip(), cap_height));
-    panel_->AddChildView(card_top_cap_);
+    const auto make_cap = [&](CefRefPtr<CefPanel>& panel, CefRefPtr<CefLabelButton>& image_button) {
+        CefRefPtr<WelcomeSurfaceDelegate> delegate = new WelcomeSurfaceDelegate(
+            this, SurfaceSlot::kTransparent, CefSize(WidthDip(), cap_height));
+        surface_delegates_.push_back(delegate);
+        panel = CefPanel::CreatePanel(delegate);
+        panels_.emplace_back(panel, SurfaceSlot::kTransparent);
+        CefRefPtr<CefBoxLayout> layout = panel->SetToBoxLayout(HorizontalLayout(0));
+        image_button = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        image_button->SetFocusable(false);
+        image_button->SetInsets(CefInsets());
+        image_button->SetMinimumSize(CefSize(WidthDip(), cap_height));
+        panel->AddChildView(image_button);
+        layout->SetFlexForView(image_button, 1);
+        panel_->AddChildView(panel);
+    };
+    make_cap(card_top_cap_, card_top_cap_image_);
 
     card_body_outline_ = MakePanel(SurfaceSlot::kOutline);
     CefRefPtr<CefBoxLayout> body_outline_layout = card_body_outline_->SetToBoxLayout(
@@ -335,10 +357,7 @@ void WelcomeFlow::BuildViews() {
     body_outline_layout->SetFlexForView(card_, 1);
     panel_->AddChildView(card_body_outline_);
 
-    card_bottom_cap_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
-    card_bottom_cap_->SetFocusable(false);
-    card_bottom_cap_->SetMinimumSize(CefSize(WidthDip(), cap_height));
-    panel_->AddChildView(card_bottom_cap_);
+    make_cap(card_bottom_cap_, card_bottom_cap_image_);
 
     // Header: title and lede.
     CefRefPtr<CefPanel> header = MakePanel(SurfaceSlot::kCard);
@@ -353,10 +372,14 @@ void WelcomeFlow::BuildViews() {
     CefRefPtr<CefPanel> appearance = MakePanel(SurfaceSlot::kCard);
     appearance->SetToBoxLayout(VerticalLayout(kItemGapDip));
     appearance->AddChildView(MakeText("Appearance", TextRole::kSectionLabel));
-    CefRefPtr<CefPanel> segments = MakePanel(SurfaceSlot::kOutline);
-    theme_track_ = segments;
-    CefRefPtr<CefBoxLayout> segments_layout =
-        segments->SetToBoxLayout(HorizontalLayout(kHairlineDip, Uniform(kHairlineDip)));
+    // Native uses the sidebar switcher's shape: a fill track with a 2 DIP inset, 24 DIP plates
+    // and a border_strong hairline around each plate (the selected one shows it). Arc and
+    // Graphite keep the hairline-gapped three-segment outline.
+    const bool native = tokens_.look == LookPreset::kNative;
+    CefRefPtr<CefPanel> segments = MakePanel(native ? SurfaceSlot::kTrack : SurfaceSlot::kOutline);
+    CefRefPtr<CefBoxLayout> segments_layout = segments->SetToBoxLayout(
+        native ? HorizontalLayout(kSegmentGapDip, Uniform(kSegmentInsetDip))
+               : HorizontalLayout(kHairlineDip, Uniform(kHairlineDip)));
     const char* const theme_labels[3] = {"System", "Light", "Dark"};
     const int theme_ids[3] = {kThemeSystemId, kThemeLightId, kThemeDarkId};
     for (int index = 0; index < 3; ++index) {
@@ -368,8 +391,21 @@ void WelcomeFlow::BuildViews() {
         button->SetFocusable(true);
         button->SetInkDropEnabled(true);
         button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
-        button->SetMinimumSize(CefSize(150, kControlHeightDip));
-        CefRefPtr<CefPanel> outline = MakePanel(SurfaceSlot::kOutline);
+        const int button_height = native ? kSegmentPlateDip - 2 * kHairlineDip : kControlHeightDip;
+        button->SetMinimumSize(CefSize(150, button_height));
+        if (native) {
+            button->SetMaximumSize(CefSize(10000, button_height));
+        }
+        CefRefPtr<CefPanel> outline;
+        if (native) {
+            CefRefPtr<WelcomeSurfaceDelegate> delegate = new WelcomeSurfaceDelegate(
+                this, SurfaceSlot::kOutline, CefSize(0, kSegmentPlateDip));
+            surface_delegates_.push_back(delegate);
+            outline = CefPanel::CreatePanel(delegate);
+            panels_.emplace_back(outline, SurfaceSlot::kOutline);
+        } else {
+            outline = MakePanel(SurfaceSlot::kOutline);
+        }
         CefRefPtr<CefBoxLayout> outline_layout =
             outline->SetToBoxLayout(HorizontalLayout(0, Uniform(kHairlineDip)));
         outline->AddChildView(button);
@@ -500,7 +536,7 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
             }
         }
         visible_ = false;
-        ApplyFocusRingTheme();
+        NotifyFocusRingChanged();
         if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
             overlay_.Release();
         }
@@ -557,10 +593,10 @@ void WelcomeFlow::Show() {
         return;
     }
     visible_ = true;
+    NotifyFocusRingChanged();
     UpdateBounds();
     overlay_.get()->SetVisible(true);
     ApplyColors();
-    ApplyFocusRingTheme();
     UpdateImportButtonState();
     const int selected_index = chosen_theme_ == ThemePreference::kSystem  ? 0
                                : chosen_theme_ == ThemePreference::kLight ? 1
@@ -576,7 +612,7 @@ void WelcomeFlow::Hide() {
         return;
     }
     visible_ = false;
-    ApplyFocusRingTheme();
+    NotifyFocusRingChanged();
     if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
         overlay_.Release();
     }
@@ -588,7 +624,16 @@ void WelcomeFlow::UpdateBounds() {
         return;
     }
     const CefSize window_size = window_->GetSize();
-    shadow_.SetCardSize(WidthDip(), ContentHeightDip(readable_count_, note_line_count_));
+    const int legacy_segment_height = kControlHeightDip + 2 * kHairlineDip;
+    const int native_segment_height = 2 * kSegmentInsetDip + kSegmentPlateDip;
+    const int card_height =
+        ContentHeightDip(readable_count_, note_line_count_) -
+        (tokens_.look == LookPreset::kNative ? legacy_segment_height - native_segment_height : 0);
+    // The shadow wrapper fixes this size for Arc and Graphite. Native deliberately omits that
+    // square wrapper, so its own delegate must supply the same fixed geometry to the centering
+    // layout; otherwise CEF stretches the square body while leaving the 560 DIP caps detached.
+    panel_delegate_->SetPreferredSize(CefSize(WidthDip(), card_height));
+    shadow_.SetCardSize(WidthDip(), card_height);
     overlay_.get()->SetBounds(CefRect(0, 0, window_size.width, window_size.height));
     scrim_panel_->Layout();
 }
@@ -600,7 +645,6 @@ void WelcomeFlow::ApplyTheme(ChromeTokens tokens) {
     }
     tokens_ = tokens;
     ApplyColors();
-    ApplyFocusRingTheme();
 }
 
 void WelcomeFlow::Detach() {
@@ -610,7 +654,7 @@ void WelcomeFlow::Detach() {
     }
     detached_ = true;
     visible_ = false;
-    ApplyFocusRingTheme();
+    NotifyFocusRingChanged();
     host_ = nullptr;
     *alive_ = nullptr;
     if (button_delegate_ != nullptr) {
@@ -625,21 +669,11 @@ void WelcomeFlow::Detach() {
     window_ = nullptr;
 }
 
-// Native's welcome focus ring is neutral (the segments' border color), not the accent. The
-// window's focus ring color belongs to the address field, so while the welcome is shown this
-// overrides it and, once hidden, the host restores the address field's ring.
-void WelcomeFlow::ApplyFocusRingTheme() {
-    if (window_ == nullptr) {
-        return;
-    }
-    if (visible_ && tokens_.look == LookPreset::kNative) {
-        window_->SetThemeColor(CEF_ColorFocusableBorderFocused, tokens_.border_strong.argb);
-        neutral_ring_ = true;
-    } else if (neutral_ring_) {
-        neutral_ring_ = false;
-        if (host_ != nullptr) {
-            host_->OnWelcomeFocusRingReleased();
-        }
+// The welcome's focus ring is neutral while it is shown. The window owns the ring color (it also
+// serves the address field), so the host repaints it whenever the welcome shows or hides.
+void WelcomeFlow::NotifyFocusRingChanged() {
+    if (host_ != nullptr) {
+        host_->OnOverlayFocusRingChanged();
     }
 }
 
@@ -655,17 +689,13 @@ void WelcomeFlow::ApplyColors() {
         scrim_delegate_->SetColor(scrim);
         scrim_panel_->SetBackgroundColor(scrim.argb);
     }
-    SetAllStateImages(card_top_cap_, CardCap(/*top=*/true));
-    SetAllStateImages(card_bottom_cap_, CardCap(/*top=*/false));
-    card_top_cap_->SetBackgroundColor(kTransparentArgb);
-    card_bottom_cap_->SetBackgroundColor(kTransparentArgb);
+    SetAllStateImages(card_top_cap_image_, CardCap(/*top=*/true));
+    SetAllStateImages(card_bottom_cap_image_, CardCap(/*top=*/false));
+    card_top_cap_image_->SetBackgroundColor(kTransparentArgb);
+    card_bottom_cap_image_->SetBackgroundColor(kTransparentArgb);
     for (const std::pair<CefRefPtr<CefPanel>, SurfaceSlot>& entry : panels_) {
         entry.first->SetBackgroundColor(ResolveColor(entry.second).argb);
     }
-    theme_track_->SetBackgroundColor((tokens_.look == LookPreset::kNative
-                                          ? BrowserChrome::NativeSegmentColors(tokens_, false).track
-                                          : tokens_.border)
-                                         .argb);
 
     for (const StaticText& text : texts_) {
         const bool native = tokens_.look == LookPreset::kNative;
@@ -714,11 +744,13 @@ void WelcomeFlow::ApplyColors() {
                                                     : ThemePreference::kDark;
         const bool selected = chosen_theme_ == choice;
         const ButtonColors colors = SegmentColors(tokens_, selected);
-        theme_outlines_[index]->SetBackgroundColor(
-            (tokens_.look == LookPreset::kNative
-                 ? BrowserChrome::NativeSegmentColors(tokens_, selected).outline
-                 : tokens_.border)
-                .argb);
+        if (theme_outlines_[index] != nullptr) {
+            theme_outlines_[index]->SetBackgroundColor(
+                (tokens_.look == LookPreset::kNative
+                     ? BrowserChrome::NativeSegmentColors(tokens_, selected).outline
+                     : tokens_.border)
+                    .argb);
+        }
         theme_buttons_[index]->SetBackgroundColor(colors.fill.argb);
         theme_buttons_[index]->SetEnabledTextColors(colors.text.argb);
         theme_buttons_[index]->SetFontList(
@@ -765,6 +797,8 @@ ArgbColor WelcomeFlow::ResolveColor(SurfaceSlot slot) const {
     switch (slot) {
         case SurfaceSlot::kTransparent:
             return {.argb = kTransparentArgb};
+        case SurfaceSlot::kTrack:
+            return tokens_.look == LookPreset::kNative ? tokens_.fill : tokens_.border;
         case SurfaceSlot::kOutline:
             return tokens_.border;
         case SurfaceSlot::kCard:
@@ -780,17 +814,14 @@ CefRefPtr<CefImage> WelcomeFlow::CardCap(bool top) const {
     for (const int scale : {1, 2}) {
         RasterBitmap bitmap = NewRasterBitmap(WidthDip(), cap_height, scale);
         if (!native) {
-            FillRoundedRect(bitmap, 0, 0, WidthDip(), cap_height, CornerRadii{0, 0, 0, 0},
-                            tokens_.border);
+            FillRoundedRect(bitmap, 0, 0, WidthDip(), cap_height, CornerRadii{}, tokens_.border);
         } else {
-            // The outer rect is twice the cap height so only the rounded corner shows; the
-            // inner surface rect is inset by the hairline so the card edge reads as a 1 DIP line.
-            const int radius = kNativeCardRadiusDip;
             const CornerRadii outer =
-                top ? CornerRadii{radius, radius, 0, 0} : CornerRadii{0, 0, radius, radius};
-            const CornerRadii inner =
-                top ? CornerRadii{radius - kHairlineDip, radius - kHairlineDip, 0, 0}
-                    : CornerRadii{0, 0, radius - kHairlineDip, radius - kHairlineDip};
+                top ? CornerRadii{kNativeCardRadiusDip, kNativeCardRadiusDip, 0, 0}
+                    : CornerRadii{0, 0, kNativeCardRadiusDip, kNativeCardRadiusDip};
+            const int inner_radius = kNativeCardRadiusDip - kHairlineDip;
+            const CornerRadii inner = top ? CornerRadii{inner_radius, inner_radius, 0, 0}
+                                          : CornerRadii{0, 0, inner_radius, inner_radius};
             const int outer_y = top ? 0 : -cap_height;
             FillRoundedRect(bitmap, 0, outer_y, WidthDip(), 2 * cap_height, outer, tokens_.border);
             const int inner_y = top ? kHairlineDip : -cap_height + kHairlineDip;

@@ -74,9 +74,9 @@ endif()
 
 file(READ "${ISLAND_ICON_MANIFEST}" _island_icon_manifest_json)
 string(JSON _island_icon_output_count LENGTH "${_island_icon_manifest_json}" outputs)
-if(NOT _island_icon_output_count EQUAL 816)
+if(NOT _island_icon_output_count EQUAL 888)
     message(FATAL_ERROR
-        "Island icon manifest must declare exactly 816 PNG resources; found ${_island_icon_output_count}.\n"
+        "Island icon manifest must declare exactly 888 PNG resources; found ${_island_icon_output_count}.\n"
         "Run tools/icon_pipeline/run.sh verify to diagnose committed icon resources.")
 endif()
 

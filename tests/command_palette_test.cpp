@@ -674,12 +674,6 @@ TEST(CommandPaletteTest, GivenAReportRowWhenSubmittedThenTheSelectionCarriesItsI
     EXPECT_FALSE(palette.visible());
 }
 
-}  // namespace
-}  // namespace island
-
-namespace island {
-namespace {
-
 TEST(CommandPaletteCommandsTest, GivenCommandsThenTheyFollowSpacesAndMatchByTitle) {
     const std::vector<PaletteTabEntry> tabs{
         {.id = TabId{1}, .title = "Sleepy docs", .url = "https://a.example/"}};
@@ -740,12 +734,6 @@ TEST(CommandPaletteSpaceIconTest, GivenTheChangeCommandWhenQueriedThenItMatchesB
     ASSERT_GE(found.size(), 1U);
     EXPECT_EQ(found[0].command.id, kChangeSpaceIconCommandId);
 }
-
-}  // namespace
-}  // namespace island
-
-namespace island {
-namespace {
 
 TEST(CommandPaletteNativeStyleTest, GivenEveryResultKindThenItAppearsOnceInTheStyleTable) {
     const std::array<PaletteEntryKind, 7> kinds = {

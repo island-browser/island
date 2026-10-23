@@ -40,6 +40,9 @@ constexpr int kNativeRowRadiusDip = 10;
 constexpr int kRowCapWidthDip = kNativeRowRadiusDip;
 constexpr int kRowIconCellDip = 24;
 constexpr int kKeycapHeightDip = 20;
+constexpr int kKeycapRadiusDip = 5;
+constexpr int kKeycapLabelWidthDip = 18;
+constexpr int kKeycapWidthDip = 2 * kKeycapRadiusDip + kKeycapLabelWidthDip;
 constexpr std::uint32_t kScrimArgb = 0x33000000U;
 constexpr std::uint32_t kTransparentArgb = 0x00000000U;
 
@@ -80,11 +83,21 @@ ChromeIcon ChromeIconForPalette(PaletteRowIcon icon) {
         case PaletteRowIcon::kBookmark:
             return ChromeIcon::kStar;
         case PaletteRowIcon::kHistory:
-            return ChromeIcon::kNewspaper;
+            return ChromeIcon::kClock;
         case PaletteRowIcon::kCommand:
             return ChromeIcon::kSettings;
         case PaletteRowIcon::kReport:
             return ChromeIcon::kBookOpen;
+        case PaletteRowIcon::kSparkles:
+            return ChromeIcon::kSparkles;
+        case PaletteRowIcon::kMoon:
+            return ChromeIcon::kMoon;
+        case PaletteRowIcon::kTable:
+            return ChromeIcon::kTable;
+        case PaletteRowIcon::kPalette:
+            return ChromeIcon::kPalette;
+        case PaletteRowIcon::kKind:
+            break;
     }
     return ChromeIcon::kLocation;
 }
@@ -220,14 +233,22 @@ class CommandPaletteView::RowButtonDelegate final : public CefButtonDelegate {
             const bool shortcut_pressed = index < palette_->result_shortcuts_.size() &&
                                           palette_->result_shortcuts_[index] != nullptr &&
                                           palette_->result_shortcuts_[index]->IsSame(button);
-            const bool left_pressed = index < palette_->result_left_caps_.size() &&
-                                      palette_->result_left_caps_[index] != nullptr &&
-                                      palette_->result_left_caps_[index]->IsSame(button);
-            const bool right_pressed = index < palette_->result_right_caps_.size() &&
-                                       palette_->result_right_caps_[index] != nullptr &&
-                                       palette_->result_right_caps_[index]->IsSame(button);
-            if (name_pressed || kind_pressed || icon_pressed || shortcut_pressed || left_pressed ||
-                right_pressed) {
+            const bool row_left_pressed = index < palette_->result_left_caps_.size() &&
+                                          palette_->result_left_caps_[index] != nullptr &&
+                                          palette_->result_left_caps_[index]->IsSame(button);
+            const bool row_right_pressed = index < palette_->result_right_caps_.size() &&
+                                           palette_->result_right_caps_[index] != nullptr &&
+                                           palette_->result_right_caps_[index]->IsSame(button);
+            const bool key_left_pressed =
+                index < palette_->result_shortcut_left_caps_.size() &&
+                palette_->result_shortcut_left_caps_[index] != nullptr &&
+                palette_->result_shortcut_left_caps_[index]->IsSame(button);
+            const bool key_right_pressed =
+                index < palette_->result_shortcut_right_caps_.size() &&
+                palette_->result_shortcut_right_caps_[index] != nullptr &&
+                palette_->result_shortcut_right_caps_[index]->IsSame(button);
+            if (name_pressed || kind_pressed || icon_pressed || shortcut_pressed ||
+                row_left_pressed || row_right_pressed || key_left_pressed || key_right_pressed) {
                 palette_->HandleRowPressed(index);
                 return;
             }
@@ -342,7 +363,8 @@ void CommandPaletteView::BuildViews() {
 
     top_spacer_delegate_ = new OverlayFillDelegate(
         scrim, CefSize(1, std::max(0, SearchPaletteTopOffsetDip() - OverlayShadow::kTopDip)));
-    scrim_panel_->AddChildView(CefPanel::CreatePanel(top_spacer_delegate_));
+    top_spacer_ = CefPanel::CreatePanel(top_spacer_delegate_);
+    scrim_panel_->AddChildView(top_spacer_);
 
     card_row_ = CefPanel::CreatePanel(scrim_delegate_);
     CefBoxLayoutSettings row_settings;
@@ -375,11 +397,16 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     result_bodies_.clear();
     result_headers_.clear();
     result_header_labels_.clear();
+    result_left_cap_panels_.clear();
     result_left_caps_.clear();
+    result_right_cap_panels_.clear();
     result_right_caps_.clear();
     result_icons_.clear();
     result_labels_.clear();
     result_kinds_.clear();
+    result_shortcut_wrappers_.clear();
+    result_shortcut_left_caps_.clear();
+    result_shortcut_right_caps_.clear();
     result_shortcuts_.clear();
     panel_->RemoveAllChildViews();
     panel_->AddChildView(query_field_);
@@ -390,13 +417,18 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     result_bodies_.reserve(row_count);
     result_headers_.reserve(row_count);
     result_header_labels_.reserve(row_count);
+    result_left_cap_panels_.reserve(row_count);
     result_left_caps_.reserve(row_count);
+    result_right_cap_panels_.reserve(row_count);
     result_right_caps_.reserve(row_count);
     result_icons_.reserve(row_count);
     row_delegates_.reserve(row_count);
     body_delegates_.reserve(row_count);
     result_labels_.reserve(row_count);
     result_kinds_.reserve(row_count);
+    result_shortcut_wrappers_.reserve(row_count);
+    result_shortcut_left_caps_.reserve(row_count);
+    result_shortcut_right_caps_.reserve(row_count);
     result_shortcuts_.reserve(row_count);
     for (std::size_t index = 0; index < row_count; ++index) {
         CefRefPtr<PaletteSurfaceDelegate> header_delegate =
@@ -419,24 +451,40 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         row_delegates_.push_back(row_delegate);
         CefRefPtr<CefPanel> row = CefPanel::CreatePanel(row_delegate);
         row->SetID(static_cast<int>(ChromeViewId::kCommandPaletteResult));
-        CefBoxLayoutSettings cap_layout_settings;
-        cap_layout_settings.horizontal = static_cast<int>(true);
-        cap_layout_settings.between_child_spacing = 0;
-        cap_layout_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
-        CefRefPtr<CefBoxLayout> row_layout = row->SetToBoxLayout(cap_layout_settings);
+        // The cap panels reserve exact 10 DIP corner bands. Their image buttons have zero insets,
+        // so the raster caps meet the body with no button-padding gap and read as one plate.
+        CefBoxLayoutSettings row_settings_box;
+        row_settings_box.horizontal = static_cast<int>(true);
+        row_settings_box.between_child_spacing = 0;
+        row_settings_box.cross_axis_alignment = CEF_AXIS_ALIGNMENT_STRETCH;
+        CefRefPtr<CefBoxLayout> row_layout = row->SetToBoxLayout(row_settings_box);
 
+        CefRefPtr<PaletteSurfaceDelegate> left_cap_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kRow, CefSize(kRowCapWidthDip, row_height));
+        surface_delegates_.push_back(left_cap_delegate);
+        CefRefPtr<CefPanel> left_cap_panel = CefPanel::CreatePanel(left_cap_delegate);
         CefRefPtr<CefLabelButton> left_cap =
             CefLabelButton::CreateLabelButton(button_delegate_, "");
         left_cap->SetFocusable(false);
+        left_cap->SetInsets(CefInsets());
         left_cap->SetMinimumSize(CefSize(kRowCapWidthDip, row_height));
-        row->AddChildView(left_cap);
+        CefBoxLayoutSettings cap_fill_settings;
+        cap_fill_settings.horizontal = static_cast<int>(true);
+        cap_fill_settings.between_child_spacing = 0;
+        CefRefPtr<CefBoxLayout> cap_fill_layout = left_cap_panel->SetToBoxLayout(cap_fill_settings);
+        left_cap_panel->AddChildView(left_cap);
+        cap_fill_layout->SetFlexForView(left_cap, 1);
+        row->AddChildView(left_cap_panel);
 
         CefRefPtr<PaletteSurfaceDelegate> body_delegate =
             new PaletteSurfaceDelegate(this, PaletteSurfaceSlot::kRow);
         surface_delegates_.push_back(body_delegate);
         body_delegates_.push_back(body_delegate);
         CefRefPtr<CefPanel> body = CefPanel::CreatePanel(body_delegate);
-        CefRefPtr<CefBoxLayout> body_layout = body->SetToBoxLayout(CommandRowLayout(tokens_));
+        // Children center vertically so the shortcut keycap is a 20 DIP plate, not row height.
+        CefBoxLayoutSettings body_settings = CommandRowLayout(tokens_);
+        body_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        CefRefPtr<CefBoxLayout> body_layout = body->SetToBoxLayout(body_settings);
 
         CefRefPtr<CefLabelButton> icon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         icon->SetFocusable(false);
@@ -455,32 +503,71 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         kind->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_RIGHT);
         body->AddChildView(kind);
 
+        CefRefPtr<PaletteSurfaceDelegate> shortcut_wrapper_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kRow, CefSize(kKeycapWidthDip, kKeycapHeightDip));
+        surface_delegates_.push_back(shortcut_wrapper_delegate);
+        CefRefPtr<CefPanel> shortcut_wrapper = CefPanel::CreatePanel(shortcut_wrapper_delegate);
+        CefBoxLayoutSettings shortcut_settings;
+        shortcut_settings.horizontal = static_cast<int>(true);
+        shortcut_settings.between_child_spacing = 0;
+        shortcut_wrapper->SetToBoxLayout(shortcut_settings);
+        CefRefPtr<CefLabelButton> shortcut_left =
+            CefLabelButton::CreateLabelButton(button_delegate_, "");
+        shortcut_left->SetFocusable(false);
+        shortcut_left->SetInsets(CefInsets());
+        shortcut_left->SetMinimumSize(CefSize(kKeycapRadiusDip, kKeycapHeightDip));
+        shortcut_wrapper->AddChildView(shortcut_left);
         CefRefPtr<CefLabelButton> shortcut =
             CefLabelButton::CreateLabelButton(button_delegate_, "");
         shortcut->SetFocusable(false);
+        shortcut->SetInsets(CefInsets(0, 2, 0, 2));
         shortcut->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
-        shortcut->SetMinimumSize(CefSize(0, kKeycapHeightDip));
-        body->AddChildView(shortcut);
+        shortcut->SetMinimumSize(CefSize(kKeycapLabelWidthDip, kKeycapHeightDip));
+        shortcut_wrapper->AddChildView(shortcut);
+        CefRefPtr<CefLabelButton> shortcut_right =
+            CefLabelButton::CreateLabelButton(button_delegate_, "");
+        shortcut_right->SetFocusable(false);
+        shortcut_right->SetInsets(CefInsets());
+        shortcut_right->SetMinimumSize(CefSize(kKeycapRadiusDip, kKeycapHeightDip));
+        shortcut_wrapper->AddChildView(shortcut_right);
+        body->AddChildView(shortcut_wrapper);
 
         row->AddChildView(body);
         row_layout->SetFlexForView(body, 1);
 
+        CefRefPtr<PaletteSurfaceDelegate> right_cap_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kRow, CefSize(kRowCapWidthDip, row_height));
+        surface_delegates_.push_back(right_cap_delegate);
+        CefRefPtr<CefPanel> right_cap_panel = CefPanel::CreatePanel(right_cap_delegate);
+        CefBoxLayoutSettings right_cap_settings;
+        right_cap_settings.horizontal = static_cast<int>(true);
+        right_cap_settings.between_child_spacing = 0;
+        CefRefPtr<CefBoxLayout> right_cap_layout =
+            right_cap_panel->SetToBoxLayout(right_cap_settings);
         CefRefPtr<CefLabelButton> right_cap =
             CefLabelButton::CreateLabelButton(button_delegate_, "");
         right_cap->SetFocusable(false);
+        right_cap->SetInsets(CefInsets());
         right_cap->SetMinimumSize(CefSize(kRowCapWidthDip, row_height));
-        row->AddChildView(right_cap);
+        right_cap_panel->AddChildView(right_cap);
+        right_cap_layout->SetFlexForView(right_cap, 1);
+        row->AddChildView(right_cap_panel);
 
         panel_->AddChildView(row);
         result_headers_.push_back(header);
         result_header_labels_.push_back(header_label);
         result_rows_.push_back(row);
         result_bodies_.push_back(body);
+        result_left_cap_panels_.push_back(left_cap_panel);
         result_left_caps_.push_back(left_cap);
+        result_right_cap_panels_.push_back(right_cap_panel);
         result_right_caps_.push_back(right_cap);
         result_icons_.push_back(icon);
         result_labels_.push_back(label);
         result_kinds_.push_back(kind);
+        result_shortcut_wrappers_.push_back(shortcut_wrapper);
+        result_shortcut_left_caps_.push_back(shortcut_left);
+        result_shortcut_right_caps_.push_back(shortcut_right);
         result_shortcuts_.push_back(shortcut);
     }
 }
@@ -539,6 +626,9 @@ void CommandPaletteView::Show(std::vector<PaletteTabEntry> tabs,
     // that a non-empty query appends.
     RebuildResultRows(pool_size);
     model_.Open();
+    if (host_ != nullptr) {
+        host_->OnOverlayFocusRingChanged();
+    }
     query_field_->SetText("");
     UpdateBounds();
     overlay_.get()->SetVisible(true);
@@ -562,6 +652,9 @@ void CommandPaletteView::Hide() {
         return;
     }
     model_.Close();
+    if (host_ != nullptr) {
+        host_->OnOverlayFocusRingChanged();
+    }
     if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
         overlay_.Release();
     }
@@ -573,13 +666,22 @@ void CommandPaletteView::UpdateBounds() {
         return;
     }
     const CefSize window_size = window_->GetSize();
-    // The card shares the search palette's width and top offset. Its one overlay now spans the
-    // window because the Native look also paints a 20% scrim behind the card.
+    // The card shares the search palette's width and top offset.
     const DipRect card = SearchPaletteBounds(
         {.x = 0, .y = 0, .width = window_size.width, .height = window_size.height},
         PreferredContentHeightDip());
     card_.SetContentSize(card.width, card.height);
-    overlay_.get()->SetBounds(CefRect(0, 0, window_size.width, window_size.height));
+    if (tokens_.look == LookPreset::kNative) {
+        // Native: one full-window overlay carries the 20% scrim behind the card.
+        overlay_.get()->SetBounds(CefRect(0, 0, window_size.width, window_size.height));
+        top_spacer_->SetVisible(true);
+    } else {
+        // Arc and Graphite have no scrim: the overlay is the card alone, as before, so page and
+        // chrome clicks outside the card keep reaching the window.
+        overlay_.get()->SetBounds(
+            OverlayCard::OverlayBoundsForContent(CefRect(card.x, card.y, card.width, card.height)));
+        top_spacer_->SetVisible(false);
+    }
     scrim_panel_->Layout();
 }
 
@@ -598,6 +700,8 @@ void CommandPaletteView::ApplyTheme(ChromeTokens tokens) {
     card_row_->SetBackgroundColor(scrim.argb);
     ApplySurfaceColors();
     ProjectResults();
+    // The look can change the overlay's size (full window in Native only).
+    UpdateBounds();
 }
 
 void CommandPaletteView::Detach() {
@@ -698,6 +802,7 @@ void CommandPaletteView::SubmitHighlighted() {
         overlay_.Release();
     }
     if (host_ != nullptr) {
+        host_->OnOverlayFocusRingChanged();
         host_->OnCommandPaletteSubmitted(*selection, query);
     }
 }
@@ -730,11 +835,14 @@ void CommandPaletteView::ProjectResults() {
         // The body delegate remembers the slot so the theme-change re-assertion restores the
         // highlight rather than flattening every row. The outer row remains the corner color.
         body_delegates_[index]->SetSlot(slot);
+
         const int radius = native ? kNativeRowRadiusDip : 0;
         SetAllStateImages(result_left_caps_[index],
-                          RowCap(fill, /*left=*/true, kRowHeightDip, radius));
+                          PlateCap(fill, /*left=*/true, kRowCapWidthDip, kRowHeightDip, radius));
         SetAllStateImages(result_right_caps_[index],
-                          RowCap(fill, /*left=*/false, kRowHeightDip, radius));
+                          PlateCap(fill, /*left=*/false, kRowCapWidthDip, kRowHeightDip, radius));
+        result_left_cap_panels_[index]->SetBackgroundColor(tokens_.surface.argb);
+        result_right_cap_panels_[index]->SetBackgroundColor(tokens_.surface.argb);
         result_left_caps_[index]->SetBackgroundColor(tokens_.surface.argb);
         result_right_caps_[index]->SetBackgroundColor(tokens_.surface.argb);
 
@@ -759,11 +867,21 @@ void CommandPaletteView::ProjectResults() {
                                          ? results[index].command.shortcut
                                          : std::string();
         const BrowserChrome::KeycapColors keycap = BrowserChrome::NativeKeycapColors(tokens_);
-        result_shortcuts_[index]->SetVisible(native && !shortcut.empty());
+        const bool show_shortcut = native && !shortcut.empty();
+        result_shortcut_wrappers_[index]->SetVisible(show_shortcut);
+        result_shortcut_wrappers_[index]->SetBackgroundColor(fill.argb);
         result_shortcuts_[index]->SetText(shortcut);
         result_shortcuts_[index]->SetBackgroundColor(keycap.fill.argb);
         result_shortcuts_[index]->SetEnabledTextColors(keycap.text.argb);
         result_shortcuts_[index]->SetAccessibleName(shortcut.empty() ? "" : "Shortcut " + shortcut);
+        SetAllStateImages(result_shortcut_left_caps_[index],
+                          PlateCap(keycap.fill, /*left=*/true, kKeycapRadiusDip, kKeycapHeightDip,
+                                   kKeycapRadiusDip));
+        SetAllStateImages(result_shortcut_right_caps_[index],
+                          PlateCap(keycap.fill, /*left=*/false, kKeycapRadiusDip, kKeycapHeightDip,
+                                   kKeycapRadiusDip));
+        result_shortcut_left_caps_[index]->SetBackgroundColor(fill.argb);
+        result_shortcut_right_caps_[index]->SetBackgroundColor(fill.argb);
     }
     if (divider_ != nullptr) {
         divider_->SetVisible(!results.empty());
@@ -805,6 +923,12 @@ void CommandPaletteView::ApplySurfaceColors() {
 }
 
 CefRefPtr<CefImage> CommandPaletteView::RowIcon(const PaletteEntry& entry) const {
+    if (entry.kind == PaletteEntryKind::kCommand && entry.command.icon != PaletteRowIcon::kKind) {
+        return icon_catalog_
+            .LoadTinted(ChromeIconForPalette(entry.command.icon), tokens_.text_secondary,
+                        ChromeIconSize::k16)
+            .value_or(nullptr);
+    }
     if (entry.kind == PaletteEntryKind::kTab) {
         const auto visual = std::find_if(tab_visuals_.begin(), tab_visuals_.end(),
                                          [&](const auto& v) { return v.id == entry.tab.id; });
@@ -817,15 +941,14 @@ CefRefPtr<CefImage> CommandPaletteView::RowIcon(const PaletteEntry& entry) const
         .value_or(nullptr);
 }
 
-CefRefPtr<CefImage> CommandPaletteView::RowCap(ArgbColor fill, bool left, int height,
-                                               int radius) const {
+CefRefPtr<CefImage> CommandPaletteView::PlateCap(ArgbColor fill, bool left, int width, int height,
+                                                 int radius) const {
     CefRefPtr<CefImage> image = CefImage::CreateImage();
     for (const int scale : {1, 2}) {
-        RasterBitmap bitmap = NewRasterBitmap(kRowCapWidthDip, height, scale);
+        RasterBitmap bitmap = NewRasterBitmap(width, height, scale);
         const CornerRadii radii =
             left ? CornerRadii{radius, 0, 0, radius} : CornerRadii{0, radius, radius, 0};
-        FillRoundedRect(bitmap, left ? 0 : -kRowCapWidthDip, 0, 2 * kRowCapWidthDip, height, radii,
-                        fill);
+        FillRoundedRect(bitmap, left ? 0 : -width, 0, 2 * width, height, radii, fill);
         image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
                          CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
                          bitmap.bgra.size());

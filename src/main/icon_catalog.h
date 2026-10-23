@@ -27,6 +27,10 @@ enum class ChromeIcon {
     kStar,
     kNewspaper,
     kBookOpen,
+    kPalette,
+    kClock,
+    kMoon,
+    kTable,
 };
 
 enum class ChromeIconTone {

@@ -2992,8 +2992,13 @@ void BrowserChrome::ApplyAgentEntryStatus(ArgbColor row_fill) {
     agent_button_->SetAccessibleName("Agent panel");
     agent_keycap_->SetVisible(!agent_shortcut_label_.empty());
     agent_keycap_->SetText(agent_shortcut_label_);
-    agent_keycap_->SetBackgroundColor(tokens_.fill.argb);
-    agent_keycap_->SetEnabledTextColors(tokens_.text_secondary.argb);
+    // Native light uses the stronger keycap plate (NativeKeycapColors); the other looks keep the
+    // fill / text_secondary pairing.
+    const KeycapColors keycap = tokens_.look == LookPreset::kNative
+                                    ? NativeKeycapColors(tokens_)
+                                    : KeycapColors{tokens_.fill, tokens_.text_secondary};
+    agent_keycap_->SetBackgroundColor(keycap.fill.argb);
+    agent_keycap_->SetEnabledTextColors(keycap.text.argb);
     agent_keycap_->SetFontList(FontList(11, ChromeFontWeight::kMedium));
     FitAgentEntryName();
 }

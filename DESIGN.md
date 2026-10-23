@@ -324,12 +324,21 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   scrollbar always fit the 52 DIP). There is no edge sliver or hover reveal. Cmd/Ctrl+L expands
   the sidebar for the length of the address edit. Every rail view re-asserts its colors through
   the same theme-reset delegates (`BrowserChrome::ApplyCollapsedRailTheme`).
-- **Welcome card (native overlay):** a `--surface` card with a 1px `--border` outline and
-  spacing_6 padding: Geist title and lede, mono uppercase section labels (APPEARANCE, IMPORT), a
-  three-segment appearance control (selected = `--surface-2` fill, `--accent` text), one outlined
-  toggle row per readable browser (checked state is a check mark as well as the fill), a wrapped
-  muted note for unreadable browsers, and a right-aligned footer with a secondary Import button
-  and the primary Start browsing button (`--text` fill, `--surface` text).
+- **Welcome card (native overlay):** a radius-12 `--surface` card with a 1px `--border` outline,
+  spacing_6 padding and system type. Appearance and Import are sentence-case 11/600 section
+  headers. The appearance control matches the sidebar switcher: a `fill` track with a 2 DIP inset,
+  24 DIP plates, and a `border_strong` hairline on the selected neutral `segment_selected` plate.
+  Its focus ring is neutral and follows only the focused segment. A 20% black scrim fills the
+  short-lived overlay; the page compositor is hidden while the welcome is shown so start-page
+  controls cannot paint through it. Readable browsers remain outlined toggle rows, followed by a
+  right-aligned secondary Import button and the black/white Start browsing primary button. Arc and
+  Graphite keep their original square hairline card and segmented control.
+- **Command palette (native overlay):** Cmd/Ctrl+K opens a 640 DIP card over a 20% black scrim.
+  Sentence-case group headers divide the results; each 36 DIP row has a 16 DIP favicon or a
+  meaning-specific Lucide icon, a sentence-case kind label, and a right-aligned 20 DIP rounded
+  keycap resolved from the current keymap. The selected row is one radius-10 neutral
+  `segment_selected` plate, never blue. The focused query field uses the shared neutral overlay
+  ring. Arc and Graphite keep the earlier card-sized overlay without a full-window click blocker.
 - **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
   document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
   on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),
@@ -360,7 +369,10 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   kicker; waiting with one pulse of the `warning_border` outline; failed with a `danger` outline.
   The dashed "+ Add a branch" ghost hangs off a branching step. Edges are cubic Béziers in the
   branch color (trunk `text_tertiary`), dashed into skipped nodes. Branches stop at 3 levels.
-  Branch labels ("Branch A") always accompany the color.
+  Branch labels ("Branch A") always accompany the color. Node kickers and the legend use the
+  system font at 10/700 in sentence case; a join deduplicates its incoming branch letters and reads
+  "Joins A + B". Report pages use the same Native sentence-case treatment for their kicker and
+  table headers; Arc and Graphite retain their mono uppercase tone.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground; the accent marks the

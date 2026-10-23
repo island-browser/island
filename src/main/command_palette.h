@@ -65,11 +65,30 @@ struct PaletteHistoryEntry {
     bool operator==(const PaletteHistoryEntry&) const = default;
 };
 
+// Native palette presentation is a single table keyed by result kind. Adding a result kind means
+// adding one row here, rather than scattering headers and icons through the view code.
+enum class PaletteRowIcon : std::uint8_t {
+    kKind,  // use the result kind's icon (see kPaletteKindStyles)
+    kGlobe,
+    kSpaces,
+    kBookmark,
+    kHistory,
+    kCommand,
+    kReport,
+    kSparkles,
+    kMoon,
+    kTable,
+    kPalette,
+};
+
 // A palette command: an action of the browser rather than a destination. `id` is the stable
 // routing key the window switches on; `title` is what the row shows and what a query matches.
 struct PaletteCommandEntry {
     std::string id;
     std::string title;
+    // The row icon for this command; kKind keeps the icon of the result kind (the gear for
+    // commands).
+    PaletteRowIcon icon = PaletteRowIcon::kKind;
     // Stable KeyAction id from keymap.cc when the command has a direct shortcut. The window
     // resolves the person's current binding at palette-open time; the view never hard-codes keys.
     std::string shortcut_action_id;
@@ -113,17 +132,6 @@ enum class PaletteEntryKind : std::uint8_t {
     kHistory,   // navigate the active tab to a local history result
     kCommand,   // run a browser command (e.g. "Sleep inactive tabs now")
     kReport,    // open the research report in a new Report tab
-};
-
-// Native palette presentation is a single table keyed by result kind. Adding a result kind means
-// adding one row here, rather than scattering headers and icons through the view code.
-enum class PaletteRowIcon : std::uint8_t {
-    kGlobe,
-    kSpaces,
-    kBookmark,
-    kHistory,
-    kCommand,
-    kReport,
 };
 
 struct PaletteKindStyle {

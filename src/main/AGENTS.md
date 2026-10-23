@@ -218,6 +218,17 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   current binding when the palette opens. Never hard-code a key in the view.
 - `BrowserChrome::NativeKeycapColors` supplies the keycap plate (border_strong in Native light).
 
+### Welcome and overlay focus
+
+- `WelcomeFlow` and `CommandPaletteView` both report show/hide through
+  `OnOverlayFocusRingChanged`; `BrowserWindow::ApplyAddressFocusColors` owns the single window
+  focus color, calls `ThemeChanged()` after each transition, and restores the address treatment
+  when the last overlay closes. Do not set `CEF_ColorFocusableBorderFocused` inside either view.
+- The Native welcome card's 12 DIP raster caps sit in exact-size `CefPanel` delegates. Their image
+  buttons must keep zero insets or CEF clips the cap into a detached strip. While welcome is shown,
+  `BrowserWindow` hides the attached `CefBrowserView`s because the macOS browser compositor can
+  otherwise paint start-page controls above the CEF overlay; hiding the welcome restores them.
+
 ## Dependencies
 
 ### Internal
@@ -275,7 +286,7 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `tools/icon_pipeline/icon_pipeline.cc`, so update the constant with the lock; (2) add its entry to
   `kSpaceIconChoices` in `space_icon.h` (the array size changes with it); (3) run
   `tools/icon_pipeline/run.sh generate` to regenerate the PNGs and `run.sh verify` to check them; (4) update the PNG count in the root
-  `CMakeLists.txt` (`816` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
+  `CMakeLists.txt` (`888` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
   The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
   switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
   none.
