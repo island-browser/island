@@ -216,9 +216,6 @@ std::string ClickTargetScript(const std::string& locator) {
 })())JS";
 }
 
-// Clicks a box-less element with element.click(). The element is found again by its locator, so
-// the script first checks that it is still the element the gate judged (`expected` is that
-// element's facts as a JSON object) and still has no box.
 // Currency marks for the live-label rule (NormalizeLiveCounters): a label that carries one is
 // compared exactly. A mark of ASCII letters only is a whole token, any case ("SEK", "kr"); any
 // other mark is a substring ("$", "руб", "р."). The page copy below reads this same table, so
@@ -248,7 +245,8 @@ constexpr std::string_view kLiveCountersJs = R"JS(
     // Only an ASCII prefix without a digit counts, as in C++ (a non-ASCII digit fails closed).
     const counter = /^([\x00-\x2f\x3a-\x7f]*)\([0-9]+\)([ \t]*)$/.exec(out);
     if (counter) out = counter[1] + '(#)' + counter[2];
-    return out.replace(/(^|[^0-9])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9])/g, (m, pre) => pre + '#');
+    // The time run may not touch a non-ASCII byte, before it or after it (NonAsciiFollows).
+    return out.replace(/(^|[\x00-\x2f\x3a-\x7f])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9\x80-￿])(?!:[0-9]*[\x80-￿])/g, (m, pre) => pre + '#');
   };
   const liveEqual = (a, b) => a === b || (!liveUnsafe(String(a)) && !liveUnsafe(String(b)) &&
     liveCounters(a) === liveCounters(b));
@@ -478,6 +476,21 @@ namespace {
 
 bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
+// A non-ASCII byte. A page may draw it as a digit ("５" is U+FF15), so it is never a boundary.
+bool IsNonAscii(char c) { return static_cast<unsigned char>(c) >= 0x80; }
+
+bool IsDigitLike(char c) { return IsDigit(c) || IsNonAscii(c); }
+
+// Whether a non-ASCII byte continues the number that ends at `end`: directly, or after its ':' and
+// the digits that follow it ("0:42５", "0:42:5５"). Plain ASCII after the run is left alone.
+bool NonAsciiFollows(std::string_view text, std::size_t end) {
+    if (end < text.size() && text[end] == ':') {
+        ++end;
+        while (end < text.size() && IsDigit(text[end])) ++end;
+    }
+    return end < text.size() && IsNonAscii(text[end]);
+}
+
 bool IsAsciiLetter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 char AsciiLower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
@@ -516,17 +529,18 @@ bool HasUnsafeMark(std::string_view text) {
     return false;
 }
 
-// Replaces one time-like run (M:SS or M:SS:SS, minutes and seconds 00-59, one or two leading
-// digits, whole digit runs only) with one '#'.
+// Replaces every time-like run (M:SS or M:SS:SS, minutes and seconds 00-59, one or two leading
+// digits, whole digit runs only) with one '#'. A run that touches a non-ASCII byte is left as it
+// is, so "５0:42" and "５9:42" never both become "５#".
 std::string ReplaceTimeRuns(std::string_view text) {
     std::string out;
     std::size_t i = 0;
     const auto minutes_or_seconds_at = [&text](std::size_t at) {
         return at + 1 < text.size() && text[at] >= '0' && text[at] <= '5' &&
-               IsDigit(text[at + 1]) && (at + 2 == text.size() || !IsDigit(text[at + 2]));
+               IsDigit(text[at + 1]) && (at + 2 == text.size() || !IsDigitLike(text[at + 2]));
     };
     while (i < text.size()) {
-        if (!IsDigit(text[i]) || (i > 0 && IsDigit(text[i - 1]))) {
+        if (!IsDigit(text[i]) || (i > 0 && IsDigitLike(text[i - 1]))) {
             out.push_back(text[i++]);
             continue;
         }
@@ -535,9 +549,11 @@ std::string ReplaceTimeRuns(std::string_view text) {
         if (j - i <= 2 && j < text.size() && text[j] == ':' && minutes_or_seconds_at(j + 1)) {
             std::size_t end = j + 3;
             if (end < text.size() && text[end] == ':' && minutes_or_seconds_at(end + 1)) end += 3;
-            out.push_back('#');
-            i = end;
-            continue;
+            if (!NonAsciiFollows(text, end)) {
+                out.push_back('#');
+                i = end;
+                continue;
+            }
         }
         out.append(text.substr(i, j - i));
         i = j;
@@ -664,7 +680,9 @@ BrowserToolbox::BrowserToolbox(AgentBrowserHost& host) : host_(host) {
 
     // Window, space, and tab management.
     add("browser_list_tabs", "List tabs",
-        "List the tabs of the active space with index, title, URL, and loading state.",
+        "List the tabs of the active space with index, title, URL, and loading state. 'active' "
+        "marks the tab that calls without an index act on. During a research that is the agent's "
+        "own page, which need not be the tab the person sees.",
         Schema(Props()), true);
     add("browser_list_spaces", "List spaces",
         "List the browser's spaces (Arc-style tab groups) with index, name, color, and tab "
@@ -1278,6 +1296,14 @@ void BrowserToolbox::TypeText(const json::Value& args, ToolCallback done) {
                      const std::string_view focus_error = focused->StringOr("error", "");
                      if (!focus_error.empty()) {
                          got(std::string(focus_error), std::nullopt);
+                         return;
+                     }
+                     // The focus did not land on the target: typing now would reach whatever
+                     // has focus, so the tool refuses instead of reporting "Typed.".
+                     if (!focused->BoolOr("ok", false)) {
+                         got("page_type could not focus that element; call page_snapshot for "
+                             "fresh refs.",
+                             std::nullopt);
                          return;
                      }
                      got({}, ParseFacts(*focused));

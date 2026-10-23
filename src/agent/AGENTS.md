@@ -93,9 +93,10 @@ matched as whole words, case-insensitive, with spaces normalized and Cyrillic fo
 
 Re-check after a card (`after_wait`): the target is found again and `SameElement` compares it with
 what was approved. Text and aria-label compare through `LiveLabelsMatch` (`browser_tools.h`). Two
-forms are normalized by `NormalizeLiveCounters`: a time-like run (minutes and seconds 00-59, one or
-two leading digits: "0:42", "1:02:03") becomes `#`, and one trailing parenthesized counter ("Like
-(12)") becomes `(#)` when no digit comes before it. So a countdown ("Resend in 0:42" → "0:41",
+forms are normalized by `NormalizeLiveCounters`: a time-like run (`m:ss` or `h:mm:ss`, minutes and
+seconds 00-59, one or two leading digits: "0:42", "1:02:03") becomes `#`, unless a non-ASCII byte
+touches it ("５0:42" stays exact), and one trailing parenthesized counter ("Like (12)") becomes
+`(#)` when no digit comes before it. So a countdown ("Resend in 0:42" → "0:41",
 "Pay now (expires 4:59)" → "4:58") or a counter ("Like (12)" → "(13)", "Checkout (3)" → "(12)")
 still matches a second later. Everything else is exact, and a label with a currency mark or a `#`
 is compared exactly. Currency marks are `kCurrencyMarks` in `browser_tools.cc`: ASCII-letter entries
@@ -118,6 +119,8 @@ Still passes by design, because the rule is written that way (a person may still
 - A valid `mm:ss` amount with no currency mark, for example "Köp 29:50" → "59:50" or "Book 10:30" → "11:30".
 - An ASCII counter in parentheses, for example "Delete (3)" → "(300)" or "Buy (1)" → "(10)"; only a
   counter with no digit or non-ASCII text before it is normalized.
+- A timer and a counter in parentheses that swap, for example "Retry (0:42)" → "Retry (42)": both
+  become "Retry (#)", a timer-to-counter pass the two normalizations produce together.
 - Text after the 80-character clip in `kFactsJs`: a currency mark or a digit past character 80 is not
   seen by the check.
 
@@ -154,6 +157,14 @@ Add one at a time, in the same commit as its test, and update the table above.
 6. A tool that can be consequential goes through `Gate` as above, and its rule (if it is new) is
    added with the gate steps. A tool that is always safe skips `Gate` entirely. Test it in
    `tests/agent/browser_tools_test.cpp` against `tests/agent/fake_browser_host.h`.
+
+**A new currency mark** (`kCurrencyMarks`, `browser_tools.cc`):
+1. Add the mark to the table. An ASCII-letter mark matches as a whole token in any case ("SEK");
+   any other mark matches as a substring ("руб"). The page copy reads the same table, so no
+   JavaScript edit is needed.
+2. Add a pair with the new mark to `kLiveCases` in `tests/agent/browser_tools_test.cpp` and to
+   `livePairs` in `tests/agent/facts_probe.cjs`. A changed amount must be `false` (must not click).
+3. Run `ctest -R BrowserToolsFactsProbe`, which runs the page copy on the same pairs.
 
 **A new task kind** (`agent_task_queue.h`, then the window):
 1. Append the enumerator to `TaskKind` (`kChat`, `kResearch`, `kCollect`, `kAsk` today).

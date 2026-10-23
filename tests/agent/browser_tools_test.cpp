@@ -237,6 +237,23 @@ TEST(BrowserToolsTest, TypeFocusesInsertsTextAndSubmits) {
     EXPECT_EQ(host.devtools[3].params.StringOr("type", ""), "keyUp");
 }
 
+TEST(BrowserToolsTest, TypeRefusesWhenTheFocusDidNotLandOnTheTarget) {
+    FakeBrowserHost host;
+    // FocusScript reports ok:false when the element that has focus is not the target.
+    host.QueueScriptResult(R"({"ok":false,"facts":{"tag":"body","type":"",
+        "page_origin":"https://island.test"}})");
+    BrowserToolbox toolbox(host);
+    const ToolResult result = CallTool(toolbox, "page_type",
+                                       Value::MakeObject()
+                                           .Set("ref", Value::Int(3))
+                                           .Set("text", Value::String("x")));
+    EXPECT_TRUE(result.is_error);
+    for (const FakeBrowserHost::DevToolsRecord& call : host.devtools) {
+        EXPECT_NE(call.method, "Input.insertText");
+    }
+    EXPECT_NE(result.content[0].text.find("could not focus"), std::string::npos);
+}
+
 TEST(BrowserToolsTest, TypeWithoutTargetTypesIntoFocus) {
     FakeBrowserHost host;
     host.QueueScriptResult(R"({"ok":true,"facts":{"tag":"input","type":"text",
@@ -721,6 +738,9 @@ const LiveCase kLiveCases[] = {
     {"Pay ₿ (5)", "Pay ₿ (500)", false},
     {"Order # (#)", "Order 1:00 (5)", false},
     {"Pay ５ (1)", "Pay ５ (2)", false},
+    {"Pay ５0:42", "Pay ５9:42", false},
+    {"Pay 0:42５", "Pay 9:42５", false},
+    {"Pay 0:42:5５", "Pay 9:42:5５", false},
     {"ادفع ٥٠ (1)", "ادفع ٥٠ (2)", false},
     {"Pay ￦ (5)", "Pay ￦ (500)", false},
     {"Pay ﹩ (5)", "Pay ﹩ (500)", false},
@@ -763,6 +783,10 @@ TEST(BrowserToolsTest, LiveCountersNormalizeOnlyTimesAndATrailingCounter) {
     // Edge cases the page copy must match too (facts_probe.cjs).
     EXPECT_EQ(NormalizeLiveCounters("1:02:034"), "#:034");
     EXPECT_EQ(NormalizeLiveCounters("1:00:2:00"), "#:#");
+    // A non-ASCII digit touching a time run is not a boundary: the run stays as it is.
+    EXPECT_EQ(NormalizeLiveCounters("Pay ５0:42"), "Pay ５0:42");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 0:42５"), "Pay 0:42５");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 0:42:5５"), "Pay 0:42:5５");
     // Letters that only contain a token are not the token.
     EXPECT_EQ(NormalizeLiveCounters("Usdx 0:42"), "Usdx #");
     EXPECT_EQ(NormalizeLiveCounters("Okra 0:42"), "Okra #");
@@ -776,6 +800,8 @@ TEST(BrowserToolsTest, LiveLabelsMatchOnlyWhatTheRuleAllows) {
     // A literal '#' must not collide with a normalized counter, in either direction.
     EXPECT_FALSE(LiveLabelsMatch("Order 1:00 (5)", "Order # (#)"));
     EXPECT_FALSE(LiveLabelsMatch("Order # (#)", "Order 1:00 (5)"));
+    // Accepted debt (src/agent/AGENTS.md): a timer and a counter in parentheses both become "(#)".
+    EXPECT_TRUE(LiveLabelsMatch("Retry (0:42)", "Retry (42)"));
 }
 
 // The button's label as the page reports it: a submit control on a.test.

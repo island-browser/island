@@ -69,6 +69,9 @@ const livePairs = [
   ['Pay ₿ (5)', 'Pay ₿ (500)', false],
   ['Order # (#)', 'Order 1:00 (5)', false],
   ['Pay ５ (1)', 'Pay ５ (2)', false],
+  ['Pay ５0:42', 'Pay ５9:42', false],
+  ['Pay 0:42５', 'Pay 9:42５', false],
+  ['Pay 0:42:5５', 'Pay 9:42:5５', false],
   ['ادفع ٥٠ (1)', 'ادفع ٥٠ (2)', false],
   ['Pay ￦ (5)', 'Pay ￦ (500)', false],
   ['Pay ﹩ (5)', 'Pay ﹩ (500)', false],
@@ -96,6 +99,9 @@ assert.equal(liveCounters('Okra 0:42'), 'Okra #');
 assert.equal(liveCounters('ادفع ٥٠ (1)'), 'ادفع ٥٠ (1)');
 assert.equal(liveCounters('1:02:034'), '#:034');
 assert.equal(liveCounters('1:00:2:00'), '#:#');
+assert.equal(liveCounters('Pay ５0:42'), 'Pay ５0:42');
+assert.equal(liveCounters('Pay 0:42５'), 'Pay 0:42５');
+assert.equal(liveCounters('Pay 0:42:5５'), 'Pay 0:42:5５');
 
 // A plain focused input.
 let input = el('input', { type: 'text', inForm: true });
