@@ -25,6 +25,8 @@ defined in `src/agent/CMakeLists.txt` (not `tests/CMakeLists.txt`) so the standa
 | `fixtures/fake_acp_agent.py` | Minimal ACP agent over stdio used by the session tests (needs `python3`) |
 | `panel/agent_panel_behavior.js` | Optional Playwright check of `src/main/pages/agent.html` (messages, keys, provider switcher and install hints, no HTML injection) |
 | `agent_transcript_test.cpp` | Event folding, in-place tool/plan updates, permission resolution, bounds |
+| `facts_probe.mjs` | Runs the gate's page helpers (`kFactsJs`) on DOM stand-ins; needs Node 18+. Its first statement checks the version (exit 77) before `node:assert` loads |
+| `run_facts_probe.cmake` | Launcher for `facts_probe.mjs` (`BrowserToolsFactsProbe`): reports `FACTS_PROBE_SKIP` when node is missing or older than 18, so ctest shows Skipped; a failing probe fails the test |
 
 ## For AI Agents
 

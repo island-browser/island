@@ -1,8 +1,16 @@
 // Runs the gate's page helpers (kFactsJs in src/agent/browser_tools.cc) against hand-built DOM
 // stand-ins, because the C++ tests only ever see canned script replies.
 // Usage: node facts_probe.mjs <path to browser_tools.cc>
-import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+
+// Module imports are hoisted, so the version check comes first and node:assert loads after it.
+// Exit 77 is the ctest skip code (SKIP_RETURN_CODE) and the SKIP marker is what the launcher
+// (run_facts_probe.cmake) matches for SKIP_REGULAR_EXPRESSION.
+if (Number(process.versions.node.split('.')[0]) < 18) {
+  console.log(`FACTS_PROBE_SKIP: Node 18 or newer is needed (found ${process.versions.node}).`);
+  process.exit(77);
+}
+const { default: assert } = await import('node:assert/strict');
 
 const source = readFileSync(process.argv[2], 'utf8');
 const match = /kFactsJs = R"JS\(([\s\S]*?)\)JS";/.exec(source);
