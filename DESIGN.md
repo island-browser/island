@@ -225,7 +225,8 @@ is one 2 DIP accent ring that follows the 8 pt radius: the controls sit in an in
 corners take the 6 pt inner radius. Arc and Graphite draw one ring too (0.8.0): the pill's outer
 accent outline, with the textfield's own Chromium ring painted in the plate fill so it vanishes.
 The field sits 2 DIP inside the pill there, so that ring never covers the outline. The Plan's
-instruction field is 30 pt tall with radius 6 and `border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
+instruction field is 30 pt tall with radius 6 and `border_strong`. Web pages follow the Light or
+Dark theme's color mode; System follows the OS.
 
 Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
 (`NativeSwitcherMetrics`). Its Agent row shows the provider name, a status dot (idle, working or
@@ -299,15 +300,15 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   `well` pill (the outline turns `--accent` while the field has focus), then the tab list — rows
   on the canvas, the selected tab a soft `selected` fill, the hovered one `hover`, no outline — and
   a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T
-  (Ctrl+T), the Browser menu on macOS and the command palette open tabs. In Arc and Graphite the footer's Agent button is a
-  neutral plate at the row radius (8 DIP) and the control height, centered with the icon buttons
-  and spaced like them: `hover` on hover, `segment_selected` while the panel is open, the label
-  `text` and the sparkle `text_2`, never an accent fill or label. Favicons sit
-  on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on a dark
-  sidebar. Chrome text uses the interface font (Geist, the system font, or an installed family).
-  CEF `cef_views` has no corner-radius API and clips button images to the button's insets, so the
-  soft rounded fills are square fills whose four corners a native macOS overlay repaints in the
-  canvas color, or in the patch's own `outside` color (the Native toolbar around the address
+  (Ctrl+T), the Browser menu on macOS and the command palette open tabs. In Arc and Graphite the
+  footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
+  centered with the icon buttons and spaced like them: `hover` on hover, `segment_selected` while
+  the panel is open, the label `text` and the sparkle `text_2`, never an accent fill or label.
+  Favicons sit on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on
+  a dark sidebar. Chrome text uses the interface font (Geist, the system font, or an installed
+  family). CEF `cef_views` has no corner-radius API and clips button images to the button's insets,
+  so the soft rounded fills are square fills whose four corners a native macOS overlay repaints in
+  the canvas color, or in the patch's own `outside` color (the Native toolbar around the address
   plate) (`CornerPatch` / `ApplyCornerPatches`, macos/page_card_mac.mm; the chrome pushes
   them on selection, hover, relayout and scroll). Elsewhere the fills stay square. CEF resets
   custom view colors on every theme change, so each chrome view reports the reset and the chrome
@@ -337,9 +338,10 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   Sentence-case group headers divide the results; each 36 DIP row has a 16 DIP favicon or a
   meaning-specific Lucide icon, a sentence-case kind label, and a shortcut keycap resolved from the
   current keymap. The keycap plate is a 20 DIP rounded plate at its natural width (caps plus label),
-  right-aligned in a fixed 104 DIP Native column so kind labels line up on every row. The selected row is one radius-10 neutral
-  `segment_selected` plate, never blue. The focused query field uses the shared neutral overlay
-  ring. Arc and Graphite keep the earlier card-sized overlay without a full-window click blocker.
+  right-aligned in a fixed 104 DIP Native column so kind labels line up on every row. The selected
+  row is one radius-10 neutral `segment_selected` plate, never blue. The focused query field uses
+  the shared neutral overlay ring. Arc and Graphite keep the earlier card-sized overlay without a
+  full-window click blocker.
 - **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
   document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
   on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),
@@ -376,8 +378,9 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   table headers; Arc and Graphite retain their mono uppercase tone.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
-  buttons use `--text` as background with `--surface` foreground; the accent marks the
-  active/selected state only. The agent panel is the exception for focus: it draws a neutral
+  buttons use `--text` as background with `--surface` foreground. The accent is used only for the
+  active tab, the address focus ring, the agent's own message bubble and its send button; selected
+  states (a selected row, segment or node) are neutral. The agent panel's focus ring is a neutral
   2 px `--text-2` ring (see below), never the accent.
 - **Agent panel (native, `pages/agent.html`):**
   - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
@@ -420,8 +423,9 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     page context) and, for a selection, a quote chip. Both share the 22 px chip style and
     ellipsize on one line.
   - *Collect sheet:* a 12 px-radius dialog over a 20 % scrim, with one text field labelled in
-    sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px `--border-2`
-    list) and a Collect button that is disabled until something is typed. Checkboxes and buttons are neutral.
+    sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px
+    `--border-2` list) and a Collect button that is disabled until something is typed. Checkboxes
+    and buttons are neutral.
 - **Settings > Agent & tools > Trusted sites:** a `--surface` card listing each host with a Remove
   button, which names the host in its accessible label; an empty state says how to add one.
 - **Keyboard keys:** Geist Mono 11–12px on `--surface` with a 1px border and a 2px bottom border.

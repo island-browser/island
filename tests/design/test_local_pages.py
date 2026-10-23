@@ -417,6 +417,20 @@ class PlanPage(unittest.TestCase):
         self.assertIn("text-transform: none", kicker.group(1))
         self.assertIn("font: 700 10px/1.3 var(--font)", legend.group(1))
 
+    def test_selected_node_and_row_use_a_neutral_plate_not_the_accent(self) -> None:
+        # Selection is a neutral plate (the owner's rule: accent only marks the active tab, the
+        # address focus ring, the agent's bubble and send button), so no blue ring or fill.
+        node = re.search(r'\.node\[aria-selected="true"\]\s*\{([^}]*)\}', self.html)
+        row = re.search(r'\.row\[aria-selected="true"\]\s*\{([^}]*)\}', self.html)
+        self.assertIsNotNone(node)
+        self.assertIsNotNone(row)
+        for rule in (node.group(1), row.group(1)):
+            with self.subTest(rule=rule):
+                self.assertIn("var(--segment-selected)", rule)
+                self.assertNotIn("--selection", rule)
+                self.assertNotIn("--accent", rule)
+        self.assertNotIn("#FFFFFF", row.group(1))
+
     def test_join_chip_deduplicates_branch_letters(self) -> None:
         join = self.html[self.html.index('if (node.kind === "join")') :]
         join = join[: join.index('button.appendChild(chips)')]

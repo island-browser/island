@@ -13,6 +13,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent confirmation cards during a research bind to the research page the action targets, not to
+  the tab the person is viewing. Switching tabs or spaces keeps such a card; a reshuffled index or
+  a navigation to another origin withdraws it.
+- The live-label rule no longer treats "５0:42" and "５9:42" as the same label: a time run touching
+  a non-ASCII digit is compared exactly.
+- `page_type` returns an error instead of "Typed." when the target does not take focus.
+
 ### Added
 
 - Collect from tabs: the command palette's "Collect from tabs…" opens a Collect sheet in the agent

@@ -76,7 +76,8 @@ button:disabled { cursor: default; opacity: .45; }
   text-align: left; border: 1px solid var(--border-2); background: var(--surface);
   display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
 .node:hover:not(:disabled) { border-color: var(--text-3); }
-.node[aria-selected="true"] { box-shadow: 0 0 0 2px var(--selection); }
+.node[aria-selected="true"] { background: var(--segment-selected);
+  box-shadow: 0 0 0 2px var(--text-3); }
 .node[data-kind="step"] { border-left: 3px solid var(--node-branch, var(--border-2)); }
 .node[data-kind="question"] { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
 .node[data-kind="needs_you"] { background: var(--warn-bg); border-color: var(--warn-border); }
@@ -118,8 +119,8 @@ button:disabled { cursor: default; opacity: .45; }
 .row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0;
   background: transparent; padding: 6px 8px; border-radius: var(--radius-sm); }
 .row:hover { background: var(--surface-2); }
-.row[aria-selected="true"] { background: var(--selection); color: #FFFFFF; }
-.row[aria-selected="true"] .kicker { color: #FFFFFF; }
+.row[aria-selected="true"] { background: var(--segment-selected); color: var(--text); }
+.row[aria-selected="true"] .kicker { color: var(--text-2); }
 .row .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Inspector (316) */
