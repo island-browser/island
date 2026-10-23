@@ -309,6 +309,17 @@ class ReportPage(unittest.TestCase):
         self.html = page("report.html")
         self.built = built_page("report.html")
 
+    def test_native_labels_are_sentence_case_system_text(self) -> None:
+        self.assertIn('root.setAttribute("data-look", theme.look || "")', self.html)
+        native = re.search(
+            r':root\[data-look="native"\] \.label,\s*'
+            r':root\[data-look="native"\] \.doc thead th\s*\{([^}]*)\}',
+            self.html,
+        )
+        self.assertIsNotNone(native)
+        self.assertIn("font: 600 11px/1.4 var(--font)", native.group(1))
+        self.assertIn("text-transform: none", native.group(1))
+
     def test_has_the_three_actions(self) -> None:
         self.assertIn(">Copy Markdown</button>", self.html)
         self.assertIn(">Export</button>", self.html)
@@ -391,6 +402,27 @@ class PlanPage(unittest.TestCase):
         self.assertIn("PITCH_Y = 112", self.html)
         self.assertIn("PAD = 16", self.html)
         self.assertIn("radial-gradient(circle, var(--border-2) 1px", self.html)
+
+    def test_native_kickers_and_legend_are_sentence_case_system_text(self) -> None:
+        self.assertIn('root.setAttribute("data-look", theme.look || "")', self.html)
+        kicker = re.search(
+            r':root\[data-look="native"\] \.kicker\s*\{([^}]*)\}', self.html
+        )
+        legend = re.search(
+            r':root\[data-look="native"\] \.legend\s*\{([^}]*)\}', self.html
+        )
+        self.assertIsNotNone(kicker)
+        self.assertIsNotNone(legend)
+        self.assertIn("font: 700 10px/1.3 var(--font)", kicker.group(1))
+        self.assertIn("text-transform: none", kicker.group(1))
+        self.assertIn("font: 700 10px/1.3 var(--font)", legend.group(1))
+
+    def test_join_chip_deduplicates_branch_letters(self) -> None:
+        join = self.html[self.html.index('if (node.kind === "join")') :]
+        join = join[: join.index('button.appendChild(chips)')]
+        self.assertIn("var letters = []", join)
+        self.assertIn("if (letters.indexOf(letter) < 0) letters.push(letter)", join)
+        self.assertIn('"Joins " + letters.join(" + ")', join)
 
     def test_branch_from_is_limited_by_the_depth_the_native_side_sends(self) -> None:
         self.assertIn("node.depth >= state.depth_limit", self.html)

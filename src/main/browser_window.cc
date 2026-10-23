@@ -1490,6 +1490,7 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("branch", std::move(branch))
         .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
         .Set("font", json::Value::String(CssFontStack(tokens)))
+        .Set("look", json::Value::String(std::string(LookName(tokens.look))))
         .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
 }
 
@@ -3539,6 +3540,13 @@ void BrowserWindow::ApplyAddressFocusColors(CefRefPtr<CefWindow> window,
     window->SetThemeColor(
         CEF_ColorFocusableBorderFocused,
         BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+    if (OverlayFocusRingShown()) {
+        // A shown overlay (welcome or palette) owns the one neutral ring: no accent anywhere.
+        window->SetThemeColor(
+            CEF_ColorWindowBackground,
+            BrowserChrome::TextfieldFocusRingBackdrop(tokens, /*address_focused=*/true).argb);
+        window->SetThemeColor(CEF_ColorFocusableBorderFocused, tokens.border_strong.argb);
+    }
 }
 
 void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
@@ -5008,6 +5016,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (show_internal_page_ && page != nullptr) {
             chrome_->AttachBrowserView(page->view());
             SetAttachedViews({AttachedView{.view = page->view(), .local_page = page}});
+            ApplyPageViewVisibility();
             return;
         }
         internal_page_.reset();
@@ -5026,6 +5035,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
             SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
                               AttachedView{.view = second->browser_view(), .tab = second->id(),
                                            .second_slot = true}});
+            ApplyPageViewVisibility();
             return;
         }
     }
@@ -5035,6 +5045,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
     }
     chrome_->AttachBrowserView(tab->browser_view());
     SetAttachedViews({AttachedView{.view = tab->browser_view(), .tab = tab->id()}});
+    ApplyPageViewVisibility();
 }
 
 bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
@@ -5533,17 +5544,21 @@ void BrowserWindow::ShowCommandPalette() {
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
-            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate);
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate,
+            icon_resource_root_);
     }
     // Read-only snapshots taken at open time: the open tabs of the active space
     // (title/URL for matching, TabId for routing) and the whole space list.
     std::vector<PaletteTabEntry> tabs;
+    std::vector<PaletteTabVisual> tab_visuals;
     tabs.reserve(active_space().tab_count());
+    tab_visuals.reserve(active_space().tab_count());
     for (const Tab& tab : active_space().tabs()) {
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
         tabs.push_back({.id = tab.id(),
                         .title = nav.page_title.empty() ? "Island" : nav.page_title,
                         .url = nav.url});
+        tab_visuals.push_back({.id = tab.id(), .favicon = tab.favicon()});
     }
     std::vector<PaletteSpaceEntry> spaces;
     spaces.reserve(spaces_.size());
@@ -5564,18 +5579,41 @@ void BrowserWindow::ShowCommandPalette() {
                            .question = report.question,
                            .kind = report.kind});
     }
+    std::vector<PaletteCommandEntry> commands = PaletteCommands();
+    for (PaletteCommandEntry& command : commands) {
+        const std::optional<KeyAction> action = KeyActionFromId(command.shortcut_action_id);
+        const std::optional<KeyBinding> binding =
+            action.has_value() ? keymap_.Binding(*action) : std::nullopt;
+        if (binding.has_value()) {
+#if defined(__APPLE__)
+            command.shortcut = FormatKeyGlyphs(*binding, /*mac=*/true);
+#else
+            command.shortcut = FormatKeyGlyphs(*binding, /*mac=*/false);
+#endif
+        }
+    }
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
-                           PaletteCommands(), std::move(reports));
+                           std::move(commands), std::move(reports), std::move(tab_visuals));
 }
 
 std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
-    return {{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
+    return {{.id = "sleep_inactive_tabs",
+             .title = "Sleep inactive tabs now",
+             .icon = PaletteRowIcon::kMoon},
             {.id = std::string(kChangeSpaceIconCommandId),
-             .title = "Change space icon\xE2\x80\xA6"},
-            {.id = "agent_tasks", .title = "Agent tasks"},
-            {.id = "summarize_page", .title = "Summarize page"},
-            {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"},
-            {.id = "collect_from_tabs", .title = "Collect from tabs\xE2\x80\xA6"}};
+             .title = "Change space icon\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kPalette},
+            {.id = "agent_tasks",
+             .title = "Agent tasks",
+             .icon = PaletteRowIcon::kSparkles,
+             .shortcut_action_id = "toggle_agent"},
+            {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles},
+            {.id = "ask_about_page",
+             .title = "Ask about page\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kSparkles},
+            {.id = "collect_from_tabs",
+             .title = "Collect from tabs\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kTable}};
 }
 
 void BrowserWindow::ShowSpaceIconPicker() {
@@ -6134,6 +6172,39 @@ void BrowserWindow::OnWelcomeThemeChanged(ThemePreference preference) {
     static_cast<void>(SetThemePreference(preference));
     if (welcome_ != nullptr) {
         welcome_->ApplyTheme(ResolvedTokens(ResolvedChromeTheme()));
+    }
+}
+
+void BrowserWindow::OnOverlayFocusRingChanged() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    // The welcome and the palette share one neutral ring while shown; hiding either hands the
+    // window's ring back to the address field (ApplyAddressFocusColors decides which).
+    ApplyAddressFocusColors(window_, ResolvedTokens(ResolvedChromeTheme()));
+    window_->ThemeChanged();
+    ApplyPageViewVisibility();
+}
+
+bool BrowserWindow::OverlayFocusRingShown() const {
+    return (welcome_ != nullptr && welcome_->visible()) ||
+           (command_palette_ != nullptr && command_palette_->visible());
+}
+
+void BrowserWindow::ApplyPageViewVisibility() {
+    if (chrome_ == nullptr) {
+        return;
+    }
+    // Chromium's browser compositor can sit above a CefWindow overlay on macOS, so Native hides the
+    // attached page views behind the welcome scrim. The chrome and the welcome card stay laid out.
+    const bool welcome_visible = welcome_ != nullptr && welcome_->visible();
+    const bool hidden = WelcomeHidesPageViews(ResolvedTokens(ResolvedChromeTheme()).look,
+                                              welcome_visible);
+    for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
+        if (view != nullptr) {
+            view->SetVisible(!hidden);
+        }
     }
 }
 

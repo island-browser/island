@@ -445,7 +445,8 @@ TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColor
 
     // Native segments: the selected one is a neutral plate on the `fill` track.
     EXPECT_EQ(active.fill, tokens.segment_selected);
-    EXPECT_EQ(active.outline, tokens.segment_selected);
+    // The selected plate carries the 1 DIP border_strong hairline (light and dark alike).
+    EXPECT_EQ(active.outline, tokens.border_strong);
     EXPECT_EQ(active.title, tokens.text);
     EXPECT_EQ(idle.fill, tokens.fill);
     EXPECT_NE(active.fill, tokens.selection);

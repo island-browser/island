@@ -47,6 +47,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Native look (command palette): a 20% scrim behind the ⌘K palette, sentence-case group headers
+  (Tabs, Spaces, Commands, Go to, Bookmarks, History, Reports), distinct row icons, rounded neutral
+  selection and keycap plates, right-aligned shortcuts read from the current keymap, and a neutral
+  query focus ring.
+- Native look (welcome): a radius-12 card, sentence-case Appearance and Import headers, the space
+  switcher's segmented control, a neutral focus ring, and a 20% scrim that fully hides the page.
+- Native look (segments): the selected segment plate has a 1 px `border_strong` hairline in light.
+- Native look (Plan and report): sentence-case kickers and legend on the Plan tab (join chips read
+  "Joins A + B"), and sentence-case kicker and table headers on report pages.
 - The sidebar's "New Tab" row is gone in every look. ⌘T (Ctrl+T), the Browser menu on macOS and
   the command palette open tabs; ChromeViewId 1042 is retired, not reused.
 - The Agent button in Arc and Graphite is a neutral plate: rounded like the tab rows, the height of

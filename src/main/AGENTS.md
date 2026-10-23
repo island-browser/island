@@ -209,6 +209,32 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   without driving a real window.
 - Owning models are move-only when they own move-only members (see `Space`).
 
+### Command palette kinds (Native presentation)
+
+- `kPaletteKindStyles` in `command_palette.cc` is the one table for the palette's result kinds:
+  group header, sentence-case label, legacy uppercase label and row icon (`PaletteRowIcon`, mapped
+  to a Lucide `ChromeIcon` in `command_palette_view.cc`). To add a kind, add its enum value, one row
+  in that table, and the icon mapping; `CommandPaletteNativeStyleTest` checks each kind is listed once.
+- Shortcut keycaps come from `PaletteCommandEntry::shortcut_action_id`: `BrowserWindow` resolves the
+  current binding when the palette opens. Never hard-code a key in the view.
+- `BrowserChrome::NativeKeycapColors` supplies the keycap plate (border_strong in Native light).
+
+### Welcome and overlay focus
+
+- `WelcomeFlow` and `CommandPaletteView` both report show/hide through
+  `OnOverlayFocusRingChanged`; `BrowserWindow::ApplyAddressFocusColors` owns the single window
+  focus color, calls `ThemeChanged()` after each transition, and restores the address treatment
+  when the last overlay closes. Do not set `CEF_ColorFocusableBorderFocused` inside either view.
+- The Native welcome card's 12 DIP raster caps sit in exact-size `CefPanel` delegates. Their image
+  buttons must keep zero insets or CEF clips the cap into a detached strip. While welcome is shown,
+  `BrowserWindow` hides the attached `CefBrowserView`s because the macOS browser compositor can
+  otherwise paint start-page controls above the CEF overlay; hiding the welcome restores them.
+  This applies to Native only (`WelcomeHidesPageViews` in `overlay_lifetime.h`). The decision is
+  re-applied on every attach (`BrowserWindow::ApplyPageViewVisibility`, called from
+  `AttachActiveTabBrowserView`), so a view attached or re-attached during the welcome follows it.
+- Palette shortcut keycaps: Native keeps a fixed 104 DIP right column on every row (so kind labels
+  line up) and shows the keycap plate inside it at its natural width; other looks hide the column.
+
 ## Dependencies
 
 ### Internal
@@ -266,7 +292,7 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `tools/icon_pipeline/icon_pipeline.cc`, so update the constant with the lock; (2) add its entry to
   `kSpaceIconChoices` in `space_icon.h` (the array size changes with it); (3) run
   `tools/icon_pipeline/run.sh generate` to regenerate the PNGs and `run.sh verify` to check them; (4) update the PNG count in the root
-  `CMakeLists.txt` (`816` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
+  `CMakeLists.txt` (`888` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
   The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
   switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
   none.

@@ -175,6 +175,9 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     animation: none !important; transition: none !important;
   }
 }
+/* Native look (N2): sentence-case kickers and legend instead of the mono uppercase tone. */
+:root[data-look="native"] .kicker { font: 700 10px/1.3 var(--font); letter-spacing: 0; text-transform: none; }
+:root[data-look="native"] .legend { font: 700 10px/1.3 var(--font); }
 </style>
 </head>
 <body>
@@ -283,6 +286,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       if (value) root.style.setProperty(variable, value);
     });
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+    root.setAttribute("data-look", theme.look || "");
   }
 
   // Branch letters in order of first appearance; each gets one --branch-* color.
@@ -293,6 +297,15 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       if (node.branch && labels.indexOf(node.branch) < 0) labels.push(node.branch);
     });
     return labels.indexOf(label) % 4;
+  }
+  // The chip names branches by their letter ("Joins A + B"), so long branch titles never truncate.
+  function branchLetter(label) {
+    var labels = [];
+    state.graph.nodes.forEach(function (node) {
+      if (node.branch && labels.indexOf(node.branch) < 0) labels.push(node.branch);
+    });
+    var index = labels.indexOf(label);
+    return index < 0 ? label : String.fromCharCode(65 + index);
   }
   function branchVar(label) {
     var index = branchIndex(label);
@@ -588,10 +601,16 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     if (node.site) chips.appendChild(el("span", "chip", node.site));
     if (nodeState === "skipped") chips.appendChild(el("span", "chip", "Skipped by you"));
     if (node.needs_you && nodeState !== "skipped") chips.appendChild(el("span", "chip warn", "Asks first"));
-    if (node.kind === "join") chips.appendChild(el("span", "chip", "Joins " + node.after.map(function (id) {
-      var parent = nodeById(id);
-      return parent && parent.branch ? "Branch " + parent.branch : id;
-    }).join(" + ")));
+    if (node.kind === "join") {
+      // One letter per branch, even when several parents share it ("Joins A + B").
+      var letters = [];
+      node.after.forEach(function (id) {
+        var parent = nodeById(id);
+        var letter = parent && parent.branch ? branchLetter(parent.branch) : id;
+        if (letters.indexOf(letter) < 0) letters.push(letter);
+      });
+      chips.appendChild(el("span", "chip", "Joins " + letters.join(" + ")));
+    }
     button.appendChild(chips);
     button.addEventListener("click", function () {
       if (suppressClickId === node.id) { suppressClickId = ""; return; }

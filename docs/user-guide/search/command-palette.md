@@ -6,6 +6,10 @@ The command palette is one box that finds your open tabs, your spaces, your book
 
 Press ⌘K (Ctrl+K). Type, use the arrow keys to move through the results, and press Enter to open one. Esc closes the palette.
 
+In the Native look, results are grouped under sentence-case headings. Each row has a page favicon
+or an icon for its action, and commands show their current shortcut at the right. The highlighted
+row is a neutral rounded plate; the palette and its search field do not use a blue selected state.
+
 ## What it finds
 
 | Result | What happens when you pick it |

@@ -694,6 +694,11 @@ class BrowserWindow : public CefClient,
         return address_focus_repaint_;
     }
     void ApplyAddressFocusColors(CefRefPtr<CefWindow> window, const ChromeTokens& tokens) const;
+    // True while the welcome or the command palette is shown (both paint the neutral ring).
+    [[nodiscard]] bool OverlayFocusRingShown() const;
+    // Hides or shows the attached page views for the welcome (Native only); called on every
+    // attach and on every overlay focus-ring transition.
+    void ApplyPageViewVisibility();
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
@@ -723,6 +728,7 @@ class BrowserWindow : public CefClient,
 
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
+    void OnOverlayFocusRingChanged() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
@@ -1061,7 +1067,8 @@ class BrowserWindow : public CefClient,
     // marks the child: true for a research page, false for the Report (the person's result).
     TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
                             std::string label, bool activate, bool opened_by_agent);
-    // True while a research runs with its Plan tab in a space: the agent's space is then the Plan's.
+    // True while a research runs with its Plan tab in a space: the agent's space is then the
+    // Plan's.
     [[nodiscard]] bool ResearchOwnsAgent() const;
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
     // The address a new tab opens (empty text: the start page), or nullopt when the text is not
