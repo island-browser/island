@@ -222,7 +222,9 @@ the `segment_selected` plate with `text`, not the blue `selection` fill (the pal
 is later work). The open Agent entry is the same plate with normal text. On the selected (blue)
 tab row, the close × is white at 70% and the generic globe is white. The address field's focus ring
 is one 2 DIP accent ring that follows the 8 pt radius: the controls sit in an inner panel whose
-corners take the 6 pt inner radius. The Plan's instruction field is 30 pt tall with radius 6 and
+corners take the 6 pt inner radius. Arc and Graphite draw one ring too (0.8.0): the pill's outer
+accent outline, with the textfield's own Chromium ring painted in the plate fill so it vanishes.
+The field sits 2 DIP inside the pill there, so that ring never covers the outline. The Plan's instruction field is 30 pt tall with radius 6 and
 `border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
 
 Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
@@ -294,9 +296,13 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
 - **Sidebar (native):** one `canvas` surface (the space color, tinted by the intensity setting)
   shared with the window margin. Controls are ghost by default at one control height (32 DIP,
   26 compact) and 16px icons on a 4/8/12 DIP rhythm: back/forward, then the address as one soft
-  `well` pill (the outline turns `--accent` while the field has focus), then a quiet New Tab row,
-  then the tab list — rows on the canvas, the selected tab a soft `selected` fill, the hovered
-  one `hover`, no outline — and a footer with a quiet space chip and icon buttons. Favicons sit
+  `well` pill (the outline turns `--accent` while the field has focus), then the tab list — rows
+  on the canvas, the selected tab a soft `selected` fill, the hovered one `hover`, no outline — and
+  a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T, the
+  File menu and the command palette open tabs. In Arc and Graphite the footer's Agent button is a
+  neutral plate at the row radius (8 DIP) and the control height, centered with the icon buttons
+  and spaced like them: `hover` on hover, `segment_selected` while the panel is open, the label
+  `text` and the sparkle `text_2`, never an accent fill or label. Favicons sit
   on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on a dark
   sidebar. Chrome text uses the interface font (Geist, the system font, or an installed family).
   CEF `cef_views` has no corner-radius API and clips button images to the button's insets, so the

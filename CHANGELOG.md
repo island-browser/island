@@ -47,6 +47,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- The sidebar's "New Tab" row is gone in every look. ⌘T, the File menu and the command palette open tabs; ChromeViewId 1042 is retired, not reused.
+- The Agent button in Arc and Graphite is a neutral plate: rounded like the tab rows, the height of the footer buttons, centered with them, `segment_selected` while the panel is open, with normal text (no accent fill or label).
 - The agent panel has a new look: a status pill, your messages as bubbles, compact tool rows and a
   composer card with the tab chip and a round send button.
 
@@ -54,6 +56,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- The address field in Arc and Graphite shows one focus ring (the pill's outline) instead of an inner blue ring inside it, like Native.
 - The Windows builds compile again after the expanded icon set exceeded the platform's command-line
   limit during post-build resource staging.
 

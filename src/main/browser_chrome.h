@@ -102,9 +102,9 @@ enum class ChromeViewId : int {
     // a contract node with zero width while the panel is closed; the panel's
     // own CefBrowserView inside it is not a contract node.
     kAgentPanel = 1041,
-    // Arc-style rail regions: the "New Tab" row above the tab list, and the
-    // footer under the space bar holding the agent toggle and New Space.
-    kRailNewTab = 1042,
+    // Arc-style rail regions: the footer under the space bar holding the agent toggle and
+    // New Space. 1042 was the "New Tab" row above the tab list; it was retired in 0.8.0 (the
+    // row is gone in every look; ⌘T, the File menu and the palette open tabs) and is not reused.
     kRailFooter = 1043,
     kRailAgentButton = 1044,
     kRailNewSpaceButton = 1045,
@@ -560,6 +560,16 @@ class BrowserChrome final : public NavigationObserver {
             open ? tokens.segment_selected : (hovered ? tokens.hover : tokens.canvas);
         return {.fill = fill, .text = tokens.text, .sparkle = tokens.accent};
     }
+    // Arc and Graphite's Agent plate (Native uses NativeAgentEntryColors): hover paints `hover`,
+    // an open panel the raised `segment_selected` plate, and at rest the rail shows through. The
+    // label stays `text` and the icon `text_2`; no accent fill or label (owner request, 0.8.0).
+    [[nodiscard]] static ArgbColor FooterAgentPlate(const ChromeTokens& tokens, bool open,
+                                                    bool hovered, ArgbColor rail) {
+        if (open) {
+            return tokens.segment_selected;
+        }
+        return hovered ? tokens.hover : rail;
+    }
     // The label next to the status dot: queue progress "3/7" while a queue runs, otherwise the
     // provider name. (The view elides a long name with an ellipsis before the keycap.)
     [[nodiscard]] static std::string AgentEntryMetaText(const AgentEntryStatus& status) {
@@ -809,10 +819,6 @@ class BrowserChrome final : public NavigationObserver {
             rail_children.push_back(address);
         }
         rail_children.push_back({ChromeViewId::kValidationMessage, {}});
-        // Arc and Graphite list New Tab above the tabs; Native moves it to the list's end.
-        if (!native) {
-            rail_children.push_back({ChromeViewId::kRailNewTab, {}});
-        }
         rail_children.insert(rail_children.end(), {{ChromeViewId::kTabStrip, {}},
                                                    {ChromeViewId::kSpacer, {}},
                                                    {ChromeViewId::kDivider, {}}});
@@ -904,10 +910,6 @@ class BrowserChrome final : public NavigationObserver {
             }
             if (native && !tabs_header_added) {
                 tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-            }
-            // Native's New Tab row is the list's last row, after the last tab.
-            if (native) {
-                tab_strip->children.push_back({ChromeViewId::kRailNewTab, {}});
             }
         }
         if (ChromeViewTreeNode* switcher = find(tree, ChromeViewId::kSpaceSwitcher, find);
@@ -1200,7 +1202,6 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
     CefRefPtr<CefView> tab_list_scroll_;
     CefRefPtr<CefPanel> space_switcher_;
-    CefRefPtr<CefLabelButton> new_tab_button_;
     CefRefPtr<CefPanel> rail_footer_;
     CefRefPtr<SurfacePanelDelegate> rail_footer_delegate_;
     CefRefPtr<CefLabelButton> agent_button_;
