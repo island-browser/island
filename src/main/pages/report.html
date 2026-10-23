@@ -89,6 +89,9 @@ h1.title { margin: 0 0 6px; font-size: 28px; line-height: 1.2; letter-spacing: -
   letter-spacing: .06em; text-transform: uppercase; color: var(--text-2); }
 .doc.plain { white-space: pre-wrap; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+/* Native look (N3): the kicker and table headers are sentence case, not mono uppercase. */
+:root[data-look="native"] .label,
+:root[data-look="native"] .doc thead th { font: 600 11px/1.4 var(--font); letter-spacing: 0; text-transform: none; }
 </style>
 </head>
 <body>
@@ -241,6 +244,7 @@ h1.title { margin: 0 0 6px; font-size: 28px; line-height: 1.2; letter-spacing: -
       if (value) root.style.setProperty(variable, value);
     });
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+    root.setAttribute("data-look", theme.look || "");
   }
 
   window.islandRender = function (next) {
