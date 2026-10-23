@@ -208,6 +208,16 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   without driving a real window.
 - Owning models are move-only when they own move-only members (see `Space`).
 
+### Command palette kinds (Native presentation)
+
+- `kPaletteKindStyles` in `command_palette.cc` is the one table for the palette's result kinds:
+  group header, sentence-case label, legacy uppercase label and row icon (`PaletteRowIcon`, mapped
+  to a Lucide `ChromeIcon` in `command_palette_view.cc`). To add a kind, add its enum value, one row
+  in that table, and the icon mapping; `CommandPaletteNativeStyleTest` checks each kind is listed once.
+- Shortcut keycaps come from `PaletteCommandEntry::shortcut_action_id`: `BrowserWindow` resolves the
+  current binding when the palette opens. Never hard-code a key in the view.
+- `BrowserChrome::NativeKeycapColors` supplies the keycap plate (border_strong in Native light).
+
 ## Dependencies
 
 ### Internal

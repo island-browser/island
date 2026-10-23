@@ -62,6 +62,14 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   where the active space keeps a selected plate. A non-string `icon` in a session is ignored.
 
 ### Changed
+- Native look (command palette): a 20% scrim behind the ⌘K palette, sentence-case group headers
+  (Tabs, Spaces, Commands, Go to, Bookmarks, History, Reports), a row icon per result, right-aligned
+  shortcut keycaps read from the current keymap, and sentence-case kind labels.
+- Native look (welcome): sentence-case Appearance and Import headers, the space switcher's segmented
+  control, a neutral focus ring, and a 20% scrim behind the card.
+- Native look (segments): the selected segment plate has a 1 px `border_strong` hairline in light.
+- Native look (Plan and report): sentence-case kickers and legend on the Plan tab (join chips read
+  "Joins A + B"), and sentence-case kicker and table headers on report pages.
 
 - Command palette rows on Native: the selected row is the neutral raised plate with normal text,
   not blue. Blue stays for the active tab and focus rings.

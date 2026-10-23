@@ -307,6 +307,8 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   custom view colors on every theme change, so each chrome view reports the reset and the chrome
   repaints from the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`,
   `SpaceChipColors`).
+- **Collapsed rail, Arc and Graphite:** the rail shows only tabs and spaces (no Back, Forward or
+  address controls). This is the intended toolbar-less rail for those looks, not a defect.
 - **Collapsed icon rail (native):** Cmd/Ctrl+B swaps the 286 DIP sidebar for a 52 DIP rail on the
   same `canvas` surface, never hiding the tabs. One 32 DIP square button per tab of the
 active space (16 DIP favicon on its plate, globe fallback), pinned tabs first with a hairline
