@@ -246,7 +246,7 @@ constexpr std::string_view kLiveCountersJs = R"JS(
     const counter = /^([\x00-\x2f\x3a-\x7f]*)\([0-9]+\)([ \t]*)$/.exec(out);
     if (counter) out = counter[1] + '(#)' + counter[2];
     // The time run may not touch a non-ASCII byte, before it or after it (NonAsciiFollows).
-    return out.replace(/(^|[\x00-\x2f\x3a-\x7f])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9\x80-￿])(?!:[0-9]*[\x80-￿])/g, (m, pre) => pre + '#');
+    return out.replace(/(^|[\x00-\x2f\x3a-\x7f])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9\x80-\uffff])(?!:[0-9]*[\x80-\uffff])/g, (m, pre) => pre + '#');
   };
   const liveEqual = (a, b) => a === b || (!liveUnsafe(String(a)) && !liveUnsafe(String(b)) &&
     liveCounters(a) === liveCounters(b));
