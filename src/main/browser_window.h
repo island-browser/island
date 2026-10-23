@@ -426,6 +426,9 @@ class BrowserWindow : public CefClient,
     void ShowQuoteFixtureForDev();
     // Dev capture (`agent_fixture:collect`): the Collect sheet open over the panel.
     void ShowCollectFixtureForDev();
+    // Dev capture (`agent_fixture:thread`): a sample transcript (a user message, three tool rows,
+    // a Markdown reply) and one queued message, nothing sent.
+    void ShowThreadFixtureForDev();
     // Dev capture (`report_fixture:collection`): a collection Report tab with its Export menu open.
     void ShowCollectionReportFixtureForDev();
     // Queues a collection of the web tabs the sheet showed, for `what` (blank or no web tab:

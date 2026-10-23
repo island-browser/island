@@ -63,6 +63,9 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void ShowQuoteFixture();
     // Developer capture only: the Collect sheet over the panel (`agent_fixture:collect`).
     void ShowCollectFixture();
+    // Developer capture only: a sample conversation with tool rows, a Markdown reply and a queued
+    // message (`agent_fixture:thread`).
+    void ShowThreadFixture();
     // Developer capture only: a collection report with its Export menu open
     // (`report_fixture:collection`).
     void ShowCollectionReportFixture();
