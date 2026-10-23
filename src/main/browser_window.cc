@@ -2970,6 +2970,47 @@ void BrowserWindow::ShowCollectFixtureForDev() {
     ScheduleLocalPagesRender();
 }
 
+void BrowserWindow::ShowThreadFixtureForDev() {
+    // queue_fixture_ keeps the tasks live without sending them: the first is running, the second
+    // waits in the queue and shows as a queued message under the conversation.
+    queue_fixture_ = true;
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    const auto now = static_cast<std::int64_t>(UnixNowMs());
+    // The transcript goes first: each session change re-checks the in-flight turn, and a turn that
+    // was enqueued before its transcript looks finished.
+    agent_session_->AddDevUserPrompt("Compare the espresso grinders on my list");
+    using agent::AcpEvent;
+    const auto tool = [](std::string id, std::string title, std::string status) {
+        AcpEvent event;
+        event.type = AcpEvent::Type::kToolCall;
+        event.tool_call_id = std::move(id);
+        event.title = std::move(title);
+        event.kind = "read";
+        event.status = std::move(status);
+        return event;
+    };
+    agent_session_->ApplyDevEvent(
+        tool("t1", "mcp__island-browser__page_read_text example.org", "completed"));
+    agent_session_->ApplyDevEvent(
+        tool("t2", "mcp__island-browser__page_snapshot shop.example.com", "completed"));
+    agent_session_->ApplyDevEvent(
+        tool("t3", "mcp__island-browser__page_click Place order", "failed"));
+    AcpEvent reply;
+    reply.type = AcpEvent::Type::kAgentMessageChunk;
+    reply.text =
+        "**Short answer:** the Hario Mini fits a small kitchen best.\n\n"
+        "What to weigh:\n\n"
+        "- Footprint: under 20 cm tall\n"
+        "- Grind: set `medium-fine` for espresso\n\n"
+        "The shop page did not accept the order, so nothing was bought.";
+    agent_session_->ApplyDevEvent(reply);
+    agent_queue_.Enqueue(agent::TaskKind::kChat, "Compare the espresso grinders on my list", {},
+                         now);
+    agent_queue_.Enqueue(agent::TaskKind::kChat, "Check the price on the second grinder", {}, now);
+    ScheduleLocalPagesRender();
+}
+
 void BrowserWindow::ShowQuoteFixtureForDev() {
     ShowAgentContextChip(
         {.title = "Example Domain",

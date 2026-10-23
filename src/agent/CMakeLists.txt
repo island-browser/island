@@ -123,11 +123,16 @@ if(TARGET GTest::gtest_main)
     endif()
     add_dependencies(island_agent_tests island_mcp_bridge)
     gtest_discover_tests(island_agent_tests)
-    # Runs the gate's page helpers on DOM stand-ins; skipped where node is absent.
+    # Runs the gate's page helpers on DOM stand-ins. The test is always registered; the launcher
+    # reports SKIP when node is missing or older than 18, so ctest shows Skipped (not Not Run) and
+    # a real probe failure still fails.
     find_program(ISLAND_NODE node)
-    if(ISLAND_NODE)
-        add_test(NAME BrowserToolsFactsProbe
-                 COMMAND "${ISLAND_NODE}" "${ISLAND_AGENT_REPO_ROOT}/tests/agent/facts_probe.mjs"
-                         "${ISLAND_AGENT_REPO_ROOT}/src/agent/browser_tools.cc")
-    endif()
+    add_test(NAME BrowserToolsFactsProbe
+             COMMAND "${CMAKE_COMMAND}"
+                     "-DNODE=${ISLAND_NODE}"
+                     "-DPROBE=${ISLAND_AGENT_REPO_ROOT}/tests/agent/facts_probe.cjs"
+                     "-DSOURCE=${ISLAND_AGENT_REPO_ROOT}/src/agent/browser_tools.cc"
+                     -P "${ISLAND_AGENT_REPO_ROOT}/tests/agent/run_facts_probe.cmake")
+    set_tests_properties(BrowserToolsFactsProbe PROPERTIES
+                         SKIP_REGULAR_EXPRESSION "FACTS_PROBE_SKIP")
 endif()

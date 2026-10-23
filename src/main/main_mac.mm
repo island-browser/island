@@ -487,21 +487,24 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         app->OpenAgentPagesForDev(std::atoi(rest.c_str()), gap_ms);
         return true;
     }
-    if (island::DevAgentFixtureName(action) == "confirm") {
-        app->ShowConfirmationFixture();
-        return true;
-    }
-    if (island::DevAgentFixtureName(action) == "queue") {
-        app->ShowQueueFixture();
-        return true;
-    }
-    if (island::DevAgentFixtureName(action) == "quote") {
-        app->ShowQuoteFixture();
-        return true;
-    }
-    if (island::DevAgentFixtureName(action) == "collect") {
-        app->ShowCollectFixture();
-        return true;
+    // `agent_fixture:<name>` shows one sample agent state; the names are listed in dev_capture.h.
+    struct AgentFixture {
+        std::string_view name;
+        void (island::IslandApp::*show)();
+    };
+    static constexpr AgentFixture kAgentFixtures[] = {
+        {"confirm", &island::IslandApp::ShowConfirmationFixture},
+        {"queue", &island::IslandApp::ShowQueueFixture},
+        {"quote", &island::IslandApp::ShowQuoteFixture},
+        {"collect", &island::IslandApp::ShowCollectFixture},
+        {"thread", &island::IslandApp::ShowThreadFixture},
+    };
+    const std::string_view agent_fixture = island::DevAgentFixtureName(action);
+    for (const AgentFixture& fixture : kAgentFixtures) {
+        if (agent_fixture == fixture.name) {
+            (app->*fixture.show)();
+            return true;
+        }
     }
     if (action == "report_fixture:collection") {
         app->ShowCollectionReportFixture();

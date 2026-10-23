@@ -1,5 +1,6 @@
 #include "browser_tools.h"
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <set>
@@ -218,14 +219,60 @@ std::string ClickTargetScript(const std::string& locator) {
 // Clicks a box-less element with element.click(). The element is found again by its locator, so
 // the script first checks that it is still the element the gate judged (`expected` is that
 // element's facts as a JSON object) and still has no box.
+// Currency marks for the live-label rule (NormalizeLiveCounters): a label that carries one is
+// compared exactly. A mark of ASCII letters only is a whole token, any case ("SEK", "kr"); any
+// other mark is a substring ("$", "руб", "р."). The page copy below reads this same table, so
+// both sides agree on every entry (facts_probe.cjs runs the pairs in browser_tools_test.cpp).
+constexpr std::string_view kCurrencyMarks[] = {
+    "$",   "€",    "£",    "¥",   "¢",   "₽",   "₴",   "₸",   "₹",   "₩",   "₺",   "₪",   "₫",
+    "₱",   "₦",    "₿",    "₡",   "₵",   "₼",   "₾",   "＄",  "￥",  "￡",  "￠",  "元",  "円",
+    "zł",  "Zł",   "ZŁ",   "Kč",  "KČ",  "kč",  "руб", "Руб", "РУБ", "р.",  "Р.",  "лв",  "Лв",
+    "ЛВ",  "грн",  "Грн",  "ГРН", "￦",  "﹩",  "﷼",   "₨",   "USD", "EUR", "GBP", "JPY", "RUB",
+    "CNY", "RMB",  "CHF",  "CAD", "AUD", "NZD", "HKD", "SGD", "SEK", "NOK", "DKK", "ISK", "PLN",
+    "CZK", "HUF",  "RON",  "UAH", "ZAR", "ILS", "Rs",  "THB", "INR", "KRW", "BRL", "MXN", "BTC",
+    "ETH", "USDT", "USDC", "kr",  "kn",  "Ft",  "lei", "Rp",  "RM",
+};
+
+// The live-label rule in page JavaScript, for SyntheticClickScript. `liveEqual` mirrors
+// LiveLabelsMatch. `liveCounters` mirrors NormalizeLiveCounters for a label that is not unsafe; it
+// does not check the unsafe marks itself, because the page only calls liveEqual. The table is
+// `__islandCurrencyMarks`, built from kCurrencyMarks by SyntheticClickScript.
+constexpr std::string_view kLiveCountersJs = R"JS(
+  const liveTokens = __islandCurrencyMarks.filter((m) => /^[A-Za-z]+$/.test(m));
+  const liveSymbols = __islandCurrencyMarks.filter((m) => !/^[A-Za-z]+$/.test(m));
+  const liveTokenRe = new RegExp('(^|[^A-Za-z])(' + liveTokens.join('|') + ')(?![A-Za-z])', 'i');
+  const liveUnsafe = (s) => s.indexOf('#') !== -1 || liveSymbols.some((m) => s.indexOf(m) !== -1) ||
+    liveTokenRe.test(s);
+  const liveCounters = (text) => {
+    let out = String(text);
+    // Only an ASCII prefix without a digit counts, as in C++ (a non-ASCII digit fails closed).
+    const counter = /^([\x00-\x2f\x3a-\x7f]*)\([0-9]+\)([ \t]*)$/.exec(out);
+    if (counter) out = counter[1] + '(#)' + counter[2];
+    return out.replace(/(^|[^0-9])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9])/g, (m, pre) => pre + '#');
+  };
+  const liveEqual = (a, b) => a === b || (!liveUnsafe(String(a)) && !liveUnsafe(String(b)) &&
+    liveCounters(a) === liveCounters(b));
+)JS";
+
+// Clicks a box-less element with element.click(). The element is found again by its locator, so
+// the script first checks that it is still the element the gate judged (`expected` is that
+// element's facts as a JSON object) and still has no box.
 std::string SyntheticClickScript(const std::string& locator, const std::string& expected) {
-    return "(() => { const el = " + locator + "; const expected = " + expected + ";" +
-           std::string(kFactsJs) + R"JS(
+    std::string marks = "const __islandCurrencyMarks = [";
+    for (std::string_view mark : kCurrencyMarks) {
+        marks += JsStringLiteral(std::string(mark)) + ",";
+    }
+    marks += "];";
+    return "(() => { const el = " + locator + "; const expected = " + expected + ";" + marks +
+           std::string(kLiveCountersJs) + std::string(kFactsJs) + R"JS(
   if (!el) return JSON.stringify({ok: false, error: 'element not found; call page_snapshot for fresh refs'});
   const rect = el.getBoundingClientRect();
   const facts = __islandFacts(el);
+  const liveKeys = ['text', 'aria_label'];
   const same = rect.width === 0 && rect.height === 0 &&
-    Object.keys(expected).every((key) => facts[key] === expected[key]);
+    Object.keys(expected).every((key) => liveKeys.includes(key)
+      ? liveEqual(facts[key], expected[key])
+      : facts[key] === expected[key]);
   if (!same) return JSON.stringify({ok: false, error: 'The page changed while waiting; take a fresh snapshot.'});
   el.click();
   return JSON.stringify({ok: true});
@@ -371,9 +418,9 @@ std::optional<ElementFacts> ParseFacts(const Value& script_result) {
 // an opaque frame) are the same; one missing and one present are not.
 bool SameElement(const std::optional<ElementFacts>& a, const std::optional<ElementFacts>& b) {
     if (!a || !b) return !a && !b;
-    return a->tag == b->tag && a->type == b->type && a->text == b->text &&
+    return a->tag == b->tag && a->type == b->type && LiveLabelsMatch(a->text, b->text) &&
            a->autocomplete == b->autocomplete && a->name == b->name && a->id == b->id &&
-           a->aria_label == b->aria_label && a->is_submit == b->is_submit &&
+           LiveLabelsMatch(a->aria_label, b->aria_label) && a->is_submit == b->is_submit &&
            a->page_origin == b->page_origin;
 }
 
@@ -426,6 +473,107 @@ void SendClick(AgentBrowserHost& host, std::optional<std::size_t> tab, double x,
 }
 
 }  // namespace
+
+namespace {
+
+bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+
+bool IsAsciiLetter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
+char AsciiLower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+
+bool IsTokenMark(std::string_view mark) {
+    return !mark.empty() &&
+           std::all_of(mark.begin(), mark.end(), [](char c) { return IsAsciiLetter(c); });
+}
+
+// A label the rule must not touch: it holds a currency mark, or a '#' (the placeholder's own
+// character, so a literal '#' could otherwise collide with a normalized counter).
+bool HasUnsafeMark(std::string_view text) {
+    if (text.find('#') != std::string_view::npos) return true;
+    for (std::string_view mark : kCurrencyMarks) {
+        if (IsTokenMark(mark)) continue;
+        if (text.find(mark) != std::string_view::npos) return true;
+    }
+    std::size_t i = 0;
+    while (i < text.size()) {
+        if (!IsAsciiLetter(text[i])) {
+            ++i;
+            continue;
+        }
+        std::size_t end = i;
+        while (end < text.size() && IsAsciiLetter(text[end])) ++end;
+        for (std::string_view mark : kCurrencyMarks) {
+            if (!IsTokenMark(mark) || mark.size() != end - i) continue;
+            bool equal = true;
+            for (std::size_t k = 0; k < mark.size(); ++k) {
+                equal = equal && AsciiLower(text[i + k]) == AsciiLower(mark[k]);
+            }
+            if (equal) return true;
+        }
+        i = end;
+    }
+    return false;
+}
+
+// Replaces one time-like run (M:SS or M:SS:SS, minutes and seconds 00-59, one or two leading
+// digits, whole digit runs only) with one '#'.
+std::string ReplaceTimeRuns(std::string_view text) {
+    std::string out;
+    std::size_t i = 0;
+    const auto minutes_or_seconds_at = [&text](std::size_t at) {
+        return at + 1 < text.size() && text[at] >= '0' && text[at] <= '5' &&
+               IsDigit(text[at + 1]) && (at + 2 == text.size() || !IsDigit(text[at + 2]));
+    };
+    while (i < text.size()) {
+        if (!IsDigit(text[i]) || (i > 0 && IsDigit(text[i - 1]))) {
+            out.push_back(text[i++]);
+            continue;
+        }
+        std::size_t j = i;
+        while (j < text.size() && IsDigit(text[j])) ++j;
+        if (j - i <= 2 && j < text.size() && text[j] == ':' && minutes_or_seconds_at(j + 1)) {
+            std::size_t end = j + 3;
+            if (end < text.size() && text[end] == ':' && minutes_or_seconds_at(end + 1)) end += 3;
+            out.push_back('#');
+            i = end;
+            continue;
+        }
+        out.append(text.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+
+// Replaces one trailing "(digits)" (trailing blanks allowed) with "(#)", but only when the text
+// before it is pure ASCII with no digit at all (a non-ASCII digit or letter before it fails
+// closed).
+std::string ReplaceTrailingCounter(std::string text) {
+    std::size_t close = text.size();
+    while (close > 0 && (text[close - 1] == ' ' || text[close - 1] == '\t')) --close;
+    if (close == 0 || text[close - 1] != ')') return text;
+    std::size_t p = close - 1;
+    while (p > 0 && IsDigit(text[p - 1])) --p;
+    if (p == close - 1 || p == 0 || text[p - 1] != '(') return text;
+    for (std::size_t k = 0; k < p; ++k) {
+        const auto byte = static_cast<unsigned char>(text[k]);
+        if (IsDigit(text[k]) || byte >= 0x80) return text;
+    }
+    return text.substr(0, p) + "#" + text.substr(close - 1);
+}
+
+}  // namespace
+
+std::string NormalizeLiveCounters(std::string_view text) {
+    if (HasUnsafeMark(text)) return std::string(text);
+    return ReplaceTimeRuns(ReplaceTrailingCounter(std::string(text)));
+}
+
+bool LiveLabelsMatch(std::string_view a, std::string_view b) {
+    if (a == b) return true;
+    if (HasUnsafeMark(a) || HasUnsafeMark(b)) return false;
+    return NormalizeLiveCounters(a) == NormalizeLiveCounters(b);
+}
 
 // ---- ToolResult ------------------------------------------------------------------
 
@@ -880,13 +1028,26 @@ std::optional<ToolResult> BrowserToolbox::Refusal(std::optional<std::size_t> tab
     return std::nullopt;
 }
 
-void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
-                          std::function<void(ToolCallback)> run, ToolCallback done,
-                          std::function<void(ToolCallback)> after_wait) {
+GateDecision BrowserToolbox::Decide(GateInput input) {
     // The page's own origin, as the page reports it, beats the tab list's URL, which can lag a
     // navigation; an origin without a host (data:, sandboxed) matches no trusted site.
     if (input.facts && !input.facts->page_origin.empty()) input.page_url = input.facts->page_origin;
-    const GateDecision decision = Classify(input, host_.TrustedSites());
+    return Classify(input, host_.TrustedSites());
+}
+
+// Belt-and-braces: SameElement runs first and compares every fact the gate reads, except in_form.
+// A change in in_form can only make an approved confirmation free, never blocked or a new rule, so
+// the failing branch here is not reachable through a test.
+bool BrowserToolbox::StillApproved(GateInput approved, GateInput fresh) {
+    const GateDecision was = Decide(std::move(approved));
+    const GateDecision now = Decide(std::move(fresh));
+    return now.action == ActionClass::kFree || (now.action == was.action && now.rule == was.rule);
+}
+
+void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
+                          std::function<void(ToolCallback)> run, ToolCallback done,
+                          std::function<void(ToolCallback)> after_wait) {
+    const GateDecision decision = Decide(input);
     if (decision.action == ActionClass::kFree) {
         run(std::move(done));
         return;
@@ -1037,16 +1198,19 @@ void BrowserToolbox::Click(const json::Value& args, ToolCallback done) {
         }
         GateInput input{.tool = "page_click", .facts = target.facts};
         if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
-        const std::optional<ElementFacts> approved = target.facts;
+        const GateInput approved = input;
         Gate(
             std::move(input), tab,
             [act, target](ToolCallback finish) { act(target, std::move(finish)); }, std::move(done),
             // After the card: find the element again, require the same one, click where it is now.
-            [locate, act, approved](ToolCallback finish) {
-                locate([act, approved, finish = std::move(finish)](Located fresh) mutable {
+            [this, locate, act, approved](ToolCallback finish) {
+                locate([this, act, approved, finish = std::move(finish)](Located fresh) mutable {
+                    GateInput judged = approved;
+                    judged.facts = fresh.facts;
                     if (!fresh.error.empty()) {
                         finish(ToolResult::Error(fresh.error));
-                    } else if (!SameElement(approved, fresh.facts)) {
+                    } else if (!SameElement(approved.facts, fresh.facts) ||
+                               !StillApproved(approved, judged)) {
                         finish(ToolResult::Error(kPageChanged));
                     } else {
                         act(fresh, std::move(finish));
@@ -1127,14 +1291,18 @@ void BrowserToolbox::TypeText(const json::Value& args, ToolCallback done) {
         }
         GateInput input{.tool = "page_type", .facts = facts, .submit = submit};
         if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+        const GateInput approved = input;
         Gate(std::move(input), tab, type_into_focus, std::move(done),
              // After the card: focus the target again and type only if it is still what was judged.
-             [read_facts, type_into_focus, approved = std::move(facts)](ToolCallback finish) {
-                 read_facts([type_into_focus, approved, finish = std::move(finish)](
+             [this, read_facts, type_into_focus, approved](ToolCallback finish) {
+                 read_facts([this, type_into_focus, approved, finish = std::move(finish)](
                                 std::string err, std::optional<ElementFacts> fresh) mutable {
+                     GateInput judged = approved;
+                     judged.facts = fresh;
                      if (!err.empty()) {
                          finish(ToolResult::Error(err));
-                     } else if (!SameElement(approved, fresh)) {
+                     } else if (!SameElement(approved.facts, fresh) ||
+                                !StillApproved(approved, judged)) {
                          finish(ToolResult::Error(kPageChanged));
                      } else {
                          type_into_focus(std::move(finish));
@@ -1166,12 +1334,15 @@ void BrowserToolbox::PressKey(const json::Value& args, ToolCallback done) {
                            done = std::move(done)](std::optional<ElementFacts> facts) mutable {
         GateInput input{.tool = "page_press_key", .facts = facts, .key = key};
         if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+        const GateInput approved = input;
         Gate(std::move(input), tab, press, std::move(done),
              // After the card: press only if focus is still on what was judged.
-             [this, tab, press, approved = std::move(facts)](ToolCallback finish) {
-                 ReadFocusedFacts(tab, [press, approved, finish = std::move(finish)](
+             [this, tab, press, approved](ToolCallback finish) {
+                 ReadFocusedFacts(tab, [this, press, approved, finish = std::move(finish)](
                                            std::optional<ElementFacts> fresh) mutable {
-                     if (SameElement(approved, fresh)) {
+                     GateInput judged = approved;
+                     judged.facts = fresh;
+                     if (SameElement(approved.facts, fresh) && StillApproved(approved, judged)) {
                          press(std::move(finish));
                      } else {
                          finish(ToolResult::Error(kPageChanged));

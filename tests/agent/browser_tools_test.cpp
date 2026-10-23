@@ -692,5 +692,185 @@ TEST(BrowserToolsTest, LocatorScriptsEscapeSelectors) {
               R"("a\u2028b")");
 }
 
+// Label pairs for the live-label rule, shared in spirit with facts_probe.cjs (which runs the same
+// pairs through the page copy). `match` is whether the labels count as the same after a card.
+struct LiveCase {
+    const char* before;
+    const char* after;
+    bool match;
+};
+const LiveCase kLiveCases[] = {
+    // Countdowns and counters that must keep matching.
+    {"Resend in 0:42", "Resend in 0:41", true},
+    {"Pay now (expires 4:59)", "Pay now (expires 4:58)", true},
+    {"Like (12)", "Like (13)", true},
+    {"Try again in 0:42", "Try again in 0:41", true},
+    {"Checkout (3)", "Checkout (12)", true},
+    // Prices, amounts and quantities that must not match. Each pair is a must-not-click case.
+    {"Pay $5", "Pay $500", false},
+    {"Transfer 10 USD", "Transfer 9000 USD", false},
+    {"Buy 1", "Buy 10", false},
+    {"Pay $5 (1)", "Pay $5 (2)", false},
+    {"Pay 5 (1)", "Pay 5 (2)", false},
+    {"Köp 29:90", "Köp 299:90", false},
+    {"Betala 29:90 kr", "Betala 299:90 kr", false},
+    {"Pay 5 SEK (1)", "Pay 5 SEK (2)", false},
+    {"Оплатить 500 руб (1)", "Оплатить 500 руб (2)", false},
+    {"Pay 5 USDT (1)", "Pay 5 USDT (2)", false},
+    {"Pay ＄5 (1)", "Pay ＄5 (2)", false},
+    {"Pay ₿ (5)", "Pay ₿ (500)", false},
+    {"Order # (#)", "Order 1:00 (5)", false},
+    {"Pay ５ (1)", "Pay ５ (2)", false},
+    {"ادفع ٥٠ (1)", "ادفع ٥٠ (2)", false},
+    {"Pay ￦ (5)", "Pay ￦ (500)", false},
+    {"Pay ﹩ (5)", "Pay ﹩ (500)", false},
+    {"Pay ﷼ (5)", "Pay ﷼ (500)", false},
+    {"Pay ₨ (5)", "Pay ₨ (500)", false},
+    {"Pay 5 грн (1)", "Pay 5 грн (2)", false},
+    {"Pay 5 Rs (1)", "Pay 5 Rs (2)", false},
+    {"Pay 5 Rp (1)", "Pay 5 Rp (2)", false},
+    {"Pay 5 RM (1)", "Pay 5 RM (2)", false},
+};
+
+TEST(BrowserToolsTest, LiveCountersNormalizeOnlyTimesAndATrailingCounter) {
+    EXPECT_EQ(NormalizeLiveCounters("0:42"), "#");
+    EXPECT_EQ(NormalizeLiveCounters("1:02:03"), "#");
+    EXPECT_EQ(NormalizeLiveCounters("Resend in 0:42"), "Resend in #");
+    EXPECT_EQ(NormalizeLiveCounters("Pay now (expires 4:59)"), "Pay now (expires #)");
+    EXPECT_EQ(NormalizeLiveCounters("Checkout (3)"), "Checkout (#)");
+    EXPECT_EQ(NormalizeLiveCounters("Checkout (12)  "), "Checkout (#)  ");
+    // A counter is normalized only when no digit comes before it; a time still is.
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 (1)"), "Pay 5 (1)");
+    EXPECT_EQ(NormalizeLiveCounters("Timer 0:42 (3)"), "Timer # (3)");
+    // Not a time: minutes or seconds above 59, three leading digits, or a counter not last.
+    EXPECT_EQ(NormalizeLiveCounters("29:90"), "29:90");
+    EXPECT_EQ(NormalizeLiveCounters("299:90"), "299:90");
+    EXPECT_EQ(NormalizeLiveCounters("1000:00"), "1000:00");
+    EXPECT_EQ(NormalizeLiveCounters("10:423"), "10:423");
+    EXPECT_EQ(NormalizeLiveCounters("Like (12) now"), "Like (12) now");
+    // Plain digits stay exact.
+    EXPECT_EQ(NormalizeLiveCounters("Buy 1"), "Buy 1");
+    EXPECT_EQ(NormalizeLiveCounters("a12b3"), "a12b3");
+    EXPECT_EQ(NormalizeLiveCounters("Delete account"), "Delete account");
+    // A currency mark (symbol, ISO code, token in any case, Cyrillic word) or a '#' turns it off.
+    EXPECT_EQ(NormalizeLiveCounters("Pay $5 (1)"), "Pay $5 (1)");
+    EXPECT_EQ(NormalizeLiveCounters("Transfer 10 usd"), "Transfer 10 usd");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 kr"), "Pay 5 kr");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 €"), "Pay 5 €");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 ₽ (2)"), "Pay 5 ₽ (2)");
+    EXPECT_EQ(NormalizeLiveCounters("Оплатить 500 руб (1)"), "Оплатить 500 руб (1)");
+    EXPECT_EQ(NormalizeLiveCounters("Order # (#)"), "Order # (#)");
+    // Edge cases the page copy must match too (facts_probe.cjs).
+    EXPECT_EQ(NormalizeLiveCounters("1:02:034"), "#:034");
+    EXPECT_EQ(NormalizeLiveCounters("1:00:2:00"), "#:#");
+    // Letters that only contain a token are not the token.
+    EXPECT_EQ(NormalizeLiveCounters("Usdx 0:42"), "Usdx #");
+    EXPECT_EQ(NormalizeLiveCounters("Okra 0:42"), "Okra #");
+}
+
+TEST(BrowserToolsTest, LiveLabelsMatchOnlyWhatTheRuleAllows) {
+    for (const LiveCase& c : kLiveCases) {
+        EXPECT_EQ(LiveLabelsMatch(c.before, c.after), c.match) << c.before << " -> " << c.after;
+        EXPECT_EQ(LiveLabelsMatch(c.after, c.before), c.match) << c.after << " -> " << c.before;
+    }
+    // A literal '#' must not collide with a normalized counter, in either direction.
+    EXPECT_FALSE(LiveLabelsMatch("Order 1:00 (5)", "Order # (#)"));
+    EXPECT_FALSE(LiveLabelsMatch("Order # (#)", "Order 1:00 (5)"));
+}
+
+// The button's label as the page reports it: a submit control on a.test.
+std::string ButtonFacts(const std::string& field, const std::string& value) {
+    return std::string(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",")") + field + R"(":")" +
+           value + R"(","is_submit":true,"page_origin":"https://a.test"}})";
+}
+
+TEST(BrowserToolsTest, LiveCountersPressAfterTheCard) {
+    for (const LiveCase& c : kLiveCases) {
+        if (!c.match) continue;
+        FakeBrowserHost host;
+        BrowserToolbox toolbox(host);
+        host.QueueScriptResult(ButtonFacts("text", c.before));
+        host.QueueScriptResult(ButtonFacts("text", c.after));
+        host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+        EXPECT_FALSE(
+            CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error)
+            << c.before << " -> " << c.after;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3) << c.before;
+    }
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(ButtonFacts("aria_label", "Like (12)"));
+    host.QueueScriptResult(ButtonFacts("aria_label", "Like (13)"));
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+}
+
+TEST(BrowserToolsTest, ChangedAmountOrCountNeverClicksAfterTheCard) {
+    // The person approved one amount or count; the page now shows another. Nothing may be clicked.
+    for (const LiveCase& c : kLiveCases) {
+        if (c.match) continue;
+        FakeBrowserHost host;
+        BrowserToolbox toolbox(host);
+        host.QueueScriptResult(ButtonFacts("text", c.before));
+        host.QueueScriptResult(ButtonFacts("text", c.after));
+        host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+        const ToolResult r =
+            CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+        EXPECT_TRUE(r.is_error) << c.before << " -> " << c.after;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0)
+            << c.before << " -> " << c.after;
+    }
+}
+
+TEST(BrowserToolsTest, CountdownThatBecomesAnotherActionIsDropped) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(ButtonFacts("text", "Resend in 0:42"));
+    host.QueueScriptResult(ButtonFacts("text", "Delete account 0:41"));
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    const ToolResult r =
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The page changed while waiting; take a fresh snapshot.");
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0);
+}
+
+TEST(BrowserToolsTest, RecheckSeesATrustedSiteAddedDuringTheCard) {
+    // Trusting the site during the card changes the fresh decision to free; the re-check accepts it
+    // and the click goes through. (A fresh decision that needs a new rule is the failing direction
+    // of StillApproved; no fact outside SameElement's set can make that happen, so it is untested.)
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(ButtonFacts("text", "Pay"));
+    host.QueueScriptResult(ButtonFacts("text", "Pay"));
+    host.answers.push_back(ConfirmationAnswer::kTrustSite);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+    ASSERT_EQ(host.trusted.size(), 1u);
+    EXPECT_EQ(host.trusted.front(), "a.test");
+}
+
+TEST(BrowserToolsTest, DigitOnlyChangeInNameOrIdStillFailsTheRecheck) {
+    // The label is the same; only a field the gate compares changes its digits.
+    for (const std::string field : {"name", "id"}) {
+        FakeBrowserHost host;
+        BrowserToolbox toolbox(host);
+        const auto facts = [&field](const std::string& value) {
+            return R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",")" + field + R"(":")" +
+                   value + R"(","is_submit":true,"page_origin":"https://a.test"}})";
+        };
+        host.QueueScriptResult(facts("item1"));
+        host.QueueScriptResult(facts("item2"));
+        host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+        const ToolResult r =
+            CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+        EXPECT_TRUE(r.is_error) << field;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0) << field;
+    }
+}
+
 }  // namespace
 }  // namespace island::agent

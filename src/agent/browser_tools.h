@@ -155,6 +155,18 @@ struct ToolDefinition {
     bool read_only = false;
 };
 
+// The normalized form of a label for the post-card re-check. Two forms are normalized: a time-like
+// run (minutes and seconds 00-59: "0:42", "1:02:03") becomes "#", and a trailing parenthesized
+// counter ("Like (12)") becomes "(#)" when no digit comes before it. A label with a currency mark
+// (see kCurrencyMarks in browser_tools.cc) or a '#' is returned unchanged. Every other digit stays
+// exact.
+std::string NormalizeLiveCounters(std::string_view text);
+
+// True when two labels may be treated as the same after a card: identical, or both free of the
+// unsafe marks above and equal once normalized. A '#' or currency label never matches a different
+// label, so the placeholder cannot collide with a literal '#'.
+bool LiveLabelsMatch(std::string_view a, std::string_view b);
+
 class BrowserToolbox {
   public:
     explicit BrowserToolbox(AgentBrowserHost& host);
@@ -188,6 +200,12 @@ class BrowserToolbox {
     void Gate(GateInput input, std::optional<std::size_t> tab,
               std::function<void(ToolCallback)> run, ToolCallback done,
               std::function<void(ToolCallback)> after_wait = nullptr);
+    // The gate's decision for `input`, with the page origin the page reports winning over the tab
+    // URL.
+    [[nodiscard]] GateDecision Decide(GateInput input);
+    // After a card: `fresh` must be free now, or need the same action and rule the person saw
+    // (`approved`). A blocked element, or a new rule, fails the action.
+    [[nodiscard]] bool StillApproved(GateInput approved, GateInput fresh);
     // The info of `tab` (the active tab when nullopt); nullopt for an unknown tab.
     [[nodiscard]] std::optional<AgentTabInfo> FindTab(std::optional<std::size_t> tab);
     // The error for a tab the agent must not act on (the Plan tab); nullopt when it may.

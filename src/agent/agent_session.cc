@@ -282,6 +282,16 @@ void AgentSession::FlushQueuedPrompt() {
     client_->Prompt(text, context);
 }
 
+void AgentSession::AddDevUserPrompt(std::string text) {
+    transcript_.AddUserPrompt(std::move(text));
+    Changed();
+}
+
+void AgentSession::ApplyDevEvent(const AcpEvent& event) {
+    transcript_.Apply(event);
+    Changed();
+}
+
 void AgentSession::Changed() {
     if (on_change_) on_change_();
 }

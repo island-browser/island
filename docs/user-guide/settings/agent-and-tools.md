@@ -17,6 +17,10 @@ Trust never covers card fields or an action the agent cannot classify. Those alw
 
 When the list is empty, the section says "No trusted sites yet. Choose “Trust this site” when the agent asks."
 
+## Other MCP clients
+
+If you connect another MCP client to Island, set its tool timeout to at least 150 seconds, or it may stop waiting while Island asks you to confirm. A confirmation card waits up to 120 seconds for your answer.
+
 ## What this page will cover
 
 * Choosing an agent and setting a custom command

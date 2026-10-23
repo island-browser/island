@@ -78,6 +78,7 @@ TEST(DevCaptureOptions, ParsesAgentFixtureConfirm) {
         {"--island-dev-actions=theme:light,toggle_agent,agent_fixture:confirm"});
     EXPECT_EQ(options.actions.back(), "agent_fixture:confirm");
     EXPECT_EQ(DevAgentFixtureName("agent_fixture:queue"), "queue");
+    EXPECT_EQ(DevAgentFixtureName("agent_fixture:thread"), "thread");
 }
 
 }  // namespace island

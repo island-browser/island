@@ -273,6 +273,13 @@ void IslandApp::ShowCollectFixture() {
     }
 }
 
+void IslandApp::ShowThreadFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowThreadFixtureForDev();
+    }
+}
+
 void IslandApp::ShowCollectionReportFixture() {
     CEF_REQUIRE_UI_THREAD();
     if (browser_window_ != nullptr) {
