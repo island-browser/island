@@ -2,6 +2,13 @@
 
 The agent panel puts an AI agent beside your page. The agent speaks the Agent Client Protocol (ACP). Island does not bundle a model: it starts an agent program on your computer and talks to it.
 
+## What you see
+
+* **The header** shows the agent's name and a status pill. The pill reads **Waiting for approval** in amber while a card needs you, **Working** while the agent runs, and **Idle** when it is ready for your next message. An error or a stopped agent shows its own short text, such as **Not running** or **Stopped**.
+* **Your messages** appear as tinted bubbles. The agent's replies are plain text.
+* **Each tool call** is one line: a check mark when it finished, a cross when it failed, and a small spinner while it runs. The line names the tool and the site it used.
+* **The box at the bottom** is one card. Type in the field; the chip on the left shows the tab the agent can read (click it to leave the tab out of this message), and the round arrow on the right sends.
+
 ## Open and close the panel
 
 * Press ⌘J (Ctrl+J), or click the **Agent** button at the bottom of the sidebar.

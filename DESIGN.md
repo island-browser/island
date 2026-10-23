@@ -358,22 +358,47 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   buttons use `--text` as background with `--surface` foreground; the accent marks focus and the
   active/selected state only.
 - **Agent panel (native, `pages/agent.html`):**
-  - *Confirmation card:* a `.card.ask` above the composer, its outline `--text-2` with `--shadow`.
-    It is titled "Allow this action?", shows the host in mono `--text-2` and the summary, and has
-    buttons for Allow once (the primary, `--text` fill), Allow for this task, Trust this site and
-    Cancel. A card that cannot be trusted (card fields, password and unclassified fields) offers
+  - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
+    opens the provider menu; a status pill sits beside it. The pill reads "Waiting for approval"
+    (`--warn-bg` fill, `--warn-border` 1 px border, `--warn-text`) while a confirmation card is
+    pending, "Working" (neutral `--fill`, `--text-2`, a small pulsing dot) while a turn runs, "Idle"
+    (neutral, no dot) when the agent is running with nothing in flight, and otherwise keeps the
+    existing wording ("Not running", "Connecting...", "Stopped") as a neutral pill. New chat and
+    Hide are quiet icon buttons (`--text-2`, a `--fill` plate on hover).
+  - *Thread:* 14 px padding and a 10 px gap. Your messages are bubbles (`--accent-soft` fill,
+    `--accent-text` text, radius 8). Agent replies are plain `--text` with no bubble. A tool call is
+    one compact 12 px line in `--text-2`: a check in `--success` (a cross in `--danger` on failure,
+    a spinner while it runs), the tool name in mono 11.5 px `--text`, then the host or detail.
+    Each row also speaks its status.
+  - *Composer:* one card with a 1 px `--border-2` outline, radius 10, `--surface`, and a 10 px
+    inset. The textarea sits above a bottom row: the page chip (22 px tall, radius 5, `--fill`,
+    `--text-2`, 11 px, ellipsis) and the quote chip on the left, and a round 24 px send button
+    (`--accent` fill, `#FFF` arrow; 40 % opacity when disabled) on the right. The placeholder is
+    "Ask about this tab or anything". The card's border shows focus; the textarea draws no ring.
+    Keyboard hints sit below in `--text-3`, 11 px.
+  - *Focus:* buttons take a neutral 2 px ring, `box-shadow: 0 0 0 2px var(--text-2)`, which follows
+    each element's radius. There is no outline and no blue focus ring, and the ring never appears
+    on mouse focus. Selected and pressed states use neutral raised plates (`--fill`,
+    `--segment-selected`), never blue.
+  - *Confirmation card:* a `.card.confirm-card` above the composer on a `--surface` plate with a
+    1 px `--warn-border` hairline and a `--warn-text` kicker. It is titled "Allow this action?",
+    shows the host in mono `--text-2` and the summary, and has buttons for Allow once (the primary),
+    Allow for this task, Trust this site and Cancel, on 26 px buttons with 6 px radius. A card that
+    cannot be trusted (card fields, password and unclassified fields) offers
     only Allow once and Cancel. Esc declines the oldest card. The card never takes focus.
   - *Tasks strip:* a `--surface` block with a `--border` outline and `--radius` corners, above the
     conversation, with a mono uppercase "Tasks" heading and a "Clear finished" link. Each row shows
-    its state as text (Queued, Running, Needs you, Done, Failed, Stopped), and a running or waiting
-    row takes the `--accent-soft` fill. Queued rows have Move up, Move down and Remove buttons;
-    running ones have Stop. A queued chat message sits under the conversation with a dashed
-    outline at 65 % opacity and the tag "Queued · #n".
-  - *Chips above the composer:* the page chip (a share toggle, with a ✕ that removes the page
-    context) and, for a selection, a quote chip in `--text-2` at 11px, clamped to two lines.
-  - *Collect sheet:* a centred dialog over a scrim, with one text field labelled in mono uppercase,
-    a list of tab rows (checkbox, title and mono URL on a 1px `--border` list) and a Collect
-    button that is disabled until something is typed.
+    its state as text (Queued, Running, Needs you, Done, Failed, Stopped), in compact 12 px rows.
+    A running or waiting row takes a neutral `--fill` plate, and "Needs you" is `--warn-text`.
+    Queued rows have Move up, Move down and Remove buttons; running ones have Stop. A queued chat
+    message sits under the conversation with a dashed outline at 65 % opacity and the tag
+    "Queued · #n".
+  - *Chips in the composer's bottom row:* the page chip (a share toggle, with a ✕ that removes the
+    page context) and, for a selection, a quote chip. Both share the 22 px chip style and
+    ellipsize on one line.
+  - *Collect sheet:* a 12 px-radius dialog over a 20 % scrim, with one text field labelled in
+    sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px `--border-2`
+    list) and a Collect button that is disabled until something is typed. Checkboxes and buttons are neutral.
 - **Settings > Agent & tools > Trusted sites:** a `--surface` card listing each host with a Remove
   button, which names the host in its accessible label; an empty state says how to add one.
 - **Keyboard keys:** Geist Mono 11–12px on `--surface` with a 1px border and a 2px bottom border.

@@ -18,6 +18,9 @@
   --success: #18794E;
   --danger: #CD2B31;
   --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 12px rgba(0, 0, 0, .04);
+  /* Pre-theme fallbacks only: the native side sends ThemeJson before the first paint of a window. */
+  --fill: #F2F2F2; --border-2: #CCCCCC; --text-3: #999999; --segment-selected: #FFFFFF;
+  --warn-bg: #FFF7E6; --warn-border: #F5D08A; --warn-text: #8A5A00;
   --radius: 10px;
   --radius-sm: 6px;
   --font: Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -34,28 +37,26 @@ body {
   -webkit-font-smoothing: antialiased; font-feature-settings: "ss01";
 }
 button { font: inherit; color: inherit; cursor: pointer; }
-button:focus-visible, textarea:focus-visible, input:focus-visible, a:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
+/* Focus is a neutral 2 px ring that follows each element's radius; never an outline, never blue.
+   The composer textarea shows focus on its card border instead. */
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: none; box-shadow: 0 0 0 2px var(--text-2);
 }
+textarea:focus-visible { outline: none; }
 [hidden] { display: none !important; }
 
-/* Header: one hairline row */
+/* Header: one 52 px hairline row, the title with its status pill, quiet icon buttons */
 header {
-  display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px;
+  display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 8px 0 14px;
   flex: none; border-bottom: 1px solid var(--border);
 }
-.mark {
-  width: 24px; height: 24px; border-radius: var(--radius-sm); flex: none; display: grid;
-  place-items: center; background: var(--surface); border: 1px solid var(--border); color: var(--text);
-}
-.mark svg { width: 13px; height: 13px; }
-.titles { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; }
+.titles { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; }
 
 /* Provider switcher: the header title opens a small menu of agents */
 header { position: relative; }
 .provider-btn { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
   margin-left: -6px; padding: 3px 6px; border: 1px solid transparent; border-radius: var(--radius-sm);
-  background: transparent; font-size: 13px; font-weight: 600; letter-spacing: -.01em;
+  background: transparent; font-size: 15px; font-weight: 600; letter-spacing: -.01em;
   transition: background .16s, border-color .16s; }
 .provider-btn:hover, .provider-btn[aria-expanded="true"] { background: var(--surface); border-color: var(--border); }
 .provider-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -85,34 +86,42 @@ header { position: relative; }
 .menu-item.action:hover, .menu-item.action:focus-visible { color: var(--text); }
 .menu-item.action svg { width: 13px; height: 13px; flex: none; }
 .menu-note { font: 11px/1.45 var(--mono); color: var(--text-2); padding: 6px 8px 4px; }
-.status { display: flex; align-items: center; gap: 6px; font: 11px/1.4 var(--mono);
-  color: var(--text-2); white-space: nowrap; overflow: hidden; }
+/* Status pill: "Waiting for approval" (amber), "Working" (neutral, pulsing dot), "Idle" (neutral,
+   no dot), or the existing neutral wording for error and not-running states. The text always
+   carries the meaning; colour only adds to it. */
+.status-pill { display: inline-flex; align-items: center; gap: 5px; min-width: 0; flex: none;
+  padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; background: var(--fill);
+  color: var(--text-2); font-size: 11px; line-height: 1.4; white-space: nowrap; }
+.status-pill[data-tone="warn"] { background: var(--warn-bg); border-color: var(--warn-border); color: var(--warn-text); }
+.status-pill[data-tone="idle"] .dot, .status-pill[data-tone="warn"] .dot { display: none; }
+#status { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); flex: none; }
-.dot[data-state="ready"] { background: var(--success); }
 .dot[data-state="prompting"], .dot[data-state="initializing"], .dot[data-state="creating_session"] {
-  background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  animation: pulse 1.2s ease-in-out infinite; }
 .dot[data-state="failed"] { background: var(--danger); }
 @keyframes pulse { 50% { opacity: .3; } }
 .icon-btn {
-  width: 28px; height: 28px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  width: 28px; height: 28px; border-radius: var(--radius-sm); border: 0;
   background: transparent; display: grid; place-items: center; color: var(--text-2); flex: none;
-  transition: background .16s, color .16s, border-color .16s;
+  transition: background .16s, color .16s;
 }
-.icon-btn:hover { background: var(--surface); border-color: var(--border); color: var(--text); }
+.icon-btn:hover { background: var(--fill); color: var(--text); }
+.icon-btn:active { background: var(--segment-selected); }
 .icon-btn svg { width: 15px; height: 15px; }
 
 /* Log */
-#log { flex: 1; overflow-y: auto; padding: 8px 14px 16px; scroll-behavior: smooth; }
+#log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  scroll-behavior: smooth; }
+#log > * { flex: none; }
 #log::-webkit-scrollbar { width: 8px; }
 #log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
-.item { margin: 12px 0; animation: rise .2s cubic-bezier(.16, 1, .3, 1); }
+.item { animation: rise .2s cubic-bezier(.16, 1, .3, 1); }
 @keyframes rise { from { opacity: 0; transform: translateY(3px); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } #log { scroll-behavior: auto; } }
 .user { display: flex; justify-content: flex-end; }
 .user .bubble {
-  background: var(--surface); color: var(--text); padding: 7px 11px; max-width: 88%;
-  border: 1px solid var(--border); border-radius: var(--radius); white-space: pre-wrap;
-  word-wrap: break-word;
+  background: var(--accent-soft); color: var(--accent-text); padding: 10px 12px; max-width: 88%;
+  border-radius: 8px; white-space: pre-wrap; word-wrap: break-word;
 }
 .agent { padding: 0 2px; word-wrap: break-word; }
 .agent p { margin: 0 0 8px; }
@@ -148,21 +157,20 @@ pre { background: var(--surface); border: 1px solid var(--border); border-radius
 pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .thought { color: var(--text-2); font-size: 12.5px; border-left: 1px solid var(--border);
   padding: 2px 0 2px 10px; white-space: pre-wrap; max-height: 7.5em; overflow: hidden;
-  -webkit-mask-image: linear-gradient(#000 70%, transparent); cursor: pointer; }
+  -webkit-mask-image: linear-gradient(#FFF 70%, transparent); cursor: pointer; }
 .thought.open { max-height: none; -webkit-mask-image: none; }
 .thought::before { content: "Thinking"; display: block; font: 500 10.5px/1.6 var(--mono);
   letter-spacing: .08em; text-transform: uppercase; margin-bottom: 2px; }
-.tool { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-sm);
-  background: var(--surface); border: 1px solid var(--border); font-size: 12px; }
-.tool .name { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; flex: 1; }
-.tool .badge { font: 10.5px/1.4 var(--mono); color: var(--text-2); flex: none; text-transform: uppercase;
-  letter-spacing: .06em; }
-.spinner { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--border);
-  border-top-color: var(--text); animation: spin .8s linear infinite; flex: none; }
+/* A tool call is one compact line: a glyph, the tool name in mono, then its host or detail */
+.tool { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: 12px; color: var(--text-2); }
+.tool .name { font: 11.5px/1.4 var(--mono); color: var(--text); white-space: nowrap; flex: none; }
+.tool .host { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.spinner { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--border-2);
+  border-top-color: var(--text-2); animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.glyph { width: 13px; height: 13px; flex: none; }
+.glyph { width: 11px; height: 11px; flex: none; }
 .ok { color: var(--success); } .bad { color: var(--danger); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .plan { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 10px 12px; }
 .plan h4, .card h4 { margin: 0 0 8px; font: 500 10.5px/1.4 var(--mono); text-transform: uppercase;
@@ -171,7 +179,7 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .plan li { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; font-size: 12.5px; }
 .plan li .box { width: 13px; height: 13px; border-radius: 4px; border: 1px solid var(--text-2);
   margin-top: 3px; flex: none; display: grid; place-items: center; }
-.plan li[data-status="in_progress"] .box { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--surface); background: var(--accent); }
+.plan li[data-status="in_progress"] .box { border-color: var(--text-2); background: var(--fill); }
 .plan li[data-status="completed"] .box { border-color: var(--text); background: var(--text); }
 .plan li[data-status="completed"] .box::after { content: ""; width: 6px; height: 3px;
   border: solid var(--surface); border-width: 0 0 1.5px 1.5px; transform: rotate(-45deg) translate(1px, -1px); }
@@ -180,14 +188,18 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
   padding: 12px; }
 .card.ask { border-color: var(--text-2); box-shadow: var(--shadow); }
 .card p { margin: 0 0 10px; }
-.confirm-card { margin-bottom: 8px; }
+/* The approval card: a surface plate with an amber hairline and an amber kicker */
+.card.confirm-card { margin: 0 0 8px; padding: 12px; border-radius: 10px; background: var(--surface);
+  border: 1px solid var(--warn-border); box-shadow: none; }
+.card.confirm-card h4 { color: var(--warn-text); }
 .confirm-card .host { margin: 0 0 4px; font: 11px/1.4 var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
 .confirm-card .summary { overflow-wrap: anywhere; }
-.confirm-card .actions .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .card .actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm);
-  padding: 5px 11px; font-size: 12.5px; font-weight: 500; transition: background .16s, border-color .16s; }
-.btn:hover { background: var(--surface-2); }
+.btn { height: 26px; padding: 0 10px; display: inline-flex; align-items: center; border: 1px solid var(--border);
+  background: var(--fill); color: var(--text); border-radius: var(--radius-sm); font-size: 12px; font-weight: 500;
+  transition: background .16s, border-color .16s; }
+.btn:hover { background: var(--border); }
+.btn:active { background: var(--segment-selected); }
 .btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
 .btn.primary:hover { opacity: .88; background: var(--text); }
 .resolved { font: 11px/1.4 var(--mono); color: var(--text-2); }
@@ -229,24 +241,24 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .endpoint code { display: block; margin-top: 6px; padding: 6px 8px; word-break: break-all; }
 
 /* Tasks strip: the live task, the queue, and what finished */
-#tasks { flex: none; margin: 0 12px; border: 1px solid var(--border); border-radius: var(--radius);
+#tasks { flex: none; margin: 12px 12px 0; border: 1px solid var(--border); border-radius: 10px;
   background: var(--surface); }
 #tasks .tasks-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px 10px; }
 #tasks h2 { margin: 0; flex: 1; font: 500 10.5px/1.4 var(--mono); text-transform: uppercase;
   letter-spacing: .08em; color: var(--text-2); }
 #tasks ul { list-style: none; margin: 0; padding: 0 4px 4px; max-height: 148px; overflow-y: auto; }
-.task { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: var(--radius-sm);
-  font-size: 12.5px; min-height: 28px; }
-.task[data-state="running"], .task[data-state="waiting"] { background: var(--accent-soft); }
-.task .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px;
+  font-size: 12px; min-height: 26px; color: var(--text-2); }
+.task[data-state="running"], .task[data-state="waiting"] { background: var(--fill); }
+.task .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 .task[data-state="done"] .title, .task[data-state="cancelled"] .title { color: var(--text-2); }
 .task[data-state="failed"] .title { color: var(--danger); }
 .task .meta { flex: none; font: 11px/1.4 var(--mono); color: var(--text-2); }
-.task[data-state="waiting"] .meta { color: var(--accent); }
+.task[data-state="waiting"] .meta { color: var(--warn-text); }
 .task .tbtn { width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid transparent;
   background: transparent; color: var(--text-2); display: grid; place-items: center; flex: none;
   font-size: 13px; line-height: 1; padding: 0; }
-.task .tbtn:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+.task .tbtn:hover:not(:disabled) { background: var(--fill); border-color: transparent; color: var(--text); }
 .task .tbtn:disabled { opacity: .3; cursor: default; }
 .task .tbtn.stop { width: auto; padding: 0 8px; font-size: 12px; }
 .link-btn { border: 0; background: transparent; color: var(--text-2); font: 11px/1.4 var(--mono);
@@ -256,54 +268,50 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .user.queued .bubble { opacity: .65; border-style: dashed; }
 
 /* Composer */
-footer { flex: none; padding: 8px 12px 10px; }
-.composer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 8px 8px 8px 12px; transition: border-color .16s, box-shadow .16s; }
+/* The composer is one card: the textarea above, and a bottom row with the chips on the left and a
+   round send button on the right. Its border shows focus; the textarea draws no ring. */
+footer { flex: none; padding: 0; }
+.composer { margin: 12px; padding: 10px; background: var(--surface); border: 1px solid var(--border-2);
+  border-radius: 10px; transition: border-color .16s, box-shadow .16s; }
 .composer:focus-within { border-color: var(--text-2); box-shadow: var(--shadow); }
-/* The composer border shows focus; the field itself draws no ring. */
-.composer textarea:focus-visible { outline: none; }
-.context { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font: 11px/1.5 var(--mono);
-  color: var(--text-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px;
-  padding: 1px 7px; margin-bottom: 6px; }
+.context { display: inline-flex; align-items: center; gap: 5px; flex: none; max-width: 55%; height: 22px;
+  padding: 0 8px; margin: 0; border: 0; border-radius: 5px; background: var(--fill); color: var(--text-2);
+  font: 11px/1 var(--font); }
 .context[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
-.context span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chiprow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
-.chiprow .context { margin-bottom: 0; }
-.context-clear { width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent;
+.context span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.context svg { flex: none; }
+.composer-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+.chiprow { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; overflow: hidden; }
+.context-clear { width: 18px; height: 18px; flex: none; border: 0; border-radius: 50%; background: transparent;
   color: var(--text-2); display: grid; place-items: center; padding: 0; }
-.context-clear:hover { background: var(--surface-2); color: var(--text); }
-.context-clear:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; border-radius: 50%; }
-.quote-chip { flex-basis: 100%; max-width: 100%; font: 11px/1.5 var(--font); color: var(--text-2);
-  background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent);
-  border-radius: 4px; padding: 2px 8px; }
-.quote-chip span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.row { display: flex; align-items: flex-end; gap: 8px; }
-textarea { flex: 1; border: 0; background: transparent; color: var(--text); font: inherit;
-  resize: none; outline: none; max-height: 160px; min-height: 22px; padding: 4px 0; }
-textarea::placeholder { color: var(--text-2); }
-.send { width: 28px; height: 28px; border-radius: var(--radius-sm); border: 0; background: var(--text);
-  color: var(--surface); display: grid; place-items: center; flex: none; transition: opacity .16s; }
-.send:disabled { opacity: .25; cursor: default; }
-.send:not(:disabled):hover { opacity: .85; }
-.send:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; border-radius: var(--radius-sm); }
-.send svg { width: 14px; height: 14px; }
-.hint { font: 10.5px/1.4 var(--mono); color: var(--text-2); text-align: center; margin-top: 7px; letter-spacing: .02em; }
+.context-clear:hover { background: var(--fill); color: var(--text); }
+.quote-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 22px;
+  padding: 0 8px; border-radius: 5px; background: var(--fill); color: var(--text-2); font: 11px/1 var(--font); }
+.quote-chip span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+textarea { display: block; width: 100%; border: 0; background: transparent; color: var(--text); font: inherit;
+  resize: none; outline: none; max-height: 160px; min-height: 22px; padding: 0; }
+textarea::placeholder { color: var(--text-3); }
+.send { width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--accent);
+  color: #FFF; display: grid; place-items: center; flex: none; padding: 0; transition: opacity .16s; }
+.send:disabled { opacity: .4; cursor: default; }
+.send:not(:disabled):hover { opacity: .88; }
+.send svg { width: 12px; height: 12px; }
+.hint { font: 11px/1.4 var(--mono); color: var(--text-3); text-align: center; padding: 0 12px 10px; letter-spacing: .02em; }
 .hint kbd { font: 10px/1.3 var(--mono); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--surface); color: var(--text); }
 /* The Collect sheet: neutral surfaces and rows; checkboxes take the text colour, not blue */
 .collect-scrim { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center;
-  justify-content: center; padding: 16px; background: color-mix(in srgb, var(--text) 16%, transparent); }
+  justify-content: center; padding: 16px; background: color-mix(in srgb, var(--text) 20%, transparent); }
 .collect-scrim[hidden] { display: none; }
 .collect-sheet { width: 100%; max-width: 380px; max-height: 80vh; display: flex; flex-direction: column;
   gap: 10px; padding: 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, .18); }
+  box-shadow: var(--shadow); }
 .collect-sheet h2 { margin: 0; font: 600 14px/1.3 var(--font); color: var(--text); }
-.collect-sheet label[for="collect-what"], .collect-sheet .field-label { font: 500 10.5px/1.4 var(--mono); color: var(--text-2);
-  letter-spacing: .04em; text-transform: uppercase; }
+.collect-sheet label[for="collect-what"], .collect-sheet .field-label { font: 600 11px/1.4 var(--font); color: var(--text-2); }
 .collect-sheet .field-label { margin: 0; }
 .collect-what { width: 100%; font: 13px/1.4 var(--font); color: var(--text); background: var(--bg);
-  border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
-.collect-what::placeholder { color: var(--text-2); }
-.collect-list { min-height: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+  border: 1px solid var(--border-2); border-radius: 6px; padding: 6px 10px; }
+.collect-what::placeholder { color: var(--text-3); }
+.collect-list { min-height: 0; overflow-y: auto; border: 1px solid var(--border-2); border-radius: 6px; padding: 4px; }
 .collect-list:empty::before { content: "No web tabs to collect from."; display: block; padding: 8px;
   color: var(--text-2); font: 13px/1.4 var(--font); }
 .collect-row { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
@@ -313,23 +321,20 @@ textarea::placeholder { color: var(--text-2); }
 .collect-row .row-title { font: 13px/1.35 var(--font); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collect-row .row-url { font: 11px/1.35 var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collect-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.collect-btn { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 8px;
-  padding: 6px 12px; font: 500 13px/1.3 var(--font); cursor: pointer; }
-.collect-btn:hover:not(:disabled) { background: var(--surface-2); }
+.collect-btn { height: 26px; padding: 0 12px; border: 1px solid var(--border); background: var(--fill); color: var(--text);
+  border-radius: 6px; font: 500 12px/1 var(--font); cursor: pointer; }
+.collect-btn:hover:not(:disabled) { background: var(--border); }
 .collect-btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
 .collect-btn:disabled { opacity: .45; cursor: default; }
-.collect-btn:focus-visible, .collect-what:focus-visible, .collect-row input:focus-visible {
-  outline: 2px solid var(--text-2); outline-offset: 2px; }
 </style>
 </head>
 <body>
 <header>
-  <div class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg></div>
   <div class="titles">
     <button class="provider-btn" id="provider-button" aria-haspopup="menu" aria-expanded="false" aria-controls="provider-menu" title="Choose an agent">
       <span id="agent-name">Agent</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
     </button>
-    <div class="status"><span class="dot" id="dot"></span><span id="status">Not running</span></div>
+    <span class="status-pill" id="status-pill" data-tone="plain"><span class="dot" id="dot" aria-hidden="true"></span><span id="status">Not running</span></span>
   </div>
   <button class="icon-btn" id="new-chat" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg></button>
   <button class="icon-btn" id="close" title="Hide panel" aria-label="Hide agent panel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
@@ -340,16 +345,16 @@ textarea::placeholder { color: var(--text-2); }
 <footer>
   <div id="confirmations" role="alertdialog" aria-label="The agent needs your approval" hidden></div>
   <div class="composer">
-    <div class="chiprow" id="chiprow" hidden>
-      <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
-        <span id="context-label"></span>
-      </button>
-      <button class="context-clear" id="context-clear" title="Remove the page context" aria-label="Remove the page context" hidden><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
-      <div class="quote-chip" id="quote-chip" title="The selected text goes to the agent" hidden><span id="quote-text"></span></div>
-    </div>
-    <div class="row">
-      <textarea id="input" rows="1" placeholder="Ask anything, or tell it what to do" aria-label="Message the agent"></textarea>
+    <textarea id="input" rows="1" placeholder="Ask about this tab or anything" aria-label="Message the agent"></textarea>
+    <div class="composer-row">
+      <div class="chiprow" id="chiprow" hidden>
+        <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+          <span id="context-label"></span>
+        </button>
+        <button class="context-clear" id="context-clear" title="Remove the page context" aria-label="Remove the page context" hidden><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        <div class="quote-chip" id="quote-chip" title="The selected text goes to the agent" hidden><span id="quote-text"></span></div>
+      </div>
       <button class="send" id="send" title="Send (Enter)" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </div>
   </div>
@@ -428,14 +433,19 @@ textarea::placeholder { color: var(--text-2); }
   });
 
   // --- Items ---
+  // The title is "tool host detail": the first word is the tool name (mono), the rest is shown
+  // beside it in the secondary colour. The status is also spoken, so colour is never the only cue.
   function toolNode(item) {
     var node = el("div", "tool");
     var status = item.status || "pending";
     if (status === "completed") node.insertAdjacentHTML("beforeend", CHECK);
     else if (status === "failed") node.insertAdjacentHTML("beforeend", CROSS);
     else node.appendChild(el("span", "spinner"));
-    node.appendChild(el("span", "name", item.text));
-    node.appendChild(el("span", "badge", status === "in_progress" ? "running" : status));
+    var title = item.text || "";
+    var cut = title.search(/\s/);
+    node.appendChild(el("span", "name", cut < 0 ? title : title.slice(0, cut)));
+    if (cut >= 0) node.appendChild(el("span", "host", title.slice(cut).trim()));
+    node.appendChild(el("span", "visually-hidden", status === "in_progress" ? "running" : status));
     return node;
   }
 
@@ -901,8 +911,18 @@ textarea::placeholder { color: var(--text-2); }
       var signature = JSON.stringify([state.provider, state.providers, state.env_override]);
       if (signature !== menuSignature) { menuSignature = signature; buildMenu(); }
     }
-    document.getElementById("status").textContent = session.status || "";
-    document.getElementById("dot").setAttribute("data-state", session.state || "idle");
+    // The header pill maps the existing states: an approval card waiting wins; a running turn is
+    // "Working"; a running agent with nothing in flight is "Idle"; anything else keeps its wording.
+    var pills = document.getElementById("status-pill");
+    var pendingCards = state.confirmations || [];
+    var stateName = session.state || "idle";
+    var pill = { tone: "plain", text: session.status || "" };
+    if (pendingCards.length) pill = { tone: "warn", text: "Waiting for approval" };
+    else if (stateName === "prompting" || (stateName === "ready" && isBusy())) pill = { tone: "busy", text: "Working" };
+    else if (stateName === "ready") pill = { tone: "idle", text: "Idle" };
+    pills.setAttribute("data-tone", pill.tone);
+    document.getElementById("status").textContent = pill.text;
+    document.getElementById("dot").setAttribute("data-state", stateName);
 
     var items = session.items || [];
     var showSetup = session.state === "failed" || (session.state === "idle" && !!session.error);
@@ -967,7 +987,7 @@ textarea::placeholder { color: var(--text-2); }
       ["selection", "--selection"], ["accent_soft", "--accent-soft"],
       ["accent_text", "--accent-text"], ["warn_bg", "--warn-bg"],
       ["warn_border", "--warn-border"], ["warn_text", "--warn-text"],
-      ["success", "--success"], ["danger", "--danger"]
+      ["success", "--success"], ["danger", "--danger"], ["segment_selected", "--segment-selected"]
     ].forEach(function (mapping) {
       var value = theme[mapping[0]];
       if (value) root.style.setProperty(mapping[1], value);

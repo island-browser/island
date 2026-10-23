@@ -45,6 +45,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   agent-opened and keep that mark across a restart. The sites you trust for the agent are saved
   in prefs (`agent_trusted_sites`, normalized to bare lowercase hosts).
 
+### Changed
+
+- The agent panel has a new look: a status pill, your messages as bubbles, compact tool rows and a
+  composer card with the tab chip and a round send button.
+
 ## [0.7.3] - 2026-10-23
 
 ### Fixed
