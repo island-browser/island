@@ -155,6 +155,12 @@ struct ToolDefinition {
     bool read_only = false;
 };
 
+// Replaces every run of ASCII digits with one '#'. A label that counts ("Resend in 0:42",
+// "Checkout (3)") changes while a confirmation card is open; the re-check after the card compares
+// its text and aria-label through this, so the tick does not fail it and any other change still
+// does.
+std::string NormalizeLiveDigits(std::string_view text);
+
 class BrowserToolbox {
   public:
     explicit BrowserToolbox(AgentBrowserHost& host);
@@ -188,6 +194,12 @@ class BrowserToolbox {
     void Gate(GateInput input, std::optional<std::size_t> tab,
               std::function<void(ToolCallback)> run, ToolCallback done,
               std::function<void(ToolCallback)> after_wait = nullptr);
+    // The gate's decision for `input`, with the page origin the page reports winning over the tab
+    // URL.
+    [[nodiscard]] GateDecision Decide(GateInput input);
+    // After a card: `fresh` must be free now, or need the same action and rule the person saw
+    // (`approved`). A blocked element, or a new rule, fails the action.
+    [[nodiscard]] bool StillApproved(GateInput approved, GateInput fresh);
     // The info of `tab` (the active tab when nullopt); nullopt for an unknown tab.
     [[nodiscard]] std::optional<AgentTabInfo> FindTab(std::optional<std::size_t> tab);
     // The error for a tab the agent must not act on (the Plan tab); nullopt when it may.

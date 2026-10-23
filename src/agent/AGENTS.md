@@ -91,6 +91,15 @@ page with no host or origin is never trusted or granted. "Allow for this task" g
 The word list lives in `kConsequentialWords` (`action_gate.cc`): English and Russian entries,
 matched as whole words, case-insensitive, with spaces normalized and Cyrillic folded.
 
+Re-check after a card (`after_wait`): the target is found again and `SameElement` compares it with
+what was approved. Text and aria-label compare through `NormalizeLiveDigits` (`browser_tools.h`),
+which reads every run of ASCII digits as one `#`, so a countdown ("Resend in 0:42", "Pay now
+(expires 4:59)") or a counter ("Checkout (3)", aria-label "Like (12)") still matches a second later
+(`kFactsJs`'s synthetic click does the same in the page). Everything else stays exact: tag, type,
+autocomplete, name, id, is_submit and page origin. `StillApproved` then judges the fresh facts with
+`Classify`: the element must be free now, or need the same action and rule the person saw. A word
+change ("Delete account") fails the check, and so does a digits-only change in name or id.
+
 ### Extension points
 
 Add one at a time, in the same commit as its test, and update the table above.

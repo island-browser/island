@@ -224,8 +224,12 @@ std::string SyntheticClickScript(const std::string& locator, const std::string& 
   if (!el) return JSON.stringify({ok: false, error: 'element not found; call page_snapshot for fresh refs'});
   const rect = el.getBoundingClientRect();
   const facts = __islandFacts(el);
+  const digits = (value) => String(value).replace(/[0-9]+/g, '#');
+  const liveKeys = ['text', 'aria_label'];
   const same = rect.width === 0 && rect.height === 0 &&
-    Object.keys(expected).every((key) => facts[key] === expected[key]);
+    Object.keys(expected).every((key) => liveKeys.includes(key)
+      ? digits(facts[key]) === digits(expected[key])
+      : facts[key] === expected[key]);
   if (!same) return JSON.stringify({ok: false, error: 'The page changed while waiting; take a fresh snapshot.'});
   el.click();
   return JSON.stringify({ok: true});
@@ -371,10 +375,11 @@ std::optional<ElementFacts> ParseFacts(const Value& script_result) {
 // an opaque frame) are the same; one missing and one present are not.
 bool SameElement(const std::optional<ElementFacts>& a, const std::optional<ElementFacts>& b) {
     if (!a || !b) return !a && !b;
-    return a->tag == b->tag && a->type == b->type && a->text == b->text &&
+    return a->tag == b->tag && a->type == b->type &&
+           NormalizeLiveDigits(a->text) == NormalizeLiveDigits(b->text) &&
            a->autocomplete == b->autocomplete && a->name == b->name && a->id == b->id &&
-           a->aria_label == b->aria_label && a->is_submit == b->is_submit &&
-           a->page_origin == b->page_origin;
+           NormalizeLiveDigits(a->aria_label) == NormalizeLiveDigits(b->aria_label) &&
+           a->is_submit == b->is_submit && a->page_origin == b->page_origin;
 }
 
 const char kPageChanged[] = "The page changed while waiting; take a fresh snapshot.";
@@ -426,6 +431,22 @@ void SendClick(AgentBrowserHost& host, std::optional<std::size_t> tab, double x,
 }
 
 }  // namespace
+
+std::string NormalizeLiveDigits(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    bool in_digits = false;
+    for (const char c : text) {
+        const bool digit = c >= '0' && c <= '9';
+        if (digit) {
+            if (!in_digits) out.push_back('#');
+        } else {
+            out.push_back(c);
+        }
+        in_digits = digit;
+    }
+    return out;
+}
 
 // ---- ToolResult ------------------------------------------------------------------
 
@@ -880,13 +901,23 @@ std::optional<ToolResult> BrowserToolbox::Refusal(std::optional<std::size_t> tab
     return std::nullopt;
 }
 
-void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
-                          std::function<void(ToolCallback)> run, ToolCallback done,
-                          std::function<void(ToolCallback)> after_wait) {
+GateDecision BrowserToolbox::Decide(GateInput input) {
     // The page's own origin, as the page reports it, beats the tab list's URL, which can lag a
     // navigation; an origin without a host (data:, sandboxed) matches no trusted site.
     if (input.facts && !input.facts->page_origin.empty()) input.page_url = input.facts->page_origin;
-    const GateDecision decision = Classify(input, host_.TrustedSites());
+    return Classify(input, host_.TrustedSites());
+}
+
+bool BrowserToolbox::StillApproved(GateInput approved, GateInput fresh) {
+    const GateDecision was = Decide(std::move(approved));
+    const GateDecision now = Decide(std::move(fresh));
+    return now.action == ActionClass::kFree || (now.action == was.action && now.rule == was.rule);
+}
+
+void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
+                          std::function<void(ToolCallback)> run, ToolCallback done,
+                          std::function<void(ToolCallback)> after_wait) {
+    const GateDecision decision = Decide(input);
     if (decision.action == ActionClass::kFree) {
         run(std::move(done));
         return;
@@ -1037,16 +1068,19 @@ void BrowserToolbox::Click(const json::Value& args, ToolCallback done) {
         }
         GateInput input{.tool = "page_click", .facts = target.facts};
         if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
-        const std::optional<ElementFacts> approved = target.facts;
+        const GateInput approved = input;
         Gate(
             std::move(input), tab,
             [act, target](ToolCallback finish) { act(target, std::move(finish)); }, std::move(done),
             // After the card: find the element again, require the same one, click where it is now.
-            [locate, act, approved](ToolCallback finish) {
-                locate([act, approved, finish = std::move(finish)](Located fresh) mutable {
+            [this, locate, act, approved](ToolCallback finish) {
+                locate([this, act, approved, finish = std::move(finish)](Located fresh) mutable {
+                    GateInput judged = approved;
+                    judged.facts = fresh.facts;
                     if (!fresh.error.empty()) {
                         finish(ToolResult::Error(fresh.error));
-                    } else if (!SameElement(approved, fresh.facts)) {
+                    } else if (!SameElement(approved.facts, fresh.facts) ||
+                               !StillApproved(approved, judged)) {
                         finish(ToolResult::Error(kPageChanged));
                     } else {
                         act(fresh, std::move(finish));
@@ -1127,14 +1161,18 @@ void BrowserToolbox::TypeText(const json::Value& args, ToolCallback done) {
         }
         GateInput input{.tool = "page_type", .facts = facts, .submit = submit};
         if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+        const GateInput approved = input;
         Gate(std::move(input), tab, type_into_focus, std::move(done),
              // After the card: focus the target again and type only if it is still what was judged.
-             [read_facts, type_into_focus, approved = std::move(facts)](ToolCallback finish) {
-                 read_facts([type_into_focus, approved, finish = std::move(finish)](
+             [this, read_facts, type_into_focus, approved](ToolCallback finish) {
+                 read_facts([this, type_into_focus, approved, finish = std::move(finish)](
                                 std::string err, std::optional<ElementFacts> fresh) mutable {
+                     GateInput judged = approved;
+                     judged.facts = fresh;
                      if (!err.empty()) {
                          finish(ToolResult::Error(err));
-                     } else if (!SameElement(approved, fresh)) {
+                     } else if (!SameElement(approved.facts, fresh) ||
+                                !StillApproved(approved, judged)) {
                          finish(ToolResult::Error(kPageChanged));
                      } else {
                          type_into_focus(std::move(finish));
@@ -1166,12 +1204,15 @@ void BrowserToolbox::PressKey(const json::Value& args, ToolCallback done) {
                            done = std::move(done)](std::optional<ElementFacts> facts) mutable {
         GateInput input{.tool = "page_press_key", .facts = facts, .key = key};
         if (const std::optional<AgentTabInfo> info = FindTab(tab)) input.page_url = info->url;
+        const GateInput approved = input;
         Gate(std::move(input), tab, press, std::move(done),
              // After the card: press only if focus is still on what was judged.
-             [this, tab, press, approved = std::move(facts)](ToolCallback finish) {
-                 ReadFocusedFacts(tab, [press, approved, finish = std::move(finish)](
+             [this, tab, press, approved](ToolCallback finish) {
+                 ReadFocusedFacts(tab, [this, press, approved, finish = std::move(finish)](
                                            std::optional<ElementFacts> fresh) mutable {
-                     if (SameElement(approved, fresh)) {
+                     GateInput judged = approved;
+                     judged.facts = fresh;
+                     if (SameElement(approved.facts, fresh) && StillApproved(approved, judged)) {
                          press(std::move(finish));
                      } else {
                          finish(ToolResult::Error(kPageChanged));

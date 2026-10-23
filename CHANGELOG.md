@@ -50,6 +50,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - The agent panel has a new look: a status pill, your messages as bubbles, compact tool rows and a
   composer card with the tab chip and a round send button.
 
+### Fixed
+
+- The agent can press buttons with a live countdown after you confirm.
+
 ## [0.7.3] - 2026-10-23
 
 ### Fixed

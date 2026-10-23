@@ -692,5 +692,83 @@ TEST(BrowserToolsTest, LocatorScriptsEscapeSelectors) {
               R"("a\u2028b")");
 }
 
+TEST(BrowserToolsTest, LiveDigitsCollapseToOnePlaceholderEachRun) {
+    EXPECT_EQ(NormalizeLiveDigits("0:42"), "#:#");
+    EXPECT_EQ(NormalizeLiveDigits("Pay now (expires 4:59)"), "Pay now (expires #:#)");
+    EXPECT_EQ(NormalizeLiveDigits("Checkout (3)"), "Checkout (#)");
+    EXPECT_EQ(NormalizeLiveDigits("Checkout (12)"), "Checkout (#)");
+    EXPECT_EQ(NormalizeLiveDigits("a12b3"), "a#b#");
+    EXPECT_EQ(NormalizeLiveDigits(""), "");
+    EXPECT_EQ(NormalizeLiveDigits("Delete account"), "Delete account");
+    EXPECT_NE(NormalizeLiveDigits("Pay 1"), NormalizeLiveDigits("Pay1"));
+}
+
+TEST(BrowserToolsTest, CountdownButtonStillPressesAfterTheCard) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(
+        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Pay now (expires 4:59)",
+        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.QueueScriptResult(
+        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Pay now (expires 4:58)",
+        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    const ToolResult r =
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+    EXPECT_FALSE(r.is_error) << r.content.at(0).text;
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+}
+
+TEST(BrowserToolsTest, CountingAriaLabelStillPressesAfterTheCard) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(
+        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","aria_label":"Like (12)",
+        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.QueueScriptResult(
+        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","aria_label":"Like (13)",
+        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+}
+
+TEST(BrowserToolsTest, CountdownThatBecomesAnotherActionIsDropped) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(
+        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Resend in 0:42",
+        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.QueueScriptResult(
+        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Delete account 0:41",
+        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+    const ToolResult r =
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+    EXPECT_TRUE(r.is_error);
+    EXPECT_EQ(r.content.at(0).text, "The page changed while waiting; take a fresh snapshot.");
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0);
+}
+
+TEST(BrowserToolsTest, DigitOnlyChangeInNameOrIdStillFailsTheRecheck) {
+    // The label is the same; only a field the gate compares changes its digits.
+    for (const std::string field : {"name", "id"}) {
+        FakeBrowserHost host;
+        BrowserToolbox toolbox(host);
+        const auto facts = [&field](const std::string& value) {
+            return R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",")" + field + R"(":")" +
+                   value + R"(","is_submit":true,"page_origin":"https://a.test"}})";
+        };
+        host.QueueScriptResult(facts("item1"));
+        host.QueueScriptResult(facts("item2"));
+        host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+        const ToolResult r =
+            CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+        EXPECT_TRUE(r.is_error) << field;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0) << field;
+    }
+}
+
 }  // namespace
 }  // namespace island::agent
