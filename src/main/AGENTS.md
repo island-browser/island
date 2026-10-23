@@ -228,6 +228,11 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   buttons must keep zero insets or CEF clips the cap into a detached strip. While welcome is shown,
   `BrowserWindow` hides the attached `CefBrowserView`s because the macOS browser compositor can
   otherwise paint start-page controls above the CEF overlay; hiding the welcome restores them.
+  This applies to Native only (`WelcomeHidesPageViews` in `overlay_lifetime.h`). The decision is
+  re-applied on every attach (`BrowserWindow::ApplyPageViewVisibility`, called from
+  `AttachActiveTabBrowserView`), so a view attached or re-attached during the welcome follows it.
+- Palette shortcut keycaps: Native keeps a fixed 104 DIP right column on every row (so kind labels
+  line up) and shows the keycap plate inside it at its natural width; other looks hide the column.
 
 ## Dependencies
 

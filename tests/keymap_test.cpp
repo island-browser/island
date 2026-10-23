@@ -260,5 +260,14 @@ TEST(CheatsheetRowsTest, KeyGlyphsMatchTheSettingsKeycaps) {
     EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("F2"), true), "F2");
     EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Alt+Left"), false), "Alt+Left");
 }
+
+TEST(CheatsheetRowsTest, KeyGlyphsFitWidthsFromOneToFourModifiers) {
+    // The palette keycap takes its width from these strings, so each length must format.
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Mod+J"), true), "⌘J");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Mod+J"), false), "Ctrl+J");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Mod+Control+Alt+Shift+J"), true), "⌃⌥⇧⌘J");
+    EXPECT_EQ(FormatKeyGlyphs(*ParseKeyBinding("Mod+Control+Alt+Shift+J"), false),
+              "Ctrl+Alt+Shift+J");
+}
 }  // namespace
 }  // namespace island

@@ -190,5 +190,22 @@ TEST(CheatsheetOverlayTest, AShortPageCardKeepsTheCardInsideIt) {
     EXPECT_LE(card.x + card.width, 200 - CheatsheetOverlay::kAnchorInsetDip);
 }
 
+// The welcome hides page views only in Native, only while it is shown. Attach paths evaluate the
+// same rule, so a view attached during the welcome is hidden and one attached after it is not.
+TEST(WelcomePageVisibilityTest, GivenNativeWhileWelcomeShownThenPageViewsAreHidden) {
+    EXPECT_TRUE(WelcomeHidesPageViews(LookPreset::kNative, /*welcome_visible=*/true));
+}
+
+TEST(WelcomePageVisibilityTest, GivenArcOrGraphiteWhileWelcomeShownThenPageViewsStayVisible) {
+    EXPECT_FALSE(WelcomeHidesPageViews(LookPreset::kArc, /*welcome_visible=*/true));
+    EXPECT_FALSE(WelcomeHidesPageViews(LookPreset::kGraphite, /*welcome_visible=*/true));
+}
+
+TEST(WelcomePageVisibilityTest, GivenWelcomeClosedThenEveryLookShowsPageViews) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        EXPECT_FALSE(WelcomeHidesPageViews(look, /*welcome_visible=*/false));
+    }
+}
+
 }  // namespace
 }  // namespace island

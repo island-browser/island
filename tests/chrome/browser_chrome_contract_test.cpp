@@ -524,12 +524,13 @@ TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitial
     const SpaceSwitcherEntrySnapshot lower = {.name = "École supérieure", .active = false};
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 1, LookPreset::kNative), "Home");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 5, LookPreset::kNative), "H");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative), "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative),
+              "P");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 4, LookPreset::kNative), "P");
     for (std::size_t count = 1; count <= 8; ++count) {
         for (const SpaceSwitcherEntrySnapshot* entry : {&shorty, &longer, &lower}) {
-            const std::string label =
-                BrowserChrome::SpaceSegmentLabel(*entry, count, LookPreset::kNative);
+            const std::string label = BrowserChrome::SpaceSegmentLabel(*entry, count,
+                                                                       LookPreset::kNative);
             EXPECT_NE(label, "\xE2\x80\xA6");
             EXPECT_FALSE(label.empty());
         }

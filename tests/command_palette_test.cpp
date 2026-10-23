@@ -638,25 +638,21 @@ TEST(CommandPaletteTest, GivenCandidateAndQueryPairsWhenClassifiedThenTheRankOrd
     EXPECT_EQ(ClassifyPaletteMatch("Anything", "   "), PaletteMatchRank::kNone);
 }
 
-TEST(CommandPaletteTest,
-     GivenReportsWhenComposedThenTheyListAfterBookmarksAndRankByTitleOrQuestion) {
+TEST(CommandPaletteTest, GivenReportsWhenComposedThenTheyListAfterBookmarksAndRankByTitleOrQuestion) {
     const std::vector<PaletteReportEntry> reports = {
         {.id = "r1", .title = "Rust in short", .question = "what is rust"},
         {.id = "r2", .title = "Sky colour", .question = "why is the sky blue"},
     };
-    const std::vector<PaletteBookmarkEntry> bookmarks = {
-        {.title = "Rust book", .url = "https://r.test/"}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {{.title = "Rust book", .url = "https://r.test/"}};
     // Empty query: canonical order, reports after bookmarks, no URL row.
-    const std::vector<PaletteEntry> all =
-        ComposePaletteResults("", {}, {}, bookmarks, {}, {}, reports);
+    const std::vector<PaletteEntry> all = ComposePaletteResults("", {}, {}, bookmarks, {}, {}, reports);
     ASSERT_EQ(all.size(), 3U);
     EXPECT_EQ(all[0].kind, PaletteEntryKind::kBookmark);
     EXPECT_EQ(all[1].kind, PaletteEntryKind::kReport);
     EXPECT_EQ(all[1].report.id, "r1");
 
     // The question matches too; the URL row stays last.
-    const std::vector<PaletteEntry> sky =
-        ComposePaletteResults("blue", {}, {}, {}, {}, {}, reports);
+    const std::vector<PaletteEntry> sky = ComposePaletteResults("blue", {}, {}, {}, {}, {}, reports);
     ASSERT_EQ(sky.size(), 2U);
     EXPECT_EQ(sky[0].kind, PaletteEntryKind::kReport);
     EXPECT_EQ(sky[0].report.id, "r2");

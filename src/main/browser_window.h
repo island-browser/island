@@ -693,6 +693,9 @@ class BrowserWindow : public CefClient,
     void ApplyAddressFocusColors(CefRefPtr<CefWindow> window, const ChromeTokens& tokens) const;
     // True while the welcome or the command palette is shown (both paint the neutral ring).
     [[nodiscard]] bool OverlayFocusRingShown() const;
+    // Hides or shows the attached page views for the welcome (Native only); called on every
+    // attach and on every overlay focus-ring transition.
+    void ApplyPageViewVisibility();
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;

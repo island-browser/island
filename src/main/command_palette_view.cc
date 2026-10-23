@@ -42,7 +42,8 @@ constexpr int kRowIconCellDip = 24;
 constexpr int kKeycapHeightDip = 20;
 constexpr int kKeycapRadiusDip = 5;
 constexpr int kKeycapLabelWidthDip = 18;
-constexpr int kKeycapWidthDip = 2 * kKeycapRadiusDip + kKeycapLabelWidthDip;
+// Native's right column for the shortcut: wide enough for a four-modifier keycap ("⌃⌥⇧⌘J").
+constexpr int kKeycapColumnWidthDip = 104;
 constexpr std::uint32_t kScrimArgb = 0x33000000U;
 constexpr std::uint32_t kTransparentArgb = 0x00000000U;
 
@@ -404,7 +405,7 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     result_icons_.clear();
     result_labels_.clear();
     result_kinds_.clear();
-    result_shortcut_wrappers_.clear();
+    result_shortcut_columns_.clear();
     result_shortcut_left_caps_.clear();
     result_shortcut_right_caps_.clear();
     result_shortcuts_.clear();
@@ -426,7 +427,7 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     body_delegates_.reserve(row_count);
     result_labels_.reserve(row_count);
     result_kinds_.reserve(row_count);
-    result_shortcut_wrappers_.reserve(row_count);
+    result_shortcut_columns_.reserve(row_count);
     result_shortcut_left_caps_.reserve(row_count);
     result_shortcut_right_caps_.reserve(row_count);
     result_shortcuts_.reserve(row_count);
@@ -503,8 +504,19 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         kind->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_RIGHT);
         body->AddChildView(kind);
 
-        CefRefPtr<PaletteSurfaceDelegate> shortcut_wrapper_delegate = new PaletteSurfaceDelegate(
-            this, PaletteSurfaceSlot::kRow, CefSize(kKeycapWidthDip, kKeycapHeightDip));
+        // The keycap column has a fixed width so every row's kind label lines up; the keycap
+        // plate inside it takes its width from its caps and label, right-aligned in the column.
+        CefRefPtr<PaletteSurfaceDelegate> shortcut_column_delegate = new PaletteSurfaceDelegate(
+            this, PaletteSurfaceSlot::kRow, CefSize(kKeycapColumnWidthDip, kKeycapHeightDip));
+        surface_delegates_.push_back(shortcut_column_delegate);
+        CefRefPtr<CefPanel> shortcut_column = CefPanel::CreatePanel(shortcut_column_delegate);
+        CefBoxLayoutSettings column_settings;
+        column_settings.horizontal = static_cast<int>(true);
+        column_settings.between_child_spacing = 0;
+        column_settings.main_axis_alignment = CEF_AXIS_ALIGNMENT_END;
+        shortcut_column->SetToBoxLayout(column_settings);
+        CefRefPtr<PaletteSurfaceDelegate> shortcut_wrapper_delegate =
+            new PaletteSurfaceDelegate(this, PaletteSurfaceSlot::kRow);
         surface_delegates_.push_back(shortcut_wrapper_delegate);
         CefRefPtr<CefPanel> shortcut_wrapper = CefPanel::CreatePanel(shortcut_wrapper_delegate);
         CefBoxLayoutSettings shortcut_settings;
@@ -530,7 +542,8 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         shortcut_right->SetInsets(CefInsets());
         shortcut_right->SetMinimumSize(CefSize(kKeycapRadiusDip, kKeycapHeightDip));
         shortcut_wrapper->AddChildView(shortcut_right);
-        body->AddChildView(shortcut_wrapper);
+        shortcut_column->AddChildView(shortcut_wrapper);
+        body->AddChildView(shortcut_column);
 
         row->AddChildView(body);
         row_layout->SetFlexForView(body, 1);
@@ -565,7 +578,7 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         result_icons_.push_back(icon);
         result_labels_.push_back(label);
         result_kinds_.push_back(kind);
-        result_shortcut_wrappers_.push_back(shortcut_wrapper);
+        result_shortcut_columns_.push_back(shortcut_column);
         result_shortcut_left_caps_.push_back(shortcut_left);
         result_shortcut_right_caps_.push_back(shortcut_right);
         result_shortcuts_.push_back(shortcut);
@@ -868,8 +881,11 @@ void CommandPaletteView::ProjectResults() {
                                          : std::string();
         const BrowserChrome::KeycapColors keycap = BrowserChrome::NativeKeycapColors(tokens_);
         const bool show_shortcut = native && !shortcut.empty();
-        result_shortcut_wrappers_[index]->SetVisible(show_shortcut);
-        result_shortcut_wrappers_[index]->SetBackgroundColor(fill.argb);
+        // Native keeps the column on every row so the kind labels line up; only the plate hides.
+        result_shortcut_columns_[index]->SetVisible(native);
+        result_shortcut_columns_[index]->SetBackgroundColor(fill.argb);
+        result_shortcut_columns_[index]->GetChildViewAt(0)->SetVisible(show_shortcut);
+        result_shortcut_columns_[index]->GetChildViewAt(0)->SetBackgroundColor(fill.argb);
         result_shortcuts_[index]->SetText(shortcut);
         result_shortcuts_[index]->SetBackgroundColor(keycap.fill.argb);
         result_shortcuts_[index]->SetEnabledTextColors(keycap.text.argb);

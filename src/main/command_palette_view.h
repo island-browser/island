@@ -127,7 +127,7 @@ class CommandPaletteView final {
     OverlayLifetime overlay_lifetime_;
     // The right-aligned kind tag (Native sentence case; legacy looks keep their uppercase tone).
     std::vector<CefRefPtr<CefLabelButton>> result_kinds_;
-    std::vector<CefRefPtr<CefPanel>> result_shortcut_wrappers_;
+    std::vector<CefRefPtr<CefPanel>> result_shortcut_columns_;
     std::vector<CefRefPtr<CefLabelButton>> result_shortcut_left_caps_;
     std::vector<CefRefPtr<CefLabelButton>> result_shortcut_right_caps_;
     std::vector<CefRefPtr<CefLabelButton>> result_shortcuts_;

@@ -931,7 +931,8 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
     if (!agent_tab_id_.has_value()) {
         return {.error = AgentTabError::kNoAgentPage};
     }
-    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*agent_tab_id_);
+    const std::optional<std::pair<std::size_t, std::size_t>> location =
+        TabLocation(*agent_tab_id_);
     if (!location.has_value() || location->first != space_index) {
         return {.error = AgentTabError::kAgentPageClosed};
     }
@@ -4974,6 +4975,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (show_internal_page_ && page != nullptr) {
             chrome_->AttachBrowserView(page->view());
             SetAttachedViews({AttachedView{.view = page->view(), .local_page = page}});
+            ApplyPageViewVisibility();
             return;
         }
         internal_page_.reset();
@@ -4989,10 +4991,10 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
             EnsureTabBrowserView(*second)) {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
-            SetAttachedViews(
-                {AttachedView{.view = first->browser_view(), .tab = first->id()},
-                 AttachedView{
-                     .view = second->browser_view(), .tab = second->id(), .second_slot = true}});
+            SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
+                              AttachedView{.view = second->browser_view(), .tab = second->id(),
+                                           .second_slot = true}});
+            ApplyPageViewVisibility();
             return;
         }
     }
@@ -5002,6 +5004,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
     }
     chrome_->AttachBrowserView(tab->browser_view());
     SetAttachedViews({AttachedView{.view = tab->browser_view(), .tab = tab->id()}});
+    ApplyPageViewVisibility();
 }
 
 bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
@@ -5593,10 +5596,11 @@ void BrowserWindow::ScheduleSpaceIconPicker() {
         return;
     }
     // Runs after the palette's released overlay has been destroyed by its posted task (FIFO).
-    CefPostTask(TID_UI,
-                CefCreateClosureTask(base::BindOnce(
-                    [](CefRefPtr<BrowserWindow> window) { window->RunScheduledSpaceIconPicker(); },
-                    CefRefPtr<BrowserWindow>(this))));
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window) {
+                                window->RunScheduledSpaceIconPicker();
+                            },
+                            CefRefPtr<BrowserWindow>(this))));
 }
 
 void BrowserWindow::RunScheduledSpaceIconPicker() {
@@ -5844,8 +5848,7 @@ void BrowserWindow::CancelStaleConfirmations() {
 }
 
 void BrowserWindow::FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer) {
-    std::function<void(agent::ConfirmationAnswer)> done =
-        std::move(pending_confirmations_[index].done);
+    std::function<void(agent::ConfirmationAnswer)> done = std::move(pending_confirmations_[index].done);
     pending_confirmations_.erase(pending_confirmations_.begin() +
                                  static_cast<std::ptrdiff_t>(index));
     RefreshConfirmationUi();
@@ -5964,10 +5967,10 @@ void BrowserWindow::RefreshAgentEntry() {
         return;
     }
     AgentEntryStatus status;
-    const bool needs_you =
-        !pending_confirmations_.empty() ||
-        (research_.has_value() && research_->awaiting_approval) ||
-        (agent_session_ != nullptr && agent_session_->pending_permission_count() != 0);
+    const bool needs_you = !pending_confirmations_.empty() ||
+                           (research_.has_value() && research_->awaiting_approval) ||
+                           (agent_session_ != nullptr &&
+                            agent_session_->pending_permission_count() != 0);
     if (needs_you) {
         status.activity = AgentActivity::kNeedsYou;
     } else if (agent_session_ != nullptr && agent_session_->busy()) {
@@ -5982,7 +5985,8 @@ void BrowserWindow::RefreshAgentEntry() {
         status.queue_total = clamp_int(current->total);
     }
     status.queued_count = static_cast<int>(std::min<std::size_t>(
-        agent_queue_.queued_count(), static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        agent_queue_.queued_count(),
+        static_cast<std::size_t>(std::numeric_limits<int>::max())));
     if (const agent::AgentProvider* provider =
             agent::FindAgentProvider(ResolvedAgent().provider_id)) {
         status.provider_name = std::string(provider->name);
@@ -6139,22 +6143,28 @@ void BrowserWindow::OnOverlayFocusRingChanged() {
     // window's ring back to the address field (ApplyAddressFocusColors decides which).
     ApplyAddressFocusColors(window_, ResolvedTokens(ResolvedChromeTheme()));
     window_->ThemeChanged();
-    // Chromium's browser compositor can sit above a CefWindow overlay on macOS. Hide only the
-    // attached page views while the first-run welcome is visible so the start page controls can
-    // never paint through the scrim; the chrome and the welcome card remain laid out normally.
-    if (chrome_ != nullptr) {
-        const bool page_visible = welcome_ == nullptr || !welcome_->visible();
-        for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
-            if (view != nullptr) {
-                view->SetVisible(page_visible);
-            }
-        }
-    }
+    ApplyPageViewVisibility();
 }
 
 bool BrowserWindow::OverlayFocusRingShown() const {
     return (welcome_ != nullptr && welcome_->visible()) ||
            (command_palette_ != nullptr && command_palette_->visible());
+}
+
+void BrowserWindow::ApplyPageViewVisibility() {
+    if (chrome_ == nullptr) {
+        return;
+    }
+    // Chromium's browser compositor can sit above a CefWindow overlay on macOS, so Native hides the
+    // attached page views behind the welcome scrim. The chrome and the welcome card stay laid out.
+    const bool welcome_visible = welcome_ != nullptr && welcome_->visible();
+    const bool hidden = WelcomeHidesPageViews(ResolvedTokens(ResolvedChromeTheme()).look,
+                                              welcome_visible);
+    for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
+        if (view != nullptr) {
+            view->SetVisible(!hidden);
+        }
+    }
 }
 
 void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources) {

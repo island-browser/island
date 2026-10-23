@@ -329,14 +329,15 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   headers. The appearance control matches the sidebar switcher: a `fill` track with a 2 DIP inset,
   24 DIP plates, and a `border_strong` hairline on the selected neutral `segment_selected` plate.
   Its focus ring is neutral and follows only the focused segment. A 20% black scrim fills the
-  short-lived overlay; the page compositor is hidden while the welcome is shown so start-page
+  short-lived overlay; the page compositor is hidden while the Native welcome is shown so start-page
   controls cannot paint through it. Readable browsers remain outlined toggle rows, followed by a
   right-aligned secondary Import button and the black/white Start browsing primary button. Arc and
   Graphite keep their original square hairline card and segmented control.
 - **Command palette (native overlay):** Cmd/Ctrl+K opens a 640 DIP card over a 20% black scrim.
   Sentence-case group headers divide the results; each 36 DIP row has a 16 DIP favicon or a
-  meaning-specific Lucide icon, a sentence-case kind label, and a right-aligned 20 DIP rounded
-  keycap resolved from the current keymap. The selected row is one radius-10 neutral
+  meaning-specific Lucide icon, a sentence-case kind label, and a shortcut keycap resolved from the
+  current keymap. The keycap plate is a 20 DIP rounded plate at its natural width (caps plus label),
+  right-aligned in a fixed 104 DIP Native column so kind labels line up on every row. The selected row is one radius-10 neutral
   `segment_selected` plate, never blue. The focused query field uses the shared neutral overlay
   ring. Arc and Graphite keep the earlier card-sized overlay without a full-window click blocker.
 - **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
