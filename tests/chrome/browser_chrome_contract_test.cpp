@@ -346,7 +346,7 @@ TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNoNewTabRow
     }
     // Top to bottom: navigation, address, the tab list, then the bottom group (divider, space
     // bar, footer); the current-page card stays last and collapsed. The New Tab row is gone:
-    // ⌘T, the File menu and the palette open tabs.
+    // ⌘T (Ctrl+T), the Browser menu and the palette open tabs.
     EXPECT_EQ(order, (std::vector<ChromeViewId>{
                          ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
                          ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
@@ -402,7 +402,7 @@ TEST(BrowserChromeContractTest,
 }
 
 // Native (2026-10-16 owner request): one Agent entry at the sidebar bottom, no toolbar Agent,
-// New Tab as the last row of the tab list, and a switcher row with the space segments.
+// no New Tab row, and a switcher row with the space segments.
 std::vector<ChromeViewId> ChildIds(const ChromeViewTreeNode& node) {
     std::vector<ChromeViewId> ids;
     for (const ChromeViewTreeNode& child : node.children) {
@@ -425,7 +425,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
     const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
     ASSERT_NE(rail, nullptr);
-    // New Tab is no longer a rail row above the list; it lives in the tab list (below).
+    // There is no New Tab row: the rail holds the tab list and no row above it.
     EXPECT_EQ(ChildIds(*rail),
               (std::vector<ChromeViewId>{ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
                                          ChromeViewId::kSpacer, ChromeViewId::kDivider,
@@ -556,6 +556,17 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
 
 // Arc and Graphite (owner request, 0.8.0): the Agent plate is neutral in every state, so no
 // accent fill or label is ever painted behind or on it.
+TEST(BrowserChromeContractTest, GivenAgentNeedsYouBadgeWhenColoredThenItIsAmberNotAccent) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        for (const LookPreset look :
+             {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+            const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
+            EXPECT_EQ(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.warning_border);
+            EXPECT_NE(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.accent);
+        }
+    }
+}
+
 TEST(BrowserChromeContractTest, GivenFooterAgentPlateWhenStatedThenItIsNeutralInEveryState) {
     const ArgbColor rail{.argb = 0xFF123456U};
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {

@@ -104,7 +104,8 @@ enum class ChromeViewId : int {
     kAgentPanel = 1041,
     // Arc-style rail regions: the footer under the space bar holding the agent toggle and
     // New Space. 1042 was the "New Tab" row above the tab list; it was retired in 0.8.0 (the
-    // row is gone in every look; ⌘T, the File menu and the palette open tabs) and is not reused.
+    // row is gone in every look; ⌘T (Ctrl+T), the Browser menu on macOS and the command palette
+    // open tabs) and is not reused.
     kRailFooter = 1043,
     kRailAgentButton = 1044,
     kRailNewSpaceButton = 1045,
@@ -621,6 +622,12 @@ class BrowserChrome final : public NavigationObserver {
         }
         return kept + ellipsis;
     }
+    // The Agent button's badge while a confirmation waits: amber (`warning_border`, the token of
+    // Native's needs-you status dot). The accent is reserved for the active tab and the address
+    // ring, so the badge never reads as a selection.
+    [[nodiscard]] static ArgbColor AgentNeedsYouBadgeColor(const ChromeTokens& tokens) {
+        return tokens.warning_border;
+    }
     [[nodiscard]] static ArgbColor AgentStatusDotColor(const ChromeTokens& tokens,
                                                        AgentActivity activity) {
         switch (activity) {
@@ -1015,7 +1022,7 @@ class BrowserChrome final : public NavigationObserver {
     // or closes the column.
     void SetAgentPanelView(CefRefPtr<CefView> view);
     void SetAgentPanelOpen(bool open);
-    // Marks the Agent entry with a 6 DIP accent dot while a confirmation waits for the person (the
+    // Marks the Agent entry with a 6 DIP amber dot while a confirmation waits for the person (the
     // panel may be closed). The dot sits on the entry's icon, the one place a label button can
     // draw a mark.
     void SetAgentNeedsYou(bool needs_you);
@@ -1219,8 +1226,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> agent_keycap_;
     AgentEntryStatus agent_status_;
     std::string agent_shortcut_label_;
-    // Native's Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
-    bool native_agent_hovered_ = false;
+    // The Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
+    bool agent_hovered_ = false;
     CefRefPtr<CefLabelButton> new_space_button_;
     CefRefPtr<CefLabelButton> tabs_button_;
     CefRefPtr<CefLabelButton> settings_button_;

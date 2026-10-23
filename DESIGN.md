@@ -224,8 +224,8 @@ tab row, the close × is white at 70% and the generic globe is white. The addres
 is one 2 DIP accent ring that follows the 8 pt radius: the controls sit in an inner panel whose
 corners take the 6 pt inner radius. Arc and Graphite draw one ring too (0.8.0): the pill's outer
 accent outline, with the textfield's own Chromium ring painted in the plate fill so it vanishes.
-The field sits 2 DIP inside the pill there, so that ring never covers the outline. The Plan's instruction field is 30 pt tall with radius 6 and
-`border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
+The field sits 2 DIP inside the pill there, so that ring never covers the outline. The Plan's
+instruction field is 30 pt tall with radius 6 and `border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
 
 Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
 (`NativeSwitcherMetrics`). Its Agent row shows the provider name, a status dot (idle, working or
@@ -298,8 +298,8 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   26 compact) and 16px icons on a 4/8/12 DIP rhythm: back/forward, then the address as one soft
   `well` pill (the outline turns `--accent` while the field has focus), then the tab list — rows
   on the canvas, the selected tab a soft `selected` fill, the hovered one `hover`, no outline — and
-  a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T, the
-  File menu and the command palette open tabs. In Arc and Graphite the footer's Agent button is a
+  a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T
+  (Ctrl+T), the Browser menu on macOS and the command palette open tabs. In Arc and Graphite the footer's Agent button is a
   neutral plate at the row radius (8 DIP) and the control height, centered with the icon buttons
   and spaced like them: `hover` on hover, `segment_selected` while the panel is open, the label
   `text` and the sparkle `text_2`, never an accent fill or label. Favicons sit

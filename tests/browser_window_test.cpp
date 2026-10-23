@@ -219,8 +219,7 @@ TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPain
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
 
-TEST(BrowserWindowTest,
-     GivenAddressFocusWhenTextfieldRingResolvedThenItIsThePlateFillInEveryLook) {
+TEST(BrowserWindowTest, GivenAddressFocusWhenTextfieldRingResolvedThenItIsThePlateFillInEveryLook) {
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
@@ -370,10 +369,9 @@ TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsH
     const ChromeViewId entry = ChromeViewId::kTabStripEntry;
     const ChromeViewId kicker = ChromeViewId::kTabGroupKicker;
     // The children stay out of Favorites and the header precedes the first kicker.
-    EXPECT_EQ(ids, (std::vector<ChromeViewId>{
-                       ChromeViewId::kFavoritesSectionHeader, entry, entry,
-                       ChromeViewId::kTabsSectionHeader, kicker, entry, entry, kicker, entry,
-                       entry}));
+    EXPECT_EQ(ids, (std::vector<ChromeViewId>{ChromeViewId::kFavoritesSectionHeader, entry, entry,
+                                              ChromeViewId::kTabsSectionHeader, kicker, entry,
+                                              entry, kicker, entry, entry}));
 }
 
 TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesFirst) {

@@ -2667,7 +2667,7 @@ void BrowserChrome::ApplyLookStructure() {
             toolbar_content_->RemoveChildView(address_row_);
             sidebar_->AddChildViewAt(navigation_row_, 0);
             sidebar_->AddChildViewAt(address_row_, 1);
-            // Arc and Graphite: the switcher sits above the footer row, New Tab above the list.
+            // Arc and Graphite: the switcher sits above the footer row.
             rail_footer_->RemoveChildView(switcher_row_);
             switcher_row_->RemoveChildView(space_switcher_);
             switcher_row_->RemoveChildView(new_space_button_);
@@ -3470,15 +3470,15 @@ void BrowserChrome::ApplyRailButtonTheme() {
         // closed, so the person knows to open it).
         agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL,
                                 agent_needs_you_
-                                    ? BuildBadgedImage(*sparkles, tokens_.accent)
+                                    ? BuildBadgedImage(*sparkles, AgentNeedsYouBadgeColor(tokens_))
                                     : *sparkles);
     }
     // The Agent entry is a neutral plate in every look: hover paints `hover`, an open panel the
     // raised `segment_selected` plate, both with normal text (no accent fill or label). Arc and
     // Graphite rest on the rail; Native rests on the canvas (NativeAgentEntryColors).
     const ArgbColor agent_fill =
-        native ? NativeAgentEntryColors(tokens_, agent_panel_open_, native_agent_hovered_).fill
-               : FooterAgentPlate(tokens_, agent_panel_open_, native_agent_hovered_, rail);
+        native ? NativeAgentEntryColors(tokens_, agent_panel_open_, agent_hovered_).fill
+               : FooterAgentPlate(tokens_, agent_panel_open_, agent_hovered_, rail);
     agent_button_->SetBackgroundColor(agent_fill.argb);
     agent_button_->SetEnabledTextColors(tokens_.text.argb);
     // Set per state as well: the enabled colors alone left this label in the disabled grey.
@@ -3697,24 +3697,27 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
         }
     }
     if (tokens_.look != LookPreset::kNative && sidebar_expanded_ &&
-        (agent_panel_open_ || native_agent_hovered_)) {
+        (agent_panel_open_ || agent_hovered_)) {
         // Arc and Graphite: the Agent plate is a square CefLabelButton fill; round it like a row.
         const WindowRect agent = InWindow(agent_button_);
         if (agent.width > 0 && agent.height > 0) {
-            patches.push_back(
-                {agent.x, agent.y, agent.width, agent.height, kRowFillRadiusDip});
+            patches.push_back({.x = agent.x,
+                               .y = agent.y,
+                               .width = agent.width,
+                               .height = agent.height,
+                               .radius = kRowFillRadiusDip});
         }
     }
     if (tokens_.look == LookPreset::kNative && sidebar_expanded_) {
         const WindowRect agent = InWindow(agent_row_);
-        if (agent_panel_open_ || native_agent_hovered_) {
+        if (agent_panel_open_ || agent_hovered_) {
             patches.push_back({agent.x, agent.y, agent.width, agent.height, kRowFillRadiusDip});
         }
         const WindowRect keycap = InWindow(agent_keycap_);
         if (keycap.width > 0 && keycap.height > 0 && !agent_shortcut_label_.empty()) {
             patches.push_back(
                 {keycap.x, keycap.y, keycap.width, keycap.height, kAgentKeycapRadiusDip,
-                 NativeAgentEntryColors(tokens_, agent_panel_open_, native_agent_hovered_).fill});
+                 NativeAgentEntryColors(tokens_, agent_panel_open_, agent_hovered_).fill});
         }
         const WindowRect track = InWindow(space_switcher_);
         if (track.width > 0 && track.height > 0) {
@@ -3854,8 +3857,8 @@ void BrowserChrome::RefreshRowHover() {
         agent_button_ != nullptr &&
         (over(agent_button_) || (tokens_.look == LookPreset::kNative && agent_row_ != nullptr &&
                                  (over(agent_meta_) || over(agent_keycap_))));
-    if (agent_hovered != native_agent_hovered_) {
-        native_agent_hovered_ = agent_hovered;
+    if (agent_hovered != agent_hovered_) {
+        agent_hovered_ = agent_hovered;
         ApplyRailButtonTheme();
     }
     PushCornerPatches();

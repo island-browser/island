@@ -38,7 +38,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   running; each task start clears "Allow for this task" grants.
 - The agent asks before consequential page actions: a confirmation card in the agent panel
   (Allow once, Allow for this task, Trust this site, Cancel; Esc cancels) that waits 120 s, marks
-  the tab and the Agent button with a dot (it never opens the panel or takes focus), survives
+  the tab and the Agent button with an amber dot (it never opens the panel or takes focus), survives
   closing the panel, and is withdrawn when its tab closes or moves, its space is left, or Stop is
   pressed. Settings > Agent & tools lists the trusted sites with Remove buttons.
 - Tabs the agent opens (`browser_open_tab`, and the pages of a research plan) are remembered as
@@ -47,16 +47,23 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
-- The sidebar's "New Tab" row is gone in every look. ⌘T, the File menu and the command palette open tabs; ChromeViewId 1042 is retired, not reused.
-- The Agent button in Arc and Graphite is a neutral plate: rounded like the tab rows, the height of the footer buttons, centered with them, `segment_selected` while the panel is open, with normal text (no accent fill or label).
+- The sidebar's "New Tab" row is gone in every look. ⌘T (Ctrl+T), the Browser menu on macOS and
+  the command palette open tabs; ChromeViewId 1042 is retired, not reused.
+- The Agent button in Arc and Graphite is a neutral plate: rounded like the tab rows, the height of
+  the footer buttons, centered with them, `segment_selected` while the panel is open, with normal
+  text (no accent fill or label).
 - The agent panel has a new look: a status pill, your messages as bubbles, compact tool rows and a
   composer card with the tab chip and a round send button.
+
+### Fixed
+
+- The address field in Arc and Graphite shows one focus ring (the pill's outline) instead of an
+  inner blue ring inside it, like Native.
 
 ## [0.7.3] - 2026-10-23
 
 ### Fixed
 
-- The address field in Arc and Graphite shows one focus ring (the pill's outline) instead of an inner blue ring inside it, like Native.
 - The Windows builds compile again after the expanded icon set exceeded the platform's command-line
   limit during post-build resource staging.
 
