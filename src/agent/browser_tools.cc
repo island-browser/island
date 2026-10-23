@@ -224,16 +224,19 @@ std::string ClickTargetScript(const std::string& locator) {
 // other mark is a substring ("$", "руб", "р."). The page copy below reads this same table, so
 // both sides agree on every entry (facts_probe.cjs runs the pairs in browser_tools_test.cpp).
 constexpr std::string_view kCurrencyMarks[] = {
-    "$",   "€",   "£",   "¥",   "¢",   "₽",   "₴",   "₸",    "₹",    "₩",   "₺",   "₪",   "₫",
-    "₱",   "₦",   "₿",   "₡",   "₵",   "₼",   "₾",   "＄",   "￥",   "￡",  "￠",  "元",  "円",
-    "zł",  "Zł",  "ZŁ",  "Kč",  "KČ",  "kč",  "руб", "Руб",  "РУБ",  "р.",  "Р.",  "лв",  "Лв",
-    "ЛВ",  "USD", "EUR", "GBP", "JPY", "RUB", "CNY", "RMB",  "CHF",  "CAD", "AUD", "NZD", "HKD",
-    "SGD", "SEK", "NOK", "DKK", "ISK", "PLN", "CZK", "HUF",  "RON",  "TRY", "UAH", "ZAR", "ILS",
-    "THB", "INR", "KRW", "BRL", "MXN", "BTC", "ETH", "USDT", "USDC", "kr",  "kn",  "Ft",  "lei",
+    "$",   "€",    "£",    "¥",   "¢",   "₽",   "₴",   "₸",   "₹",   "₩",   "₺",   "₪",   "₫",
+    "₱",   "₦",    "₿",    "₡",   "₵",   "₼",   "₾",   "＄",  "￥",  "￡",  "￠",  "元",  "円",
+    "zł",  "Zł",   "ZŁ",   "Kč",  "KČ",  "kč",  "руб", "Руб", "РУБ", "р.",  "Р.",  "лв",  "Лв",
+    "ЛВ",  "грн",  "Грн",  "ГРН", "￦",  "﹩",  "﷼",   "₨",   "USD", "EUR", "GBP", "JPY", "RUB",
+    "CNY", "RMB",  "CHF",  "CAD", "AUD", "NZD", "HKD", "SGD", "SEK", "NOK", "DKK", "ISK", "PLN",
+    "CZK", "HUF",  "RON",  "UAH", "ZAR", "ILS", "Rs",  "THB", "INR", "KRW", "BRL", "MXN", "BTC",
+    "ETH", "USDT", "USDC", "kr",  "kn",  "Ft",  "lei", "Rp",  "RM",
 };
 
-// The live-label rule in page JavaScript. It mirrors NormalizeLiveCounters and LiveLabelsMatch
-// exactly. `__islandCurrencyMarks` is the table above, passed in by SyntheticClickScript.
+// The live-label rule in page JavaScript, for SyntheticClickScript. `liveEqual` mirrors
+// LiveLabelsMatch. `liveCounters` mirrors NormalizeLiveCounters for a label that is not unsafe; it
+// does not check the unsafe marks itself, because the page only calls liveEqual. The table is
+// `__islandCurrencyMarks`, built from kCurrencyMarks by SyntheticClickScript.
 constexpr std::string_view kLiveCountersJs = R"JS(
   const liveTokens = __islandCurrencyMarks.filter((m) => /^[A-Za-z]+$/.test(m));
   const liveSymbols = __islandCurrencyMarks.filter((m) => !/^[A-Za-z]+$/.test(m));
@@ -242,7 +245,8 @@ constexpr std::string_view kLiveCountersJs = R"JS(
     liveTokenRe.test(s);
   const liveCounters = (text) => {
     let out = String(text);
-    const counter = /^([^0-9]*)\([0-9]+\)([ \t]*)$/.exec(out);
+    // Only an ASCII prefix without a digit counts, as in C++ (a non-ASCII digit fails closed).
+    const counter = /^([\x00-\x2f\x3a-\x7f]*)\([0-9]+\)([ \t]*)$/.exec(out);
     if (counter) out = counter[1] + '(#)' + counter[2];
     return out.replace(/(^|[^0-9])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9])/g, (m, pre) => pre + '#');
   };
@@ -250,6 +254,9 @@ constexpr std::string_view kLiveCountersJs = R"JS(
     liveCounters(a) === liveCounters(b));
 )JS";
 
+// Clicks a box-less element with element.click(). The element is found again by its locator, so
+// the script first checks that it is still the element the gate judged (`expected` is that
+// element's facts as a JSON object) and still has no box.
 std::string SyntheticClickScript(const std::string& locator, const std::string& expected) {
     std::string marks = "const __islandCurrencyMarks = [";
     for (std::string_view mark : kCurrencyMarks) {
@@ -539,7 +546,8 @@ std::string ReplaceTimeRuns(std::string_view text) {
 }
 
 // Replaces one trailing "(digits)" (trailing blanks allowed) with "(#)", but only when the text
-// before it holds no digit at all.
+// before it is pure ASCII with no digit at all (a non-ASCII digit or letter before it fails
+// closed).
 std::string ReplaceTrailingCounter(std::string text) {
     std::size_t close = text.size();
     while (close > 0 && (text[close - 1] == ' ' || text[close - 1] == '\t')) --close;
@@ -548,7 +556,8 @@ std::string ReplaceTrailingCounter(std::string text) {
     while (p > 0 && IsDigit(text[p - 1])) --p;
     if (p == close - 1 || p == 0 || text[p - 1] != '(') return text;
     for (std::size_t k = 0; k < p; ++k) {
-        if (IsDigit(text[k])) return text;
+        const auto byte = static_cast<unsigned char>(text[k]);
+        if (IsDigit(text[k]) || byte >= 0x80) return text;
     }
     return text.substr(0, p) + "#" + text.substr(close - 1);
 }

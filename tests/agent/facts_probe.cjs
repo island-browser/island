@@ -68,6 +68,17 @@ const livePairs = [
   ['Pay ＄5 (1)', 'Pay ＄5 (2)', false],
   ['Pay ₿ (5)', 'Pay ₿ (500)', false],
   ['Order # (#)', 'Order 1:00 (5)', false],
+  ['Pay ５ (1)', 'Pay ５ (2)', false],
+  ['ادفع ٥٠ (1)', 'ادفع ٥٠ (2)', false],
+  ['Pay ￦ (5)', 'Pay ￦ (500)', false],
+  ['Pay ﹩ (5)', 'Pay ﹩ (500)', false],
+  ['Pay ﷼ (5)', 'Pay ﷼ (500)', false],
+  ['Pay ₨ (5)', 'Pay ₨ (500)', false],
+  ['Pay 5 грн (1)', 'Pay 5 грн (2)', false],
+  ['Pay 5 Rs (1)', 'Pay 5 Rs (2)', false],
+  ['Pay 5 Rp (1)', 'Pay 5 Rp (2)', false],
+  ['Pay 5 RM (1)', 'Pay 5 RM (2)', false],
+  ['Try again in 0:42', 'Try again in 0:41', true],
 ];
 for (const [before, after, match] of livePairs) {
   assert.equal(liveEqual(before, after), match, before + ' -> ' + after);
@@ -82,6 +93,7 @@ assert.equal(liveCounters('299:90'), '299:90');
 assert.equal(liveCounters('Pay 5 kr'), 'Pay 5 kr');
 assert.equal(liveCounters('Usdx 0:42'), 'Usdx #');
 assert.equal(liveCounters('Okra 0:42'), 'Okra #');
+assert.equal(liveCounters('ادفع ٥٠ (1)'), 'ادفع ٥٠ (1)');
 assert.equal(liveCounters('1:02:034'), '#:034');
 assert.equal(liveCounters('1:00:2:00'), '#:#');
 

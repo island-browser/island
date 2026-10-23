@@ -112,6 +112,18 @@ change in name or id. The failing branch of `StillApproved` is belt-and-braces: 
 `SameElement`'s set can turn an approved confirmation into another rule or a block, so no test
 reaches it.
 
+### Accepted debt (re-check of live labels)
+
+Still passes by design, because the rule is written that way (a person may still want these fixed later):
+- A valid `mm:ss` amount with no currency mark, for example "Köp 29:50" → "59:50" or "Book 10:30" → "11:30".
+- An ASCII counter in parentheses, for example "Delete (3)" → "(300)" or "Buy (1)" → "(10)"; only a
+  counter with no digit or non-ASCII text before it is normalized.
+- Text after the 80-character clip in `kFactsJs`: a currency mark or a digit past character 80 is not
+  seen by the check.
+
+Everything else fails closed: a changed amount, price, currency label or '#' label drops the action
+and asks the person again.
+
 ### Extension points
 
 Add one at a time, in the same commit as its test, and update the table above.

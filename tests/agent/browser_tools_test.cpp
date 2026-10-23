@@ -704,6 +704,7 @@ const LiveCase kLiveCases[] = {
     {"Resend in 0:42", "Resend in 0:41", true},
     {"Pay now (expires 4:59)", "Pay now (expires 4:58)", true},
     {"Like (12)", "Like (13)", true},
+    {"Try again in 0:42", "Try again in 0:41", true},
     {"Checkout (3)", "Checkout (12)", true},
     // Prices, amounts and quantities that must not match. Each pair is a must-not-click case.
     {"Pay $5", "Pay $500", false},
@@ -719,6 +720,16 @@ const LiveCase kLiveCases[] = {
     {"Pay ＄5 (1)", "Pay ＄5 (2)", false},
     {"Pay ₿ (5)", "Pay ₿ (500)", false},
     {"Order # (#)", "Order 1:00 (5)", false},
+    {"Pay ５ (1)", "Pay ５ (2)", false},
+    {"ادفع ٥٠ (1)", "ادفع ٥٠ (2)", false},
+    {"Pay ￦ (5)", "Pay ￦ (500)", false},
+    {"Pay ﹩ (5)", "Pay ﹩ (500)", false},
+    {"Pay ﷼ (5)", "Pay ﷼ (500)", false},
+    {"Pay ₨ (5)", "Pay ₨ (500)", false},
+    {"Pay 5 грн (1)", "Pay 5 грн (2)", false},
+    {"Pay 5 Rs (1)", "Pay 5 Rs (2)", false},
+    {"Pay 5 Rp (1)", "Pay 5 Rp (2)", false},
+    {"Pay 5 RM (1)", "Pay 5 RM (2)", false},
 };
 
 TEST(BrowserToolsTest, LiveCountersNormalizeOnlyTimesAndATrailingCounter) {
