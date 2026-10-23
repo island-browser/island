@@ -117,3 +117,13 @@ class IconCountAgreementTests(unittest.TestCase):
             (REPOSITORY / "resources/island/icons/manifest.json").read_text(encoding="utf-8")
         )
         self.assertEqual(len(manifest["outputs"]), EXPECTED_ICON_OUTPUTS)
+
+    def test_cmake_stages_icons_without_expanding_every_path_on_the_command_line(self) -> None:
+        cmake = (REPOSITORY / "CMakeLists.txt").read_text(encoding="utf-8")
+        staging = cmake.split("function(island_stage_chrome_resources", 1)[1].split(
+            "endfunction()", 1
+        )[0]
+        self.assertNotIn("copy_if_different ${ISLAND_ICON_PNG_RESOURCES}", staging)
+        self.assertIn(
+            'copy_directory\n            "${ISLAND_ICON_RESOURCE_DIRECTORY}/png"', staging
+        )

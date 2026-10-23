@@ -103,7 +103,9 @@ function(island_stage_chrome_resources target destination)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}/icons/png"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ISLAND_FONT_RESOURCE_PATHS} "${destination}/fonts"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ISLAND_ICON_MANIFEST}" "${ISLAND_ICON_LICENSE}" "${destination}/icons"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ISLAND_ICON_PNG_RESOURCES} "${destination}/icons/png"
+        # Keep the Windows post-build command line bounded as the generated icon set grows.
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ISLAND_ICON_RESOURCE_DIRECTORY}/png" "${destination}/icons/png"
         VERBATIM
     )
 endfunction()

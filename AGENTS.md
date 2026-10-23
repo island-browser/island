@@ -188,7 +188,7 @@ hand-maintained project instructions and take precedence over anything a nested 
 
 | File | Description |
 |------|-------------|
-| `CMakeLists.txt` | Top-level build: CEF sentinel check, font/icon resource gates, `island_stage_chrome_resources`, the `ISLAND_ENABLE_SEARCH` option, then `tests/` and `src/main/` |
+| `CMakeLists.txt` | Top-level build: CEF sentinel check, font/icon resource gates, bounded-directory staging in `island_stage_chrome_resources`, the `ISLAND_ENABLE_SEARCH` option, then `tests/` and `src/main/` |
 | `CLAUDE.md` | Loader that pulls this file in via `@AGENTS.md` |
 | `DESIGN.md` | Long-form product/visual design narrative |
 | `README.md` | Human-facing project overview |
