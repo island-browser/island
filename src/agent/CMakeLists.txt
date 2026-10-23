@@ -130,10 +130,9 @@ if(TARGET GTest::gtest_main)
     add_test(NAME BrowserToolsFactsProbe
              COMMAND "${CMAKE_COMMAND}"
                      "-DNODE=${ISLAND_NODE}"
-                     "-DPROBE=${ISLAND_AGENT_REPO_ROOT}/tests/agent/facts_probe.mjs"
+                     "-DPROBE=${ISLAND_AGENT_REPO_ROOT}/tests/agent/facts_probe.cjs"
                      "-DSOURCE=${ISLAND_AGENT_REPO_ROOT}/src/agent/browser_tools.cc"
                      -P "${ISLAND_AGENT_REPO_ROOT}/tests/agent/run_facts_probe.cmake")
     set_tests_properties(BrowserToolsFactsProbe PROPERTIES
-                         SKIP_REGULAR_EXPRESSION "FACTS_PROBE_SKIP"
-                         SKIP_RETURN_CODE 77)
+                         SKIP_REGULAR_EXPRESSION "FACTS_PROBE_SKIP")
 endif()

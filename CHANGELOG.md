@@ -52,7 +52,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- The agent can press buttons with a live countdown after you confirm.
+- The agent can press buttons with a live countdown or counter after you confirm. Amounts and
+  quantities are never normalized: when one changes while the card is open, the action is dropped.
 
 ## [0.7.3] - 2026-10-23
 

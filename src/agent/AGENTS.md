@@ -92,13 +92,21 @@ The word list lives in `kConsequentialWords` (`action_gate.cc`): English and Rus
 matched as whole words, case-insensitive, with spaces normalized and Cyrillic folded.
 
 Re-check after a card (`after_wait`): the target is found again and `SameElement` compares it with
-what was approved. Text and aria-label compare through `NormalizeLiveDigits` (`browser_tools.h`),
-which reads every run of ASCII digits as one `#`, so a countdown ("Resend in 0:42", "Pay now
-(expires 4:59)") or a counter ("Checkout (3)", aria-label "Like (12)") still matches a second later
-(`kFactsJs`'s synthetic click does the same in the page). Everything else stays exact: tag, type,
-autocomplete, name, id, is_submit and page origin. `StillApproved` then judges the fresh facts with
-`Classify`: the element must be free now, or need the same action and rule the person saw. A word
-change ("Delete account") fails the check, and so does a digits-only change in name or id.
+what was approved. Text and aria-label compare through `NormalizeLiveCounters` (`browser_tools.h`),
+which normalizes only two forms: a time-like run (`M:SS` or `H:MM:SS`, whole digit runs) becomes
+`#`, and one trailing parenthesized counter (`(12)` at the end) becomes `(#)`. So a countdown
+("Resend in 0:42" → "0:41", "Pay now (expires 4:59)") or a counter ("Like (12)" → "(13)",
+"Checkout (3)" → "(12)") still matches a second later. A label with a currency symbol or ISO code
+(`kCurrencySymbols`, `kCurrencyCodes`) is compared exactly, and every other digit stays exact, so
+"Pay $5" → "Pay $500", "Transfer 10 USD" → "Transfer 9000 USD", "Buy 1" → "Buy 10" and "Pay $5 (1)" →
+"Pay $5 (2)" fail. The page's `SyntheticClickScript` applies the same rule in JavaScript
+(`kLiveCountersJs`, built from the same tables). `tests/agent/facts_probe.cjs` runs that copy on the
+same pairs. Everything else stays exact: tag, type, autocomplete, name, id, is_submit and page
+origin. `StillApproved` then judges the fresh facts with `Classify`: the element must be free now,
+or need the same action and rule the person saw. A word change ("Delete account") fails the check,
+and so does a digits-only change in name or id. The failing branch of `StillApproved` is
+belt-and-braces: no fact outside `SameElement`'s set can turn an approved confirmation into another
+rule or a block, so no test reaches it.
 
 ### Extension points
 
@@ -111,7 +119,7 @@ Add one at a time, in the same commit as its test, and update the table above.
    that must beat an existing one goes above it. Set `action`, `rule`, `summary` and
    `trusted_allowed`. Leave the scope and host tail alone.
 3. If the rule needs a new fact, add the field to `ElementFacts`, read it in `ParseFacts` and
-   collect it in `kFactsJs` (`browser_tools.cc`). Keep `tests/agent/facts_probe.mjs` passing.
+   collect it in `kFactsJs` (`browser_tools.cc`). Keep `tests/agent/facts_probe.cjs` passing.
 4. Test in `tests/agent/action_gate_test.cpp`: the ask, the trusted case (free) and the
    `trusted_allowed` value. `ctest -R ActionGate` runs them.
 

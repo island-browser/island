@@ -692,63 +692,134 @@ TEST(BrowserToolsTest, LocatorScriptsEscapeSelectors) {
               R"("a\u2028b")");
 }
 
-TEST(BrowserToolsTest, LiveDigitsCollapseToOnePlaceholderEachRun) {
-    EXPECT_EQ(NormalizeLiveDigits("0:42"), "#:#");
-    EXPECT_EQ(NormalizeLiveDigits("Pay now (expires 4:59)"), "Pay now (expires #:#)");
-    EXPECT_EQ(NormalizeLiveDigits("Checkout (3)"), "Checkout (#)");
-    EXPECT_EQ(NormalizeLiveDigits("Checkout (12)"), "Checkout (#)");
-    EXPECT_EQ(NormalizeLiveDigits("a12b3"), "a#b#");
-    EXPECT_EQ(NormalizeLiveDigits(""), "");
-    EXPECT_EQ(NormalizeLiveDigits("Delete account"), "Delete account");
-    EXPECT_NE(NormalizeLiveDigits("Pay 1"), NormalizeLiveDigits("Pay1"));
+// The normalizer's cases; facts_probe.cjs checks the page-side copy against the same pairs.
+struct LiveCase {
+    const char* before;
+    const char* after;
+    bool same_after_normalizing;
+};
+const LiveCase kLiveCases[] = {
+    // Time-like runs and one trailing counter pass.
+    {"Resend in 0:42", "Resend in 0:41", true},
+    {"Pay now (expires 4:59)", "Pay now (expires 4:58)", true},
+    {"Like (12)", "Like (13)", true},
+    {"Checkout (3)", "Checkout (12)", true},
+    // Amounts and quantities stay exact, with or without a counter.
+    {"Pay $5", "Pay $500", false},
+    {"Transfer 10 USD", "Transfer 9000 USD", false},
+    {"Buy 1", "Buy 10", false},
+    {"Pay $5 (1)", "Pay $5 (2)", false},
+};
+
+TEST(BrowserToolsTest, LiveCountersNormalizeOnlyTimesAndATrailingCounter) {
+    EXPECT_EQ(NormalizeLiveCounters("0:42"), "#");
+    EXPECT_EQ(NormalizeLiveCounters("1:02:03"), "#");
+    EXPECT_EQ(NormalizeLiveCounters("Resend in 0:42"), "Resend in #");
+    EXPECT_EQ(NormalizeLiveCounters("Pay now (expires 4:59)"), "Pay now (expires #)");
+    EXPECT_EQ(NormalizeLiveCounters("Checkout (3)"), "Checkout (#)");
+    EXPECT_EQ(NormalizeLiveCounters("Checkout (12)  "), "Checkout (#)  ");
+    // Not a time: three fraction digits, or a counter that is not last.
+    EXPECT_EQ(NormalizeLiveCounters("10:423"), "10:423");
+    EXPECT_EQ(NormalizeLiveCounters("Like (12) now"), "Like (12) now");
+    // Plain digits stay exact.
+    EXPECT_EQ(NormalizeLiveCounters("Buy 1"), "Buy 1");
+    EXPECT_EQ(NormalizeLiveCounters("a12b3"), "a12b3");
+    EXPECT_EQ(NormalizeLiveCounters("Delete account"), "Delete account");
+    // A currency symbol or ISO code turns normalization off for the whole label.
+    EXPECT_EQ(NormalizeLiveCounters("Pay $5 (1)"), "Pay $5 (1)");
+    EXPECT_EQ(NormalizeLiveCounters("Transfer 10 usd"), "Transfer 10 usd");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 €"), "Pay 5 €");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 ₽ (2)"), "Pay 5 ₽ (2)");
+    // Letters that only contain a code are not the code.
+    EXPECT_EQ(NormalizeLiveCounters("Usdx 0:42"), "Usdx #");
+    for (const LiveCase& c : kLiveCases) {
+        EXPECT_EQ(NormalizeLiveCounters(c.before) == NormalizeLiveCounters(c.after),
+                  c.same_after_normalizing)
+            << c.before << " -> " << c.after;
+    }
 }
 
-TEST(BrowserToolsTest, CountdownButtonStillPressesAfterTheCard) {
-    FakeBrowserHost host;
-    BrowserToolbox toolbox(host);
-    host.QueueScriptResult(
-        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Pay now (expires 4:59)",
-        "is_submit":true,"page_origin":"https://a.test"}})json");
-    host.QueueScriptResult(
-        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Pay now (expires 4:58)",
-        "is_submit":true,"page_origin":"https://a.test"}})json");
-    host.answers.push_back(ConfirmationAnswer::kAllowOnce);
-    const ToolResult r =
-        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
-    EXPECT_FALSE(r.is_error) << r.content.at(0).text;
-    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+// The button's label as the page reports it, a submit control with page origin a.test.
+std::string ButtonFacts(const std::string& field, const std::string& value) {
+    return std::string(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",")") + field + R"(":")" +
+           value + R"(","is_submit":true,"page_origin":"https://a.test"}})";
 }
 
-TEST(BrowserToolsTest, CountingAriaLabelStillPressesAfterTheCard) {
+TEST(BrowserToolsTest, LiveCountersPressAfterTheCard) {
+    const std::vector<std::pair<std::string, std::string>> pairs = {
+        {"Resend in 0:42", "Resend in 0:41"},
+        {"Pay now (expires 4:59)", "Pay now (expires 4:58)"},
+        {"Checkout (3)", "Checkout (12)"},
+    };
+    for (const auto& [before, after] : pairs) {
+        FakeBrowserHost host;
+        BrowserToolbox toolbox(host);
+        host.QueueScriptResult(ButtonFacts("text", before));
+        host.QueueScriptResult(ButtonFacts("text", after));
+        host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+        EXPECT_FALSE(
+            CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error)
+            << before;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3) << before;
+    }
     FakeBrowserHost host;
     BrowserToolbox toolbox(host);
-    host.QueueScriptResult(
-        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","aria_label":"Like (12)",
-        "is_submit":true,"page_origin":"https://a.test"}})json");
-    host.QueueScriptResult(
-        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","aria_label":"Like (13)",
-        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.QueueScriptResult(ButtonFacts("aria_label", "Like (12)"));
+    host.QueueScriptResult(ButtonFacts("aria_label", "Like (13)"));
     host.answers.push_back(ConfirmationAnswer::kAllowOnce);
     EXPECT_FALSE(
         CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
     EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
 }
 
+TEST(BrowserToolsTest, ChangedAmountOrCountNeverClicksAfterTheCard) {
+    // The person approved one amount; the page now shows another. Nothing may be clicked.
+    const std::vector<std::pair<std::string, std::string>> pairs = {
+        {"Pay $5", "Pay $500"},
+        {"Transfer 10 USD", "Transfer 9000 USD"},
+        {"Buy 1", "Buy 10"},
+        {"Pay $5 (1)", "Pay $5 (2)"},
+    };
+    for (const auto& [before, after] : pairs) {
+        FakeBrowserHost host;
+        BrowserToolbox toolbox(host);
+        host.QueueScriptResult(ButtonFacts("text", before));
+        host.QueueScriptResult(ButtonFacts("text", after));
+        host.answers.push_back(ConfirmationAnswer::kAllowOnce);
+        const ToolResult r =
+            CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
+        EXPECT_TRUE(r.is_error) << before << " -> " << after;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0) << before << " -> " << after;
+    }
+}
+
 TEST(BrowserToolsTest, CountdownThatBecomesAnotherActionIsDropped) {
     FakeBrowserHost host;
     BrowserToolbox toolbox(host);
-    host.QueueScriptResult(
-        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Resend in 0:42",
-        "is_submit":true,"page_origin":"https://a.test"}})json");
-    host.QueueScriptResult(
-        R"json({"ok":true,"x":10,"y":20,"facts":{"tag":"button","text":"Delete account 0:41",
-        "is_submit":true,"page_origin":"https://a.test"}})json");
+    host.QueueScriptResult(ButtonFacts("text", "Resend in 0:42"));
+    host.QueueScriptResult(ButtonFacts("text", "Delete account 0:41"));
     host.answers.push_back(ConfirmationAnswer::kAllowOnce);
     const ToolResult r =
         CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
     EXPECT_TRUE(r.is_error);
     EXPECT_EQ(r.content.at(0).text, "The page changed while waiting; take a fresh snapshot.");
     EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0);
+}
+
+TEST(BrowserToolsTest, RecheckSeesATrustedSiteAddedDuringTheCard) {
+    // Trusting the site during the card changes the fresh decision to free; the re-check accepts it
+    // and the click goes through. (A fresh decision that needs a new rule is the failing direction
+    // of StillApproved; no fact outside SameElement's set can make that happen, so it is untested.)
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    host.QueueScriptResult(ButtonFacts("text", "Pay"));
+    host.QueueScriptResult(ButtonFacts("text", "Pay"));
+    host.answers.push_back(ConfirmationAnswer::kTrustSite);
+    EXPECT_FALSE(
+        CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error);
+    EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3);
+    ASSERT_EQ(host.trusted.size(), 1u);
+    EXPECT_EQ(host.trusted.front(), "a.test");
 }
 
 TEST(BrowserToolsTest, DigitOnlyChangeInNameOrIdStillFailsTheRecheck) {

@@ -155,11 +155,12 @@ struct ToolDefinition {
     bool read_only = false;
 };
 
-// Replaces every run of ASCII digits with one '#'. A label that counts ("Resend in 0:42",
-// "Checkout (3)") changes while a confirmation card is open; the re-check after the card compares
-// its text and aria-label through this, so the tick does not fail it and any other change still
-// does.
-std::string NormalizeLiveDigits(std::string_view text);
+// Normalizes the live counters in a label before the post-card re-check compares it: a time-like
+// run
+// ("0:42", "1:02:03") becomes "#", and one trailing parenthesized counter ("Like (12)") becomes
+// "(#)". A label with a currency symbol or ISO code is returned unchanged, so an amount that
+// changes never passes. Every other digit stays exact.
+std::string NormalizeLiveCounters(std::string_view text);
 
 class BrowserToolbox {
   public:
