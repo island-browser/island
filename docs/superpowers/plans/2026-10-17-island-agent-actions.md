@@ -30,7 +30,7 @@ binding; §9.3 and §9.4 were confirmed by the owner on 2026-10-17).
 - Unclassifiable actions ask (missing element facts → kConfirm).
 - External MCP confirmations time out after **120 s** with `"No one confirmed this action in time."`;
   Cancel returns `"The person declined this action."`.
-- Pref key `agent.trusted_sites` (list of lowercase hosts without leading `www.`); a host matches an
+- Pref key `agent_trusted_sites` (list of lowercase hosts without leading `www.`); a host matches an
   entry when equal to it or ending with `"." + entry`.
 - No persistent `CefWindow` overlay (`src/main/overlay_lifetime.h`); all new UI lives in the agent
   panel, local pages, the context menu, the ⌘K palette and existing sidebar views.

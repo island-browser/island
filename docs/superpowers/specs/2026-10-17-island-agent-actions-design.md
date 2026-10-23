@@ -127,7 +127,7 @@ External MCP clients get the same card. Their call waits up to 120 s; on timeout
 
 ### 2.4 Trusted domains
 
-- Pref `agent.trusted_sites`: a list of hosts (lowercase, without a leading `www.`). A host
+- Pref `agent_trusted_sites`: a list of hosts (lowercase, without a leading `www.`). A host
   matches when it equals an entry or ends with `"." + entry`.
 - "Trust this site" adds the current page host (without `www.`) and allows the pending action.
 - Settings → Agent & tools gets a "Trusted sites" list with Remove buttons and a short line:

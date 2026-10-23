@@ -1,6 +1,6 @@
 # The sidebar
 
-The sidebar holds your pinned tabs, your tabs, the space switcher and, in the Native look, the Agent button. This page shows how to change how it looks and where it sits.
+The sidebar holds your pinned tabs, your tabs, the space switcher and the Agent button. This page shows how to change how it looks and where it sits.
 
 ## Choose a look
 
@@ -45,7 +45,9 @@ See [Appearance](../settings/appearance.md) for every control.
 
 ## The Agent button
 
-In the Native look, a full-width **Agent** button sits at the bottom of the sidebar. It is tinted while the agent panel is open. Click it, or press ⌘J (Ctrl+J), to open the [agent panel](../agent/agent-panel.md).
+The **Agent** button sits at the bottom of the sidebar. In the Native look it is a full-width row; in Arc and Graphite it is a button at the foot of the rail, with a sparkle icon. In every look it uses a neutral plate: the plate shows while the agent panel is open, and a light highlight shows under the pointer. It never takes the accent color.
+
+While a card waits for your answer, an amber dot appears on the button: beside the provider name in Native, on the sparkle icon in Arc and Graphite. The dot shows even when the panel is closed. Click the button, or press ⌘J (Ctrl+J), to open the [agent panel](../agent/agent-panel.md).
 
 ## Address field indicators
 
