@@ -148,6 +148,13 @@ Queue contract: `StartFn` runs synchronously and may call back into the queue. T
 not live. `StopCurrent` waits for the turn end; `StopCurrentAndAdvanceNow` is for a turn that never
 started or will never report.
 
+### Known limitations
+
+- No cancel on disconnect: `AgentEndpoint` does not notice when an MCP client closes its HTTP connection
+  while a tool call waits. The confirmation card stays open until answered or its 120 s timeout, and an
+  approved action still runs. An external client with a shorter tool timeout may stop waiting first
+  (the user guide asks for 150 s). No protocol change in 0.8.
+
 ### Testing Requirements
 
 ```bash
