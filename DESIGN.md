@@ -155,7 +155,7 @@ values.
 ```design-tokens-native
 {
   "contract": "island-native-look",
-  "version": 1,
+  "version": 2,
   "colors": {
     "light": {
       "background": "#EBEBEF",
@@ -176,6 +176,7 @@ values.
       "warning_text": "#6A4A00",
       "success": "#248A3D",
       "danger": "#D70015",
+      "segment_selected": "#E3E3E8",
       "branch_a": "#0A64D8",
       "branch_b": "#8E44AD",
       "branch_c": "#C25400",
@@ -200,6 +201,7 @@ values.
       "warning_text": "#FFD60A",
       "success": "#30D158",
       "danger": "#FF453A",
+      "segment_selected": "#3A3A3D",
       "branch_a": "#0A84FF",
       "branch_b": "#BF5AF2",
       "branch_c": "#FF9F0A",
@@ -208,6 +210,25 @@ values.
   }
 }
 ```
+
+`segment_selected` is shared by Native, Arc and Graphite. A selected segment is a neutral raised
+plate with the normal `text` color; blue remains reserved for actions and `:focus-visible` rings.
+In dark theme the selected plate equals the track fill, so the chrome draws a `border_strong`
+outline there (`BrowserChrome::NativeSegmentColors`), and the web pages draw the same hairline as an
+inset `--segment-outline` (`#48484A`; `transparent` in light). Blue is still not used for selection.
+
+0.7.2 applies the same rule to the other Native selections. The command palette's highlighted row is
+the `segment_selected` plate with `text`, not the blue `selection` fill (the palette redesign itself
+is later work). The open Agent entry is the same plate with normal text. On the selected (blue)
+tab row, the close × is white at 70% and the generic globe is white. The address field's focus ring
+is one 2 DIP accent ring that follows the 8 pt radius: the controls sit in an inner panel whose
+corners take the 6 pt inner radius. The Plan's instruction field is 30 pt tall with radius 6 and
+`border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
+
+Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
+(`NativeSwitcherMetrics`). Its Agent row shows the provider name, a status dot (idle, working or
+needs you) and the shortcut keycap. A space with an icon shows only that icon in its switcher
+segment; the name stays in the tooltip and the accessible name.
 
 ### Documented colors
 

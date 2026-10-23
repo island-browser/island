@@ -34,6 +34,7 @@ COLOR_SLOTS = {
     "warning_text",
     "success",
     "danger",
+    "segment_selected",
     "branch_a",
     "branch_b",
     "branch_c",
@@ -84,7 +85,7 @@ class NativeLookContractTest(unittest.TestCase):
 
     def test_contract_identity(self) -> None:
         self.assertEqual(self.contract["contract"], "island-native-look")
-        self.assertEqual(self.contract["version"], 1)
+        self.assertEqual(self.contract["version"], 2)
 
     def test_both_themes_have_exactly_the_native_color_slots(self) -> None:
         self.assertEqual(set(self.contract["colors"]), {"light", "dark"})

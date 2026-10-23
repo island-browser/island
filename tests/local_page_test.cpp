@@ -126,6 +126,15 @@ TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
     }
 }
 
+TEST(LocalPageTest, BuiltInPagesHaveShortDisplayUrlsAndStartUsesThePlaceholder) {
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kAgent), "island://agent");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kSettings), "island://settings");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kTabOverview), "island://tabs");
+    EXPECT_TRUE(LocalPage::DisplayUrl(LocalPageKind::kStart).empty());
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kReport), "island://report");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kPlan), "island://plan");
+}
+
 // The build inlines src/main/pages/markdown.js where a page carries the
 // placeholder line; the embedded pages must hold the renderer, not the marker.
 TEST(LocalPageTest, TheSharedMarkdownRendererIsInlinedIntoThePagesThatNeedIt) {
@@ -138,6 +147,26 @@ TEST(LocalPageTest, TheSharedMarkdownRendererIsInlinedIntoThePagesThatNeedIt) {
          {LocalPageKind::kSettings, LocalPageKind::kTabOverview, LocalPageKind::kStart}) {
         EXPECT_EQ(std::string(LocalPageHtml(kind)).find("function islandMarkdown("),
                   std::string::npos);
+    }
+}
+
+TEST(LocalPageTest, SettingsSelectedSegmentsUseTheThemeToken) {
+    const std::string html(SettingsPageHtml());
+
+    EXPECT_NE(html.find("background: var(--segment-selected)"), std::string::npos);
+    EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"), std::string::npos);
+}
+
+TEST(LocalPageTest, EverySegmentedPageUsesTheNeutralThemeTokenAndFocusVisible) {
+    for (const LocalPageKind kind :
+         {LocalPageKind::kSettings, LocalPageKind::kStart, LocalPageKind::kPlan}) {
+        const std::string html(LocalPageHtml(kind));
+        EXPECT_NE(html.find("--segment-selected: #E3E3E8"), std::string::npos);
+        EXPECT_NE(html.find("--segment-selected: #3A3A3D"), std::string::npos);
+        EXPECT_NE(html.find("var(--segment-selected)"), std::string::npos);
+        EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"),
+                  std::string::npos);
+        EXPECT_NE(html.find(":focus-visible"), std::string::npos);
     }
 }
 

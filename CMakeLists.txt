@@ -74,9 +74,9 @@ endif()
 
 file(READ "${ISLAND_ICON_MANIFEST}" _island_icon_manifest_json)
 string(JSON _island_icon_output_count LENGTH "${_island_icon_manifest_json}" outputs)
-if(NOT _island_icon_output_count EQUAL 240)
+if(NOT _island_icon_output_count EQUAL 816)
     message(FATAL_ERROR
-        "Island icon manifest must declare exactly 240 PNG resources; found ${_island_icon_output_count}.\n"
+        "Island icon manifest must declare exactly 816 PNG resources; found ${_island_icon_output_count}.\n"
         "Run tools/icon_pipeline/run.sh verify to diagnose committed icon resources.")
 endif()
 
@@ -103,7 +103,9 @@ function(island_stage_chrome_resources target destination)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${destination}/icons/png"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ISLAND_FONT_RESOURCE_PATHS} "${destination}/fonts"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ISLAND_ICON_MANIFEST}" "${ISLAND_ICON_LICENSE}" "${destination}/icons"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ISLAND_ICON_PNG_RESOURCES} "${destination}/icons/png"
+        # Keep the Windows post-build command line bounded as the generated icon set grows.
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ISLAND_ICON_RESOURCE_DIRECTORY}/png" "${destination}/icons/png"
         VERBATIM
     )
 endfunction()

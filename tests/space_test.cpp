@@ -98,6 +98,20 @@ TEST(Space, RenamesAndRecolors) {
     EXPECT_EQ(space.color(), ArgbColor{0xFF00FF00U});
 }
 
+TEST(Space, KeepsOnlyKnownOptionalIconIds) {
+    Space space = MakeSpace();
+    EXPECT_TRUE(space.icon_id().empty());
+
+    space.SetIconId("rocket");
+    EXPECT_EQ(space.icon_id(), "rocket");
+
+    space.SetIconId("not-a-space-icon");
+    EXPECT_TRUE(space.icon_id().empty());
+
+    const Space constructed(NextSpaceId(), "Home", kSpaceAccent, "home");
+    EXPECT_EQ(constructed.icon_id(), "home");
+}
+
 TEST(Space, AppendedTabBecomesTheActiveTab) {
     Space space = MakeSpace();
 
@@ -343,7 +357,7 @@ TEST(Space, RejectsOutOfBoundsMovesLeavingOrderUnchanged) {
     EXPECT_FALSE(space.MoveTab(2U, 0U));
 
     EXPECT_EQ(TabIds(space), (std::vector<TabId>{first_id, second_id}));
-    EXPECT_TRUE(space.MoveTab(0U, 0U));
+    EXPECT_FALSE(space.MoveTab(0U, 0U));
     EXPECT_EQ(TabIds(space), (std::vector<TabId>{first_id, second_id}));
 }
 
@@ -603,6 +617,18 @@ TEST(Space, DraggingATabIntoARunReplacesTheRunBehindItsParent) {
     EXPECT_EQ(space.tabs()[1].group_parent(), plan);
     EXPECT_EQ(space.tabs()[2].group_parent(), plan);
     EXPECT_EQ(space.active_tab_id(), active);
+}
+
+TEST(Space, MovingTheTabAfterARunIntoTheRunReportsTheNormalizedNoOp) {
+    Space space = MakeTitledSpace({"plan", "other", "third"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+    ASSERT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other", "third"}));
+
+    EXPECT_FALSE(space.MoveTab(3, 2));  // "other" normalizes after the complete child run.
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other", "third"}));
 }
 
 TEST(Space, MovingAParentCarriesItsChildren) {

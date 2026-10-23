@@ -220,6 +220,8 @@ bool BrowserWindow::StartResearchTask(const agent::AgentTask& queued) {
         return false;
     }
     research_ = std::move(task);
+    // The agent's page belongs to one research: a new one starts without the last run's page.
+    agent_tab_id_.reset();
     research_status_.question = asked;
     plan_entries_.clear();
     plan_edits_ = {};
@@ -286,6 +288,7 @@ void BrowserWindow::CancelResearch() {
         // at once.
         const std::string id = research_->task_id;
         research_.reset();
+        agent_tab_id_.reset();
         SetResearchStatus("cancelled", "Research cancelled.");
         const agent::AgentTask* live = agent_queue_.current();
         if (!id.empty() && live != nullptr && live->id == id) {
@@ -313,6 +316,7 @@ void BrowserWindow::EndResearchTask(const std::string& task_id, bool ok) {
 }
 
 void BrowserWindow::OnAgentSessionChanged() {
+    RefreshAgentEntry();
     ScheduleLocalPagesRender();
     RefreshAddressIndicators();
     RefreshPlanFromTranscript();
@@ -380,6 +384,7 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     }
     const ResearchTask task = std::move(*research_);
     research_.reset();
+    agent_tab_id_.reset();
     research_finish_posted_ = false;
     research_status_.question = task.question;
     switch (outcome.kind) {
@@ -596,14 +601,19 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
                                         std::string label, bool activate) {
     const std::optional<std::pair<std::size_t, std::size_t>> location =
         plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
-    if (!location.has_value() || location->first != active_space_index_) {
-        // The agent tools address the active space, so a Plan hub elsewhere gets no group: the
-        // page opens as an ordinary tab and the view stays where the person left it.
+    if (!location.has_value()) {
         AppendTabToActiveSpace(std::move(startup_url), /*opened_by_agent=*/true);
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
-    return AppendChildOfPlan(location->first, std::move(startup_url), std::move(node_id),
-                             std::move(label), activate, /*opened_by_agent=*/true);
+    // Do not pull the person away from another space. The page still belongs to the research,
+    // so append it to the Plan's group in the background; it becomes active only when the Plan
+    // space is already active and the caller needs the agent's page tools to address it.
+    activate = activate && location->first == active_space_index_;
+    const TabId id = AppendChildOfPlan(location->first, std::move(startup_url),
+                                       std::move(node_id), std::move(label), activate,
+                                       /*opened_by_agent=*/true);
+    agent_tab_id_ = id;
+    return id;
 }
 
 TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string startup_url,
@@ -645,7 +655,9 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
     if (!url.has_value()) {
         return false;
     }
-    if (!research_.has_value() || !plan_tab_.has_value()) {
+    if (!ResearchOwnsAgent()) {
+        // Ordinary chat (or a plan waiting for approval): the page joins the person's space but
+        // retains its agent-opened mark for the action gate.
         AppendTabToActiveSpace(std::move(*url), /*opened_by_agent=*/true);
         return true;
     }

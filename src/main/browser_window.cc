@@ -48,6 +48,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "native_handle.h"
 #include "page_card.h"
 #include "runtime_style.h"
 #include "search_provider.h"
@@ -348,7 +349,7 @@ bool BrowserWindow::RestoreSessionState(const SessionState& state) {
             continue;
         }
         Space space{SpaceId{space_state.id.value}, space_state.name,
-                    ArgbColor{space_state.color_argb}};
+                    ArgbColor{space_state.color_argb}, space_state.icon_id};
         std::set<TabId> restored_ids;
         for (const TabState& tab_state : space_state.tabs) {
             if (!IsSessionInternalTabUrl(tab_state.url)) {
@@ -439,6 +440,7 @@ SessionState BrowserWindow::BuildSessionState() const {
         space_state.id = space.id();
         space_state.name = space.name();
         space_state.color_argb = space.color().argb;
+        space_state.icon_id = space.icon_id();
         std::set<TabId> saved_ids;
         for (const Tab& tab : space.tabs()) {
             const std::string url = EffectiveUrl(tab);
@@ -713,9 +715,36 @@ void BrowserWindow::ExecuteCommand(BrowserCommand command) {
     }
 }
 
+namespace {
+
+// Island's Light or Dark theme is also the pages' color mode; System leaves it to the OS.
+cef_color_variant_t WebColorSchemeFor(ThemePreference preference) {
+    switch (preference) {
+        case ThemePreference::kLight:
+            return CEF_COLOR_VARIANT_LIGHT;
+        case ThemePreference::kDark:
+            return CEF_COLOR_VARIANT_DARK;
+        case ThemePreference::kSystem:
+            break;
+    }
+    return CEF_COLOR_VARIANT_SYSTEM;
+}
+
+}  // namespace
+
+void BrowserWindow::ApplyWebColorScheme() {
+    const cef_color_variant_t scheme = WebColorSchemeFor(prefs_.theme);
+    for (Space& space : spaces_) {
+        space.SetWebColorScheme(scheme);
+    }
+}
+
 Space& BrowserWindow::AppendSpace(std::string name) {
-    return spaces_.emplace_back(SpaceId{NextSpaceId()}, std::move(name),
-                                kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]);
+    Space& created =
+        spaces_.emplace_back(SpaceId{NextSpaceId()}, std::move(name),
+                             kSpaceColorPalette[spaces_.size() % kSpaceColorPalette.size()]);
+    created.SetWebColorScheme(WebColorSchemeFor(prefs_.theme));
+    return created;
 }
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
@@ -860,6 +889,134 @@ bool BrowserWindow::SetActiveSpaceTabPinned(std::size_t index, bool pinned) {
     return true;
 }
 
+bool BrowserWindow::ResearchOwnsAgent() const {
+    // A plan that waits for approval runs no turn, so the agent is in ordinary chat again: its
+    // calls address the window the person sees, as the sidebar's context does.
+    return research_.has_value() && !research_->awaiting_approval && plan_tab_.has_value() &&
+           TabLocation(*plan_tab_).has_value();
+}
+
+std::size_t BrowserWindow::AgentSpaceIndex() const {
+    if (ResearchOwnsAgent()) {
+        return TabLocation(*plan_tab_)->first;
+    }
+    return active_space_index_;
+}
+
+BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
+    std::optional<std::size_t> index) const {
+    if (!ResearchOwnsAgent()) {
+        // Ordinary chat: the agent works with the window the person sees. Indices and calls
+        // without an index refer to the active space and its active tab.
+        const Space& space = active_space();
+        if (index.has_value()) {
+            if (*index >= space.tab_count()) {
+                return {.error = AgentTabError::kNoSuchTab};
+            }
+            return {.tab = AgentTabRef{.space = active_space_index_, .tab = *index}};
+        }
+        if (!space.has_active_tab()) {
+            return {.error = AgentTabError::kNoAgentPage};
+        }
+        return {.tab = AgentTabRef{.space = active_space_index_, .tab = space.active_tab_index()}};
+    }
+    // During research the agent works in the Plan's space and on its own most recent page.
+    const std::size_t space_index = AgentSpaceIndex();
+    if (index.has_value()) {
+        if (*index >= spaces_[space_index].tab_count()) {
+            return {.error = AgentTabError::kNoSuchTab};
+        }
+        return {.tab = AgentTabRef{.space = space_index, .tab = *index}, .research = true};
+    }
+    if (!agent_tab_id_.has_value()) {
+        return {.error = AgentTabError::kNoAgentPage};
+    }
+    const std::optional<std::pair<std::size_t, std::size_t>> location =
+        TabLocation(*agent_tab_id_);
+    if (!location.has_value() || location->first != space_index) {
+        return {.error = AgentTabError::kAgentPageClosed};
+    }
+    return {.tab = AgentTabRef{.space = location->first, .tab = location->second},
+            .research = true};
+}
+
+bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (!lookup.tab.has_value()) {
+        return false;
+    }
+    const Tab& tab = spaces_[lookup.tab->space].tabs()[lookup.tab->tab];
+    if (plan_tab_.has_value() && tab.id() == *plan_tab_) {
+        return true;
+    }
+    return !plan_page_url_.empty() && tab.startup_url() == plan_page_url_;
+}
+
+CefRefPtr<CefBrowser> BrowserWindow::AgentBrowser(AgentTabRef ref) const {
+    if (closing_) {
+        return nullptr;
+    }
+    return spaces_[ref.space].tabs()[ref.tab].browser();
+}
+
+bool BrowserWindow::NavigateAgentTab(std::optional<std::size_t> index, std::string_view text) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value() || IsAgentPlanTab(lookup.tab->tab)) {
+        return false;
+    }
+    const AgentTabRef ref = *lookup.tab;
+    if (ref.space == active_space_index_) {
+        return NavigateTab(ref.tab, text);
+    }
+    // The page is in a space the person is not viewing: change its address without switching.
+    const std::optional<std::string> url = ResolveAgentNavigation(text, address_validator_);
+    if (!url.has_value()) {
+        return false;
+    }
+    Tab& tab = spaces_[ref.space].tabs()[ref.tab];
+    if (tab.browser() != nullptr && tab.browser()->GetMainFrame() != nullptr) {
+        tab.browser()->GetMainFrame()->LoadURL(*url);
+    } else {
+        tab.SetStartupUrl(*url);
+        tab.ClearSavedScroll();
+    }
+    return true;
+}
+
+bool BrowserWindow::ActivateAgentTab(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value()) {
+        return false;
+    }
+    SelectTabWithOneAttach(lookup.tab->space, lookup.tab->tab);
+    return true;
+}
+
+bool BrowserWindow::CloseAgentTab(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value() || lookup.tab->space != active_space_index_) {
+        return false;
+    }
+    return CloseActiveSpaceTabIndex(lookup.tab->tab);
+}
+
+bool BrowserWindow::SetAgentTabPinned(std::size_t index, bool pinned) {
+    CEF_REQUIRE_UI_THREAD();
+    const AgentTabLookup lookup = ResolveAgentTab(index);
+    if (closing_ || !lookup.tab.has_value()) {
+        return false;
+    }
+    Space& space = spaces_[lookup.tab->space];
+    if (!space.SetTabPinned(space.tabs()[lookup.tab->tab].id(), pinned)) {
+        return false;
+    }
+    UpdateChromeCollections();
+    return true;
+}
+
 agent::ResolvedAgentCommand BrowserWindow::ResolvedAgent() const {
     const char* const env_command = std::getenv("ISLAND_AGENT_COMMAND");
     return agent::ResolveAgentCommand(prefs_.agent_provider, prefs_.agent_command,
@@ -940,6 +1097,7 @@ bool BrowserWindow::SetAgentProvider(std::string_view id) {
             });
         }
     }
+    RefreshAgentEntry();
     ScheduleLocalPagesRender();
     return true;
 }
@@ -1328,6 +1486,7 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("warn_text", json::Value::String(CssColor(tokens.warning_text)))
         .Set("success", json::Value::String(CssColor(tokens.success)))
         .Set("danger", json::Value::String(CssColor(tokens.danger)))
+        .Set("segment_selected", json::Value::String(CssColor(tokens.segment_selected)))
         .Set("branch", std::move(branch))
         .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
         .Set("font", json::Value::String(CssFontStack(tokens)))
@@ -1378,6 +1537,10 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
     show_internal_page_ = true;
+    UpdateAddressBarForCurrentPage();
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
     RequestViewSwap();
     FlushLocalPagesRender();
 }
@@ -1389,6 +1552,10 @@ void BrowserWindow::HideInternalPage() {
     internal_page_.reset();
     show_internal_page_ = false;
     shortcut_conflict_.reset();
+    UpdateAddressBarForCurrentPage();
+    if (chrome_ != nullptr) {
+        chrome_->OnAddressChanged(address_bar_model_.snapshot());
+    }
     RequestViewSwap();
 }
 
@@ -2779,6 +2946,7 @@ json::Value BrowserWindow::TasksStateJson() const {
 void BrowserWindow::RefreshAgentButtonLabel() {
     if (chrome_ != nullptr && !closing_) {
         chrome_->SetAgentButtonLabel(AgentButtonLabel(agent_queue_));
+        RefreshAgentEntry();
     }
 }
 
@@ -3026,6 +3194,7 @@ void BrowserWindow::CloseAgentPanelAndSession() {
     }
     research_.reset();
     CancelPendingConfirmations();
+    agent_tab_id_.reset();
     agent_session_.reset();
     // Teardown: the session is gone, so its turn end never comes. closing_ fails the rest.
     AbandonInFlightTurn();
@@ -3145,6 +3314,17 @@ bool BrowserWindow::RenameSpace(std::size_t space_index, std::string name) {
     }
     spaces_[space_index].Rename(std::move(name));
     UpdateChromeCollections();
+    return true;
+}
+
+bool BrowserWindow::SetSpaceIcon(std::size_t space_index, std::string icon_id) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_index >= spaces_.size()) {
+        return false;
+    }
+    spaces_[space_index].SetIconId(std::move(icon_id));
+    UpdateChromeCollections();
+    SaveSession();
     return true;
 }
 
@@ -3301,6 +3481,47 @@ void BrowserWindow::BeginAddressEditing() {
     PublishChromeSnapshot();
 }
 
+void BrowserWindow::ApplyAddressFocusColors(CefRefPtr<CefWindow> window,
+                                            const ChromeTokens& tokens) const {
+    window->SetThemeColor(
+        CEF_ColorTextfieldOutline,
+        BrowserChrome::TextfieldOutlineColor(tokens, address_focus_ring_suppressed_).argb);
+    // CEF installs its own two-DIP FocusRing inside every textfield, drawn in
+    // CEF_ColorFocusableBorderFocused and clamped to a minimum contrast against
+    // CEF_ColorWindowBackground (a ring darker than that clamp is lifted to a grey 94,94,94). While
+    // the Native address field is focused, paint that ring as the plate fill so Island's outer
+    // accent ring is the sole focus indicator. Restore the accent as soon as focus leaves the
+    // address field so palette textfields keep their normal focus treatment.
+    window->SetThemeColor(
+        CEF_ColorWindowBackground,
+        BrowserChrome::TextfieldFocusRingBackdrop(tokens, address_focus_ring_suppressed_).argb);
+    window->SetThemeColor(
+        CEF_ColorFocusableBorderFocused,
+        BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+}
+
+void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || address_focus_ring_suppressed_ == suppressed) {
+        return;
+    }
+    address_focus_ring_suppressed_ = suppressed;
+    // Only the Native look paints these colors (the helpers gate on it). Other looks keep their
+    // colors, so focus changes repaint nothing for them.
+    const ChromeTokens tokens = ResolvedTokens(ResolvedChromeTheme());
+    if (tokens.look != LookPreset::kNative) {
+        address_focus_repaint_ = AddressFocusRepaint::kNone;
+        return;
+    }
+    // A full ApplyTheme here re-themed every view, page and start page on each focus change.
+    // Only the three colors change; ThemeChanged then repaints the views that read them.
+    address_focus_repaint_ = AddressFocusRepaint::kColorsOnly;
+    if (window_ != nullptr) {
+        ApplyAddressFocusColors(window_, tokens);
+        window_->ThemeChanged();
+    }
+}
+
 void BrowserWindow::CancelAddressEditing() {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
@@ -3358,10 +3579,7 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
         return;
     }
 
-    const Tab* shown_tab = active_tab();
-    address_bar_model_.UpdateCommittedUrl(shown_tab != nullptr && ReaderActiveFor(*shown_tab)
-                                              ? EffectiveUrl(*shown_tab)
-                                              : snapshot.url);
+    UpdateAddressBarForNavigation(snapshot);
     UpdateReaderButton();
     if (chrome_ != nullptr) {
         chrome_->OnNavigationChanged(snapshot);
@@ -3381,6 +3599,37 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
     if (navigation_observer_ != nullptr) {
         navigation_observer_->OnNavigationChanged(snapshot);
     }
+}
+
+void BrowserWindow::UpdateAddressBarForNavigation(const NavigationSnapshot& snapshot) {
+    if (internal_page_.has_value()) {
+        address_bar_model_.UpdateInternalPage(std::string(LocalPage::DisplayUrl(*internal_page_)));
+        return;
+    }
+
+    const Tab* shown_tab = active_tab();
+    const std::string url = shown_tab != nullptr && ReaderActiveFor(*shown_tab)
+                                ? EffectiveUrl(*shown_tab)
+                                : snapshot.url;
+    if (!start_page_url_.empty() && url == start_page_url_) {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kStart)));
+    } else if (!plan_page_url_.empty() && url == plan_page_url_) {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kPlan)));
+    } else if (!report_page_url_.empty() && url.size() > report_page_url_.size() + 1 &&
+               url.compare(0, report_page_url_.size(), report_page_url_) == 0 &&
+               url[report_page_url_.size()] == '#') {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kReport)) +
+            url.substr(report_page_url_.size()));
+    } else {
+        address_bar_model_.UpdateCommittedUrl(url);
+    }
+}
+
+void BrowserWindow::UpdateAddressBarForCurrentPage() {
+    UpdateAddressBarForNavigation(navigation_snapshot());
 }
 
 CefRefPtr<CefDisplayHandler> BrowserWindow::GetDisplayHandler() { return this; }
@@ -3863,6 +4112,7 @@ void BrowserWindow::OnWindowCreated(CefRefPtr<CefWindow> window) {
     // Refreshes that ran before the chrome existed updated the cache without delivering it.
     DeliverAddressIndicators();
     UpdateChromeCollections();
+    RefreshAgentEntry();
     window_->AddChildView(chrome_->root());
     chrome_->SetCornerPatchSink([this](const std::vector<CornerPatch>& patches) {
         corner_patches_ = patches;
@@ -4117,6 +4367,7 @@ void BrowserWindow::ApplyKeymap() {
                                 false, true);
     }
     window_->SetAccelerator(kEscapeAccelerator, kVirtualKeyEscape, false, false, false, true);
+    RefreshAgentEntry();
 }
 
 void BrowserWindow::RunKeyAction(KeyAction action) {
@@ -4454,6 +4705,9 @@ Tab* BrowserWindow::TabForAttachedView(const AttachedView& attached) noexcept {
 
 bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
     if (show_internal_page_ && internal_page_.has_value()) {
+        if (attached.local_page_for_test.has_value()) {
+            return attached.local_page_for_test == internal_page_;
+        }
         return attached.local_page != nullptr &&
                attached.local_page == InternalPageFor(*internal_page_);
     }
@@ -4463,13 +4717,16 @@ bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
     const Space& space = active_space();
     if (space.split().has_value()) {
         // A pane that changes slot is removed and re-added by the attach, so it leaves.
-        return *attached.tab == (attached.second_slot ? space.split()->second
-                                                      : space.split()->first);
+        return *attached.tab ==
+               (attached.second_slot ? space.split()->second : space.split()->first);
     }
     return *attached.tab == space.active_tab_id();
 }
 
 bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
+    if (attached.local_page_for_test.has_value()) {
+        return true;
+    }
     if (attached.local_page != nullptr) {
         return attached.local_page == settings_page_.get() ||
                attached.local_page == overview_page_.get();
@@ -4479,6 +4736,9 @@ bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
 }
 
 bool BrowserWindow::AttachedViewBrowserWasCreated(const AttachedView& attached) {
+    if (attached.local_page_for_test.has_value()) {
+        return attached.browser_created_at_for_test.has_value();
+    }
     if (attached.local_page != nullptr) {
         return attached.local_page->browser_was_created();
     }
@@ -4488,6 +4748,13 @@ bool BrowserWindow::AttachedViewBrowserWasCreated(const AttachedView& attached) 
 
 std::optional<BrowserWindow::ViewSwapClock::duration> BrowserWindow::AttachedViewAgeAt(
     const AttachedView& attached, ViewSwapClock::time_point now) {
+    if (attached.local_page_for_test.has_value()) {
+        if (!attached.browser_created_at_for_test.has_value() ||
+            now < *attached.browser_created_at_for_test) {
+            return std::nullopt;
+        }
+        return now - *attached.browser_created_at_for_test;
+    }
     if (attached.local_page != nullptr) {
         return attached.local_page->BrowserViewAgeAt(now);
     }
@@ -4649,6 +4916,24 @@ void BrowserWindow::SetAttachedViewsForSwapTest(std::vector<TabId> tabs) {
     SetAttachedViews(std::move(attached));
 }
 
+void BrowserWindow::SetAttachedInternalPageForSwapTest(LocalPageKind kind) {
+    attached_view_for_test_ = true;
+    internal_page_ = kind;
+    show_internal_page_ = true;
+    SetAttachedViews(
+        {AttachedView{.local_page_for_test = kind, .browser_created_at_for_test = ViewSwapNow()}});
+}
+
+void BrowserWindow::ToggleInternalPageForSwapTest(LocalPageKind kind) {
+    if (internal_page_ == kind) {
+        HideInternalPage();
+        return;
+    }
+    internal_page_ = kind;
+    show_internal_page_ = true;
+    RequestViewSwap();
+}
+
 void BrowserWindow::BrowserCreatedForViewSwapTest(TabId tab_id) {
     Tab* tab = FindTabById(tab_id);
     if (tab == nullptr) {
@@ -4703,7 +4988,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
             SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
                               AttachedView{.view = second->browser_view(), .tab = second->id(),
-                                         .second_slot = true}});
+                                           .second_slot = true}});
             return;
         }
     }
@@ -4762,6 +5047,7 @@ void BrowserWindow::UpdateChromeCollections() {
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
         spaces.push_back({.color = spaces_[index].color(),
                           .name = spaces_[index].name(),
+                          .icon_id = spaces_[index].icon_id(),
                           .active = index == active_space_index_});
     }
     if (active != nullptr) {
@@ -4832,8 +5118,10 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     window->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder, tokens.text_secondary.argb);
     window->SetThemeColor(CEF_ColorTextfieldSelectionBackground, tokens.accent.argb);
     window->SetThemeColor(CEF_ColorTextfieldSelectionForeground, tokens.background.argb);
-    window->SetThemeColor(CEF_ColorTextfieldOutline, tokens.border.argb);
     window->SetThemeColor(CEF_ColorTextfieldHover, tokens.surface_secondary.argb);
+    ApplyAddressFocusColors(window, tokens);
+    window->SetThemeColor(CEF_ColorFocusableBorderUnfocused, tokens.border.argb);
+    ApplyWebColorScheme();
     if (notify_views) {
         window->ThemeChanged();
     }
@@ -5204,6 +5492,7 @@ void BrowserWindow::ShowCommandPalette() {
         return;
     }
     CloseCheatsheet(/*refocus_page=*/false);
+    space_icon_picker_open_ = false;
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
@@ -5244,15 +5533,51 @@ void BrowserWindow::ShowCommandPalette() {
 
 std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
     return {{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
+            {.id = std::string(kChangeSpaceIconCommandId),
+             .title = "Change space icon\xE2\x80\xA6"},
             {.id = "agent_tasks", .title = "Agent tasks"},
             {.id = "summarize_page", .title = "Summarize page"},
             {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"},
             {.id = "collect_from_tabs", .title = "Collect from tabs\xE2\x80\xA6"}};
 }
 
+void BrowserWindow::ShowSpaceIconPicker() {
+    CEF_REQUIRE_UI_THREAD();
+    ++space_icon_picker_shows_;
+    if (closing_ || command_palette_ == nullptr) {
+        return;
+    }
+    space_icon_picker_open_ = true;
+    command_palette_->Show({}, {}, {}, SpaceIconPaletteCommands(), {});
+}
+
+void BrowserWindow::ScheduleSpaceIconPicker() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || space_icon_picker_scheduled_) {
+        return;
+    }
+    space_icon_picker_scheduled_ = true;
+    if (!ui_tasks_enabled_for_test_) {
+        // Headless tests have no CEF task queue; they run RunScheduledSpaceIconPickerForTest.
+        return;
+    }
+    // Runs after the palette's released overlay has been destroyed by its posted task (FIFO).
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window) {
+                                window->RunScheduledSpaceIconPicker();
+                            },
+                            CefRefPtr<BrowserWindow>(this))));
+}
+
+void BrowserWindow::RunScheduledSpaceIconPicker() {
+    CEF_REQUIRE_UI_THREAD();
+    space_icon_picker_scheduled_ = false;
+    ShowSpaceIconPicker();
+}
+
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
     CEF_REQUIRE_UI_THREAD();
-    if (closing_ || history_ == nullptr) {
+    if (closing_ || history_ == nullptr || space_icon_picker_open_) {
         return;
     }
     const std::string requested(query);
@@ -5311,6 +5636,17 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
     if (closing_) {
         return;
     }
+    const bool was_space_icon_picker = std::exchange(space_icon_picker_open_, false);
+    if (was_space_icon_picker) {
+        if (selection.kind == PaletteEntryKind::kCommand) {
+            if (const std::optional<std::string> icon =
+                    ParseSpaceIconCommandId(selection.command.id)) {
+                static_cast<void>(SetSpaceIcon(active_space_index_, *icon));
+            }
+        }
+        FocusBrowserView();
+        return;
+    }
     switch (selection.kind) {
         case PaletteEntryKind::kTab:
             ActivatePaletteTab(selection.tab.id);
@@ -5328,7 +5664,12 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             OpenHistory(selection.history);
             break;
         case PaletteEntryKind::kCommand:
-            RunPaletteCommand(selection.command.id);
+            if (selection.command.id == kChangeSpaceIconCommandId) {
+                ScheduleSpaceIconPicker();
+                return;  // the picker keeps the focus
+            } else {
+                RunPaletteCommand(selection.command.id);
+            }
             break;
         case PaletteEntryKind::kReport:
             static_cast<void>(OpenReportTab(selection.report.id));
@@ -5339,6 +5680,7 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
 
 void BrowserWindow::OnCommandPaletteDismissed() {
     CEF_REQUIRE_UI_THREAD();
+    space_icon_picker_open_ = false;
     // Escape restores focus to the invocation point, which is the browser view
     // by default.
     FocusBrowserView();
@@ -5584,6 +5926,48 @@ void BrowserWindow::RemoveTrustedSite(std::string_view host) {
     ScheduleLocalPagesRender();
 }
 
+// Pushes the provider, task progress, activity and shortcut keycap to Native's Agent entry.
+void BrowserWindow::RefreshAgentEntry() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || chrome_ == nullptr) {
+        return;
+    }
+    AgentEntryStatus status;
+    const bool needs_you = !pending_confirmations_.empty() ||
+                           (research_.has_value() && research_->awaiting_approval) ||
+                           (agent_session_ != nullptr &&
+                            agent_session_->pending_permission_count() != 0);
+    if (needs_you) {
+        status.activity = AgentActivity::kNeedsYou;
+    } else if (agent_session_ != nullptr && agent_session_->busy()) {
+        status.activity = AgentActivity::kWorking;
+    }
+    if (const agent::AgentTask* current = agent_queue_.current(); current != nullptr) {
+        const auto clamp_int = [](std::size_t value) {
+            return static_cast<int>(std::min<std::size_t>(
+                value, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        };
+        status.queue_done = clamp_int(current->done);
+        status.queue_total = clamp_int(current->total);
+    }
+    status.queued_count = static_cast<int>(std::min<std::size_t>(
+        agent_queue_.queued_count(),
+        static_cast<std::size_t>(std::numeric_limits<int>::max())));
+    if (const agent::AgentProvider* provider =
+            agent::FindAgentProvider(ResolvedAgent().provider_id)) {
+        status.provider_name = std::string(provider->name);
+    }
+    chrome_->SetAgentEntryStatus(std::move(status));
+    const std::optional<KeyBinding> binding = keymap_.Binding(KeyAction::kToggleAgentPanel);
+#if defined(__APPLE__)
+    constexpr bool kMac = true;
+#else
+    constexpr bool kMac = false;
+#endif
+    chrome_->SetAgentShortcutLabel(binding.has_value() ? FormatKeyGlyphs(*binding, kMac)
+                                                       : std::string());
+}
+
 void BrowserWindow::ApplyContentBlockerPolicy() {
     if (content_blocker_ != nullptr) {
         std::vector<std::string> allowlist;
@@ -5671,10 +6055,8 @@ AgentTabState BrowserWindow::AgentStateForActiveTab() const {
     if (agent_session_ == nullptr || active_tab() == nullptr || !agent_session_->busy()) {
         return AgentTabState::kIdle;
     }
-    for (const agent::TranscriptItem& item : agent_session_->transcript().items()) {
-        if (item.kind == agent::TranscriptItem::Kind::kPermission && item.resolution.empty()) {
-            return AgentTabState::kWaitingForYou;
-        }
+    if (agent_session_->pending_permission_count() != 0) {
+        return AgentTabState::kWaitingForYou;
     }
     return AgentTabState::kReading;
 }
@@ -5966,7 +6348,7 @@ std::vector<void*> BrowserWindow::NativeContentHandles() const {
     for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
         CefRefPtr<CefBrowser> browser = view != nullptr ? view->GetBrowser() : nullptr;
         if (browser != nullptr) {
-            handles.push_back(browser->GetHost()->GetWindowHandle());
+            handles.push_back(NativeHandlePointer(browser->GetHost()->GetWindowHandle()));
         }
     }
     return handles;

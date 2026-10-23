@@ -39,11 +39,134 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - The agent asks before consequential page actions: a confirmation card in the agent panel
   (Allow once, Allow for this task, Trust this site, Cancel; Esc cancels) that waits 120 s, marks
   the tab and the Agent button with a dot (it never opens the panel or takes focus), survives
-  closing the panel, and is withdrawn when its tab closes or moves, its space is left, or Stop is pressed. Settings > Agent &
-  tools lists the trusted sites with Remove buttons.
+  closing the panel, and is withdrawn when its tab closes or moves, its space is left, or Stop is
+  pressed. Settings > Agent & tools lists the trusted sites with Remove buttons.
 - Tabs the agent opens (`browser_open_tab`, and the pages of a research plan) are remembered as
   agent-opened and keep that mark across a restart. The sites you trust for the agent are saved
   in prefs (`agent_trusted_sites`, normalized to bare lowercase hosts).
+
+## [0.7.3] - 2026-10-23
+
+### Fixed
+
+- The Windows builds compile again after the expanded icon set exceeded the platform's command-line
+  limit during post-build resource staging.
+
+## [0.7.2] - 2026-10-19
+
+### Added
+
+- Spaces can use one of 24 bundled Lucide icons, chosen from Browser > Icon on macOS or from the
+  command palette ("Change space icon…") on every platform. The choice persists in the session
+  (saved at once) and appears in the Native, Arc and Graphite switchers and the collapsed rail,
+  where the active space keeps a selected plate. A non-string `icon` in a session is ignored.
+
+### Changed
+
+- Command palette rows on Native: the selected row is the neutral raised plate with normal text,
+  not blue. Blue stays for the active tab and focus rings.
+- Native's Agent entry shows an open panel as the neutral raised plate with normal text, not a blue
+  label.
+- Native space segments with an icon show only that centered icon in equal-width segments (the
+  name stays in the tooltip, the accessible name and the sidebar header). Spaces without an icon
+  keep their name when it fits, else their initial, never a lone ellipsis.
+- Polished the Native sidebar footer into one aligned, hairline-separated control group with a
+  raised space track, same-height ghost actions, and a quieter tinted Agent row.
+- Native's Back and Forward buttons share one continuous toolbar surface, removing the thin
+  rail-colored seams beside the ghost-button group.
+- Selected segments use a neutral raised plate with normal text in every look; blue is reserved
+  for actions and keyboard focus.
+- Native's Agent entry shows the provider name with a status dot (idle or working) and the
+  shortcut keycap, on the sidebar's bottom row.
+- Streaming agent status updates use the session's permission count instead of repeatedly scanning
+  the full transcript.
+- macOS rounded-corner patches stop their quick polling after the chrome settles, wake on layout,
+  pointer, tab, space and sidebar changes, and follow scrolling within about a second.
+- Downgrade note: 0.7.1 ignores a space's `icon` and rewrites the session without it, so going
+  0.7.2 → 0.7.1 → 0.7.2 drops every chosen space icon.
+
+### Fixed
+
+- Native's selected tab row draws its close × and its generic globe in white (the × at 70%).
+- Arc and Graphite space chips show their full names when every chip fits the sidebar. A chip that
+  does not fit shows its icon alone, never an icon beside a lone initial.
+- The Native address field's focus ring is one even 2 DIP accent ring that follows the 8 pt radius,
+  with no step at the globe and reload ends.
+- With Island's Light or Dark theme, web pages get the same prefers-color-scheme (and scrollbars);
+  System follows the OS.
+- Plan child rows show the page title, or the host before the page loads, not the raw address. The
+  Plan's instruction field spans the inspector at 30 pt with a 6 pt radius.
+- In ordinary chat, agent tools act on the window the person sees: calls without a tab index use the
+  active tab, and indices refer to its space. While a research runs, they act on the agent's own
+  research page in the Plan's space; a plan waiting for approval is not a running research. When
+  that page is missing or closed, the tool reports it instead of using the page on screen.
+- Choosing "Change space icon…" from the command palette with the keyboard opens the icon picker.
+  Return re-applied the unchanged query, which reset the arrowed row, so it submitted the first row
+  instead.
+- Focusing or blurring the Native address field repaints only its focus colors, not the whole
+  window.
+- Selected segments on the Settings, Start and Plan pages have an outline in dark theme, so the
+  selected option is distinguishable.
+- The Native footer's Agent name fills the room between "Agent" and its status dot, measured from
+  the laid-out row, so "Claude Code" shows in full and ellipsizes only when it does not fit.
+- Arc and Graphite space chips keep their natural width; the equal-width track and centered labels
+  apply to Native only.
+- Opening the agent panel no longer hides the page and the toolbar.
+- The Native address field shows one clear accent focus ring in either theme instead of a second
+  inner ring.
+- Focusing the address field on an Island page no longer exposes its embedded data URL; the start
+  page stays empty and other built-in pages use short `island://` addresses.
+- Settings uses each look's selected-segment color instead of forcing Native's dark gray.
+- Agent-opened research pages stay grouped in the Plan's space without interrupting another space.
+- Moving a regular tab into a research group places it after the group without reporting a
+  phantom move.
+- Closing a split-view window detaches both page panes and the divider cleanly.
+- Windows prefers Segoe UI Variable for Native chrome and falls back to Segoe UI.
+- Settings and other internal pages respect the same young-browser swap guard as ordinary tabs.
+- The research prompt asks the agent not to purchase, post or delete on a site or type passwords or
+  payment details, which the Plan's limits and the README state; a step that needs them asks first.
+
+### Known limitations
+
+- Research reads each source while its space is shown. If you switch to another space, the
+  research's pages that have not been shown yet have no browser: the agent reports those sources
+  as unread instead of reading them, and does not activate them. Background reading is not in 0.7.2.
+
+## [0.7.1] - 2026-10-17
+
+### Fixed
+
+- The Linux builds compile again: native window handles are converted the same way on every
+  platform (0.7.0 failed to build for linux64 and linuxarm64).
+
+## [0.7.0] - 2026-10-17
+
+### Changed
+
+- The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
+  control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
+  the most visited sites (from history, one per host, opened in the current tab). Tab and
+  Shift+Tab step through the modes while the field has focus. Clearing history clears the tiles.
+  Visits are grouped by host before the six-tile limit applies, so one busy site with many pages
+  no longer hides the others. IP-address sites get a neutral globe instead of a digit, and the
+  old keyboard-shortcut list under the start page is removed.
+- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
+  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
+  version at the bottom, and one section shown at a time. Appearance groups its controls into
+  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
+  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
+  Native has no space color. Every existing setting keeps its behavior. Search finds sections by
+  name (Privacy, Shortcuts, About) and shows the whole pane for them, and also finds the Import
+  sources and the About list. A section that is already selected opens again when it is requested
+  again (for example, the privacy shield after a click on another section), and an explicit
+  request clears the search first. The search fields use the interface font, and the selected
+  section in the list is filled with a semibold label instead of the accent.
+- The window does not re-lay out the page in a loop while idle, and the Native sidebar and
+  toolbar stay visible when a page swap is deferred, for example when pages open in the
+  background.
+
+### Added
+
 - Native is the default look for fresh profiles: the system font (SF Pro on macOS), one
   system-blue accent for selection and focus, a source-list sidebar and no space color. Released
   profiles without Appearance settings use Native; Arc-era profiles with Appearance settings but
@@ -128,30 +251,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Research mode asks the agent for a branching plan first: each step is an ACP plan entry with
   `_meta.island` (`id`, `after`, `branch`, `kind`), at most 3 levels of branching, and nothing runs
   until you approve the plan.
-
-### Changed
-
-- The start page is restyled to the Native mockup: a segmented Search · Ask Agent · Research
-  control, a 44 px search field with an accent focus halo, and a row of six speed-dial tiles for
-  the most visited sites (from history, one per host, opened in the current tab). Tab and
-  Shift+Tab step through the modes while the field has focus. Clearing history clears the tiles.
-  Visits are grouped by host before the six-tile limit applies, so one busy site with many pages
-  no longer hides the others. IP-address sites get a neutral globe instead of a digit, and the
-  old keyboard-shortcut list under the start page is removed.
-- Settings is restyled to the Native mockups: a section list (General, Appearance, Privacy &
-  blocking, Tabs, Reader, Agent & tools, Shortcuts, About) with search over settings and the
-  version at the bottom, and one section shown at a time. Appearance groups its controls into
-  Theme, Color, Layout and Text cards; Shortcuts lists its groups in two columns with keycaps,
-  an amber conflict banner and Reset all. Native hides Space colors and Sidebar tint, because
-  Native has no space color. Every existing setting keeps its behavior. Search finds sections by
-  name (Privacy, Shortcuts, About) and shows the whole pane for them, and also finds the Import
-  sources and the About list. A section that is already selected opens again when it is requested
-  again (for example, the privacy shield after a click on another section), and an explicit
-  request clears the search first. The search fields use the interface font, and the selected
-  section in the list is filled with a semibold label instead of the accent.
-- The window does not re-lay out the page in a loop while idle, and the Native sidebar and
-  toolbar stay visible when a page swap is deferred, for example when pages open in the
-  background.
 
 ### Fixed
 
@@ -409,7 +508,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/island-browser/island/releases/tag/v0.7.3
+[0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2
+[0.7.1]: https://github.com/island-browser/island/releases/tag/v0.7.1
+[0.7.0]: https://github.com/island-browser/island/releases/tag/v0.7.0
 [0.6.2]: https://github.com/island-browser/island/releases/tag/v0.6.2
 [0.6.1]: https://github.com/island-browser/island/releases/tag/v0.6.1
 [0.6.0]: https://github.com/island-browser/island/releases/tag/v0.6.0

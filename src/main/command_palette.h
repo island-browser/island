@@ -73,6 +73,18 @@ struct PaletteCommandEntry {
     bool operator==(const PaletteCommandEntry&) const = default;
 };
 
+// The palette command that reopens the palette as a space-icon picker, and the prefix of the
+// picker rows' ids (`space_icon:<icon id>`, `space_icon:none` to clear). The picker is the
+// cross-platform way to choose a space icon; the macOS menu is a second entry to the same action.
+inline constexpr std::string_view kChangeSpaceIconCommandId = "change_space_icon";
+inline constexpr std::string_view kSpaceIconCommandPrefix = "space_icon:";
+
+// "None" first, then every bundled icon in catalog order, as palette command rows.
+[[nodiscard]] std::vector<PaletteCommandEntry> SpaceIconPaletteCommands();
+// The icon id a picker row stands for ("" for None), or nullopt when `command_id` is not a picker
+// row or names an unknown icon.
+[[nodiscard]] std::optional<std::string> ParseSpaceIconCommandId(std::string_view command_id);
+
 // Read-only snapshot of one finished research report. Selecting one opens it
 // in a new Report tab, by id.
 struct PaletteReportEntry {
@@ -234,7 +246,8 @@ class CommandPaletteModel {
     // Replaces the draft query and resets the highlight to the first row, so
     // narrowing results can never leave the highlight past the last row. A new
     // draft also clears any surfaced rejection, mirroring
-    // AddressBarModel::SetEditText.
+    // AddressBarModel::SetEditText. Re-setting the same text is a no-op, so the
+    // Return key can echo the field without losing the arrowed row.
     void SetQuery(std::string query);
 
     // Moves the highlight by `delta` rows, wrapping at both ends of the current

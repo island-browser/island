@@ -70,13 +70,17 @@ bool SameLookKnobs(const AppearanceSettings& a, const AppearanceSettings& b) {
            a.full_bleed == b.full_bleed;
 }
 
-ChromeTokens CompleteNativeTokens(ChromeTokens tokens, ArgbColor segment_selected = {}) {
+ArgbColor NeutralSegmentSelected(ChromeTheme theme) {
+    return {.argb = theme == ChromeTheme::kDark ? 0xFF3A3A3DU : 0xFFE3E3E8U};
+}
+
+ChromeTokens CompleteNativeTokens(ChromeTokens tokens, ChromeTheme theme) {
     tokens.canvas = tokens.background;
     tokens.selected = tokens.selection;
     tokens.hover = MixColor(tokens.background, tokens.fill, 0.6);
     tokens.well = tokens.fill;
     tokens.plate = tokens.surface;
-    tokens.segment_selected = segment_selected.argb != 0 ? segment_selected : tokens.surface;
+    tokens.segment_selected = NeutralSegmentSelected(theme);
     tokens.ui_font_family = "system";
     tokens.look = LookPreset::kNative;
     return tokens;
@@ -125,33 +129,35 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
                                 {.argb = 0xFFFF9F0AU},
                                 {.argb = 0xFF40C8A0U}}},
                 },
-                ArgbColor{.argb = 0xFF636366U});
+                theme);
         }
 
-        return CompleteNativeTokens(ChromeTokens{
-            .background = {.argb = 0xFFEBEBEFU},
-            .surface = {.argb = 0xFFFFFFFFU},
-            .surface_secondary = {.argb = 0xFFF6F6F8U},
-            .fill = {.argb = 0xFFE8E8EDU},
-            .text = {.argb = 0xFF1D1D1FU},
-            .text_secondary = {.argb = 0xFF636366U},
-            .text_tertiary = {.argb = 0xFF8E8E93U},
-            .border = {.argb = 0xFFE5E5EAU},
-            .border_strong = {.argb = 0xFFD2D2D7U},
-            .accent = {.argb = 0xFF0A64D8U},
-            .selection = {.argb = 0xFF0A64D8U},
-            .accent_soft = {.argb = 0xFFDFE9F8U},
-            .accent_text = {.argb = 0xFF0A4FA8U},
-            .warning_bg = {.argb = 0xFFFFF8E6U},
-            .warning_border = {.argb = 0xFFF5D38AU},
-            .warning_text = {.argb = 0xFF6A4A00U},
-            .success = {.argb = 0xFF248A3DU},
-            .danger = {.argb = 0xFFD70015U},
-            .branch = {{{.argb = 0xFF0A64D8U},
-                        {.argb = 0xFF8E44ADU},
-                        {.argb = 0xFFC25400U},
-                        {.argb = 0xFF1F8A70U}}},
-        });
+        return CompleteNativeTokens(
+            ChromeTokens{
+                .background = {.argb = 0xFFEBEBEFU},
+                .surface = {.argb = 0xFFFFFFFFU},
+                .surface_secondary = {.argb = 0xFFF6F6F8U},
+                .fill = {.argb = 0xFFE8E8EDU},
+                .text = {.argb = 0xFF1D1D1FU},
+                .text_secondary = {.argb = 0xFF636366U},
+                .text_tertiary = {.argb = 0xFF8E8E93U},
+                .border = {.argb = 0xFFE5E5EAU},
+                .border_strong = {.argb = 0xFFD2D2D7U},
+                .accent = {.argb = 0xFF0A64D8U},
+                .selection = {.argb = 0xFF0A64D8U},
+                .accent_soft = {.argb = 0xFFDFE9F8U},
+                .accent_text = {.argb = 0xFF0A4FA8U},
+                .warning_bg = {.argb = 0xFFFFF8E6U},
+                .warning_border = {.argb = 0xFFF5D38AU},
+                .warning_text = {.argb = 0xFF6A4A00U},
+                .success = {.argb = 0xFF248A3DU},
+                .danger = {.argb = 0xFFD70015U},
+                .branch = {{{.argb = 0xFF0A64D8U},
+                            {.argb = 0xFF8E44ADU},
+                            {.argb = 0xFFC25400U},
+                            {.argb = 0xFF1F8A70U}}},
+            },
+            theme);
     }
 
     if (theme == ChromeTheme::kDark) {
@@ -183,6 +189,7 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
             .hover = {.argb = 0xFF222222U},
             .well = {.argb = 0xFF242424U},
             .plate = {.argb = 0xFFEDEDEDU},
+            .segment_selected = NeutralSegmentSelected(theme),
         };
         tokens.look = look;
         return tokens;
@@ -216,6 +223,7 @@ ChromeTokens ChromeTokens::ForLook(LookPreset look, ChromeTheme theme) noexcept 
         .hover = {.argb = 0xFFEAEAEAU},
         .well = {.argb = 0xFFFAFAFAU},
         .plate = {.argb = 0xFFFFFFFFU},
+        .segment_selected = NeutralSegmentSelected(theme),
     };
     tokens.look = look;
     return tokens;

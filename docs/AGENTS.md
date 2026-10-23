@@ -24,6 +24,8 @@ each accepted phase.
 | Directory | Purpose |
 |-----------|---------|
 | `superpowers/` | Dated phase specs and plans (see `superpowers/AGENTS.md`) |
+| `user-guide/` | The end-user guide in GitBook layout (see `user-guide/AGENTS.md`) |
+| `images/` | README screenshots (PNG, 1600 px wide, each under 600 KB), captured with the `--island-dev-*` flags; no `AGENTS.md` of its own |
 
 ## For AI Agents
 

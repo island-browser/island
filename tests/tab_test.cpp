@@ -78,7 +78,7 @@ TEST(Tab, StoresItsOptionalGroupParentAndBranchLabel) {
     EXPECT_FALSE(tab.group_parent().has_value());
 }
 
-TEST(Tab, DisplayTitleNamesTheAddressOfAnUnshownWebPage) {
+TEST(Tab, DisplayTitleNamesTheHostOfAnUnshownWebPage) {
     Tab tab(NextTabId());
     EXPECT_EQ(tab.DisplayTitle(), "Island");
 
@@ -86,7 +86,10 @@ TEST(Tab, DisplayTitleNamesTheAddressOfAnUnshownWebPage) {
     EXPECT_EQ(tab.DisplayTitle(), "Island");
 
     tab.SetStartupUrl("https://docs.test/a");
-    EXPECT_EQ(tab.DisplayTitle(), "https://docs.test/a");
+    EXPECT_EQ(tab.DisplayTitle(), "docs.test");
+
+    tab.SetStartupUrl("https://user@developer.docs.test:8443/a?b#c");
+    EXPECT_EQ(tab.DisplayTitle(), "developer.docs.test:8443");
 
     tab.navigation_state().OnTitleChange("Docs");
     EXPECT_EQ(tab.DisplayTitle(), "Docs");

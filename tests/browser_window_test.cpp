@@ -219,6 +219,56 @@ TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPain
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
 
+TEST(BrowserWindowTest,
+     GivenNativeAddressFocusWhenTextfieldRingResolvedThenItIsThePlateFillOverAnExtremeBackdrop) {
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
+
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/true), dark.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(light, /*address_focused=*/true), light.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/true),
+              (ArgbColor{.argb = 0xFFFFFFFFU}));
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(light, /*address_focused=*/true),
+              (ArgbColor{.argb = 0xFF000000U}));
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/false),
+              dark.canvas);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false), dark.accent);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.accent);
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(arc, /*address_focused=*/true), arc.canvas);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(dark, /*address_focused=*/true), dark.fill);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(dark, /*address_focused=*/false), dark.border);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/true), arc.border);
+}
+
+TEST(BrowserWindowTest, CornerPatchPollKeepsASlowTickAfterTheQuietBurst) {
+    // Inside the burst the poll ticks quickly; after it, scrolling (which CEF does not report) is
+    // still followed by one slow tick, so the poll is never left without a next tick.
+    const int quick = BrowserChrome::CornerPatchPollDelayMs(
+        {.unchanged_ticks = 0, .continue_polling = true});
+    const int slow = BrowserChrome::CornerPatchPollDelayMs(
+        {.unchanged_ticks = BrowserChrome::CornerPatchPollUnchangedLimit(),
+         .continue_polling = false});
+    EXPECT_GT(quick, 0);
+    EXPECT_GT(slow, quick);
+    EXPECT_LE(slow, 1000);
+}
+
+TEST(BrowserWindowTest, CornerPatchPollingStopsAfterAQuietStreakAndResetsOnChange) {
+    BrowserChrome::CornerPatchPollState state;
+    for (std::size_t tick = 0; tick < BrowserChrome::CornerPatchPollUnchangedLimit(); ++tick) {
+        state = BrowserChrome::AdvanceCornerPatchPoll(state.unchanged_ticks,
+                                                      /*patches_changed=*/false);
+        EXPECT_EQ(state.continue_polling,
+                  tick + 1 < BrowserChrome::CornerPatchPollUnchangedLimit());
+    }
+
+    EXPECT_EQ(BrowserChrome::AdvanceCornerPatchPoll(state.unchanged_ticks,
+                                                    /*patches_changed=*/true),
+              (BrowserChrome::CornerPatchPollState{.unchanged_ticks = 0,
+                                                   .continue_polling = true}));
+}
+
 TEST(BrowserWindowTest, GivenNativeTreeWhenInspectedThenToolbarAndAddressIdsMatchRuntime) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
     const ChromeViewTreeNode* rail = FindChromeView(tree, ChromeViewId::kRail);
@@ -383,14 +433,18 @@ TEST(BrowserWindowTest, GivenSectionHeaderWhenFormattedThenItUsesTheParsedSemiBo
                           ", 11px"));
 }
 
+TEST(BrowserWindowTest, GivenWindowsSystemFontsThenSegoeUiVariablePrecedesTheFallback) {
+    EXPECT_EQ(BrowserChrome::WindowsSystemFontFamilies(), "Segoe UI Variable, Segoe UI");
+}
+
 TEST(BrowserWindowTest, GivenNativeSpaceChipsWhenResolvedThenTheyUseNoSpaceColorAccent) {
     const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const BrowserChrome::EntryColors active = BrowserChrome::SpaceChipColors(tokens, true);
     const BrowserChrome::EntryColors idle = BrowserChrome::SpaceChipColors(tokens, false);
 
-    // Native segments: the selected one is `surface` on the `fill` track, the others sit on it.
-    EXPECT_EQ(active.fill, tokens.surface);
-    EXPECT_EQ(active.outline, tokens.surface);
+    // Native segments: the selected one is a neutral plate on the `fill` track.
+    EXPECT_EQ(active.fill, tokens.segment_selected);
+    EXPECT_EQ(active.outline, tokens.segment_selected);
     EXPECT_EQ(active.title, tokens.text);
     EXPECT_EQ(idle.fill, tokens.fill);
     EXPECT_NE(active.fill, tokens.selection);
@@ -424,6 +478,33 @@ TEST(BrowserWindowTest, GivenAHeadlessWindowWhenTheViewTreeIsRequestedThenItRepo
     EXPECT_EQ(snapshot.display_title, "Island");
     EXPECT_FALSE(snapshot.can_go_back);
     EXPECT_FALSE(snapshot.can_go_forward);
+}
+
+TEST(BrowserWindowTest, GivenInternalPagesWhenAddressEditingBeginsThenNoDataUrlIsExposed) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+
+    window->SetStartPageUrlForTest("data:text/html,start");
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,start"});
+    window->BeginAddressEditing();
+    EXPECT_TRUE(window->address_bar_snapshot().edit_text.empty());
+    window->CancelAddressEditing();
+
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,plan"});
+    window->BeginAddressEditing();
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, "island://plan");
+    EXPECT_EQ(window->address_bar_snapshot().edit_text.find("data:"), std::string::npos);
+    window->CancelAddressEditing();
+
+    window->SetReportPageUrlForTest("data:text/html,report");
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,report#r12"});
+    window->BeginAddressEditing();
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, "island://report#r12");
+    window->CancelAddressEditing();
+
+    window->OnNavigationChanged(NavigationSnapshot{.url = "data:text/html,other"});
+    window->BeginAddressEditing();
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, "island://local-page");
 }
 
 TEST(BrowserWindowTest, GivenNewTabCommandsWhenExecutedThenTabsAppendAndSelectInTheActiveSpace) {

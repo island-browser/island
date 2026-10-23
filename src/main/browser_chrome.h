@@ -11,6 +11,7 @@
 #endif
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -153,6 +154,27 @@ enum class ChromeViewId : int {
     kRailSwitcherRow = 1076,
     // The branch label above the first grouped (research) tab row of a run; Native only.
     kTabGroupKicker = 1077,
+    // Native's Agent entry (2026-10-18): the row holding the Agent button, the right-aligned
+    // provider/queue label with its status dot, and the shortcut keycap. Native only.
+    kRailAgentRow = 1078,
+    kRailAgentMeta = 1079,
+    kRailAgentKeycap = 1080,
+};
+
+// What the Agent entry's status dot shows, from the agent state the window already tracks.
+enum class AgentActivity : std::uint8_t { kIdle, kWorking, kNeedsYou };
+
+// The right side of Native's Agent entry: the provider name (or, while a task queue runs, its
+// "done/total" progress), the status dot, and the entry's accessible description.
+struct AgentEntryStatus {
+    std::string provider_name;
+    AgentActivity activity = AgentActivity::kIdle;
+    // Task-queue progress; queue_total == 0 means no queue is running.
+    int queue_done = 0;
+    int queue_total = 0;
+    int queued_count = 0;
+
+    bool operator==(const AgentEntryStatus&) const = default;
 };
 
 struct ChromeViewTreeNode {
@@ -192,6 +214,7 @@ struct TabStripEntrySnapshot {
 struct SpaceSwitcherEntrySnapshot {
     ArgbColor color;
     std::string name;
+    std::string icon_id;
     bool active = false;
 
     bool operator==(const SpaceSwitcherEntrySnapshot&) const = default;
@@ -274,6 +297,7 @@ class BrowserChromeHost {
     virtual void CloseTab(std::size_t index) = 0;
     virtual void SelectSpace(std::size_t index) = 0;
     virtual void BeginAddressEditing() = 0;
+    virtual void SetAddressFocusRingSuppressed(bool suppressed) = 0;
     virtual void CancelAddressEditing() = 0;
     virtual void SubmitAddressDraft(std::string_view draft) = 0;
     virtual void FocusBrowserView() = 0;
@@ -376,6 +400,26 @@ class BrowserChrome final : public NavigationObserver {
     // The color the address row paints around its children: the hairline (accent while focused),
     // or the plate fill itself in Native so no outline or ring shows.
     [[nodiscard]] static ArgbColor AddressOutlineColor(const ChromeTokens& tokens, bool focused);
+    [[nodiscard]] static ArgbColor TextfieldFocusRingColor(const ChromeTokens& tokens,
+                                                           bool address_focused);
+    // CEF_ColorWindowBackground: the reference the textfield focus ring's minimum contrast is
+    // measured against. Native address focus needs an extreme one so a plate-colored ring is not
+    // lightened into a grey inner ring.
+    [[nodiscard]] static ArgbColor TextfieldFocusRingBackdrop(const ChromeTokens& tokens,
+                                                              bool address_focused);
+    [[nodiscard]] static ArgbColor TextfieldOutlineColor(const ChromeTokens& tokens,
+                                                         bool address_focused);
+    struct CornerPatchPollState {
+        std::size_t unchanged_ticks = 0;
+        bool continue_polling = true;
+
+        bool operator==(const CornerPatchPollState&) const = default;
+    };
+    [[nodiscard]] static constexpr std::size_t CornerPatchPollUnchangedLimit() { return 8; }
+    [[nodiscard]] static CornerPatchPollState AdvanceCornerPatchPoll(std::size_t unchanged_ticks,
+                                                                     bool patches_changed);
+    // The next poll tick: quick inside the bounded burst, one slow tick (about 1 s) after it.
+    [[nodiscard]] static int CornerPatchPollDelayMs(const CornerPatchPollState& state);
     // The corner patch that rounds the address plate at `bounds` (window DIP). Native's address
     // sits in the always-shown toolbar; the other looks' address lives in the expanded sidebar
     // only, so it has no patch while the sidebar is collapsed.
@@ -387,6 +431,9 @@ class BrowserChrome final : public NavigationObserver {
     // the pinned Chromium (150.0.7871.129); an unknown token ("SemiBold") fails the whole list.
     [[nodiscard]] static std::string FontListForTokens(const ChromeTokens& tokens, int size_px,
                                                        ChromeFontWeight weight);
+    [[nodiscard]] static constexpr std::string_view WindowsSystemFontFamilies() {
+        return "Segoe UI Variable, Segoe UI";
+    }
     // Native's sentence-case section headers ("Favorites", "<Space> · Tabs"): 11 px, weight 600.
     [[nodiscard]] static std::string SectionHeaderFontList(const ChromeTokens& tokens) {
         return FontListForTokens(tokens, 11, ChromeFontWeight::kSemiBold);
@@ -406,6 +453,8 @@ class BrowserChrome final : public NavigationObserver {
     enum class SurfaceSlot : std::uint8_t {
         kRoot,
         kRail,
+        // The navigation row: the toolbar surface under Native, the rail canvas otherwise.
+        kNavigationRow,
         kBrowserContent,
         kToolbar,
         kHairline,
@@ -426,6 +475,8 @@ class BrowserChrome final : public NavigationObserver {
                 // One surface: the sidebar and the window margin around the page card share
                 // the canvas, so the card floats on it (Arc).
                 return tokens.canvas;
+            case SurfaceSlot::kNavigationRow:
+                return NavigationRowSurface(tokens);
             case SurfaceSlot::kToolbar:
                 return tokens.surface_secondary;
             case SurfaceSlot::kHairline:
@@ -449,6 +500,8 @@ class BrowserChrome final : public NavigationObserver {
             case SurfaceSlot::kBrowserContent:
             case SurfaceSlot::kRail:
                 return tokens_.canvas;
+            case SurfaceSlot::kNavigationRow:
+                return NavigationRowSurface(tokens_);
             case SurfaceSlot::kToolbar:
                 return tokens_.surface_secondary;
             case SurfaceSlot::kHairline:
@@ -493,9 +546,8 @@ class BrowserChrome final : public NavigationObserver {
                 tokens.look == LookPreset::kNative && active ? row.title : tokens.text_secondary,
         };
     }
-    // Native's Agent entry (2026-10-16): full width at the sidebar bottom. Open takes the
-    // accent_soft fill with accent_text; closed is the bare sidebar with an accent sparkle, and
-    // hover takes the hover token.
+    // Native's Agent entry (2026-10-17): a quiet footer row. The open state tints the label and
+    // sparkle instead of laying a white/accent slab across the footer; hover alone paints ink.
     struct NativeAgentColors {
         ArgbColor fill;
         ArgbColor text;
@@ -503,38 +555,133 @@ class BrowserChrome final : public NavigationObserver {
     };
     [[nodiscard]] static NativeAgentColors NativeAgentEntryColors(const ChromeTokens& tokens,
                                                                   bool open, bool hovered) {
-        if (open) {
-            return {.fill = tokens.accent_soft,
-                    .text = tokens.accent_text,
-                    .sparkle = tokens.accent};
-        }
-        return {.fill = hovered ? tokens.hover : tokens.canvas,
-                .text = tokens.text,
-                .sparkle = tokens.accent};
+        // An open panel shows as the neutral raised plate with normal text, never a blue label.
+        const ArgbColor fill =
+            open ? tokens.segment_selected : (hovered ? tokens.hover : tokens.canvas);
+        return {.fill = fill, .text = tokens.text, .sparkle = tokens.accent};
     }
-    // Native's space segmented control: a `fill` track, the selected segment on `surface`,
-    // the selected name in `text` and the others in `text_secondary`.
+    // The label next to the status dot: queue progress "3/7" while a queue runs, otherwise the
+    // provider name. (The view elides a long name with an ellipsis before the keycap.)
+    [[nodiscard]] static std::string AgentEntryMetaText(const AgentEntryStatus& status) {
+        if (status.queue_total > 0) {
+            return std::to_string(std::min(status.queue_done, status.queue_total)) + "/" +
+                   std::to_string(status.queue_total);
+        }
+        if (status.queued_count > 0) {
+            return std::to_string(status.queued_count) + " queued";
+        }
+        // Truncated here rather than by the label button, which elides too early; the cap keeps
+        // the name clear of the keycap in the 286 DIP sidebar.
+        return status.provider_name;
+    }
+    // The longest code-point prefix of |text| plus an ellipsis that |measure| (the label's own
+    // preferred width) fits in |max_width|. Text that already fits is returned unchanged.
+    [[nodiscard]] static std::string FitAgentEntryText(
+        std::string_view text, int max_width, const std::function<int(std::string_view)>& measure) {
+        if (measure(text) <= max_width) {
+            return std::string(text);
+        }
+        std::vector<std::size_t> starts;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if ((static_cast<unsigned char>(text[i]) & 0xC0U) != 0x80U) {
+                starts.push_back(i);
+            }
+        }
+        const std::string ellipsis = "\xE2\x80\xA6";
+        if (starts.empty()) {
+            return ellipsis;
+        }
+        const auto prefix = [&](std::size_t count) {
+            return std::string(text.substr(0, count < starts.size() ? starts[count] : text.size()));
+        };
+        std::size_t low = 0;
+        std::size_t high = starts.size() - 1;
+        while (low < high) {
+            const std::size_t middle = (low + high + 1) / 2;
+            if (measure(prefix(middle) + ellipsis) <= max_width) {
+                low = middle;
+            } else {
+                high = middle - 1;
+            }
+        }
+        // No space before the ellipsis: "Claude…", not "Claude …".
+        std::string kept = prefix(low);
+        while (!kept.empty() && kept.back() == ' ') {
+            kept.pop_back();
+        }
+        return kept + ellipsis;
+    }
+    [[nodiscard]] static ArgbColor AgentStatusDotColor(const ChromeTokens& tokens,
+                                                       AgentActivity activity) {
+        switch (activity) {
+            case AgentActivity::kWorking:
+                return tokens.accent;
+            case AgentActivity::kNeedsYou:
+                return tokens.warning_border;
+            case AgentActivity::kIdle:
+                break;
+        }
+        return tokens.text_tertiary;
+    }
+    [[nodiscard]] static std::string AgentEntryDescription(const AgentEntryStatus& status) {
+        const char* state = status.activity == AgentActivity::kWorking    ? "working"
+                            : status.activity == AgentActivity::kNeedsYou ? "needs you"
+                                                                          : "idle";
+        std::string text =
+            status.provider_name.empty() ? std::string("Agent") : status.provider_name;
+        text += ", ";
+        text += state;
+        if (status.queue_total > 0) {
+            text += ", task " + AgentEntryMetaText(status);
+        } else if (status.queued_count > 0) {
+            text += ", " + AgentEntryMetaText(status);
+        }
+        return text;
+    }
+    // Native's space segmented control: a `fill` track, the selected segment on its neutral plate,
+    // the selected name in `text` and the others in `text_secondary`. Dark mode gives the
+    // selected plate a subtle outline so it remains legible without a shadow.
     struct SegmentPalette {
         ArgbColor track;
+        ArgbColor outline;
         ArgbColor fill;
         ArgbColor title;
     };
     [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
                                                             bool active) {
+        const std::uint32_t surface = tokens.surface.argb;
+        const int brightness = static_cast<int>((surface >> 16U) & 0xFFU) * 299 +
+                               static_cast<int>((surface >> 8U) & 0xFFU) * 587 +
+                               static_cast<int>(surface & 0xFFU) * 114;
+        const bool dark = brightness < 128000;
         return {.track = tokens.fill,
+                .outline = active && dark ? tokens.border_strong
+                                          : (active ? tokens.segment_selected : tokens.fill),
                 .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
-    // Native's bottom switcher (spec §3, 2026-10-16): the segmented track and its three 24 DIP
-    // icon buttons share one row; the segments sit inside the track's 2 DIP inset.
+    // Native places the navigation row in the toolbar, so the row and its ghost buttons must
+    // share the toolbar surface. Arc and Graphite keep the row on the rail canvas.
+    [[nodiscard]] static ArgbColor NavigationRowSurface(const ChromeTokens& tokens) {
+        return tokens.look == LookPreset::kNative ? tokens.surface_secondary : tokens.canvas;
+    }
+    // Native's bottom switcher/footer (2026-10-17 owner polish): every control shares a 28 DIP
+    // height, the rows use an 8 DIP vertical rhythm, and segments sit inside a 2 DIP track inset.
     struct NativeSwitcherMetrics {
         int row_dip;
         int button_dip;
+        int agent_dip;
+        int footer_gap_dip;
         int track_inset_dip;
         int segment_dip;
     };
     [[nodiscard]] static constexpr NativeSwitcherMetrics NativeSwitcherSizes() {
-        return {.row_dip = 24, .button_dip = 24, .track_inset_dip = 2, .segment_dip = 20};
+        return {.row_dip = 28,
+                .button_dip = 28,
+                .agent_dip = 28,
+                .footer_gap_dip = 8,
+                .track_inset_dip = 2,
+                .segment_dip = 24};
     }
     // Space chips stay quiet: no fill and no outline (the dot, and the full name on the
     // active chip, carry the state); the active chip's label takes --text. Native segments
@@ -544,7 +691,7 @@ class BrowserChrome final : public NavigationObserver {
         if (tokens.look == LookPreset::kNative) {
             const SegmentPalette segment = NativeSegmentColors(tokens, active);
             return {
-                .outline = segment.fill,
+                .outline = segment.outline,
                 .fill = segment.fill,
                 .title = segment.title,
                 .trailing = tokens.text_secondary,
@@ -590,6 +737,19 @@ class BrowserChrome final : public NavigationObserver {
                                                                 const ChromeTokens& tokens,
                                                                 bool sidebar_expanded,
                                                                 bool agent_panel_open);
+    // Heights a fixed-width column reports to the root BoxLayout. CEF ignores a delegate size
+    // with a zero width or height and falls back to the layout's own size, so a width-only size
+    // lets the column's content (the agent panel's web view) pick its width instead.
+    struct FixedWidthColumn {
+        int width = 0;
+        int min_height = 0;
+        int max_height = 0;
+        bool operator==(const FixedWidthColumn&) const = default;
+    };
+    [[nodiscard]] static constexpr FixedWidthColumn FixedWidthColumnFor(int width) {
+        return width > 0 ? FixedWidthColumn{width, 1, 1 << 20} : FixedWidthColumn{};
+    }
+
     // A repeated root snapshot is a no-op only while every managed region remains at its target.
     // The live-bounds input keeps this decision CEF-free and testable.
     [[nodiscard]] static bool NeedsRelayout(const std::optional<ChromeGeometrySnapshot>& applied,
@@ -660,14 +820,16 @@ class BrowserChrome final : public NavigationObserver {
             // Bottom-up the owner's layout reads: the full-width Agent entry at the very bottom,
             // with the switcher row (segments plus the new-space, overview and settings buttons)
             // above it.
-            rail_children.push_back(
-                {ChromeViewId::kRailFooter,
-                 {{ChromeViewId::kRailSwitcherRow,
-                   {{ChromeViewId::kSpaceSwitcher, {}},
-                    {ChromeViewId::kRailNewSpaceButton, {}},
-                    {ChromeViewId::kRailTabsButton, {}},
-                    {ChromeViewId::kRailSettingsButton, {}}}},
-                  {ChromeViewId::kRailAgentButton, {}}}});
+            rail_children.push_back({ChromeViewId::kRailFooter,
+                                     {{ChromeViewId::kRailSwitcherRow,
+                                       {{ChromeViewId::kSpaceSwitcher, {}},
+                                        {ChromeViewId::kRailNewSpaceButton, {}},
+                                        {ChromeViewId::kRailTabsButton, {}},
+                                        {ChromeViewId::kRailSettingsButton, {}}}},
+                                      {ChromeViewId::kRailAgentRow,
+                                       {{ChromeViewId::kRailAgentButton, {}},
+                                        {ChromeViewId::kRailAgentMeta, {}},
+                                        {ChromeViewId::kRailAgentKeycap, {}}}}}});
         } else {
             rail_children.push_back({ChromeViewId::kSpaceSwitcher, {}});
             rail_children.push_back({ChromeViewId::kRailFooter,
@@ -683,8 +845,8 @@ class BrowserChrome final : public NavigationObserver {
         std::vector<ChromeViewTreeNode> root_children = {
             {ChromeViewId::kRail, std::move(rail_children)}};
         if (native) {
-            root_children.push_back({ChromeViewId::kToolbar,
-                                     {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
+            root_children.push_back(
+                {ChromeViewId::kToolbar, {navigation, address, {ChromeViewId::kToolbarShare, {}}}});
         }
         root_children.push_back(
             {ChromeViewId::kBrowserContent, {{ChromeViewId::kBrowserView, {}}}});
@@ -752,9 +914,10 @@ class BrowserChrome final : public NavigationObserver {
             switcher != nullptr) {
             switcher->children.reserve(spaces.size());
             for (std::size_t i = 0; i < spaces.size(); ++i) {
-                // Native segments carry only the name: the space color is never shown there.
+                // Arc/Graphite keep the color square only when no icon was chosen. Native never
+                // shows space color.
                 ChromeViewTreeNode segment = {ChromeViewId::kSpaceSwitcherEntry, {}};
-                if (!native) {
+                if (!native && spaces[i].icon_id.empty()) {
                     segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryColorMark, {}});
                 }
                 segment.children.push_back({ChromeViewId::kSpaceSwitcherEntryName, {}});
@@ -776,6 +939,11 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static std::string TabCloseAccessibleName(const TabStripEntrySnapshot& entry);
     // Inactive space pills show only an initial; the active one shows the name.
     [[nodiscard]] static std::string SpacePillLabel(const SpaceSwitcherEntrySnapshot& entry);
+    // The label of one space segment. Native: the icon alone, else the name or initial by room.
+    // Arc and Graphite: the name when `chip_names_fit`, else the icon alone or the initial.
+    [[nodiscard]] static std::string SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& entry,
+                                                       std::size_t space_count, LookPreset look,
+                                                       bool chip_names_fit = false);
     [[nodiscard]] static std::string SpaceEntryAccessibleName(
         const SpaceSwitcherEntrySnapshot& entry);
 
@@ -850,7 +1018,13 @@ class BrowserChrome final : public NavigationObserver {
     // draw a mark.
     void SetAgentNeedsYou(bool needs_you);
     // The Agent entry's text: "Agent", "Agent · 3/7" or "Agent · 2 queued" (AgentButtonLabel).
+    // Native keeps "Agent" on the leading button and puts progress in the row's meta label.
     void SetAgentButtonLabel(std::string label);
+    // Native's Agent entry: provider/task label and status dot. Arc and Graphite ignore it.
+    void SetAgentEntryStatus(AgentEntryStatus status);
+    // The keycap text from the keymap (the macOS command glyph plus J, or "Ctrl+J"); "" hides the
+    // keycap.
+    void SetAgentShortcutLabel(std::string label);
     [[nodiscard]] bool agent_panel_open() const noexcept { return agent_panel_open_; }
     // A short updater notice ("Island 0.5.0 is available"): the rail's
     // Settings button takes the accent tint and carries it in its tooltip
@@ -931,11 +1105,15 @@ class BrowserChrome final : public NavigationObserver {
     void ApplyTabRowVisual(std::size_t index);
     void ApplyCollapsedTabVisual(std::size_t position);
     void ApplyAddressPillImages();
+    void ApplyAgentEntryStatus(ArgbColor row_fill);
+    // Shortens the Native Agent name to the width the row leaves it, measured by the label itself.
+    void FitAgentEntryName();
     void ApplyAddressIndicators();
     // Called by the row buttons' delegates on every pointer-state change.
     void RefreshRowHover();
+    [[nodiscard]] bool RefreshCornerPatches();
     void PushCornerPatches();
-    void SchedulePatchPoll();
+    void SchedulePatchPoll(int delay_ms);
     void ApplyCollapsedRailTheme();
     void UpdateAddressFocusLeadingEdge();
 
@@ -979,6 +1157,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> spacer_;
     CefRefPtr<CefBoxLayout> address_layout_;
     CefRefPtr<CefPanel> address_field_holder_;
+    // The inner panel holding every address control, inset by the ring (see BuildViews).
+    CefRefPtr<CefPanel> address_inner_;
     CefRefPtr<CefLabelButton> address_idle_label_;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
@@ -1024,6 +1204,20 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> rail_footer_;
     CefRefPtr<SurfacePanelDelegate> rail_footer_delegate_;
     CefRefPtr<CefLabelButton> agent_button_;
+    // Native only: the row wrapping agent_button_, the provider/progress label with the status
+    // dot, and the shortcut keycap. Arc and Graphite keep agent_button_ alone in the footer.
+    CefRefPtr<CefPanel> agent_row_;
+    CefRefPtr<CefLabelButton> agent_meta_;
+    CefRefPtr<CefLabelButton> agent_dot_;
+    CefRefPtr<CefPanel> agent_spacer_;
+    // The untruncated label text, and the inputs the last fit was measured for.
+    std::string agent_meta_text_;
+    int agent_fit_row_width_ = -1;
+    std::string agent_fit_text_;
+    bool agent_fit_keycap_ = false;
+    CefRefPtr<CefLabelButton> agent_keycap_;
+    AgentEntryStatus agent_status_;
+    std::string agent_shortcut_label_;
     // Native's Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
     bool native_agent_hovered_ = false;
     CefRefPtr<CefLabelButton> new_space_button_;
@@ -1098,6 +1292,7 @@ class BrowserChrome final : public NavigationObserver {
     std::function<void(const std::vector<CornerPatch>&)> corner_sink_;
     std::vector<CornerPatch> last_patches_;
     bool patch_poll_pending_ = false;
+    std::size_t patch_poll_unchanged_ticks_ = 0;
     std::size_t browser_view_size_change_count_ = 0;
     std::size_t relayout_count_ = 0;
     std::vector<CefRect> last_browser_view_bounds_;

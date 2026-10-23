@@ -33,7 +33,7 @@ struct SplitPairing {
 // because its Tabs are move-only.
 class Space {
   public:
-    Space(SpaceId id, std::string name, SpaceColor color);
+    Space(SpaceId id, std::string name, SpaceColor color, std::string icon_id = {});
 
     Space(const Space&) = delete;
     Space& operator=(const Space&) = delete;
@@ -44,8 +44,10 @@ class Space {
     [[nodiscard]] SpaceId id() const noexcept;
     [[nodiscard]] const std::string& name() const noexcept;
     [[nodiscard]] SpaceColor color() const noexcept;
+    [[nodiscard]] const std::string& icon_id() const noexcept;
     void Rename(std::string name);
     void SetColor(SpaceColor color);
+    void SetIconId(std::string icon_id);
 
     [[nodiscard]] const std::vector<Tab>& tabs() const noexcept;
     [[nodiscard]] std::vector<Tab>& tabs() noexcept;
@@ -85,7 +87,9 @@ class Space {
     // child leaves the rest of the group intact. Unknown ids remove nothing.
     std::optional<Tab> RemoveTab(TabId id);
 
-    // Reorders; the active tab keeps its identity. Rejects out-of-range positions.
+    // Reorders; the active tab keeps its identity. A drop inside a child run lands after the
+    // complete group. Returns true only when the tab's final position differs from its start;
+    // out-of-range and normalized no-op moves return false.
     bool MoveTab(std::size_t from_index, std::size_t to_index);
 
     // Pins or unpins a tab and keeps the pinned group contiguous at the front:
@@ -104,6 +108,10 @@ class Space {
     // U2: returns the space's CefRequestContext, creating it lazily on first access.
     [[nodiscard]] CefRefPtr<CefRequestContext> request_context() const noexcept;
 
+    // The color mode the space's pages see (prefers-color-scheme and scrollbars). Applied to the
+    // context now when it exists, and when it is created.
+    void SetWebColorScheme(cef_color_variant_t scheme);
+
   private:
     void CreateRequestContextIfNeeded(const std::string& cache_path) const;
     void MaintainActiveIndexAfterRemoval(std::size_t removed_index);
@@ -111,10 +119,12 @@ class Space {
     SpaceId id_;
     std::string name_;
     SpaceColor color_;
+    std::string icon_id_;
     std::vector<Tab> tabs_;
     std::size_t active_tab_index_ = 0;
     std::optional<SplitPairing> split_;
     mutable CefRefPtr<CefRequestContext> request_context_;
+    cef_color_variant_t web_color_scheme_ = CEF_COLOR_VARIANT_SYSTEM;
 };
 
 }  // namespace island

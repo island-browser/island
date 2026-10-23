@@ -120,6 +120,32 @@ void IslandApp::BeginSpaceRenaming() {
     }
 }
 
+void IslandApp::SetActiveSpaceIcon(const std::string& icon_id) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(
+            browser_window_->SetSpaceIcon(browser_window_->active_space_index(), icon_id));
+    }
+}
+
+void IslandApp::SetSpaceIconForDev(std::size_t index, const std::string& icon_id) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        static_cast<void>(browser_window_->SetSpaceIcon(index, icon_id));
+    }
+}
+
+std::string IslandApp::ActiveSpaceIconId() const {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ == nullptr) {
+        return {};
+    }
+    const Space* space = browser_window_->FindSpace(browser_window_->active_space_id());
+    return space != nullptr ? space->icon_id() : std::string();
+}
+
 void IslandApp::MoveSpaceLeft() {
     CEF_REQUIRE_UI_THREAD();
 

@@ -53,6 +53,8 @@
 - Tab sleep (inactive background tabs release their `CefBrowser`; Settings → Tabs, palette command) and
   Peek (a floating single-window card with its own browser, opened from Cmd/middle-click, the
   context menu or new-tab opens) were added on 2026-10-15; see `src/main/AGENTS.md`.
+- Spaces can use one of 24 bundled Lucide icons. The optional id is stored in the session; the
+  sidebar switcher and collapsed rail fall back to their previous color mark/initial when absent.
 - Agentic integration is in scope as of 2026-10-06 at the project owner's request: the CEF-free
   `src/agent/` kernel provides an MCP tools endpoint (`http://127.0.0.1:<port>/mcp`, bearer token,
   discovery file) and an ACP client that runs an agent in the sidebar. GitHub Actions triggers
@@ -196,12 +198,13 @@ hand-maintained project instructions and take precedence over anything a nested 
 
 | File | Description |
 |------|-------------|
-| `CMakeLists.txt` | Top-level build: CEF sentinel check, font/icon resource gates, `island_stage_chrome_resources`, the `ISLAND_ENABLE_SEARCH` option, then `tests/` and `src/main/` |
+| `CMakeLists.txt` | Top-level build: CEF sentinel check, font/icon resource gates, bounded-directory staging in `island_stage_chrome_resources`, the `ISLAND_ENABLE_SEARCH` option, then `tests/` and `src/main/` |
 | `CLAUDE.md` | Loader that pulls this file in via `@AGENTS.md` |
 | `DESIGN.md` | Long-form product/visual design narrative |
 | `README.md` | Human-facing project overview |
 | `VERSION` | The single source of the version (SemVer); read by CMake and `scripts/version.py` |
 | `CHANGELOG.md` | Keep-a-Changelog release notes; the site repository renders them into its changelog page at build time |
+| `.gitbook.yaml` | GitBook Git Sync: serves `docs/user-guide/` (README.md, SUMMARY.md) |
 | `.clang-format` | Google base, 4-space indent, 100 columns, left-aligned pointers |
 
 ### Search build

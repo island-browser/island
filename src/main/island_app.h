@@ -74,6 +74,9 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
     void BeginSpaceRenaming();
+    void SetActiveSpaceIcon(const std::string& icon_id);
+    void SetSpaceIconForDev(std::size_t index, const std::string& icon_id);
+    [[nodiscard]] std::string ActiveSpaceIconId() const;
     // Space reorder menu entries; a move that would leave the space list is a
     // no-op.
     void MoveSpaceLeft();

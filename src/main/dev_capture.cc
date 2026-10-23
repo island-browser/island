@@ -1,8 +1,13 @@
 #include "dev_capture.h"
 
 #include <array>
+#include <charconv>
 #include <cstdlib>
+#include <optional>
+#include <string>
 #include <utility>
+
+#include "space_icon.h"
 
 namespace island {
 namespace {
@@ -96,6 +101,33 @@ std::string_view DevAgentFixtureName(std::string_view action) {
         return {};
     }
     return action.substr(kPrefix.size());
+}
+
+std::optional<DevSpaceIconAction> ParseDevSpaceIconAction(std::string_view action) {
+    constexpr std::string_view kPrefix = "space_icon:";
+    if (!action.starts_with(kPrefix)) {
+        return std::nullopt;
+    }
+    const std::string_view value = action.substr(kPrefix.size());
+    const std::size_t equals = value.find('=');
+    if (equals == std::string_view::npos || equals == 0 || equals + 1 >= value.size()) {
+        return std::nullopt;
+    }
+    std::size_t index = 0;
+    const char* const begin = value.data();
+    const char* const end = value.data() + equals;
+    const auto [parsed, error] = std::from_chars(begin, end, index);
+    if (error != std::errc() || parsed != end) {
+        return std::nullopt;
+    }
+    const std::string_view icon = value.substr(equals + 1);
+    if (icon == "none") {
+        return DevSpaceIconAction{.index = index, .icon_id = ""};
+    }
+    if (!IsKnownSpaceIconId(icon)) {
+        return std::nullopt;
+    }
+    return DevSpaceIconAction{.index = index, .icon_id = std::string(icon)};
 }
 
 }  // namespace island

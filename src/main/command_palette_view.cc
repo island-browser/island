@@ -569,16 +569,13 @@ void CommandPaletteView::ProjectResults() {
         const PaletteSurfaceSlot slot =
             highlighted ? PaletteSurfaceSlot::kHighlightedRow : PaletteSurfaceSlot::kRow;
         const ArgbColor fill = ResolvePaletteColor(slot);
-        const RowColors row_colors =
-            ResolveRowColors(tokens_, highlighted, /*hovered=*/false, /*slept=*/false);
         result_rows_[index]->SetBackgroundColor(fill.argb);
         // The row delegate remembers the slot so the theme-change re-assertion
         // restores the highlight rather than flattening every row.
         row_delegates_[index]->SetSlot(slot);
         result_labels_[index]->SetText(PaletteRowDisplayText(results[index]));
         result_labels_[index]->SetBackgroundColor(fill.argb);
-        result_labels_[index]->SetEnabledTextColors(
-            (tokens_.look == LookPreset::kNative ? row_colors.title : tokens_.text).argb);
+        result_labels_[index]->SetEnabledTextColors(tokens_.text.argb);
         result_labels_[index]->SetFontList(BrowserChrome::FontListForTokens(
             tokens_, (tokens_.look == LookPreset::kNative ? 13 : 14),
             highlighted ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
@@ -586,10 +583,7 @@ void CommandPaletteView::ProjectResults() {
         result_labels_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
         result_kinds_[index]->SetText(PaletteKindLabel(results[index]));
         result_kinds_[index]->SetBackgroundColor(fill.argb);
-        result_kinds_[index]->SetEnabledTextColors(
-            (tokens_.look == LookPreset::kNative && highlighted ? row_colors.title
-                                                                : tokens_.text_secondary)
-                .argb);
+        result_kinds_[index]->SetEnabledTextColors(tokens_.text_secondary.argb);
         result_kinds_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
     }
     if (divider_ != nullptr) {
@@ -620,8 +614,9 @@ void CommandPaletteView::ApplySurfaceColors() {
 
 ArgbColor CommandPaletteView::ResolvePaletteColor(PaletteSurfaceSlot slot) const {
     if (tokens_.look == LookPreset::kNative && slot == PaletteSurfaceSlot::kHighlightedRow) {
-        return ResolveRowColors(tokens_, /*selected=*/true, /*hovered=*/false, /*slept=*/false)
-            .fill;
+        // Native's highlight is the neutral raised plate, not the blue selection: blue stays for
+        // the active tab and focus rings.
+        return tokens_.segment_selected;
     }
     return PaletteSurfaceRoleForTokens(slot, tokens_);
 }

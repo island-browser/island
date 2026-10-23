@@ -10,15 +10,34 @@ constexpr char kDraftUrl[] = "https://next.example.test/";
 
 ValidatedAddress ValidDraft() { return {.url = kDraftUrl}; }
 
-TEST(AddressBarModel, RestsWithContextualDataPageDisplay) {
+TEST(AddressBarModel, NeverExposesAnUnknownDataPageUrl) {
     AddressBarModel model;
     model.UpdateCommittedUrl("data:text/html;charset=utf-8,Island%20Browser");
 
-    const AddressBarSnapshot snapshot = model.snapshot();
+    AddressBarSnapshot snapshot = model.snapshot();
     EXPECT_EQ(snapshot.mode, AddressBarMode::kResting);
-    EXPECT_EQ(snapshot.display_text, "Island");
-    EXPECT_EQ(snapshot.edit_text, "data:text/html;charset=utf-8,Island%20Browser");
+    EXPECT_EQ(snapshot.display_text, "island://local-page");
+    EXPECT_EQ(snapshot.edit_text, "island://local-page");
     EXPECT_EQ(snapshot.validation_error, std::nullopt);
+
+    model.Focus();
+    snapshot = model.snapshot();
+    EXPECT_EQ(snapshot.edit_text, "island://local-page");
+    EXPECT_EQ(snapshot.edit_text.find("data:"), std::string::npos);
+}
+
+TEST(AddressBarModel, UsesAnInternalPagesOwnDisplayUrlAndLeavesStartEmpty) {
+    AddressBarModel model;
+    model.UpdateInternalPage("island://settings");
+    model.Focus();
+    EXPECT_EQ(model.snapshot().display_text, "island://settings");
+    EXPECT_EQ(model.snapshot().edit_text, "island://settings");
+
+    model.Blur();
+    model.UpdateInternalPage("");
+    model.Focus();
+    EXPECT_TRUE(model.snapshot().display_text.empty());
+    EXPECT_TRUE(model.snapshot().edit_text.empty());
 }
 
 TEST(AddressBarModel, EntersEditingWithTheLatestCommittedUrl) {

@@ -18,6 +18,7 @@
 #include "agent/plan_fixture.h"
 #include "agent_context.h"
 #include "browser_window.h"
+#include "window_agent_host.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
@@ -144,7 +145,7 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
         {"accent", "#0a64d8"},      {"selection", "#0a64d8"}, {"accent_soft", "#dfe9f8"},
         {"accent_text", "#0a4fa8"}, {"warn_bg", "#fff8e6"},   {"warn_border", "#f5d38a"},
         {"warn_text", "#6a4a00"},   {"success", "#248a3d"},   {"danger", "#d70015"},
-        {"canvas", "#ebebef"},
+        {"segment_selected", "#e3e3e8"},                         {"canvas", "#ebebef"},
     };
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
@@ -161,6 +162,28 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
         ASSERT_TRUE(branch->array_val[i].IsString());
         EXPECT_EQ(branch->array_val[i].string_val, expected_branches[i]);
     }
+}
+
+TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenIsNeutralForEveryLook) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+
+    std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
+
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"set_look","look":"arc"})"));
+    state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    const Value* theme = state->FindMember("theme");
+    ASSERT_NE(theme, nullptr);
+    EXPECT_EQ(theme->StringOr("segment_selected", ""), "#e3e3e8");
+
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               *json::Parse(R"({"type":"set_look","look":"graphite"})"));
+    state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(state.has_value());
+    EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
 }
 
 TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
@@ -1285,6 +1308,8 @@ TEST(BrowserWindowPagesTest, RetryOfAStepThatDidNotFailSendsNothing) {
 TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivatesThem) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    // A research that runs (not one waiting for approval): its agent opens pages into the plan.
+    window->SetResearchTaskForTest("sample");
     window->OpenPlanFixtureTab();
     std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
     plan[2].status = "in_progress";
@@ -1310,6 +1335,8 @@ TEST(BrowserWindowPagesTest, ResearchPagesAreGroupedAndSelectingTheirNodeActivat
 TEST(BrowserWindowPagesTest, AnAgentOpenedResearchPageIsTheActiveTabItsToolsRead) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    // A research that runs (not one waiting for approval): its agent opens pages into the plan.
+    window->SetResearchTaskForTest("sample");
     window->OpenPlanFixtureTab();
 
     ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
@@ -1483,6 +1510,44 @@ TEST(BrowserWindowPagesTest, AViewYoungerThanOneHundredMillisecondsHoldsTheSwap)
     EXPECT_FALSE(window->ViewSwapPendingForTest());
 }
 
+TEST(BrowserWindowPagesTest, OpeningSettingsWaitsForTheYoungTabToSettle) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const TabId attached = window->active_tab_id();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedViewForSwapTest(attached);
+    window->BrowserCreatedForViewSwapTest(attached);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+    EXPECT_EQ(window->internal_page(), LocalPageKind::kSettings);
+}
+
+TEST(BrowserWindowPagesTest, HidingYoungSettingsWaitsForItToSettle) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
+    window->SetAttachedInternalPageForSwapTest(LocalPageKind::kSettings);
+
+    const std::size_t swaps_before = window->ViewSwapCountForTest();
+    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
+    EXPECT_TRUE(window->ViewSwapPendingForTest());
+    const std::uint64_t generation = window->AttachedViewGenerationForTest();
+    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
+    window->RecheckPendingViewSwapForTest(generation);
+    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
+    EXPECT_FALSE(window->ViewSwapPendingForTest());
+    EXPECT_FALSE(window->internal_page().has_value());
+}
+
 TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->ExecuteCommand(BrowserCommand::kNewTab);
@@ -1605,6 +1670,23 @@ TEST(BrowserWindowPagesTest, AStaleFallbackTimerDoesNothingToANewerAttachedView)
     EXPECT_TRUE(window->ViewSwapPendingForTest());
 }
 
+TEST(BrowserWindowPagesTest, ChangeSpaceIconSubmitShowsThePickerOnTheNextTaskNotInline) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->DisableUiTaskPostingForTest();
+    PaletteSelection selection;
+    selection.kind = PaletteEntryKind::kCommand;
+    selection.command = {.id = std::string(kChangeSpaceIconCommandId), .title = "Change"};
+    // The palette is still inside its own submit: the picker must not re-show it there.
+    window->OnCommandPaletteSubmitted(selection, "");
+    EXPECT_EQ(window->SpaceIconPickerShowsForTest(), 0U);
+    EXPECT_TRUE(window->SpaceIconPickerScheduledForTest());
+    // A second submit before the posted task runs does not queue a second picker.
+    window->OnCommandPaletteSubmitted(selection, "");
+    window->RunScheduledSpaceIconPickerForTest();
+    EXPECT_EQ(window->SpaceIconPickerShowsForTest(), 1U);
+    EXPECT_FALSE(window->SpaceIconPickerScheduledForTest());
+}
+
 TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothing) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     std::vector<std::string> sent;
@@ -1626,21 +1708,98 @@ TEST(BrowserWindowPagesTest, RetryAfterCancellingWhileAwaitingApprovalSendsNothi
     EXPECT_TRUE(sent.empty());
 }
 
-TEST(BrowserWindowPagesTest, AnAgentThatCreatesItsOwnSpaceStillGetsOrdinaryTabs) {
+TEST(BrowserWindowPagesTest, AnAgentPageOpenedFromAnotherSpaceStaysGroupedInThePlanSpace) {
     const ScopedAgentCommand command("true");
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetPlanPageUrlForTest(std::string(kPlanUrl));
     window->SetAgentSendForTest([](std::string) { return true; });
     ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
-    ASSERT_TRUE(window->CreateSpace("Agent's own"));
+    ASSERT_TRUE(window->CreateSpace("Person's space"));
+    const TabId persons_tab = window->active_tab_id();
     const std::size_t plan_space_tabs = SpaceAt(*window, 1).tab_count();
 
     ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
 
-    // The hub stays in the research space; the page is an ordinary tab of the active space.
-    EXPECT_EQ(SpaceAt(*window, 1).tab_count(), plan_space_tabs);
-    ASSERT_EQ(SpaceAt(*window, 2).tab_count(), 2U);
-    EXPECT_FALSE(SpaceAt(*window, 2).tabs()[1].group_parent().has_value());
+    const Space& research = SpaceAt(*window, 1);
+    ASSERT_EQ(research.tab_count(), plan_space_tabs + 1);
+    EXPECT_EQ(research.tabs().back().group_parent(), research.tabs().front().id());
+    EXPECT_EQ(research.tabs().back().startup_url(), "https://reviews.test/laptop");
+    EXPECT_EQ(window->active_space_index(), 2U);
+    EXPECT_EQ(window->active_tab_id(), persons_tab);
+    EXPECT_EQ(SpaceAt(*window, 2).tab_count(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, AResearchPageIsTheAgentsTargetWhenThePersonIsInAnotherSpace) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+    ASSERT_TRUE(window->CreateSpace("Person's space"));
+    const std::string persons_url = SpaceAt(*window, 2).tabs()[0].startup_url();
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+
+    // The agent's page is the Plan space's newest child, and no index means that page.
+    const BrowserWindow::AgentTabLookup lookup = window->ResolveAgentTab(std::nullopt);
+    ASSERT_TRUE(lookup.tab.has_value());
+    EXPECT_EQ(lookup.tab->space, 1U);
+    EXPECT_EQ(lookup.tab->tab, SpaceAt(*window, 1).tab_count() - 1);
+    EXPECT_EQ(window->AgentSpaceIndex(), 1U);
+
+    EXPECT_TRUE(window->NavigateAgentTab(std::nullopt, "https://reviews.test/next"));
+    EXPECT_EQ(SpaceAt(*window, 1).tabs().back().startup_url(), "https://reviews.test/next");
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), persons_url);
+    EXPECT_EQ(window->active_space_index(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, AddressFocusRepaintsOnlyItsColorsNotTheWholeWindow) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    // Native is the default look: focusing and blurring the address field changes three
+    // colors and nothing else (no full ApplyTheme, no page or start-page re-render).
+    window->SetAddressFocusRingSuppressed(true);
+    EXPECT_EQ(window->LastAddressFocusRepaintForTest(),
+              BrowserWindow::AddressFocusRepaint::kColorsOnly);
+    window->SetAddressFocusRingSuppressed(false);
+    EXPECT_EQ(window->LastAddressFocusRepaintForTest(),
+              BrowserWindow::AddressFocusRepaint::kColorsOnly);
+}
+
+TEST(BrowserWindowPagesTest, DuringResearchNoIndexActsOnTheAgentsPageNotThePersons) {
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_EQ(window->StartResearch("Research topic").code, BrowserWindow::ResearchStart::kStarted);
+    ASSERT_TRUE(window->CreateSpace("Person's space"));
+    const std::string persons_url = SpaceAt(*window, 2).tabs()[0].startup_url();
+    ASSERT_TRUE(window->OpenAgentTab("https://reviews.test/laptop"));
+    WindowAgentHost host(*window);
+    const auto call = [&](std::string_view tool, Value args = Value::MakeObject()) {
+        std::optional<agent::ToolResult> result;
+        host.toolbox().Call(tool, args, [&](agent::ToolResult r) { result = std::move(r); });
+        return result.value_or(agent::ToolResult::Error("no result"));
+    };
+
+    // Indices and listings refer to the Plan's space, though the person is in another space.
+    const Value tabs = *json::Parse(call("browser_list_tabs").content[0].text);
+    EXPECT_EQ(tabs.FindMember("tabs")->array_val.size(), SpaceAt(*window, 1).tab_count());
+
+    // Without an index the agent's own page is the target.
+    EXPECT_FALSE(call("browser_navigate",
+                      Value::MakeObject().Set("url", Value::String("https://reviews.test/next")))
+                     .is_error);
+    EXPECT_EQ(SpaceAt(*window, 1).tabs().back().startup_url(), "https://reviews.test/next");
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), persons_url);
+
+    // When the agent's page is closed, the call fails and the person's tab is left alone.
+    ASSERT_TRUE(window->SelectSpaceIndex(1));
+    ASSERT_TRUE(window->CloseAgentTab(SpaceAt(*window, 1).tab_count() - 1));
+    ASSERT_TRUE(window->SelectSpaceIndex(2));
+    const agent::ToolResult gone =
+        call("browser_navigate", Value::MakeObject().Set("url", Value::String("https://x.test/")));
+    EXPECT_TRUE(gone.is_error);
+    EXPECT_NE(gone.content[0].text.find("closed"), std::string::npos);
+    EXPECT_EQ(SpaceAt(*window, 2).tabs()[0].startup_url(), persons_url);
 }
 
 TEST(BrowserWindowPagesTest, ABackgroundChildIsSavedWithItsStartupAddress) {
