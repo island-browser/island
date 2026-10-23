@@ -687,17 +687,105 @@ class AgentContextChip(unittest.TestCase):
         self.assertIn('type: "clear_context"', clear)
 
     def test_the_composer_focus_is_the_border_not_an_accent_ring(self) -> None:
-        self.assertRegex(self.html, r"\.composer textarea:focus-visible\s*\{\s*outline:\s*none")
+        self.assertRegex(self.html, r"textarea:focus-visible\s*\{\s*outline:\s*none")
         self.assertRegex(self.html, r"\.composer:focus-within\s*\{\s*border-color:\s*var\(--text-2\)")
-        for selector in (".send:focus-visible", ".context-clear:focus-visible"):
-            rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", self.html)
-            self.assertIsNotNone(rule, selector)
-            self.assertIn("var(--text-2)", rule.group(1))
-            self.assertNotIn("var(--accent)", rule.group(1))
-            self.assertIn("border-radius", rule.group(1))
+        # Buttons take a neutral 2 px ring (a box-shadow that follows the radius), never blue.
+        focus = re.search(r"button:focus-visible, a:focus-visible, input:focus-visible\s*\{([^}]*)\}",
+                          self.html)
+        self.assertIsNotNone(focus)
+        self.assertIn("outline: none", focus.group(1))
+        self.assertIn("box-shadow: 0 0 0 2px var(--text-2)", focus.group(1))
+        self.assertNotIn("var(--accent)", focus.group(1))
 
     def test_the_quote_is_set_as_text(self) -> None:
         self.assertIn('getElementById("quote-text").textContent = quote', self.html)
+
+
+def agent_component_css(html: str) -> str:
+    """The agent page's CSS without its two pre-theme :root fallback blocks."""
+    css = html[html.index("<style>") : html.index("</style>")]
+    return re.sub(r":root[^{]*\{[^}]*\}", "", css)
+
+
+class AgentPanelLook(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_the_header_pill_has_amber_working_idle_and_plain_tones(self) -> None:
+        self.assertIn('class="status-pill" id="status-pill" data-tone="plain"', self.html)
+        self.assertRegex(self.html, r"\.status-pill\[data-tone=\"warn\"\][^{]*\{[^}]*var\(--warn-bg\)")
+        self.assertIn('"Waiting for approval"', self.html)
+        self.assertIn('"Working"', self.html)
+        self.assertIn('"Idle"', self.html)
+        self.assertIn('pills.setAttribute("data-tone", pill.tone)', self.html)
+        # The existing wording of the error and not-running states is kept.
+        self.assertIn("pill = { tone: \"plain\", text: session.status || \"\" }", self.html)
+
+    def test_the_send_button_is_round_and_takes_the_accent(self) -> None:
+        rule = re.search(r"\n\.send \{([^}]*)\}", self.html)
+        self.assertIsNotNone(rule)
+        self.assertIn("border-radius: 50%", rule.group(1))
+        self.assertIn("background: var(--accent)", rule.group(1))
+        self.assertIn("color: #FFF", rule.group(1))
+        self.assertRegex(self.html, r"\.send:disabled \{ opacity: \.4;")
+
+    def test_the_composer_placeholder_names_the_tab(self) -> None:
+        self.assertIn('placeholder="Ask about this tab or anything"', self.html)
+        self.assertNotIn("Ask anything, or tell it what to do", self.html)
+
+    def test_the_tab_chip_and_quote_chip_share_the_chip_style(self) -> None:
+        self.assertRegex(self.html, r"\.context \{[^}]*height: 22px")
+        self.assertRegex(self.html, r"\.context \{[^}]*border-radius: 5px")
+        self.assertRegex(self.html, r"\.quote-chip \{[^}]*height: 22px")
+        self.assertRegex(self.html, r"\.quote-chip \{[^}]*border-radius: 5px")
+
+    def test_only_neutral_focus_rules_exist(self) -> None:
+        css = agent_component_css(self.html)
+        for match in re.finditer(r"([^{}]*:focus[^{}]*)\{([^}]*)\}", css):
+            for outline in re.findall(r"outline:\s*([^;]+);", match.group(2)):
+                with self.subTest(selector=match.group(1).strip()):
+                    self.assertEqual(outline.strip(), "none")
+            self.assertNotIn("var(--accent)", match.group(2))
+
+    def test_component_css_uses_theme_variables_and_no_hex_but_white(self) -> None:
+        css = agent_component_css(self.html)
+        for match in re.finditer(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b", css):
+            with self.subTest(color=match.group(0)):
+                self.assertIn(match.group(0).upper(), ("#FFF", "#FFFFFF"))
+
+    def test_the_send_button_stays_on_the_right_when_the_chip_row_is_hidden(self) -> None:
+        # With #chiprow hidden, the send button is the row's only child: it must still sit right.
+        rule = re.search(r"\n\.send \{([^}]*)\}", self.html)
+        self.assertIsNotNone(rule)
+        self.assertIn("margin-left: auto", rule.group(1))
+        self.assertIn('id="chiprow" hidden', self.html)
+
+    def test_a_queued_bubble_has_a_one_pixel_dashed_neutral_border(self) -> None:
+        self.assertIn(".user.queued .bubble { opacity: .65; border: 1px dashed var(--border-2); }", self.html)
+        self.assertNotIn("border-style: dashed", self.html)
+
+    def test_every_working_pill_pulses_whatever_the_session_state(self) -> None:
+        self.assertRegex(
+            self.html,
+            r'\.status-pill\[data-tone="busy"\] \.dot, [^{]*\{\s*animation: pulse',
+        )
+
+    def test_a_long_tool_name_ellipsizes_and_the_host_takes_the_rest(self) -> None:
+        name = re.search(r"\.tool \.name \{([^}]*)\}", self.html)
+        self.assertIsNotNone(name)
+        for fragment in ("overflow: hidden", "text-overflow: ellipsis", "min-width: 0", "max-width: 70%"):
+            self.assertIn(fragment, name.group(1))
+        self.assertRegex(self.html, r"\.tool \.host \{[^}]*flex: 1 1 0")
+
+    def test_a_collect_checkbox_rings_its_row_on_keyboard_focus(self) -> None:
+        self.assertIn(".collect-row:has(input:focus-visible) { box-shadow: 0 0 0 2px var(--text-2); }", self.html)
+
+    def test_the_tool_row_is_one_line_with_a_spoken_status(self) -> None:
+        node = self.html[self.html.index("function toolNode") :][:900]
+        self.assertIn('el("span", "name"', node)
+        self.assertIn('el("span", "host"', node)
+        self.assertIn('"visually-hidden"', node)
+        self.assertNotIn("innerHTML", node)
 
 
 class AgentConfirmationCard(unittest.TestCase):

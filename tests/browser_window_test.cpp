@@ -219,8 +219,7 @@ TEST(BrowserWindowTest, GivenNativeAddressWhenFocusedThenATwoDipAccentRingIsPain
     EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
 }
 
-TEST(BrowserWindowTest,
-     GivenNativeAddressFocusWhenTextfieldRingResolvedThenItIsThePlateFillOverAnExtremeBackdrop) {
+TEST(BrowserWindowTest, GivenAddressFocusWhenTextfieldRingResolvedThenItIsThePlateFillInEveryLook) {
     const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const ChromeTokens arc = ChromeTokens::ForTheme(ChromeTheme::kDark);
@@ -234,11 +233,15 @@ TEST(BrowserWindowTest,
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/false),
               dark.canvas);
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false), dark.accent);
-    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.accent);
-    EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(arc, /*address_focused=*/true), arc.canvas);
+    // Arc and Graphite: the inner textfield ring is the well it sits on (one ring, the outer
+    // pill's accent), and the outer ring stays the accent.
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.well);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/true), arc.well);
     EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(dark, /*address_focused=*/true), dark.fill);
     EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(dark, /*address_focused=*/false), dark.border);
-    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/true), arc.border);
+    EXPECT_EQ(BrowserChrome::TextfieldOutlineColor(arc, /*address_focused=*/false), arc.border);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(arc, /*focused=*/true), arc.accent);
+    EXPECT_EQ(BrowserChrome::AddressOutlineColor(dark, /*focused=*/true), dark.accent);
 }
 
 TEST(BrowserWindowTest, CornerPatchPollKeepsASlowTickAfterTheQuietBurst) {
@@ -335,13 +338,12 @@ TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAre
     const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
 
     ASSERT_NE(tab_strip, nullptr);
-    // Native's New Tab row closes the list, after the last tab.
-    ASSERT_EQ(tab_strip->children.size(), 5U);
+    // The list holds its headers and tab rows only; there is no New Tab row.
+    ASSERT_EQ(tab_strip->children.size(), 4U);
     EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kFavoritesSectionHeader);
     EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabStripEntry);
     EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
     EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
-    EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kRailNewTab);
 }
 
 TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsHeader) {
@@ -367,10 +369,9 @@ TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsH
     const ChromeViewId entry = ChromeViewId::kTabStripEntry;
     const ChromeViewId kicker = ChromeViewId::kTabGroupKicker;
     // The children stay out of Favorites and the header precedes the first kicker.
-    EXPECT_EQ(ids, (std::vector<ChromeViewId>{
-                       ChromeViewId::kFavoritesSectionHeader, entry, entry,
-                       ChromeViewId::kTabsSectionHeader, kicker, entry, entry, kicker, entry, entry,
-                       ChromeViewId::kRailNewTab}));
+    EXPECT_EQ(ids, (std::vector<ChromeViewId>{ChromeViewId::kFavoritesSectionHeader, entry, entry,
+                                              ChromeViewId::kTabsSectionHeader, kicker, entry,
+                                              entry, kicker, entry, entry}));
 }
 
 TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesFirst) {
@@ -385,10 +386,10 @@ TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesF
     const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
 
     ASSERT_NE(tab_strip, nullptr);
-    ASSERT_EQ(tab_strip->children.size(), 6U);
+    ASSERT_EQ(tab_strip->children.size(), 5U);
     EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
     EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabGroupKicker);
-    EXPECT_EQ(tab_strip->children[5].id, ChromeViewId::kRailNewTab);
+    EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kTabStripEntry);
 }
 
 TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThenInsetDoes) {

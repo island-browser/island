@@ -4,7 +4,7 @@ Tabs hold pages. Spaces hold tabs. Use a space for each area of your life or wor
 
 ## Open, close and switch tabs
 
-* To open a new tab, press ⌘T (Ctrl+T), or click **New Tab** in the sidebar. In the Native look, the row sits below the last tab.
+* To open a new tab, press ⌘T (Ctrl+T), or choose **New Tab** from the Browser menu (macOS) or the command palette.
 * To close the current tab, press ⌘W (Ctrl+W).
 * To bring back a closed tab, press ⇧⌘T (Ctrl+Shift+T).
 * To go to the next or previous tab, press ⇧⌘] or ⇧⌘[ (Ctrl+Shift+] or Ctrl+Shift+[). Ctrl+Tab and Ctrl+Shift+Tab work too.
