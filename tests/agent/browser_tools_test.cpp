@@ -692,23 +692,33 @@ TEST(BrowserToolsTest, LocatorScriptsEscapeSelectors) {
               R"("a\u2028b")");
 }
 
-// The normalizer's cases; facts_probe.cjs checks the page-side copy against the same pairs.
+// Label pairs for the live-label rule, shared in spirit with facts_probe.cjs (which runs the same
+// pairs through the page copy). `match` is whether the labels count as the same after a card.
 struct LiveCase {
     const char* before;
     const char* after;
-    bool same_after_normalizing;
+    bool match;
 };
 const LiveCase kLiveCases[] = {
-    // Time-like runs and one trailing counter pass.
+    // Countdowns and counters that must keep matching.
     {"Resend in 0:42", "Resend in 0:41", true},
     {"Pay now (expires 4:59)", "Pay now (expires 4:58)", true},
     {"Like (12)", "Like (13)", true},
     {"Checkout (3)", "Checkout (12)", true},
-    // Amounts and quantities stay exact, with or without a counter.
+    // Prices, amounts and quantities that must not match. Each pair is a must-not-click case.
     {"Pay $5", "Pay $500", false},
     {"Transfer 10 USD", "Transfer 9000 USD", false},
     {"Buy 1", "Buy 10", false},
     {"Pay $5 (1)", "Pay $5 (2)", false},
+    {"Pay 5 (1)", "Pay 5 (2)", false},
+    {"Köp 29:90", "Köp 299:90", false},
+    {"Betala 29:90 kr", "Betala 299:90 kr", false},
+    {"Pay 5 SEK (1)", "Pay 5 SEK (2)", false},
+    {"Оплатить 500 руб (1)", "Оплатить 500 руб (2)", false},
+    {"Pay 5 USDT (1)", "Pay 5 USDT (2)", false},
+    {"Pay ＄5 (1)", "Pay ＄5 (2)", false},
+    {"Pay ₿ (5)", "Pay ₿ (500)", false},
+    {"Order # (#)", "Order 1:00 (5)", false},
 };
 
 TEST(BrowserToolsTest, LiveCountersNormalizeOnlyTimesAndATrailingCounter) {
@@ -718,49 +728,63 @@ TEST(BrowserToolsTest, LiveCountersNormalizeOnlyTimesAndATrailingCounter) {
     EXPECT_EQ(NormalizeLiveCounters("Pay now (expires 4:59)"), "Pay now (expires #)");
     EXPECT_EQ(NormalizeLiveCounters("Checkout (3)"), "Checkout (#)");
     EXPECT_EQ(NormalizeLiveCounters("Checkout (12)  "), "Checkout (#)  ");
-    // Not a time: three fraction digits, or a counter that is not last.
+    // A counter is normalized only when no digit comes before it; a time still is.
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 (1)"), "Pay 5 (1)");
+    EXPECT_EQ(NormalizeLiveCounters("Timer 0:42 (3)"), "Timer # (3)");
+    // Not a time: minutes or seconds above 59, three leading digits, or a counter not last.
+    EXPECT_EQ(NormalizeLiveCounters("29:90"), "29:90");
+    EXPECT_EQ(NormalizeLiveCounters("299:90"), "299:90");
+    EXPECT_EQ(NormalizeLiveCounters("1000:00"), "1000:00");
     EXPECT_EQ(NormalizeLiveCounters("10:423"), "10:423");
     EXPECT_EQ(NormalizeLiveCounters("Like (12) now"), "Like (12) now");
     // Plain digits stay exact.
     EXPECT_EQ(NormalizeLiveCounters("Buy 1"), "Buy 1");
     EXPECT_EQ(NormalizeLiveCounters("a12b3"), "a12b3");
     EXPECT_EQ(NormalizeLiveCounters("Delete account"), "Delete account");
-    // A currency symbol or ISO code turns normalization off for the whole label.
+    // A currency mark (symbol, ISO code, token in any case, Cyrillic word) or a '#' turns it off.
     EXPECT_EQ(NormalizeLiveCounters("Pay $5 (1)"), "Pay $5 (1)");
     EXPECT_EQ(NormalizeLiveCounters("Transfer 10 usd"), "Transfer 10 usd");
+    EXPECT_EQ(NormalizeLiveCounters("Pay 5 kr"), "Pay 5 kr");
     EXPECT_EQ(NormalizeLiveCounters("Pay 5 €"), "Pay 5 €");
     EXPECT_EQ(NormalizeLiveCounters("Pay 5 ₽ (2)"), "Pay 5 ₽ (2)");
-    // Letters that only contain a code are not the code.
+    EXPECT_EQ(NormalizeLiveCounters("Оплатить 500 руб (1)"), "Оплатить 500 руб (1)");
+    EXPECT_EQ(NormalizeLiveCounters("Order # (#)"), "Order # (#)");
+    // Edge cases the page copy must match too (facts_probe.cjs).
+    EXPECT_EQ(NormalizeLiveCounters("1:02:034"), "#:034");
+    EXPECT_EQ(NormalizeLiveCounters("1:00:2:00"), "#:#");
+    // Letters that only contain a token are not the token.
     EXPECT_EQ(NormalizeLiveCounters("Usdx 0:42"), "Usdx #");
-    for (const LiveCase& c : kLiveCases) {
-        EXPECT_EQ(NormalizeLiveCounters(c.before) == NormalizeLiveCounters(c.after),
-                  c.same_after_normalizing)
-            << c.before << " -> " << c.after;
-    }
+    EXPECT_EQ(NormalizeLiveCounters("Okra 0:42"), "Okra #");
 }
 
-// The button's label as the page reports it, a submit control with page origin a.test.
+TEST(BrowserToolsTest, LiveLabelsMatchOnlyWhatTheRuleAllows) {
+    for (const LiveCase& c : kLiveCases) {
+        EXPECT_EQ(LiveLabelsMatch(c.before, c.after), c.match) << c.before << " -> " << c.after;
+        EXPECT_EQ(LiveLabelsMatch(c.after, c.before), c.match) << c.after << " -> " << c.before;
+    }
+    // A literal '#' must not collide with a normalized counter, in either direction.
+    EXPECT_FALSE(LiveLabelsMatch("Order 1:00 (5)", "Order # (#)"));
+    EXPECT_FALSE(LiveLabelsMatch("Order # (#)", "Order 1:00 (5)"));
+}
+
+// The button's label as the page reports it: a submit control on a.test.
 std::string ButtonFacts(const std::string& field, const std::string& value) {
     return std::string(R"({"ok":true,"x":10,"y":20,"facts":{"tag":"button",")") + field + R"(":")" +
            value + R"(","is_submit":true,"page_origin":"https://a.test"}})";
 }
 
 TEST(BrowserToolsTest, LiveCountersPressAfterTheCard) {
-    const std::vector<std::pair<std::string, std::string>> pairs = {
-        {"Resend in 0:42", "Resend in 0:41"},
-        {"Pay now (expires 4:59)", "Pay now (expires 4:58)"},
-        {"Checkout (3)", "Checkout (12)"},
-    };
-    for (const auto& [before, after] : pairs) {
+    for (const LiveCase& c : kLiveCases) {
+        if (!c.match) continue;
         FakeBrowserHost host;
         BrowserToolbox toolbox(host);
-        host.QueueScriptResult(ButtonFacts("text", before));
-        host.QueueScriptResult(ButtonFacts("text", after));
+        host.QueueScriptResult(ButtonFacts("text", c.before));
+        host.QueueScriptResult(ButtonFacts("text", c.after));
         host.answers.push_back(ConfirmationAnswer::kAllowOnce);
         EXPECT_FALSE(
             CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1))).is_error)
-            << before;
-        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3) << before;
+            << c.before << " -> " << c.after;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 3) << c.before;
     }
     FakeBrowserHost host;
     BrowserToolbox toolbox(host);
@@ -773,23 +797,19 @@ TEST(BrowserToolsTest, LiveCountersPressAfterTheCard) {
 }
 
 TEST(BrowserToolsTest, ChangedAmountOrCountNeverClicksAfterTheCard) {
-    // The person approved one amount; the page now shows another. Nothing may be clicked.
-    const std::vector<std::pair<std::string, std::string>> pairs = {
-        {"Pay $5", "Pay $500"},
-        {"Transfer 10 USD", "Transfer 9000 USD"},
-        {"Buy 1", "Buy 10"},
-        {"Pay $5 (1)", "Pay $5 (2)"},
-    };
-    for (const auto& [before, after] : pairs) {
+    // The person approved one amount or count; the page now shows another. Nothing may be clicked.
+    for (const LiveCase& c : kLiveCases) {
+        if (c.match) continue;
         FakeBrowserHost host;
         BrowserToolbox toolbox(host);
-        host.QueueScriptResult(ButtonFacts("text", before));
-        host.QueueScriptResult(ButtonFacts("text", after));
+        host.QueueScriptResult(ButtonFacts("text", c.before));
+        host.QueueScriptResult(ButtonFacts("text", c.after));
         host.answers.push_back(ConfirmationAnswer::kAllowOnce);
         const ToolResult r =
             CallTool(toolbox, "page_click", Value::MakeObject().Set("ref", Value::Int(1)));
-        EXPECT_TRUE(r.is_error) << before << " -> " << after;
-        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0) << before << " -> " << after;
+        EXPECT_TRUE(r.is_error) << c.before << " -> " << c.after;
+        EXPECT_EQ(CountMethod(host, "Input.dispatchMouseEvent"), 0)
+            << c.before << " -> " << c.after;
     }
 }
 

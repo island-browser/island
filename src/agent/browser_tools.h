@@ -155,12 +155,17 @@ struct ToolDefinition {
     bool read_only = false;
 };
 
-// Normalizes the live counters in a label before the post-card re-check compares it: a time-like
-// run
-// ("0:42", "1:02:03") becomes "#", and one trailing parenthesized counter ("Like (12)") becomes
-// "(#)". A label with a currency symbol or ISO code is returned unchanged, so an amount that
-// changes never passes. Every other digit stays exact.
+// The normalized form of a label for the post-card re-check. Two forms are normalized: a time-like
+// run (minutes and seconds 00-59: "0:42", "1:02:03") becomes "#", and a trailing parenthesized
+// counter ("Like (12)") becomes "(#)" when no digit comes before it. A label with a currency mark
+// (see kCurrencyMarks in browser_tools.cc) or a '#' is returned unchanged. Every other digit stays
+// exact.
 std::string NormalizeLiveCounters(std::string_view text);
+
+// True when two labels may be treated as the same after a card: identical, or both free of the
+// unsafe marks above and equal once normalized. A '#' or currency label never matches a different
+// label, so the placeholder cannot collide with a literal '#'.
+bool LiveLabelsMatch(std::string_view a, std::string_view b);
 
 class BrowserToolbox {
   public:

@@ -92,21 +92,25 @@ The word list lives in `kConsequentialWords` (`action_gate.cc`): English and Rus
 matched as whole words, case-insensitive, with spaces normalized and Cyrillic folded.
 
 Re-check after a card (`after_wait`): the target is found again and `SameElement` compares it with
-what was approved. Text and aria-label compare through `NormalizeLiveCounters` (`browser_tools.h`),
-which normalizes only two forms: a time-like run (`M:SS` or `H:MM:SS`, whole digit runs) becomes
-`#`, and one trailing parenthesized counter (`(12)` at the end) becomes `(#)`. So a countdown
-("Resend in 0:42" → "0:41", "Pay now (expires 4:59)") or a counter ("Like (12)" → "(13)",
-"Checkout (3)" → "(12)") still matches a second later. A label with a currency symbol or ISO code
-(`kCurrencySymbols`, `kCurrencyCodes`) is compared exactly, and every other digit stays exact, so
-"Pay $5" → "Pay $500", "Transfer 10 USD" → "Transfer 9000 USD", "Buy 1" → "Buy 10" and "Pay $5 (1)" →
-"Pay $5 (2)" fail. The page's `SyntheticClickScript` applies the same rule in JavaScript
-(`kLiveCountersJs`, built from the same tables). `tests/agent/facts_probe.cjs` runs that copy on the
-same pairs. Everything else stays exact: tag, type, autocomplete, name, id, is_submit and page
-origin. `StillApproved` then judges the fresh facts with `Classify`: the element must be free now,
-or need the same action and rule the person saw. A word change ("Delete account") fails the check,
-and so does a digits-only change in name or id. The failing branch of `StillApproved` is
-belt-and-braces: no fact outside `SameElement`'s set can turn an approved confirmation into another
-rule or a block, so no test reaches it.
+what was approved. Text and aria-label compare through `LiveLabelsMatch` (`browser_tools.h`). Two
+forms are normalized by `NormalizeLiveCounters`: a time-like run (minutes and seconds 00-59, one or
+two leading digits: "0:42", "1:02:03") becomes `#`, and one trailing parenthesized counter ("Like
+(12)") becomes `(#)` when no digit comes before it. So a countdown ("Resend in 0:42" → "0:41",
+"Pay now (expires 4:59)" → "4:58") or a counter ("Like (12)" → "(13)", "Checkout (3)" → "(12)")
+still matches a second later. Everything else is exact, and a label with a currency mark or a `#`
+is compared exactly. Currency marks are `kCurrencyMarks` in `browser_tools.cc`: ASCII-letter entries
+match as whole tokens in any case ("SEK", "kr", "USDT"), other entries as substrings ("$", "руб",
+"р."). So "Pay $5" → "Pay $500", "Transfer 10 USD" → "Transfer 9000 USD", "Buy 1" → "Buy 10", "Pay $5 (1)"
+→ "Pay $5 (2)", "Pay 5 (1)" → "Pay 5 (2)", "Köp 29:90" → "Köp 299:90" and "Betala 29:90 kr" → "Betala
+299:90 kr" fail. A literal `#` is unsafe for the same reason: the placeholder must not collide with
+it. The page's `SyntheticClickScript` applies the same rule in JavaScript (`kLiveCountersJs`, built
+from the same table), and `tests/agent/facts_probe.cjs` runs that copy on the same pairs. Everything
+else stays exact: tag, type, autocomplete, name, id, is_submit and page origin. `StillApproved` then
+judges the fresh facts with `Classify`: the element must be free now, or need the same action and
+rule the person saw. A word change ("Delete account") fails the check, and so does a digits-only
+change in name or id. The failing branch of `StillApproved` is belt-and-braces: no fact outside
+`SameElement`'s set can turn an approved confirmation into another rule or a block, so no test
+reaches it.
 
 ### Extension points
 

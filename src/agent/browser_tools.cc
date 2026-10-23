@@ -1,5 +1,6 @@
 #include "browser_tools.h"
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <set>
@@ -218,37 +219,44 @@ std::string ClickTargetScript(const std::string& locator) {
 // Clicks a box-less element with element.click(). The element is found again by its locator, so
 // the script first checks that it is still the element the gate judged (`expected` is that
 // element's facts as a JSON object) and still has no box.
-// Currency marks (symbols and ISO codes) for NormalizeLiveCounters: a label that carries one is
-// compared exactly. Shared with the page script below, so both sides read the same table.
-constexpr std::string_view kCurrencySymbols[] = {"$", "€", "£", "¥", "₽", "₹", "₩",
-                                                 "₺", "₴", "₱", "₪", "¢", "₫"};
-constexpr std::string_view kCurrencyCodes[] = {"USD", "EUR", "GBP", "JPY", "RUB", "CNY", "CHF",
-                                               "CAD", "AUD", "INR", "KRW", "BRL", "MXN"};
+// Currency marks for the live-label rule (NormalizeLiveCounters): a label that carries one is
+// compared exactly. A mark of ASCII letters only is a whole token, any case ("SEK", "kr"); any
+// other mark is a substring ("$", "руб", "р."). The page copy below reads this same table, so
+// both sides agree on every entry (facts_probe.cjs runs the pairs in browser_tools_test.cpp).
+constexpr std::string_view kCurrencyMarks[] = {
+    "$",   "€",   "£",   "¥",   "¢",   "₽",   "₴",   "₸",    "₹",    "₩",   "₺",   "₪",   "₫",
+    "₱",   "₦",   "₿",   "₡",   "₵",   "₼",   "₾",   "＄",   "￥",   "￡",  "￠",  "元",  "円",
+    "zł",  "Zł",  "ZŁ",  "Kč",  "KČ",  "kč",  "руб", "Руб",  "РУБ",  "р.",  "Р.",  "лв",  "Лв",
+    "ЛВ",  "USD", "EUR", "GBP", "JPY", "RUB", "CNY", "RMB",  "CHF",  "CAD", "AUD", "NZD", "HKD",
+    "SGD", "SEK", "NOK", "DKK", "ISK", "PLN", "CZK", "HUF",  "RON",  "TRY", "UAH", "ZAR", "ILS",
+    "THB", "INR", "KRW", "BRL", "MXN", "BTC", "ETH", "USDT", "USDC", "kr",  "kn",  "Ft",  "lei",
+};
 
-// The counter normalizer, in page JavaScript. It mirrors NormalizeLiveCounters exactly: the same
-// time and counter forms, the same currency test. Tests pin both through the same cases.
+// The live-label rule in page JavaScript. It mirrors NormalizeLiveCounters and LiveLabelsMatch
+// exactly. `__islandCurrencyMarks` is the table above, passed in by SyntheticClickScript.
 constexpr std::string_view kLiveCountersJs = R"JS(
+  const liveTokens = __islandCurrencyMarks.filter((m) => /^[A-Za-z]+$/.test(m));
+  const liveSymbols = __islandCurrencyMarks.filter((m) => !/^[A-Za-z]+$/.test(m));
+  const liveTokenRe = new RegExp('(^|[^A-Za-z])(' + liveTokens.join('|') + ')(?![A-Za-z])', 'i');
+  const liveUnsafe = (s) => s.indexOf('#') !== -1 || liveSymbols.some((m) => s.indexOf(m) !== -1) ||
+    liveTokenRe.test(s);
   const liveCounters = (text) => {
-    const s = String(text);
-    const currency = __islandCurrencySymbols.some((m) => s.indexOf(m) !== -1) ||
-      new RegExp('(^|[^A-Za-z])(' + __islandCurrencyCodes.join('|') + ')(?![A-Za-z])', 'i').test(s);
-    if (currency) return s;
-    return s.replace(/(^|[^0-9])[0-9]+:[0-9]{2}(:[0-9]{2})?(?![0-9])/g, (m, pre) => pre + '#')
-      .replace(/\([0-9]+\)[ \t]*$/, (m) => '(#)' + m.slice(m.indexOf(')') + 1));
+    let out = String(text);
+    const counter = /^([^0-9]*)\([0-9]+\)([ \t]*)$/.exec(out);
+    if (counter) out = counter[1] + '(#)' + counter[2];
+    return out.replace(/(^|[^0-9])[0-9]{1,2}:[0-5][0-9](:[0-5][0-9])?(?![0-9])/g, (m, pre) => pre + '#');
   };
+  const liveEqual = (a, b) => a === b || (!liveUnsafe(String(a)) && !liveUnsafe(String(b)) &&
+    liveCounters(a) === liveCounters(b));
 )JS";
 
 std::string SyntheticClickScript(const std::string& locator, const std::string& expected) {
-    std::string currency = "const __islandCurrencySymbols = [";
-    for (std::string_view symbol : kCurrencySymbols) {
-        currency += JsStringLiteral(std::string(symbol)) + ",";
+    std::string marks = "const __islandCurrencyMarks = [";
+    for (std::string_view mark : kCurrencyMarks) {
+        marks += JsStringLiteral(std::string(mark)) + ",";
     }
-    currency += "]; const __islandCurrencyCodes = [";
-    for (std::string_view code : kCurrencyCodes) {
-        currency += JsStringLiteral(std::string(code)) + ",";
-    }
-    currency += "];";
-    return "(() => { const el = " + locator + "; const expected = " + expected + ";" + currency +
+    marks += "];";
+    return "(() => { const el = " + locator + "; const expected = " + expected + ";" + marks +
            std::string(kLiveCountersJs) + std::string(kFactsJs) + R"JS(
   if (!el) return JSON.stringify({ok: false, error: 'element not found; call page_snapshot for fresh refs'});
   const rect = el.getBoundingClientRect();
@@ -256,7 +264,7 @@ std::string SyntheticClickScript(const std::string& locator, const std::string& 
   const liveKeys = ['text', 'aria_label'];
   const same = rect.width === 0 && rect.height === 0 &&
     Object.keys(expected).every((key) => liveKeys.includes(key)
-      ? liveCounters(facts[key]) === liveCounters(expected[key])
+      ? liveEqual(facts[key], expected[key])
       : facts[key] === expected[key]);
   if (!same) return JSON.stringify({ok: false, error: 'The page changed while waiting; take a fresh snapshot.'});
   el.click();
@@ -403,11 +411,10 @@ std::optional<ElementFacts> ParseFacts(const Value& script_result) {
 // an opaque frame) are the same; one missing and one present are not.
 bool SameElement(const std::optional<ElementFacts>& a, const std::optional<ElementFacts>& b) {
     if (!a || !b) return !a && !b;
-    return a->tag == b->tag && a->type == b->type &&
-           NormalizeLiveCounters(a->text) == NormalizeLiveCounters(b->text) &&
+    return a->tag == b->tag && a->type == b->type && LiveLabelsMatch(a->text, b->text) &&
            a->autocomplete == b->autocomplete && a->name == b->name && a->id == b->id &&
-           NormalizeLiveCounters(a->aria_label) == NormalizeLiveCounters(b->aria_label) &&
-           a->is_submit == b->is_submit && a->page_origin == b->page_origin;
+           LiveLabelsMatch(a->aria_label, b->aria_label) && a->is_submit == b->is_submit &&
+           a->page_origin == b->page_origin;
 }
 
 const char kPageChanged[] = "The page changed while waiting; take a fresh snapshot.";
@@ -466,10 +473,20 @@ bool IsDigit(char c) { return c >= '0' && c <= '9'; }
 
 bool IsAsciiLetter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
-// True when `text` holds a currency symbol, or an ISO code as a whole ASCII word (any case).
-bool HasCurrencyMark(std::string_view text) {
-    for (std::string_view symbol : kCurrencySymbols) {
-        if (text.find(symbol) != std::string_view::npos) return true;
+char AsciiLower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+
+bool IsTokenMark(std::string_view mark) {
+    return !mark.empty() &&
+           std::all_of(mark.begin(), mark.end(), [](char c) { return IsAsciiLetter(c); });
+}
+
+// A label the rule must not touch: it holds a currency mark, or a '#' (the placeholder's own
+// character, so a literal '#' could otherwise collide with a normalized counter).
+bool HasUnsafeMark(std::string_view text) {
+    if (text.find('#') != std::string_view::npos) return true;
+    for (std::string_view mark : kCurrencyMarks) {
+        if (IsTokenMark(mark)) continue;
+        if (text.find(mark) != std::string_view::npos) return true;
     }
     std::size_t i = 0;
     while (i < text.size()) {
@@ -479,29 +496,27 @@ bool HasCurrencyMark(std::string_view text) {
         }
         std::size_t end = i;
         while (end < text.size() && IsAsciiLetter(text[end])) ++end;
-        if (end - i == 3) {
-            for (std::string_view code : kCurrencyCodes) {
-                bool equal = true;
-                for (std::size_t k = 0; k < 3; ++k) {
-                    char a = text[i + k];
-                    if (a >= 'a' && a <= 'z') a = static_cast<char>(a - 'a' + 'A');
-                    equal = equal && a == code[k];
-                }
-                if (equal) return true;
+        for (std::string_view mark : kCurrencyMarks) {
+            if (!IsTokenMark(mark) || mark.size() != end - i) continue;
+            bool equal = true;
+            for (std::size_t k = 0; k < mark.size(); ++k) {
+                equal = equal && AsciiLower(text[i + k]) == AsciiLower(mark[k]);
             }
+            if (equal) return true;
         }
         i = end;
     }
     return false;
 }
 
-// Replaces each time-like run (M:SS or H:MM:SS, whole digit runs only) with one '#'.
+// Replaces one time-like run (M:SS or M:SS:SS, minutes and seconds 00-59, one or two leading
+// digits, whole digit runs only) with one '#'.
 std::string ReplaceTimeRuns(std::string_view text) {
     std::string out;
     std::size_t i = 0;
-    const auto two_digits_at = [&text](std::size_t at) {
-        return at + 1 < text.size() && IsDigit(text[at]) && IsDigit(text[at + 1]) &&
-               (at + 2 == text.size() || !IsDigit(text[at + 2]));
+    const auto minutes_or_seconds_at = [&text](std::size_t at) {
+        return at + 1 < text.size() && text[at] >= '0' && text[at] <= '5' &&
+               IsDigit(text[at + 1]) && (at + 2 == text.size() || !IsDigit(text[at + 2]));
     };
     while (i < text.size()) {
         if (!IsDigit(text[i]) || (i > 0 && IsDigit(text[i - 1]))) {
@@ -510,9 +525,9 @@ std::string ReplaceTimeRuns(std::string_view text) {
         }
         std::size_t j = i;
         while (j < text.size() && IsDigit(text[j])) ++j;
-        if (j < text.size() && text[j] == ':' && two_digits_at(j + 1)) {
+        if (j - i <= 2 && j < text.size() && text[j] == ':' && minutes_or_seconds_at(j + 1)) {
             std::size_t end = j + 3;
-            if (end < text.size() && text[end] == ':' && two_digits_at(end + 1)) end += 3;
+            if (end < text.size() && text[end] == ':' && minutes_or_seconds_at(end + 1)) end += 3;
             out.push_back('#');
             i = end;
             continue;
@@ -523,7 +538,8 @@ std::string ReplaceTimeRuns(std::string_view text) {
     return out;
 }
 
-// Replaces one trailing "(digits)" (trailing blanks allowed) with "(#)".
+// Replaces one trailing "(digits)" (trailing blanks allowed) with "(#)", but only when the text
+// before it holds no digit at all.
 std::string ReplaceTrailingCounter(std::string text) {
     std::size_t close = text.size();
     while (close > 0 && (text[close - 1] == ' ' || text[close - 1] == '\t')) --close;
@@ -531,14 +547,23 @@ std::string ReplaceTrailingCounter(std::string text) {
     std::size_t p = close - 1;
     while (p > 0 && IsDigit(text[p - 1])) --p;
     if (p == close - 1 || p == 0 || text[p - 1] != '(') return text;
+    for (std::size_t k = 0; k < p; ++k) {
+        if (IsDigit(text[k])) return text;
+    }
     return text.substr(0, p) + "#" + text.substr(close - 1);
 }
 
 }  // namespace
 
 std::string NormalizeLiveCounters(std::string_view text) {
-    if (HasCurrencyMark(text)) return std::string(text);
-    return ReplaceTrailingCounter(ReplaceTimeRuns(text));
+    if (HasUnsafeMark(text)) return std::string(text);
+    return ReplaceTimeRuns(ReplaceTrailingCounter(std::string(text)));
+}
+
+bool LiveLabelsMatch(std::string_view a, std::string_view b) {
+    if (a == b) return true;
+    if (HasUnsafeMark(a) || HasUnsafeMark(b)) return false;
+    return NormalizeLiveCounters(a) == NormalizeLiveCounters(b);
 }
 
 // ---- ToolResult ------------------------------------------------------------------

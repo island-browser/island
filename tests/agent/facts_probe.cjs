@@ -19,16 +19,16 @@ const match = /kFactsJs = R"JS\(([\s\S]*?)\)JS";/.exec(source);
 assert.ok(match, 'kFactsJs not found');
 const liveMatch = /kLiveCountersJs = R"JS\(([\s\S]*?)\)JS";/.exec(source);
 assert.ok(liveMatch, 'kLiveCountersJs not found');
-const currencyBlock = /kCurrencySymbols\[\] = \{([\s\S]*?)\};[\s\S]*?kCurrencyCodes\[\] = \{([\s\S]*?)\};/.exec(source);
-assert.ok(currencyBlock, 'currency tables not found');
-const literals = (text) => Array.from(text.matchAll(/"((?:[^"\\]|\\.)*)"/g), (m) => m[1]);
-const currencySymbols = literals(currencyBlock[1]);
-const currencyCodes = literals(currencyBlock[2]);
-assert.ok(currencySymbols.length > 0 && currencyCodes.length > 0, 'currency tables are empty');
+const marksBlock = /kCurrencyMarks\[\] = \{([\s\S]*?)\};/.exec(source);
+assert.ok(marksBlock, 'kCurrencyMarks not found');
+// Literals in the table; the comment lines hold no quotes.
+const currencyMarks = Array.from(marksBlock[1].matchAll(/"((?:[^"\\]|\\.)*)"/g), (m) => m[1]);
+assert.ok(currencyMarks.length > 0, 'currency table is empty');
 
-// The page-side normalizer, with the currency tables the C++ builds into the script.
-const liveCounters = new Function('__islandCurrencySymbols', '__islandCurrencyCodes',
-  liveMatch[1] + ' return liveCounters;')(currencySymbols, currencyCodes);
+// The page-side rule, with the table the C++ builds into the script.
+const live = new Function('__islandCurrencyMarks', liveMatch[1] + ' return {liveCounters, liveEqual};')(currencyMarks);
+const liveCounters = live.liveCounters;
+const liveEqual = live.liveEqual;
 
 function load(document) {
   const body = `${match[1]}; return {active: __islandActive, within: __islandWithin, facts: __islandFacts, activeFacts: __islandActiveFacts};`;
@@ -48,7 +48,8 @@ function el(tag, props) {
 }
 const doc = (active, extra) => Object.assign({ activeElement: active, body: el('body') }, extra || {});
 
-// Pairs shared with browser_tools_test.cpp (kLiveCases): true when the normalized labels match.
+// The same pairs as kLiveCases in browser_tools_test.cpp: `match` is whether the labels count as the
+// same after a card, in the page copy and in C++.
 const livePairs = [
   ['Resend in 0:42', 'Resend in 0:41', true],
   ['Pay now (expires 4:59)', 'Pay now (expires 4:58)', true],
@@ -58,14 +59,31 @@ const livePairs = [
   ['Transfer 10 USD', 'Transfer 9000 USD', false],
   ['Buy 1', 'Buy 10', false],
   ['Pay $5 (1)', 'Pay $5 (2)', false],
+  ['Pay 5 (1)', 'Pay 5 (2)', false],
+  ['Köp 29:90', 'Köp 299:90', false],
+  ['Betala 29:90 kr', 'Betala 299:90 kr', false],
+  ['Pay 5 SEK (1)', 'Pay 5 SEK (2)', false],
+  ['Оплатить 500 руб (1)', 'Оплатить 500 руб (2)', false],
+  ['Pay 5 USDT (1)', 'Pay 5 USDT (2)', false],
+  ['Pay ＄5 (1)', 'Pay ＄5 (2)', false],
+  ['Pay ₿ (5)', 'Pay ₿ (500)', false],
+  ['Order # (#)', 'Order 1:00 (5)', false],
 ];
-for (const [before, after, same] of livePairs) {
-  assert.equal(liveCounters(before) === liveCounters(after), same, before + ' -> ' + after);
+for (const [before, after, match] of livePairs) {
+  assert.equal(liveEqual(before, after), match, before + ' -> ' + after);
+  assert.equal(liveEqual(after, before), match, after + ' -> ' + before);
 }
+// Normalized forms, as NormalizeLiveCounters returns them in C++.
 assert.equal(liveCounters('0:42'), '#');
+assert.equal(liveCounters('Timer 0:42 (3)'), 'Timer # (3)');
 assert.equal(liveCounters('Checkout (12)  '), 'Checkout (#)  ');
-assert.equal(liveCounters('Pay 5 ₽ (2)'), 'Pay 5 ₽ (2)');
+assert.equal(liveCounters('Pay 5 (1)'), 'Pay 5 (1)');
+assert.equal(liveCounters('299:90'), '299:90');
+assert.equal(liveCounters('Pay 5 kr'), 'Pay 5 kr');
 assert.equal(liveCounters('Usdx 0:42'), 'Usdx #');
+assert.equal(liveCounters('Okra 0:42'), 'Okra #');
+assert.equal(liveCounters('1:02:034'), '#:034');
+assert.equal(liveCounters('1:00:2:00'), '#:#');
 
 // A plain focused input.
 let input = el('input', { type: 'text', inForm: true });

@@ -52,8 +52,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- The agent can press buttons with a live countdown or counter after you confirm. Amounts and
-  quantities are never normalized: when one changes while the card is open, the action is dropped.
+- The agent can press buttons with a live countdown (a timer such as "0:42") or a trailing count
+  in parentheses after you confirm. Other numbers, prices and currency labels must still match: if
+  one changes while the card is open, the action is dropped.
 
 ## [0.7.3] - 2026-10-23
 
