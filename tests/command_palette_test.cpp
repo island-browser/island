@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cctype>
 #include <optional>
 #include <string>
@@ -636,21 +638,25 @@ TEST(CommandPaletteTest, GivenCandidateAndQueryPairsWhenClassifiedThenTheRankOrd
     EXPECT_EQ(ClassifyPaletteMatch("Anything", "   "), PaletteMatchRank::kNone);
 }
 
-TEST(CommandPaletteTest, GivenReportsWhenComposedThenTheyListAfterBookmarksAndRankByTitleOrQuestion) {
+TEST(CommandPaletteTest,
+     GivenReportsWhenComposedThenTheyListAfterBookmarksAndRankByTitleOrQuestion) {
     const std::vector<PaletteReportEntry> reports = {
         {.id = "r1", .title = "Rust in short", .question = "what is rust"},
         {.id = "r2", .title = "Sky colour", .question = "why is the sky blue"},
     };
-    const std::vector<PaletteBookmarkEntry> bookmarks = {{.title = "Rust book", .url = "https://r.test/"}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {
+        {.title = "Rust book", .url = "https://r.test/"}};
     // Empty query: canonical order, reports after bookmarks, no URL row.
-    const std::vector<PaletteEntry> all = ComposePaletteResults("", {}, {}, bookmarks, {}, {}, reports);
+    const std::vector<PaletteEntry> all =
+        ComposePaletteResults("", {}, {}, bookmarks, {}, {}, reports);
     ASSERT_EQ(all.size(), 3U);
     EXPECT_EQ(all[0].kind, PaletteEntryKind::kBookmark);
     EXPECT_EQ(all[1].kind, PaletteEntryKind::kReport);
     EXPECT_EQ(all[1].report.id, "r1");
 
     // The question matches too; the URL row stays last.
-    const std::vector<PaletteEntry> sky = ComposePaletteResults("blue", {}, {}, {}, {}, {}, reports);
+    const std::vector<PaletteEntry> sky =
+        ComposePaletteResults("blue", {}, {}, {}, {}, {}, reports);
     ASSERT_EQ(sky.size(), 2U);
     EXPECT_EQ(sky[0].kind, PaletteEntryKind::kReport);
     EXPECT_EQ(sky[0].report.id, "r2");
@@ -733,6 +739,59 @@ TEST(CommandPaletteSpaceIconTest, GivenTheChangeCommandWhenQueriedThenItMatchesB
         ComposePaletteResults("space icon", {}, {}, {}, {}, commands);
     ASSERT_GE(found.size(), 1U);
     EXPECT_EQ(found[0].command.id, kChangeSpaceIconCommandId);
+}
+
+}  // namespace
+}  // namespace island
+
+namespace island {
+namespace {
+
+TEST(CommandPaletteNativeStyleTest, GivenEveryResultKindThenItAppearsOnceInTheStyleTable) {
+    const std::array<PaletteEntryKind, 7> kinds = {
+        PaletteEntryKind::kTab,      PaletteEntryKind::kSpace,   PaletteEntryKind::kUrl,
+        PaletteEntryKind::kBookmark, PaletteEntryKind::kHistory, PaletteEntryKind::kCommand,
+        PaletteEntryKind::kReport,
+    };
+    ASSERT_EQ(PaletteKindStyles().size(), kinds.size());
+    for (const PaletteEntryKind kind : kinds) {
+        int matches = 0;
+        for (const PaletteKindStyle& style : PaletteKindStyles()) {
+            matches += style.kind == kind ? 1 : 0;
+        }
+        EXPECT_EQ(matches, 1);
+    }
+}
+
+TEST(CommandPaletteNativeStyleTest, GivenNativeLabelsThenNoneIsAllCapsAndEveryHeaderIsSet) {
+    for (const PaletteKindStyle& style : PaletteKindStyles()) {
+        EXPECT_FALSE(style.group_header.empty());
+        const bool has_lowercase =
+            std::any_of(style.sentence_label.begin(), style.sentence_label.end(),
+                        [](char c) { return std::islower(static_cast<unsigned char>(c)) != 0; });
+        EXPECT_TRUE(has_lowercase) << style.sentence_label;
+    }
+    // The URL row and the command rows must not both print "Commands" as a group title.
+    EXPECT_NE(PaletteKindStyleFor(PaletteEntryKind::kUrl).group_header,
+              PaletteKindStyleFor(PaletteEntryKind::kCommand).group_header);
+}
+
+TEST(CommandPaletteNativeStyleTest, GivenKindLabelsThenNativeIsSentenceCaseAndLegacyStaysUpper) {
+    PaletteEntry tab;
+    tab.kind = PaletteEntryKind::kTab;
+    EXPECT_EQ(PaletteKindLabel(tab, /*sentence_case=*/true), "Tab");
+    EXPECT_EQ(PaletteKindLabel(tab, /*sentence_case=*/false), "TAB");
+
+    PaletteEntry url;
+    url.kind = PaletteEntryKind::kUrl;
+    EXPECT_EQ(PaletteKindLabel(url, /*sentence_case=*/true), "Go to");
+    EXPECT_EQ(PaletteKindLabel(url, /*sentence_case=*/false), "GO TO");
+
+    PaletteEntry table;
+    table.kind = PaletteEntryKind::kReport;
+    table.report.kind = "collection";
+    EXPECT_EQ(PaletteKindLabel(table, /*sentence_case=*/true), "Table");
+    EXPECT_EQ(PaletteKindLabel(table, /*sentence_case=*/false), "TABLE");
 }
 
 }  // namespace

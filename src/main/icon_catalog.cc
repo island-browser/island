@@ -39,6 +39,12 @@ std::string_view IconFilename(ChromeIcon icon) {
             return "layout-grid";
         case ChromeIcon::kSettings:
             return "settings";
+        case ChromeIcon::kStar:
+            return "star";
+        case ChromeIcon::kNewspaper:
+            return "newspaper";
+        case ChromeIcon::kBookOpen:
+            return "book-open";
     }
     return {};
 }

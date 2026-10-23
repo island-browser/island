@@ -931,8 +931,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
     if (!agent_tab_id_.has_value()) {
         return {.error = AgentTabError::kNoAgentPage};
     }
-    const std::optional<std::pair<std::size_t, std::size_t>> location =
-        TabLocation(*agent_tab_id_);
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*agent_tab_id_);
     if (!location.has_value() || location->first != space_index) {
         return {.error = AgentTabError::kAgentPageClosed};
     }
@@ -1490,6 +1489,7 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("branch", std::move(branch))
         .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
         .Set("font", json::Value::String(CssFontStack(tokens)))
+        .Set("look", json::Value::String(std::string(LookName(tokens.look))))
         .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
 }
 
@@ -4986,9 +4986,10 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
             EnsureTabBrowserView(*second)) {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
-            SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
-                              AttachedView{.view = second->browser_view(), .tab = second->id(),
-                                           .second_slot = true}});
+            SetAttachedViews(
+                {AttachedView{.view = first->browser_view(), .tab = first->id()},
+                 AttachedView{
+                     .view = second->browser_view(), .tab = second->id(), .second_slot = true}});
             return;
         }
     }
@@ -5496,17 +5497,21 @@ void BrowserWindow::ShowCommandPalette() {
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
-            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate);
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate,
+            icon_resource_root_);
     }
     // Read-only snapshots taken at open time: the open tabs of the active space
     // (title/URL for matching, TabId for routing) and the whole space list.
     std::vector<PaletteTabEntry> tabs;
+    std::vector<PaletteTabVisual> tab_visuals;
     tabs.reserve(active_space().tab_count());
+    tab_visuals.reserve(active_space().tab_count());
     for (const Tab& tab : active_space().tabs()) {
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
         tabs.push_back({.id = tab.id(),
                         .title = nav.page_title.empty() ? "Island" : nav.page_title,
                         .url = nav.url});
+        tab_visuals.push_back({.id = tab.id(), .favicon = tab.favicon()});
     }
     std::vector<PaletteSpaceEntry> spaces;
     spaces.reserve(spaces_.size());
@@ -5527,18 +5532,31 @@ void BrowserWindow::ShowCommandPalette() {
                            .question = report.question,
                            .kind = report.kind});
     }
+    std::vector<PaletteCommandEntry> commands = PaletteCommands();
+    for (PaletteCommandEntry& command : commands) {
+        const std::optional<KeyAction> action = KeyActionFromId(command.shortcut_action_id);
+        const std::optional<KeyBinding> binding =
+            action.has_value() ? keymap_.Binding(*action) : std::nullopt;
+        if (binding.has_value()) {
+#if defined(__APPLE__)
+            command.shortcut = FormatKeyGlyphs(*binding, /*mac=*/true);
+#else
+            command.shortcut = FormatKeyGlyphs(*binding, /*mac=*/false);
+#endif
+        }
+    }
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
-                           PaletteCommands(), std::move(reports));
+                           std::move(commands), std::move(reports), std::move(tab_visuals));
 }
 
 std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
-    return {{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
-            {.id = std::string(kChangeSpaceIconCommandId),
-             .title = "Change space icon\xE2\x80\xA6"},
-            {.id = "agent_tasks", .title = "Agent tasks"},
-            {.id = "summarize_page", .title = "Summarize page"},
-            {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"},
-            {.id = "collect_from_tabs", .title = "Collect from tabs\xE2\x80\xA6"}};
+    return {
+        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
+        {.id = std::string(kChangeSpaceIconCommandId), .title = "Change space icon\xE2\x80\xA6"},
+        {.id = "agent_tasks", .title = "Agent tasks", .shortcut_action_id = "toggle_agent"},
+        {.id = "summarize_page", .title = "Summarize page"},
+        {.id = "ask_about_page", .title = "Ask about page\xE2\x80\xA6"},
+        {.id = "collect_from_tabs", .title = "Collect from tabs\xE2\x80\xA6"}};
 }
 
 void BrowserWindow::ShowSpaceIconPicker() {
@@ -5562,11 +5580,10 @@ void BrowserWindow::ScheduleSpaceIconPicker() {
         return;
     }
     // Runs after the palette's released overlay has been destroyed by its posted task (FIFO).
-    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
-                            [](CefRefPtr<BrowserWindow> window) {
-                                window->RunScheduledSpaceIconPicker();
-                            },
-                            CefRefPtr<BrowserWindow>(this))));
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(
+                    [](CefRefPtr<BrowserWindow> window) { window->RunScheduledSpaceIconPicker(); },
+                    CefRefPtr<BrowserWindow>(this))));
 }
 
 void BrowserWindow::RunScheduledSpaceIconPicker() {
@@ -5814,7 +5831,8 @@ void BrowserWindow::CancelStaleConfirmations() {
 }
 
 void BrowserWindow::FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer) {
-    std::function<void(agent::ConfirmationAnswer)> done = std::move(pending_confirmations_[index].done);
+    std::function<void(agent::ConfirmationAnswer)> done =
+        std::move(pending_confirmations_[index].done);
     pending_confirmations_.erase(pending_confirmations_.begin() +
                                  static_cast<std::ptrdiff_t>(index));
     RefreshConfirmationUi();
@@ -5933,10 +5951,10 @@ void BrowserWindow::RefreshAgentEntry() {
         return;
     }
     AgentEntryStatus status;
-    const bool needs_you = !pending_confirmations_.empty() ||
-                           (research_.has_value() && research_->awaiting_approval) ||
-                           (agent_session_ != nullptr &&
-                            agent_session_->pending_permission_count() != 0);
+    const bool needs_you =
+        !pending_confirmations_.empty() ||
+        (research_.has_value() && research_->awaiting_approval) ||
+        (agent_session_ != nullptr && agent_session_->pending_permission_count() != 0);
     if (needs_you) {
         status.activity = AgentActivity::kNeedsYou;
     } else if (agent_session_ != nullptr && agent_session_->busy()) {
@@ -5951,8 +5969,7 @@ void BrowserWindow::RefreshAgentEntry() {
         status.queue_total = clamp_int(current->total);
     }
     status.queued_count = static_cast<int>(std::min<std::size_t>(
-        agent_queue_.queued_count(),
-        static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        agent_queue_.queued_count(), static_cast<std::size_t>(std::numeric_limits<int>::max())));
     if (const agent::AgentProvider* provider =
             agent::FindAgentProvider(ResolvedAgent().provider_id)) {
         status.provider_name = std::string(provider->name);
@@ -6097,6 +6114,13 @@ void BrowserWindow::OnWelcomeThemeChanged(ThemePreference preference) {
     static_cast<void>(SetThemePreference(preference));
     if (welcome_ != nullptr) {
         welcome_->ApplyTheme(ResolvedTokens(ResolvedChromeTheme()));
+    }
+}
+
+void BrowserWindow::OnWelcomeFocusRingReleased() {
+    CEF_REQUIRE_UI_THREAD();
+    if (window_ != nullptr) {
+        ApplyAddressFocusColors(window_, ResolvedTokens(ResolvedChromeTheme()));
     }
 }
 

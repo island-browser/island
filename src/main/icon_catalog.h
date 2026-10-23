@@ -24,6 +24,9 @@ enum class ChromeIcon {
     kClose,
     kGrid,
     kSettings,
+    kStar,
+    kNewspaper,
+    kBookOpen,
 };
 
 enum class ChromeIconTone {

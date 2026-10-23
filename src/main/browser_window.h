@@ -720,6 +720,7 @@ class BrowserWindow : public CefClient,
 
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
+    void OnWelcomeFocusRingReleased() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
@@ -1058,7 +1059,8 @@ class BrowserWindow : public CefClient,
     // marks the child: true for a research page, false for the Report (the person's result).
     TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
                             std::string label, bool activate, bool opened_by_agent);
-    // True while a research runs with its Plan tab in a space: the agent's space is then the Plan's.
+    // True while a research runs with its Plan tab in a space: the agent's space is then the
+    // Plan's.
     [[nodiscard]] bool ResearchOwnsAgent() const;
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
     // The address a new tab opens (empty text: the start page), or nullopt when the text is not

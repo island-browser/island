@@ -1,11 +1,14 @@
 #include "welcome_flow.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <string>
 #include <utility>
 
 #include "include/base/cef_callback.h"
+#include "include/cef_color_ids.h"
+#include "include/cef_image.h"
 #include "include/cef_task.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_button_delegate.h"
@@ -14,6 +17,7 @@
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
+#include "row_raster.h"
 
 namespace island {
 namespace {
@@ -21,6 +25,7 @@ namespace {
 // Metrics in DIP. The card is a hairline-outlined surface; its text and controls sit on
 // the spacing grid (4 / 8 / 24) with 32 DIP controls, like the rail.
 constexpr int kHairlineDip = 1;
+constexpr int kNativeCardRadiusDip = 12;
 constexpr int kCardPaddingVerticalDip = 24;
 // 24 DIP of padding plus the 6 DIP of internal inset a label button adds on its
 // leading edge, so text and the outlined controls share one left edge.
@@ -36,13 +41,23 @@ constexpr int kLabelHeightDip = 16;
 constexpr int kControlHeightDip = 32;
 constexpr int kNoteLineHeightDip = 20;
 constexpr std::size_t kNoteLineChars = 64;
-// The dim layer behind the card (alpha black): lighter over the light canvas.
-// The overlay root stays transparent. A dimming scrim cannot reach the bottom of the window:
-// CEF positions overlays from the frame's top edge (title bar included) but clips them to
-// the client-area height, so the last title-bar-height of the window stays undimmed and
-// reads as a rendering bug. The card is separated by its hairline and shadow instead.
-constexpr std::uint32_t kScrimLightArgb = 0x00000000U;
-constexpr std::uint32_t kScrimDarkArgb = 0x00000000U;
+// Native's dim layer behind the card: 20% black in both themes. Arc and Graphite retain their
+// existing transparent background. The scrim and card are one short-lived overlay.
+constexpr std::uint32_t kScrimArgb = 0x33000000U;
+constexpr std::uint32_t kTransparentArgb = 0x00000000U;
+
+void SetAllStateImages(CefRefPtr<CefLabelButton> button, CefRefPtr<CefImage> image) {
+    for (const cef_button_state_t state : {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED,
+                                           CEF_BUTTON_STATE_PRESSED, CEF_BUTTON_STATE_DISABLED}) {
+        button->SetImage(state, image);
+    }
+}
+
+// Native's card is a 12 DIP rounded surface, so its top and bottom caps are 12 DIP tall and
+// carry the corners. Arc and Graphite keep their hairline: the caps are one DIP of border.
+int CardCapHeightDip(LookPreset look) {
+    return look == LookPreset::kNative ? kNativeCardRadiusDip : kHairlineDip;
+}
 
 CefBoxLayoutSettings VerticalLayout(int spacing, const CefInsets& insets = CefInsets()) {
     CefBoxLayoutSettings settings;
@@ -135,6 +150,11 @@ WelcomeFlow::ButtonColors WelcomeFlow::SegmentColors(const ChromeTokens& tokens,
     if (selected) {
         return {.fill = tokens.segment_selected, .text = tokens.text};
     }
+    if (tokens.look == LookPreset::kNative) {
+        const BrowserChrome::SegmentPalette segment =
+            BrowserChrome::NativeSegmentColors(tokens, selected);
+        return {.fill = segment.fill, .text = segment.title};
+    }
     return {.fill = tokens.surface, .text = tokens.text};
 }
 
@@ -211,7 +231,9 @@ WelcomeFlow::WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, Chr
     source_checked_.assign(sources_.size(), true);
     BuildViews();
     // The overlay covers the window: a translucent scrim that centers the shadowed card.
-    scrim_delegate_ = new OverlayFillDelegate(ArgbColor{.argb = kScrimDarkArgb});
+    const ArgbColor scrim{.argb =
+                              tokens_.look == LookPreset::kNative ? kScrimArgb : kTransparentArgb};
+    scrim_delegate_ = new OverlayFillDelegate(scrim);
     scrim_panel_ = CefPanel::CreatePanel(scrim_delegate_);
     {
         CefBoxLayoutSettings settings;
@@ -276,7 +298,7 @@ CefRefPtr<CefPanel> WelcomeFlow::MakeText(const std::string& text, TextRole role
     CefRefPtr<CefBoxLayout> layout = row->SetToBoxLayout(HorizontalLayout(0));
     row->AddChildView(label);
     layout->SetFlexForView(label, 1);
-    texts_.push_back({label, role});
+    texts_.push_back({label, role, text});
     if (label_out != nullptr) {
         *label_out = label;
     }
@@ -284,23 +306,39 @@ CefRefPtr<CefPanel> WelcomeFlow::MakeText(const std::string& text, TextRole role
 }
 
 void WelcomeFlow::BuildViews() {
-    panel_delegate_ = new WelcomeSurfaceDelegate(this, SurfaceSlot::kOutline, CefSize());
+    panel_delegate_ = new WelcomeSurfaceDelegate(this, SurfaceSlot::kTransparent, CefSize());
     surface_delegates_.push_back(panel_delegate_);
     panel_ = CefPanel::CreatePanel(panel_delegate_);
-    panels_.emplace_back(panel_, SurfaceSlot::kOutline);
+    panels_.emplace_back(panel_, SurfaceSlot::kTransparent);
     panel_->SetID(static_cast<int>(ChromeViewId::kWelcome));
-    // The overlay root paints the hairline and insets the card by its thickness.
-    CefRefPtr<CefBoxLayout> outline_layout =
-        panel_->SetToBoxLayout(VerticalLayout(0, Uniform(kHairlineDip)));
+    panel_->SetToBoxLayout(VerticalLayout(0));
 
     button_delegate_ = new WelcomeButtonDelegate(this);
 
+    // Top and bottom raster caps make the Native card radius real even though cef_views has no
+    // corner-radius API; the middle paints the side hairlines around the content surface.
+    const int cap_height = CardCapHeightDip(tokens_.look);
+    card_top_cap_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    card_top_cap_->SetFocusable(false);
+    card_top_cap_->SetMinimumSize(CefSize(WidthDip(), cap_height));
+    panel_->AddChildView(card_top_cap_);
+
+    card_body_outline_ = MakePanel(SurfaceSlot::kOutline);
+    CefRefPtr<CefBoxLayout> body_outline_layout = card_body_outline_->SetToBoxLayout(
+        HorizontalLayout(0, CefInsets(0, kHairlineDip, 0, kHairlineDip)));
     card_ = MakePanel(SurfaceSlot::kCard);
     card_->SetToBoxLayout(VerticalLayout(
-        kSectionGapDip, CefInsets(kCardPaddingVerticalDip, kCardPaddingHorizontalDip,
-                                  kCardPaddingVerticalDip, kCardPaddingHorizontalDip)));
-    panel_->AddChildView(card_);
-    outline_layout->SetFlexForView(card_, 1);
+        kSectionGapDip,
+        CefInsets(kCardPaddingVerticalDip - cap_height + kHairlineDip, kCardPaddingHorizontalDip,
+                  kCardPaddingVerticalDip - cap_height + kHairlineDip, kCardPaddingHorizontalDip)));
+    card_body_outline_->AddChildView(card_);
+    body_outline_layout->SetFlexForView(card_, 1);
+    panel_->AddChildView(card_body_outline_);
+
+    card_bottom_cap_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    card_bottom_cap_->SetFocusable(false);
+    card_bottom_cap_->SetMinimumSize(CefSize(WidthDip(), cap_height));
+    panel_->AddChildView(card_bottom_cap_);
 
     // Header: title and lede.
     CefRefPtr<CefPanel> header = MakePanel(SurfaceSlot::kCard);
@@ -314,8 +352,9 @@ void WelcomeFlow::BuildViews() {
     // shows it through the 1 DIP gaps between equal-width segments.
     CefRefPtr<CefPanel> appearance = MakePanel(SurfaceSlot::kCard);
     appearance->SetToBoxLayout(VerticalLayout(kItemGapDip));
-    appearance->AddChildView(MakeText("APPEARANCE", TextRole::kSectionLabel));
+    appearance->AddChildView(MakeText("Appearance", TextRole::kSectionLabel));
     CefRefPtr<CefPanel> segments = MakePanel(SurfaceSlot::kOutline);
+    theme_track_ = segments;
     CefRefPtr<CefBoxLayout> segments_layout =
         segments->SetToBoxLayout(HorizontalLayout(kHairlineDip, Uniform(kHairlineDip)));
     const char* const theme_labels[3] = {"System", "Light", "Dark"};
@@ -330,9 +369,15 @@ void WelcomeFlow::BuildViews() {
         button->SetInkDropEnabled(true);
         button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
         button->SetMinimumSize(CefSize(150, kControlHeightDip));
-        segments->AddChildView(button);
-        segments_layout->SetFlexForView(button, 1);
+        CefRefPtr<CefPanel> outline = MakePanel(SurfaceSlot::kOutline);
+        CefRefPtr<CefBoxLayout> outline_layout =
+            outline->SetToBoxLayout(HorizontalLayout(0, Uniform(kHairlineDip)));
+        outline->AddChildView(button);
+        outline_layout->SetFlexForView(button, 1);
+        segments->AddChildView(outline);
+        segments_layout->SetFlexForView(outline, 1);
         theme_buttons_[index] = button;
+        theme_outlines_[index] = outline;
     }
     appearance->AddChildView(segments);
     card_->AddChildView(appearance);
@@ -341,7 +386,7 @@ void WelcomeFlow::BuildViews() {
     // wrapped, muted note (never ellipsized).
     CefRefPtr<CefPanel> import_section = MakePanel(SurfaceSlot::kCard);
     import_section->SetToBoxLayout(VerticalLayout(kItemGapDip));
-    import_section->AddChildView(MakeText("IMPORT", TextRole::kSectionLabel));
+    import_section->AddChildView(MakeText("Import", TextRole::kSectionLabel));
     std::vector<std::string> unreadable;
     for (std::size_t index = 0; index < sources_.size(); ++index) {
         if (!sources_[index].available) {
@@ -455,6 +500,7 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
             }
         }
         visible_ = false;
+        ApplyFocusRingTheme();
         if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
             overlay_.Release();
         }
@@ -514,9 +560,13 @@ void WelcomeFlow::Show() {
     UpdateBounds();
     overlay_.get()->SetVisible(true);
     ApplyColors();
+    ApplyFocusRingTheme();
     UpdateImportButtonState();
-    if (theme_buttons_[0] != nullptr) {
-        theme_buttons_[0]->RequestFocus();
+    const int selected_index = chosen_theme_ == ThemePreference::kSystem  ? 0
+                               : chosen_theme_ == ThemePreference::kLight ? 1
+                                                                          : 2;
+    if (theme_buttons_[selected_index] != nullptr) {
+        theme_buttons_[selected_index]->RequestFocus();
     }
 }
 
@@ -526,6 +576,7 @@ void WelcomeFlow::Hide() {
         return;
     }
     visible_ = false;
+    ApplyFocusRingTheme();
     if (overlay_lifetime_.Hide() == OverlayStep::kDestroy) {
         overlay_.Release();
     }
@@ -549,6 +600,7 @@ void WelcomeFlow::ApplyTheme(ChromeTokens tokens) {
     }
     tokens_ = tokens;
     ApplyColors();
+    ApplyFocusRingTheme();
 }
 
 void WelcomeFlow::Detach() {
@@ -557,6 +609,8 @@ void WelcomeFlow::Detach() {
         return;
     }
     detached_ = true;
+    visible_ = false;
+    ApplyFocusRingTheme();
     host_ = nullptr;
     *alive_ = nullptr;
     if (button_delegate_ != nullptr) {
@@ -571,6 +625,24 @@ void WelcomeFlow::Detach() {
     window_ = nullptr;
 }
 
+// Native's welcome focus ring is neutral (the segments' border color), not the accent. The
+// window's focus ring color belongs to the address field, so while the welcome is shown this
+// overrides it and, once hidden, the host restores the address field's ring.
+void WelcomeFlow::ApplyFocusRingTheme() {
+    if (window_ == nullptr) {
+        return;
+    }
+    if (visible_ && tokens_.look == LookPreset::kNative) {
+        window_->SetThemeColor(CEF_ColorFocusableBorderFocused, tokens_.border_strong.argb);
+        neutral_ring_ = true;
+    } else if (neutral_ring_) {
+        neutral_ring_ = false;
+        if (host_ != nullptr) {
+            host_->OnWelcomeFocusRingReleased();
+        }
+    }
+}
+
 // Paints every welcome view from the tokens and the current selection state. Runs on
 // construction, on every theme/selection change, and after CEF's theme reset.
 void WelcomeFlow::ApplyColors() {
@@ -578,32 +650,55 @@ void WelcomeFlow::ApplyColors() {
     const ChromeTheme theme = ThemeOfTokens(tokens_);
     shadow_.Apply(theme);
     if (scrim_delegate_ != nullptr && scrim_panel_ != nullptr) {
-        const ArgbColor scrim{.argb = theme == ChromeTheme::kDark ? kScrimDarkArgb
-                                                                  : kScrimLightArgb};
+        const ArgbColor scrim{.argb = tokens_.look == LookPreset::kNative ? kScrimArgb
+                                                                          : kTransparentArgb};
         scrim_delegate_->SetColor(scrim);
         scrim_panel_->SetBackgroundColor(scrim.argb);
     }
+    SetAllStateImages(card_top_cap_, CardCap(/*top=*/true));
+    SetAllStateImages(card_bottom_cap_, CardCap(/*top=*/false));
+    card_top_cap_->SetBackgroundColor(kTransparentArgb);
+    card_bottom_cap_->SetBackgroundColor(kTransparentArgb);
     for (const std::pair<CefRefPtr<CefPanel>, SurfaceSlot>& entry : panels_) {
         entry.first->SetBackgroundColor(ResolveColor(entry.second).argb);
     }
+    theme_track_->SetBackgroundColor((tokens_.look == LookPreset::kNative
+                                          ? BrowserChrome::NativeSegmentColors(tokens_, false).track
+                                          : tokens_.border)
+                                         .argb);
 
     for (const StaticText& text : texts_) {
+        const bool native = tokens_.look == LookPreset::kNative;
         switch (text.role) {
             case TextRole::kTitle:
-                text.view->SetFontList("Geist, Bold 24px");
+                text.view->SetFontList(
+                    native ? BrowserChrome::FontListForTokens(tokens_, 24, ChromeFontWeight::kBold)
+                           : "Geist, Bold 24px");
                 text.view->SetEnabledTextColors(tokens_.text.argb);
                 break;
             case TextRole::kLede:
-                text.view->SetFontList("Geist, 14px");
+                text.view->SetFontList(native ? BrowserChrome::FontListForTokens(
+                                                    tokens_, 14, ChromeFontWeight::kRegular)
+                                              : "Geist, 14px");
                 text.view->SetEnabledTextColors(tokens_.text_secondary.argb);
                 break;
             case TextRole::kSectionLabel:
-                // Mono uppercase labels, DESIGN.md §3.
-                text.view->SetFontList("Geist Mono, Medium 11px");
+                text.view->SetText(native ? text.text : [&] {
+                    std::string upper = text.text;
+                    std::transform(upper.begin(), upper.end(), upper.begin(), [](char c) {
+                        return static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                    });
+                    return upper;
+                }());
+                text.view->SetFontList(native ? BrowserChrome::FontListForTokens(
+                                                    tokens_, 11, ChromeFontWeight::kSemiBold)
+                                              : "Geist Mono, Medium 11px");
                 text.view->SetEnabledTextColors(tokens_.text_secondary.argb);
                 break;
             case TextRole::kNote:
-                text.view->SetFontList("Geist, 13px");
+                text.view->SetFontList(native ? BrowserChrome::FontListForTokens(
+                                                    tokens_, 13, ChromeFontWeight::kRegular)
+                                              : "Geist, 13px");
                 text.view->SetEnabledTextColors(tokens_.text_secondary.argb);
                 break;
         }
@@ -619,9 +714,19 @@ void WelcomeFlow::ApplyColors() {
                                                     : ThemePreference::kDark;
         const bool selected = chosen_theme_ == choice;
         const ButtonColors colors = SegmentColors(tokens_, selected);
+        theme_outlines_[index]->SetBackgroundColor(
+            (tokens_.look == LookPreset::kNative
+                 ? BrowserChrome::NativeSegmentColors(tokens_, selected).outline
+                 : tokens_.border)
+                .argb);
         theme_buttons_[index]->SetBackgroundColor(colors.fill.argb);
         theme_buttons_[index]->SetEnabledTextColors(colors.text.argb);
-        theme_buttons_[index]->SetFontList(selected ? "Geist, Bold 13px" : "Geist, 13px");
+        theme_buttons_[index]->SetFontList(
+            tokens_.look == LookPreset::kNative
+                ? BrowserChrome::FontListForTokens(
+                      tokens_, 13,
+                      selected ? ChromeFontWeight::kSemiBold : ChromeFontWeight::kRegular)
+                : (selected ? "Geist, Bold 13px" : "Geist, 13px"));
     }
 
     for (const SourceRow& row : source_rows_) {
@@ -632,27 +737,71 @@ void WelcomeFlow::ApplyColors() {
                             sources_[row.source_index].display_name);
         row.button->SetBackgroundColor(colors.fill.argb);
         row.button->SetEnabledTextColors(colors.text.argb);
-        row.button->SetFontList(checked ? "Geist, Bold 13px" : "Geist, 13px");
+        row.button->SetFontList(
+            tokens_.look == LookPreset::kNative
+                ? BrowserChrome::FontListForTokens(
+                      tokens_, 13,
+                      checked ? ChromeFontWeight::kSemiBold : ChromeFontWeight::kRegular)
+                : (checked ? "Geist, Bold 13px" : "Geist, 13px"));
     }
 
     const ButtonColors secondary = SecondaryButtonColors(tokens_);
     import_button_->SetBackgroundColor(secondary.fill.argb);
     import_button_->SetEnabledTextColors(secondary.text.argb);
-    import_button_->SetFontList("Geist, Medium 13px");
+    import_button_->SetFontList(
+        tokens_.look == LookPreset::kNative
+            ? BrowserChrome::FontListForTokens(tokens_, 13, ChromeFontWeight::kMedium)
+            : "Geist, Medium 13px");
     const ButtonColors primary = PrimaryButtonColors(tokens_);
     start_button_->SetBackgroundColor(primary.fill.argb);
     start_button_->SetEnabledTextColors(primary.text.argb);
-    start_button_->SetFontList("Geist, Medium 13px");
+    start_button_->SetFontList(
+        tokens_.look == LookPreset::kNative
+            ? BrowserChrome::FontListForTokens(tokens_, 13, ChromeFontWeight::kMedium)
+            : "Geist, Medium 13px");
 }
 
 ArgbColor WelcomeFlow::ResolveColor(SurfaceSlot slot) const {
     switch (slot) {
+        case SurfaceSlot::kTransparent:
+            return {.argb = kTransparentArgb};
         case SurfaceSlot::kOutline:
             return tokens_.border;
         case SurfaceSlot::kCard:
             return tokens_.surface;
     }
     return tokens_.surface;
+}
+
+CefRefPtr<CefImage> WelcomeFlow::CardCap(bool top) const {
+    const bool native = tokens_.look == LookPreset::kNative;
+    const int cap_height = CardCapHeightDip(tokens_.look);
+    CefRefPtr<CefImage> image = CefImage::CreateImage();
+    for (const int scale : {1, 2}) {
+        RasterBitmap bitmap = NewRasterBitmap(WidthDip(), cap_height, scale);
+        if (!native) {
+            FillRoundedRect(bitmap, 0, 0, WidthDip(), cap_height, CornerRadii{0, 0, 0, 0},
+                            tokens_.border);
+        } else {
+            // The outer rect is twice the cap height so only the rounded corner shows; the
+            // inner surface rect is inset by the hairline so the card edge reads as a 1 DIP line.
+            const int radius = kNativeCardRadiusDip;
+            const CornerRadii outer =
+                top ? CornerRadii{radius, radius, 0, 0} : CornerRadii{0, 0, radius, radius};
+            const CornerRadii inner =
+                top ? CornerRadii{radius - kHairlineDip, radius - kHairlineDip, 0, 0}
+                    : CornerRadii{0, 0, radius - kHairlineDip, radius - kHairlineDip};
+            const int outer_y = top ? 0 : -cap_height;
+            FillRoundedRect(bitmap, 0, outer_y, WidthDip(), 2 * cap_height, outer, tokens_.border);
+            const int inner_y = top ? kHairlineDip : -cap_height + kHairlineDip;
+            FillRoundedRect(bitmap, kHairlineDip, inner_y, WidthDip() - 2 * kHairlineDip,
+                            2 * cap_height - 2 * kHairlineDip, inner, tokens_.surface);
+        }
+        image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
+                         CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
+                         bitmap.bgra.size());
+    }
+    return image;
 }
 
 }  // namespace island
