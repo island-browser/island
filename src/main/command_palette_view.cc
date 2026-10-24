@@ -116,7 +116,14 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
         case PaletteEntryKind::kBookmark: {
             const std::string& title =
                 entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
-            return "Open bookmark: " + title + ", URL " + entry.bookmark.url;
+            std::string name = "Open bookmark: " + title + ", URL " + entry.bookmark.url;
+            if (!entry.bookmark.folder_path.empty()) {
+                name += ", folder " + entry.bookmark.folder_path;
+            }
+            if (!entry.bookmark.scope_label.empty()) {
+                name += ", favorite " + entry.bookmark.scope_label;
+            }
+            return name;
         }
         case PaletteEntryKind::kHistory: {
             const std::string& title =
@@ -146,8 +153,12 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
             return "Go to " + entry.url_query;
         case PaletteEntryKind::kBookmark:
             // An untitled bookmark falls back to its URL so the row is never
-            // blank.
-            return entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
+            // blank. The folder path remains visible as secondary metadata in
+            // the compact one-line palette row.
+            return (entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title) +
+                   (entry.bookmark.folder_path.empty() ? ""
+                                                       : "  —  " + entry.bookmark.folder_path) +
+                   (entry.bookmark.scope_label.empty() ? "" : "  ·  " + entry.bookmark.scope_label);
         case PaletteEntryKind::kHistory:
             return (entry.history.title.empty() ? entry.history.url : entry.history.title) +
                    (entry.history.host.empty() ? "" : "  —  " + entry.history.host);

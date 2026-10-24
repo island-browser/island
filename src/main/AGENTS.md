@@ -347,6 +347,12 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
   switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
   none.
+- Palette commands: `BrowserWindow::PaletteCommands` is the registry for ordinary palette action
+  rows. It accepts the active space name and current favorite state so favorite labels can say Add
+  or Remove without creating another result kind. Add a `PaletteCommandEntry` there, route its
+  stable id in `RunPaletteCommand`, and add a window test; bookmark results remain `kBookmark`,
+  carrying folder path and optional scope metadata. Favorite reordering deliberately has no palette
+  commands until sidebar focus/selection exists.
 - Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
   (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
   the icon. Each command submit must reach the host after the palette released its overlay, so the

@@ -1512,5 +1512,53 @@ TEST(BrowserWindowTest, GivenAFailedBookmarkMutationThenItIsRetryableUntilDismis
     EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
 }
 
+TEST(BrowserWindowTest, GivenCurrentWebPageWhenFavoriteTogglesThenScopesUseOneCanonicalBookmark) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://Example.test/path"));
+
+    ASSERT_TRUE(window->ToggleGlobalFavoriteForCurrentPage().ok());
+    const std::optional<std::uint64_t> id =
+        window->bookmarks().FindBookmarkByUrl("https://example.test/path");
+    ASSERT_TRUE(id.has_value());
+    EXPECT_EQ(window->bookmarks().state().global_favorite_ids, (std::vector<std::uint64_t>{*id}));
+    ASSERT_TRUE(window->ToggleSpaceFavoriteForCurrentPage().ok());
+    ASSERT_EQ(window->BuildSidebarCollection().space_favorites.size(), 1U);
+
+    ASSERT_TRUE(window->ToggleGlobalFavoriteForCurrentPage().ok());
+    EXPECT_TRUE(window->bookmarks().state().global_favorite_ids.empty());
+    ASSERT_TRUE(window->ToggleSpaceFavoriteForCurrentPage().ok());
+    EXPECT_TRUE(window->BuildSidebarCollection().space_favorites.empty());
+}
+
+TEST(BrowserWindowTest, GivenALocalPageWhenFavoriteToggleRunsThenItDoesNotAddABookmark) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+
+    const BookmarkResult result = window->ToggleGlobalFavoriteForCurrentPage();
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
+}
+
+TEST(BrowserWindowTest, GivenBookmarkPaletteCommandsThenTheyIncludeLibraryActionsAndScopeLabels) {
+    const std::vector<PaletteCommandEntry> commands =
+        BrowserWindow::PaletteCommands("Work", /*global_favorite=*/true, /*space_favorite=*/false);
+    const auto find = [&commands](std::string_view id) {
+        return std::find_if(commands.begin(), commands.end(),
+                            [id](const PaletteCommandEntry& command) { return command.id == id; });
+    };
+
+    ASSERT_NE(find("open_bookmarks"), commands.end());
+    ASSERT_NE(find("add_bookmark"), commands.end());
+    const auto global = find("toggle_global_favorite");
+    ASSERT_NE(global, commands.end());
+    EXPECT_EQ(global->title, "Remove global favorite");
+    const auto space = find("toggle_space_favorite");
+    ASSERT_NE(space, commands.end());
+    EXPECT_EQ(space->title, "Add Work favorite");
+    ASSERT_NE(find("new_bookmark_folder"), commands.end());
+    ASSERT_NE(find("import_bookmarks"), commands.end());
+    ASSERT_NE(find("show_global_favorites"), commands.end());
+}
+
 }  // namespace
 }  // namespace island

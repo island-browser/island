@@ -444,7 +444,9 @@ class BrowserWindow : public CefClient,
         export_path_for_test_ = std::move(path);
     }
     // The command palette's command list (the window's own commands).
-    [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands();
+    [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands(
+        std::string_view active_space_name = {}, bool global_favorite = false,
+        bool space_favorite = false);
     void SetPlanCloseConfirmationForTest(
         std::function<bool(std::string_view, std::string_view, std::string_view)> confirm) {
         plan_close_confirmation_for_test_ = std::move(confirm);
@@ -641,6 +643,10 @@ class BrowserWindow : public CefClient,
     BookmarkResult AddFavoriteByUrl(FavoriteScope scope, std::string_view title,
                                     std::string_view url);
     BookmarkResult RemoveFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Toggle the active web page in the global or active-space favorite list.
+    // These small public seams are also the keyboard-shortcut targets.
+    BookmarkResult ToggleGlobalFavoriteForCurrentPage();
+    BookmarkResult ToggleSpaceFavoriteForCurrentPage();
     // Runs the last failed bookmark mutation again. With no retryable failure it returns an error.
     BookmarkResult RetryLastBookmarkMutation();
     void DismissBookmarkStatus();
@@ -1189,6 +1195,7 @@ class BrowserWindow : public CefClient,
     // The one path for bookmark mutations (see the favorites methods above). Reconciles virtual
     // tabs with the library afterwards and reprojects the sidebar.
     BookmarkResult RunBookmarkMutation(std::function<BookmarkResult()> mutation);
+    BookmarkResult ToggleFavoriteForCurrentPage(FavoriteScope scope);
     // Disposes the records and virtual tabs of favorites the library no longer lists. Returns true
     // when the displayed virtual tab was one of them, so the caller re-attaches the content slot.
     bool ReconcileFavoriteTabs();

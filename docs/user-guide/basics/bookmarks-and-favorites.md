@@ -2,6 +2,14 @@
 
 Open the Bookmarks page to manage Island's local bookmark library.
 
+## Use bookmarks from ⌘K
+
+Press ⌘K (Ctrl+K) and search by bookmark name or address. Each matching bookmark shows its folder;
+favorite bookmarks also show `Global` or their space name. The same palette offers **Open
+Bookmarks**, **Add bookmark**, add/remove global or current-space favorite, **New folder**,
+**Import bookmarks**, and **Show all global favorites**. **New folder** creates a folder named
+“New folder,” which you can rename on the Bookmarks page.
+
 Use the search field to find a bookmark by its title, address, or folder. Select a folder to show
 only its bookmarks. You can create, rename, and delete folders from the folder actions.
 

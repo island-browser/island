@@ -41,12 +41,17 @@ struct PaletteSpaceEntry {
     bool operator==(const PaletteSpaceEntry&) const = default;
 };
 
-// Read-only snapshot of one bookmark from the window's bookmark store. No
-// identity beyond the URL: selecting one navigates the active tab through the
-// single address path, exactly like a kUrl row.
+// Read-only snapshot of one bookmark from the window's bookmark store. Its
+// id is retained for metadata consumers, while selecting it still navigates
+// through the single address path, exactly like a kUrl row.
 struct PaletteBookmarkEntry {
+    std::uint64_t id = 0;
     std::string title;
     std::string url;
+    // Presentation metadata: the folder is the bookmark row's secondary text;
+    // a favorite may additionally name its scope ("Global" or a space).
+    std::string folder_path;
+    std::string scope_label;
 
     bool operator==(const PaletteBookmarkEntry&) const = default;
 };

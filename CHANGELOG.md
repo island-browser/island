@@ -24,6 +24,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
   add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
   sites; bulk, import, folder-mutation and reorder tools are not exposed.
+- The command palette now searches the full bookmark library with folder and favorite-scope
+  metadata, and offers Bookmarks actions for adding a bookmark or favorite, opening/importing the
+  library, creating a `New folder`, and showing global favorites.
 
 ### Changed
 
