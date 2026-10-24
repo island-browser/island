@@ -438,7 +438,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     the ✕ that removes the page context inside the same `--fill` plate) and, for a selection, a
     quote chip. Both share the 22 px chip style and ellipsize on one line. Once sent, the same
     neutral page and quote chips appear above that user's bubble in the thread; they are transcript
-    metadata, not repeated prompt text.
+    metadata, not repeated prompt text. Thread quotes use the same one-line text span as composer
+    quotes, including long selections.
   - *Collect sheet:* a 12 px-radius dialog over a 20 % scrim, with one text field labelled in
     sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px
     `--border-2` list) and a Collect button that is disabled until something is typed. Checkboxes

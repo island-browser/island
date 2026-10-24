@@ -21,10 +21,10 @@ defined in `src/agent/CMakeLists.txt` (not `tests/CMakeLists.txt`) so the standa
 | `acp_client_test.cpp` | ACP handshake, HTTP vs stdio MCP hand-off, streaming updates, permissions, cancel, failures |
 | `agent_providers_test.cpp` | Provider registry contents, command executable parsing, PATH search dirs and executable detection (temp dirs, POSIX), provider JSON, command resolution incl. the env override |
 | `agent_process_test.cpp` | Command-line splitting, child stdio, exit codes, stubborn-child termination |
-| `agent_session_test.cpp` | Full conversation against a real fake agent subprocess (`fixtures/fake_acp_agent.py`): queued first prompt, streaming, permissions, cancel, crash + relaunch, provider switch |
+| `agent_session_test.cpp` | Full conversation against a real fake agent subprocess (`fixtures/fake_acp_agent.py`): queued first prompt, streaming, permissions, cancel, crash + relaunch, provider switch, and context-bearing developer transcript fixture |
 | `fixtures/fake_acp_agent.py` | Minimal ACP agent over stdio used by the session tests (needs `python3`) |
 | `panel/agent_panel_behavior.js` | Optional Playwright check of `src/main/pages/agent.html` (messages, keys, provider switcher, sent context chips and install hints, no HTML injection) |
-| `agent_transcript_test.cpp` | Event folding, in-place tool/plan updates, permission resolution, bounds, and sent page/quote chip JSON metadata |
+| `agent_transcript_test.cpp` | Event folding, in-place tool/plan updates, permission resolution, bounds, and sent page/quote chip JSON metadata (including absent context and escaped closing tags) |
 | `facts_probe.cjs` | Runs the gate's page helpers (`kFactsJs`) on DOM stand-ins and the page-side counter normalizer (`kLiveCountersJs`) on the pairs the C++ tests use. CommonJS with ES2015 syntax only; the version check is its first statement (direct run on Node < 18 exits 77) |
 | `run_facts_probe.cmake` | Launcher for `facts_probe.cjs` (`BrowserToolsFactsProbe`): checks `node -p` for a major version of 18 or more, prints `FACTS_PROBE_SKIP` when node is missing, not numeric, or older, so ctest shows Skipped; a failing probe fails the test. No SKIP_RETURN_CODE: cmake -P cannot exit 77 |
 

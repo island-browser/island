@@ -60,8 +60,9 @@ class AgentSession {
     bool Send(std::string text, std::string context = {});
     void Cancel();
     // Developer capture only (`agent_fixture:thread`): records a user turn and agent events in the
-    // transcript as if the agent had answered. Nothing is sent and no agent is started.
-    void AddDevUserPrompt(std::string text);
+    // transcript as if the agent had answered. An empty context uses the fixture's page and long
+    // quote context. Nothing is sent and no agent is started.
+    void AddDevUserPrompt(std::string text, std::string context = {});
     void ApplyDevEvent(const AcpEvent& event);
     void ResolvePermission(std::int64_t request_id, std::optional<std::string> option_id);
     // Stops the agent, clears the conversation, and starts a fresh session.

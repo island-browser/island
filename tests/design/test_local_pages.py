@@ -934,6 +934,14 @@ class AgentContextChip(unittest.TestCase):
     def test_the_quote_is_set_as_text(self) -> None:
         self.assertIn('getElementById("quote-text").textContent = quote', self.html)
 
+    def test_sent_quote_chip_is_a_one_line_text_span(self) -> None:
+        start = self.html.index("function itemNode")
+        render = self.html[start : self.html.index("function render", start)]
+        self.assertIn('var quote = el("div", "quote-chip")', render)
+        self.assertIn('quote.appendChild(el("span", "", context.selection))', render)
+        self.assertRegex(self.html,
+                         r"\.quote-chip span \{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis;")
+
 
 def agent_component_css(html: str) -> str:
     """The agent page's CSS without its two pre-theme :root fallback blocks."""

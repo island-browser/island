@@ -15,7 +15,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- Agent messages retain the neutral page and selection-quote chips that were sent with that turn.
+- Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
+  long selection chips stay on one ellipsized line.
 
 ### Added
 

@@ -282,8 +282,16 @@ void AgentSession::FlushQueuedPrompt() {
     client_->Prompt(text, context);
 }
 
-void AgentSession::AddDevUserPrompt(std::string text) {
-    transcript_.AddUserPrompt(std::move(text));
+void AgentSession::AddDevUserPrompt(std::string text, std::string context) {
+    if (context.empty()) {
+        context =
+            "<page_title>Example Domain</page_title>\n"
+            "<page_url>https://example.com/</page_url>\n"
+            "<selection>This domain is for use in illustrative examples in documents. You may use "
+            "this domain in literature without prior coordination or asking for "
+            "permission.</selection>";
+    }
+    transcript_.AddUserPrompt(std::move(text), std::move(context));
     Changed();
 }
 

@@ -20,6 +20,18 @@ std::string TaggedValue(std::string_view context, std::string_view name) {
                : std::string(context.substr(value_start, end - value_start));
 }
 
+// BuildAgentContext escapes only closing-tag prefixes so untrusted content cannot end one of its
+// enclosing tags. The panel inserts this value with textContent, so restore that display text after
+// parsing the tagged prompt.
+std::string DecodeEscapedCloseTags(std::string value) {
+    std::size_t offset = 0;
+    while ((offset = value.find("&lt;/", offset)) != std::string::npos) {
+        value.replace(offset, 4, "<");
+        ++offset;
+    }
+    return value;
+}
+
 }  // namespace
 
 std::string_view TranscriptKindName(TranscriptItem::Kind kind) {
@@ -47,9 +59,9 @@ std::string_view TranscriptKindName(TranscriptItem::Kind kind) {
 void AgentTranscript::AddUserPrompt(std::string text, std::string context) {
     Push({.kind = TranscriptItem::Kind::kUser,
           .text = std::move(text),
-          .context_title = TaggedValue(context, "page_title"),
-          .context_url = TaggedValue(context, "page_url"),
-          .context_selection = TaggedValue(context, "selection")});
+          .context_title = DecodeEscapedCloseTags(TaggedValue(context, "page_title")),
+          .context_url = DecodeEscapedCloseTags(TaggedValue(context, "page_url")),
+          .context_selection = DecodeEscapedCloseTags(TaggedValue(context, "selection"))});
 }
 
 void AgentTranscript::AddNotice(std::string text) {
