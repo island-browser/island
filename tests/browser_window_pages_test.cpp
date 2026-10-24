@@ -25,6 +25,7 @@
 #include "island_version.h"
 #include "json_util.h"
 #include "keymap.h"
+#include "local_pages_html.h"
 #include "plan_dev_fixture.h"
 #include "plan_edits.h"
 #include "research_prompt.h"
@@ -55,6 +56,12 @@ CefRefPtr<BrowserWindow> MakeWindow() {
 
 const Space& SpaceAt(const BrowserWindow& window, std::size_t index) {
     return window.spaces()[index];
+}
+
+TEST(LocalPageRegistryTest, BookmarksUsesItsOwnLocalUrlAndDocument) {
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kBookmarks), "island://bookmarks");
+    EXPECT_NE(LocalPageHtml(LocalPageKind::kBookmarks).find("<title>Bookmarks</title>"),
+              std::string_view::npos);
 }
 
 TEST(BrowserWindowPagesTest, KeymapEditsTakeEffectAndShortcutsRunActions) {

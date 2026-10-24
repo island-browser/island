@@ -46,6 +46,30 @@ TEST(ActionGateTest, ReadingAndLinksAreFree) {
     EXPECT_EQ(Classify(Call("page_type", Input("search")), kNone).action, ActionClass::kFree);
 }
 
+TEST(ActionGateTest, BookmarkMutationsAlwaysAskEvenForTrustedSites) {
+    GateInput input = Call("browser_add_favorite");
+    input.bookmark_title = "Island";
+    input.bookmark_url = "https://shop.example.com/";
+    input.favorite_scope = "space 12 favorites";
+    GateDecision decision = Classify(input, kTrusted);
+    EXPECT_EQ(decision.action, ActionClass::kConfirm);
+    EXPECT_EQ(decision.rule, GateRule::kBookmarkMutation);
+    EXPECT_FALSE(decision.trusted_allowed);
+    EXPECT_TRUE(decision.task_grant_allowed);
+    EXPECT_EQ(decision.summary, "Add \"Island\" on shop.example.com to space 12 favorites");
+}
+
+TEST(ActionGateTest, BookmarkCardsClipAndCannotSpoofQuotedParts) {
+    GateInput input = Call("browser_add_bookmark");
+    input.bookmark_title = "x\" on bank.test to folder \"Y";
+    input.bookmark_url = "https://shop.example.com/";
+    input.bookmark_folder_path = std::string(60, 'x') + "\"";
+    const GateDecision decision = Classify(input, kNone);
+    EXPECT_EQ(decision.summary,
+              "Add bookmark \"x on bank.test to folder Y\" on shop.example.com to folder \"" +
+                  std::string(40, 'x') + "…\"");
+}
+
 TEST(ActionGateTest, PasswordFieldsAreBlockedEvenWhenTrusted) {
     for (auto facts : {Input("password"), Input("text", "current-password"),
                        Input("text", "new-password"), Input("text", "one-time-code")}) {
@@ -54,6 +78,7 @@ TEST(ActionGateTest, PasswordFieldsAreBlockedEvenWhenTrusted) {
             EXPECT_EQ(d.action, ActionClass::kBlocked);
             EXPECT_EQ(d.rule, GateRule::kPassword);
             EXPECT_FALSE(d.trusted_allowed);
+            EXPECT_FALSE(d.task_grant_allowed);
         }
     }
     EXPECT_EQ(Classify(Call("page_press_key", Input("password")), kTrusted).action,
@@ -68,6 +93,7 @@ TEST(ActionGateTest, CardFieldsAlwaysAsk) {
         EXPECT_EQ(d.action, ActionClass::kConfirm) << facts.name << facts.autocomplete;
         EXPECT_EQ(d.rule, GateRule::kCardField);
         EXPECT_FALSE(d.trusted_allowed);
+        EXPECT_FALSE(d.task_grant_allowed);
     }
 }
 

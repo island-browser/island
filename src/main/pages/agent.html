@@ -120,6 +120,9 @@ header { position: relative; }
 @keyframes rise { from { opacity: 0; transform: translateY(3px); } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } #log { scroll-behavior: auto; } }
 .user { display: flex; justify-content: flex-end; }
+.user-turn { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; max-width: 100%; }
+.sent-chips { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 5px; max-width: 88%; }
+.sent-page-chip { border: 1px solid var(--border); }
 .user .bubble {
   background: var(--accent-soft); color: var(--accent-text); padding: 10px 12px; max-width: 88%;
   border-radius: 8px; white-space: pre-wrap; word-wrap: break-word;
@@ -629,7 +632,24 @@ textarea::placeholder { color: var(--text-3); }
     switch (item.kind) {
       case "user":
         wrap.classList.add("user");
-        wrap.appendChild(el("div", "bubble", item.text));
+        var turn = el("div", "user-turn");
+        var context = item.context || {};
+        if (context.url) {
+          var chips = el("div", "sent-chips");
+          var page = el("div", "quote-chip sent-page-chip");
+          page.title = context.url;
+          page.appendChild(el("span", "", context.title || context.url));
+          chips.appendChild(page);
+          if (context.selection) {
+            var quote = el("div", "quote-chip");
+            quote.title = context.selection;
+            quote.appendChild(el("span", "", context.selection));
+            chips.appendChild(quote);
+          }
+          turn.appendChild(chips);
+        }
+        turn.appendChild(el("div", "bubble", item.text));
+        wrap.appendChild(turn);
         break;
       case "agent": wrap.appendChild(agentNode(item.text)); break;
       case "thought": {

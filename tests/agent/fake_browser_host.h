@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,11 +31,23 @@ class FakeBrowserHost : public AgentBrowserHost {
         {.index = 1, .title = "Docs", .url = "https://docs.test/", .loading = true},
     };
     std::vector<std::string> calls;
+    std::vector<std::string> resolved_targets;
     std::vector<DevToolsRecord> devtools;
     std::deque<DevToolsReply> replies;
     std::vector<std::string> trusted;
+    std::vector<AgentBookmarkInfo> bookmarks = {
+        {.id = 7,
+         .title = "Island",
+         .url = "https://island.test/",
+         .folder_path = "Work / References",
+         .favorite_scopes = {{}, {.space_id = 12}}},
+        {.id = 8, .title = "Docs", .url = "https://docs.test/", .folder_path = "Unfiled"},
+    };
+    HostStatus bookmark_status = HostStatus::Ok();
     std::vector<ConfirmationRequest> confirmations;
     std::deque<ConfirmationAnswer> answers;  // empty answers kCancel
+    bool defer_confirmations = false;
+    std::deque<std::function<void(ConfirmationAnswer)>> pending_confirmations;
 
     std::vector<AgentSpaceInfo> ListSpaces() override { return spaces; }
     std::vector<AgentTabInfo> ListTabs() override { return tabs; }
@@ -97,12 +110,76 @@ class FakeBrowserHost : public AgentBrowserHost {
             answers.pop_front();
         }
         if (answer == ConfirmationAnswer::kTrustSite) trusted.push_back(host);
+        if (defer_confirmations) {
+            pending_confirmations.push_back(std::move(done));
+            return;
+        }
+        done(answer);
+    }
+    void AnswerNext(ConfirmationAnswer answer) {
+        auto done = std::move(pending_confirmations.front());
+        pending_confirmations.pop_front();
         done(answer);
     }
     std::optional<std::string> ResolveNavigationTarget(std::string_view text) override {
+        resolved_targets.emplace_back(text);
         if (text.empty()) return std::nullopt;
+        if (text.starts_with("javascript:")) return std::nullopt;
         if (text.find("://") != std::string_view::npos) return std::string(text);
         return "https://" + std::string(text);
+    }
+    void ListBookmarks(std::optional<std::string> folder_path,
+                       AgentBookmarksCallback done) override {
+        calls.push_back("list_bookmarks" + (folder_path ? ":" + *folder_path : std::string()));
+        if (!bookmark_status.ok) {
+            done(bookmark_status, {});
+            return;
+        }
+        std::vector<AgentBookmarkInfo> result;
+        for (const AgentBookmarkInfo& bookmark : bookmarks) {
+            if (!folder_path || bookmark.folder_path == *folder_path) result.push_back(bookmark);
+        }
+        done(HostStatus::Ok(), std::move(result));
+    }
+    void ListFavorites(std::optional<AgentFavoriteScope> scope,
+                       AgentBookmarksCallback done) override {
+        calls.push_back("list_favorites");
+        if (!bookmark_status.ok) {
+            done(bookmark_status, {});
+            return;
+        }
+        std::vector<AgentBookmarkInfo> result;
+        for (const AgentBookmarkInfo& bookmark : bookmarks) {
+            const bool matches =
+                !bookmark.favorite_scopes.empty() &&
+                (!scope ||
+                 std::any_of(bookmark.favorite_scopes.begin(), bookmark.favorite_scopes.end(),
+                             [&scope](const AgentFavoriteScope& favorite_scope) {
+                                 return favorite_scope.space_id == scope->space_id;
+                             }));
+            if (matches) result.push_back(bookmark);
+        }
+        done(HostStatus::Ok(), std::move(result));
+    }
+    void AddBookmark(AgentBookmarkDraft bookmark, AgentBookmarkStatusCallback done) override {
+        calls.push_back("add_bookmark:" + bookmark.url);
+        done(bookmark_status);
+    }
+    void RemoveBookmark(std::uint64_t id, AgentBookmarkStatusCallback done) override {
+        calls.push_back("remove_bookmark:" + std::to_string(id));
+        done(bookmark_status);
+    }
+    void AddFavorite(std::uint64_t id, AgentFavoriteScope scope,
+                     AgentBookmarkStatusCallback done) override {
+        calls.push_back("add_favorite:" + std::to_string(id) + ":" +
+                        (scope.space_id ? std::to_string(*scope.space_id) : "global"));
+        done(bookmark_status);
+    }
+    void RemoveFavorite(std::uint64_t id, AgentFavoriteScope scope,
+                        AgentBookmarkStatusCallback done) override {
+        calls.push_back("remove_favorite:" + std::to_string(id) + ":" +
+                        (scope.space_id ? std::to_string(*scope.space_id) : "global"));
+        done(bookmark_status);
     }
 
     // Queues a Runtime.evaluate reply whose value is `json_text` as a string,

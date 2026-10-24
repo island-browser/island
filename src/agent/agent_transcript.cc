@@ -6,6 +6,34 @@
 
 namespace island::agent {
 
+namespace {
+
+std::string TaggedValue(std::string_view context, std::string_view name) {
+    const std::string open = "<" + std::string(name) + ">";
+    const std::string close = "</" + std::string(name) + ">";
+    const std::size_t start = context.find(open);
+    if (start == std::string_view::npos) return {};
+    const std::size_t value_start = start + open.size();
+    const std::size_t end = context.find(close, value_start);
+    return end == std::string_view::npos
+               ? std::string()
+               : std::string(context.substr(value_start, end - value_start));
+}
+
+// BuildAgentContext escapes only closing-tag prefixes so untrusted content cannot end one of its
+// enclosing tags. The panel inserts this value with textContent, so restore that display text after
+// parsing the tagged prompt.
+std::string DecodeEscapedCloseTags(std::string value) {
+    std::size_t offset = 0;
+    while ((offset = value.find("&lt;/", offset)) != std::string::npos) {
+        value.replace(offset, 4, "<");
+        ++offset;
+    }
+    return value;
+}
+
+}  // namespace
+
 std::string_view TranscriptKindName(TranscriptItem::Kind kind) {
     switch (kind) {
         case TranscriptItem::Kind::kUser:
@@ -28,8 +56,12 @@ std::string_view TranscriptKindName(TranscriptItem::Kind kind) {
     return "notice";
 }
 
-void AgentTranscript::AddUserPrompt(std::string text) {
-    Push({.kind = TranscriptItem::Kind::kUser, .text = std::move(text)});
+void AgentTranscript::AddUserPrompt(std::string text, std::string context) {
+    Push({.kind = TranscriptItem::Kind::kUser,
+          .text = std::move(text),
+          .context_title = DecodeEscapedCloseTags(TaggedValue(context, "page_title")),
+          .context_url = DecodeEscapedCloseTags(TaggedValue(context, "page_url")),
+          .context_selection = DecodeEscapedCloseTags(TaggedValue(context, "selection"))});
 }
 
 void AgentTranscript::AddNotice(std::string text) {
@@ -182,6 +214,12 @@ std::string AgentTranscript::ToJson() const {
         Value entry = Value::MakeObject()
                           .Set("kind", Value::String(std::string(TranscriptKindName(item.kind))))
                           .Set("text", Value::String(item.text));
+        if (item.kind == TranscriptItem::Kind::kUser && !item.context_url.empty()) {
+            entry.Set("context", Value::MakeObject()
+                                     .Set("title", Value::String(item.context_title))
+                                     .Set("url", Value::String(item.context_url))
+                                     .Set("selection", Value::String(item.context_selection)));
+        }
         if (item.kind == TranscriptItem::Kind::kTool) {
             entry.Set("id", Value::String(item.tool_call_id))
                 .Set("tool_kind", Value::String(item.tool_kind))

@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookmarks</title>
+<!--
+  Native state for islandRender(state):
+  {theme: ThemeJson, folders:[{id,name,count}], bookmarks:[{id,title,url,host,
+  folder_id,folder_path,global,spaces:[{id,name}]}], current_space:{id,name},
+  selected_folder:id|"all", import_sources:[{id,label}],
+  status:{kind:"ok"|"error",text,retry}|null, agent_naming?:bool}.
+
+  Page-to-native message table. Native validates every id and string before mutation:
+  bookmarks:open(id), bookmarks:open-new-tab(id), bookmarks:edit(id,title,url),
+  bookmarks:delete(id), bookmarks:move(id,folder_id), folder:create(name),
+  folder:rename(id,name), folder:delete(id,mode:"move"|"delete"),
+  favorite:toggle-global(id), favorite:toggle-space(id), import {source_id}, retry,
+  select-folder(id|"all").
+-->
+<style>
+:root {
+  --bg: var(--bg); --surface: var(--surface); --surface-2: var(--surface-2);
+  --fill: var(--fill); --text: var(--text); --text-2: var(--text-2); --text-3: var(--text-3);
+  --border: var(--border); --border-2: var(--border-2); --danger: var(--danger);
+  --segment-selected: var(--segment-selected); --font: var(--font); --display: var(--font);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--surface); color: var(--text); font: 13px/1.45 var(--font); }
+button, input, select { color: inherit; font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .48; }
+/* The neutral ring stays visible on selected plates in every look. */
+:focus-visible { border-radius: 7px; outline: none; box-shadow: 0 0 0 2px var(--text-2); }
+[hidden] { display: none !important; }
+.page { min-height: 100%; padding: 28px 40px 60px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: 1160px; }
+h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-spacing: -.01em; }
+.search { display: flex; align-items: center; flex: 1 1 250px; height: 32px; min-width: 170px;
+  padding: 0 10px; border: 1px solid var(--border-2); border-radius: 7px; background: var(--surface-2); }
+.search:focus-within { box-shadow: 0 0 0 2px var(--text-2); }
+.search input { width: 100%; border: 0; outline: 0; box-shadow: none; background: transparent; }
+.search input::placeholder { color: var(--text-3); }
+.button, .icon { min-height: 30px; border: 1px solid var(--border-2); border-radius: 7px;
+  background: var(--surface); color: var(--text); }
+.button { padding: 0 11px; white-space: nowrap; }
+.icon { width: 30px; padding: 0; font-size: 16px; line-height: 1; }
+.button:hover, .icon:hover, .folder-row:hover, .bookmark:hover { background: var(--fill); }
+.button.quiet { border-color: transparent; background: transparent; }
+.button.danger { border-color: var(--danger); color: var(--danger); }
+.status { display: flex; align-items: center; gap: 9px; min-height: 28px; max-width: 1160px;
+  margin: 8px 0 12px; padding: 5px 10px; border-radius: 7px; background: var(--fill); color: var(--text-2); }
+.status[data-kind="error"] { border: 1px solid var(--danger); color: var(--danger); }
+.status span { flex: 1; }
+.library { display: grid; grid-template-columns: minmax(180px, 250px) minmax(0, 1fr); max-width: 1160px;
+  min-height: 360px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.folders { padding: 12px; background: var(--bg); border-right: 1px solid var(--border); }
+.folders-top, .list-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.folders h2, .results h2 { margin: 0; font: 600 13px/1.3 var(--font); }
+.folder-list, .bookmark-list { display: flex; flex-direction: column; gap: 3px; margin: 10px 0 0; padding: 0; list-style: none; }
+.folder-row { display: flex; align-items: center; gap: 4px; min-height: 32px; padding: 1px 3px; border-radius: 7px; }
+.folder-row[aria-current="page"] { background: var(--segment-selected); font-weight: 600; }
+.folder-select { flex: 1; min-width: 0; padding: 4px 5px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
+.folder-count { color: var(--text-2); font-size: 12px; }
+.disclosure { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); }
+.folder-tools { display: flex; gap: 4px; padding: 4px 4px 7px 28px; }
+.folder-tools input, .edit input { min-width: 0; height: 29px; padding: 0 8px; border: 1px solid var(--border-2);
+  border-radius: 6px; background: var(--surface); }
+.results { min-width: 0; padding: 16px 18px; }
+.results-meta { color: var(--text-2); font-size: 12px; }
+.bookmark { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  min-height: 62px; padding: 9px 7px; border-top: 1px solid var(--border); border-radius: 7px; }
+.bookmark:first-child { border-top: 0; }
+.bookmark-main { min-width: 0; }
+.bookmark-title { display: block; max-width: max-content; padding: 1px 3px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--text); font-weight: 600; text-align: left; }
+.bookmark-url, .scopes { overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-url { padding-left: 3px; font-size: 12px; }
+.scopes { margin-top: 3px; padding-left: 3px; font-size: 11px; }
+.bookmark-actions { display: flex; align-items: center; gap: 4px; }
+.move { max-width: 128px; height: 29px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface); }
+.edit { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(140px, 2fr) auto auto; gap: 6px; }
+.empty { margin: 30px 0; color: var(--text-2); text-align: center; }
+.new-folder { display: flex; gap: 6px; margin-top: 10px; }
+.new-folder input { flex: 1; min-width: 0; height: 30px; padding: 0 8px; border: 1px solid var(--border-2);
+  border-radius: 6px; background: var(--surface); }
+.imports { position: relative; }
+.imports-menu { position: absolute; z-index: 1; right: 0; top: calc(100% + 4px); min-width: 170px;
+  padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.imports-menu button { display: block; width: 100%; min-height: 29px; padding: 0 8px; border: 0; border-radius: 6px;
+  background: transparent; text-align: left; }
+.imports-menu button:hover { background: var(--fill); }
+.confirm-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: var(--fill); }
+.confirm { width: min(390px, 100%); padding: 20px; border: 1px solid var(--border-2); border-radius: 10px; background: var(--surface); }
+.confirm h2 { margin: 0 0 8px; font: 650 18px/1.2 var(--display); }
+.confirm p { margin: 0 0 17px; color: var(--text-2); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 680px) {
+  .page { padding: 20px 18px 44px; }
+  .library { grid-template-columns: minmax(0, 1fr); }
+  .folders { border-right: 0; border-bottom: 1px solid var(--border); }
+  .edit { grid-template-columns: minmax(0, 1fr); }
+  .bookmark { grid-template-columns: minmax(0, 1fr); }
+  .bookmark-actions { justify-content: flex-start; flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto; transition: none !important; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="head">
+    <h1>Bookmarks</h1>
+    <label class="search"><input id="query" type="search" placeholder="Search bookmarks" aria-label="Search bookmarks by title, URL, or folder" autocomplete="off"></label>
+    <div class="imports"><button class="button" id="import-button" aria-expanded="false" aria-controls="import-menu">Import</button><div class="imports-menu" id="import-menu" hidden></div></div>
+    <button class="button" id="new-folder-button">New folder</button>
+  </div>
+  <div class="status" id="status" role="status" aria-live="polite" hidden><span></span><button class="button" id="retry">Retry</button></div>
+  <section class="library" aria-label="Bookmark library">
+    <aside class="folders" aria-label="Bookmark folders">
+      <div class="folders-top"><h2>Folders</h2><span class="folder-count" id="folder-total"></span></div>
+      <ul class="folder-list" id="folder-list"></ul>
+      <form class="new-folder" id="new-folder" hidden><label for="new-folder-name" class="visually-hidden">Folder name</label><input id="new-folder-name" maxlength="120" required><button class="button" type="submit">Create</button><button class="button quiet" type="button" id="cancel-folder">Cancel</button></form>
+    </aside>
+    <section class="results" aria-label="Bookmarks">
+      <div class="list-title"><h2 id="results-title">All bookmarks</h2><span class="results-meta" id="result-count"></span></div>
+      <ul class="bookmark-list" id="bookmark-list"></ul>
+      <p class="empty" id="empty" hidden>No bookmarks match this view.</p>
+    </section>
+  </section>
+</main>
+<div class="confirm-backdrop" id="confirm-backdrop" hidden>
+  <section class="confirm" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-copy">
+    <h2 id="confirm-title">Delete bookmarks in this folder?</h2><p id="confirm-copy">This permanently deletes the bookmarks in this folder and removes them from favorites.</p>
+    <div class="confirm-actions"><button class="button" id="confirm-cancel">Cancel</button><button class="button" id="confirm-move">Move bookmarks to Unfiled</button><button class="button danger" id="confirm-delete">Delete bookmarks</button></div>
+  </section>
+</div>
+<script>
+"use strict";
+(function () {
+  var PREFIX = "\u0001island:";
+  var state = { folders: [], bookmarks: [], selected_folder: "all", import_sources: [] };
+  var expandedFolder = null;
+  var editingBookmark = null;
+  var folderRenameDraft = null;
+  var deletingFolder = null;
+  var priorFocus = null;
+  var $ = function (id) { return document.getElementById(id); };
+  function post(message) { console.log(PREFIX + JSON.stringify(message)); }
+  function text(value) { return value === undefined || value === null ? "" : String(value); }
+  function button(label, className) { var node = document.createElement("button"); node.type = "button"; node.textContent = label; node.className = className || "icon"; return node; }
+  function matches(bookmark, needle) {
+    if (!needle) return true;
+    return [bookmark.title, bookmark.url, bookmark.host, bookmark.folder_path].join(" ").toLowerCase().indexOf(needle) >= 0;
+  }
+  function selectedFolderName() {
+    if (state.selected_folder === "all") return "All bookmarks";
+    var folder = state.folders.filter(function (item) { return String(item.id) === String(state.selected_folder); })[0];
+    return folder ? text(folder.name) : "Bookmarks";
+  }
+  function setFolder(id) { state.selected_folder = id; post({ type: "select-folder", id: id }); render(); }
+  function showNewFolder() { $("new-folder").hidden = false; $("new-folder-name").focus(); }
+  function captureFolderRenameDraft() {
+    if (!folderRenameDraft) return;
+    var input = document.querySelector(".folder-tools input");
+    if (!input || String(input.dataset.folderId) !== String(folderRenameDraft.id)) return;
+    folderRenameDraft.name = input.value;
+    folderRenameDraft.restoreFocus = document.activeElement === input;
+  }
+  function captureBookmarkDraft() {
+    if (!editingBookmark) return;
+    var form = document.querySelector(".edit");
+    if (!form || String(form.dataset.bookmarkId) !== String(editingBookmark.id)) return;
+    var title = form.querySelector('[data-edit-field="title"]');
+    var url = form.querySelector('[data-edit-field="url"]');
+    editingBookmark.title = title.value; editingBookmark.url = url.value;
+    editingBookmark.restoreFocus = document.activeElement === title ? "title" :
+        document.activeElement === url ? "url" : null;
+  }
+  function folderTools(folder) {
+    var tools = document.createElement("form"); tools.className = "folder-tools";
+    tools.dataset.folderId = folder.id;
+    var input = document.createElement("input"); input.value = folderRenameDraft ? folderRenameDraft.name : text(folder.name); input.maxLength = 120; input.setAttribute("aria-label", "Rename " + text(folder.name));
+    input.dataset.folderId = folder.id;
+    var save = button("Save", "button"); save.type = "submit";
+    var remove = button("Delete", "button");
+    tools.appendChild(input); tools.appendChild(save); tools.appendChild(remove);
+    input.addEventListener("input", function () { if (folderRenameDraft) folderRenameDraft.name = input.value; });
+    tools.addEventListener("submit", function (event) { event.preventDefault(); var name = input.value.trim(); if (name) post({ type: "folder:rename", id: folder.id, name: name }); });
+    remove.addEventListener("click", function () {
+      if (Number(folder.count) > 0) { deletingFolder = folder; openFolderDeleteChoice(); }
+      else post({ type: "folder:delete", id: folder.id, mode: "move" });
+    });
+    if (folderRenameDraft && folderRenameDraft.restoreFocus) { folderRenameDraft.restoreFocus = false; setTimeout(function () { input.focus(); }, 0); }
+    return tools;
+  }
+  function renderFolders() {
+    captureFolderRenameDraft();
+    var list = $("folder-list"); list.textContent = "";
+    var all = { id: "all", name: "All bookmarks", count: state.bookmarks.length };
+    [all].concat(state.folders || []).forEach(function (folder) {
+      var item = document.createElement("li"); var row = document.createElement("div"); row.className = "folder-row";
+      if (String(state.selected_folder) === String(folder.id)) row.setAttribute("aria-current", "page");
+      var choose = button(text(folder.name), "folder-select"); choose.setAttribute("aria-current", String(state.selected_folder) === String(folder.id) ? "page" : "false");
+      choose.addEventListener("click", function () { setFolder(folder.id); }); row.appendChild(choose);
+      var count = document.createElement("span"); count.className = "folder-count"; count.textContent = text(folder.count); row.appendChild(count);
+      if (folder.id !== "all") { var disclose = button(expandedFolder === folder.id ? "Hide" : "More", "disclosure"); disclose.setAttribute("aria-expanded", expandedFolder === folder.id ? "true" : "false"); disclose.setAttribute("aria-label", "Folder actions for " + text(folder.name)); disclose.addEventListener("click", function () { if (expandedFolder === folder.id) { expandedFolder = null; folderRenameDraft = null; } else { expandedFolder = folder.id; folderRenameDraft = { id: folder.id, name: text(folder.name), restoreFocus: false }; } renderFolders(); }); row.appendChild(disclose); }
+      item.appendChild(row); if (expandedFolder === folder.id) item.appendChild(folderTools(folder)); list.appendChild(item);
+    });
+    $("folder-total").textContent = text((state.folders || []).length) + " folders";
+  }
+  function scopeText(bookmark) {
+    var labels = []; if (bookmark.global) labels.push("Global favorite");
+    (bookmark.spaces || []).forEach(function (space) { labels.push(text(space.name) + " favorite"); });
+    return labels.join(" / ");
+  }
+  function renderBookmark(bookmark) {
+    var item = document.createElement("li"); item.className = "bookmark";
+    if (editingBookmark && editingBookmark.id === bookmark.id) {
+      var edit = document.createElement("form"); edit.className = "edit";
+      edit.dataset.bookmarkId = bookmark.id;
+      var title = document.createElement("input"); title.value = editingBookmark.title; title.maxLength = 500; title.dataset.editField = "title"; title.setAttribute("aria-label", "Bookmark title");
+      var url = document.createElement("input"); url.value = editingBookmark.url; url.maxLength = 4000; url.dataset.editField = "url"; url.setAttribute("aria-label", "Bookmark URL");
+      var save = button("Save", "button"); save.type = "submit"; var cancel = button("Cancel", "button quiet");
+      edit.appendChild(title); edit.appendChild(url); edit.appendChild(save); edit.appendChild(cancel); item.appendChild(edit);
+      title.addEventListener("input", captureBookmarkDraft); url.addEventListener("input", captureBookmarkDraft);
+      edit.addEventListener("submit", function (event) { event.preventDefault(); post({ type: "bookmarks:edit", id: bookmark.id, title: title.value, url: url.value }); editingBookmark = null; render(); });
+      cancel.addEventListener("click", function () { editingBookmark = null; render(); });
+      edit.addEventListener("keydown", function (event) { if (event.key === "Escape") { event.preventDefault(); editingBookmark = null; render(); } });
+      var focusField = editingBookmark.restoreFocus, selectTitle = editingBookmark.selectTitle;
+      editingBookmark.restoreFocus = null; editingBookmark.selectTitle = false;
+      if (focusField) setTimeout(function () { var field = focusField === "url" ? url : title; field.focus(); if (focusField === "title" && selectTitle) field.select(); }, 0);
+      return item;
+    }
+    var main = document.createElement("div"); main.className = "bookmark-main";
+    var titleButton = button(text(bookmark.title) || text(bookmark.url), "bookmark-title"); titleButton.addEventListener("click", function () { post({ type: "bookmarks:open", id: bookmark.id }); });
+    var url = document.createElement("div"); url.className = "bookmark-url"; url.textContent = text(bookmark.host) || text(bookmark.url);
+    var scopes = document.createElement("div"); scopes.className = "scopes"; scopes.textContent = scopeText(bookmark);
+    main.appendChild(titleButton); main.appendChild(url); if (scopes.textContent) main.appendChild(scopes); item.appendChild(main);
+    var actions = document.createElement("div"); actions.className = "bookmark-actions";
+    var openNew = button("Open new", "button"); openNew.setAttribute("aria-label", "Open " + text(bookmark.title) + " in new tab"); openNew.addEventListener("click", function () { post({ type: "bookmarks:open-new-tab", id: bookmark.id }); });
+    var global = button(bookmark.global ? "Global on" : "Global", "button"); global.setAttribute("aria-pressed", bookmark.global ? "true" : "false"); global.addEventListener("click", function () { post({ type: "favorite:toggle-global", id: bookmark.id }); });
+    var spaceOn = (bookmark.spaces || []).some(function (entry) { return state.current_space && String(entry.id) === String(state.current_space.id); });
+    var space = button(spaceOn ? "Space on" : "Space", "button"); space.setAttribute("aria-label", "Toggle favorite in current space"); space.setAttribute("aria-pressed", spaceOn ? "true" : "false"); space.disabled = !state.current_space; space.addEventListener("click", function () { post({ type: "favorite:toggle-space", id: bookmark.id }); });
+    var move = document.createElement("select"); move.className = "move"; move.setAttribute("aria-label", "Move " + text(bookmark.title) + " to folder");
+    (state.folders || []).forEach(function (folder) { var option = document.createElement("option"); option.value = folder.id; option.textContent = folder.name; option.selected = String(bookmark.folder_id) === String(folder.id); move.appendChild(option); });
+    move.addEventListener("change", function () { post({ type: "bookmarks:move", id: bookmark.id, folder_id: move.value }); });
+    var edit = button("Edit", "button"); edit.addEventListener("click", function () { editingBookmark = { id: bookmark.id, title: text(bookmark.title), url: text(bookmark.url), restoreFocus: "title", selectTitle: true }; render(); });
+    var remove = button("Delete", "button"); remove.addEventListener("click", function () { post({ type: "bookmarks:delete", id: bookmark.id }); });
+    actions.appendChild(openNew); actions.appendChild(global); actions.appendChild(space); actions.appendChild(move); actions.appendChild(edit); actions.appendChild(remove);
+    if (state.agent_naming) { var agent = button("Name with agent", "button"); agent.disabled = true; agent.title = "Available when agent naming is connected"; actions.appendChild(agent); }
+    item.appendChild(actions); return item;
+  }
+  function renderBookmarks() {
+    captureBookmarkDraft();
+    var needle = $("query").value.trim().toLowerCase();
+    var bookmarks = (state.bookmarks || []).filter(function (bookmark) { return (state.selected_folder === "all" || String(bookmark.folder_id) === String(state.selected_folder)) && matches(bookmark, needle); });
+    var list = $("bookmark-list"); list.textContent = ""; bookmarks.forEach(function (bookmark) { list.appendChild(renderBookmark(bookmark)); });
+    $("results-title").textContent = selectedFolderName(); $("result-count").textContent = text(bookmarks.length) + " bookmarks"; $("empty").hidden = bookmarks.length !== 0;
+  }
+  function renderImports() {
+    var menu = $("import-menu"); menu.textContent = "";
+    (state.import_sources || []).forEach(function (source) { var entry = button(text(source.label), ""); entry.addEventListener("click", function () { post({ type: "import", source_id: source.id }); menu.hidden = true; $("import-button").setAttribute("aria-expanded", "false"); }); menu.appendChild(entry); });
+    $("import-button").disabled = !(state.import_sources || []).length;
+  }
+  function renderStatus() { var box = $("status"), value = state.status; box.hidden = !value; if (!value) return; box.dataset.kind = text(value.kind); box.querySelector("span").textContent = text(value.text); $("retry").hidden = !value.retry; }
+  function render() { renderFolders(); renderBookmarks(); renderImports(); renderStatus(); }
+  function openFolderDeleteChoice() { priorFocus = document.activeElement; $("confirm-title").textContent = "Delete folder?"; $("confirm-copy").textContent = "Choose Move bookmarks to Unfiled to keep them, or continue to permanently delete them."; $("confirm-move").hidden = false; $("confirm-delete").textContent = "Delete bookmarks"; $("confirm-backdrop").hidden = false; $("confirm-move").focus(); }
+  function closeConfirm() { $("confirm-backdrop").hidden = true; if (priorFocus) priorFocus.focus(); priorFocus = null; }
+  function trapConfirm(event) { if ($("confirm-backdrop").hidden || event.key !== "Tab") return; var focusable = $("confirm-backdrop").querySelectorAll("button:not([disabled])"); var first = focusable[0], last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); } }
+  $("query").addEventListener("input", renderBookmarks);
+  $("new-folder-button").addEventListener("click", showNewFolder);
+  $("cancel-folder").addEventListener("click", function () { $("new-folder").hidden = true; });
+  $("new-folder").addEventListener("submit", function (event) { event.preventDefault(); var name = $("new-folder-name").value.trim(); if (name) { post({ type: "folder:create", name: name }); $("new-folder-name").value = ""; $("new-folder").hidden = true; } });
+  $("import-button").addEventListener("click", function () { var menu = $("import-menu"); menu.hidden = !menu.hidden; $("import-button").setAttribute("aria-expanded", menu.hidden ? "false" : "true"); });
+  $("retry").addEventListener("click", function () { post({ type: "retry" }); });
+  $("confirm-cancel").addEventListener("click", closeConfirm);
+  $("confirm-move").addEventListener("click", function () { if (deletingFolder) post({ type: "folder:delete", id: deletingFolder.id, mode: "move" }); deletingFolder = null; closeConfirm(); });
+  $("confirm-delete").addEventListener("click", function () { if (!deletingFolder) return; if (!$("confirm-move").hidden) { $("confirm-title").textContent = "Delete bookmarks permanently?"; $("confirm-copy").textContent = "This cannot be undone. Delete the bookmarks and this folder?"; $("confirm-move").hidden = true; $("confirm-delete").textContent = "Delete permanently"; $("confirm-delete").focus(); return; } post({ type: "folder:delete", id: deletingFolder.id, mode: "delete" }); deletingFolder = null; closeConfirm(); });
+  document.addEventListener("keydown", function (event) { trapConfirm(event); if (!$("confirm-backdrop").hidden && event.key === "Escape") { event.preventDefault(); closeConfirm(); } });
+  function applyTheme(theme) {
+    if (!theme) return; var root = document.documentElement;
+    [["bg","--bg"],["surface","--surface"],["surface_2","--surface-2"],["fill","--fill"],["text","--text"],["text_2","--text-2"],["text_3","--text-3"],["border","--border"],["border_2","--border-2"],["accent","--accent"],["selection","--selection"],["accent_soft","--accent-soft"],["accent_text","--accent-text"],["warn_bg","--warn-bg"],["warn_border","--warn-border"],["warn_text","--warn-text"],["success","--success"],["danger","--danger"],["segment_selected","--segment-selected"]].forEach(function (mapping) { if (theme[mapping[0]]) root.style.setProperty(mapping[1], theme[mapping[0]]); });
+    ["--branch-a", "--branch-b", "--branch-c", "--branch-d"].forEach(function (variable, index) { if (theme.branch && theme.branch[index]) root.style.setProperty(variable, theme.branch[index]); });
+    if (theme.font) { root.style.setProperty("--font", theme.font); root.style.setProperty("--display", theme.font); }
+    root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+  }
+  window.islandRender = function (next) { if (next.theme) applyTheme(next.theme); state = next; render(); };
+  window.islandFocus = function () { $("query").focus(); };
+  post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

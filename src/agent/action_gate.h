@@ -26,6 +26,7 @@ enum class GateRule : std::uint8_t {
     kForeignNavigation,
     kClosePersonTab,
     kUnclassified,  // missing element facts for page_type / page_press_key; always asks
+    kBookmarkMutation,
 };
 
 // What the tool layer knows about the element a page action targets (or the focused element for
@@ -48,6 +49,13 @@ struct GateInput {
     // raw argument.
     std::string target_url;
     bool tab_opened_by_agent = false;
+    // Persistent bookmark-library action. These values are supplied by the tool layer, never by a
+    // page, and let the confirmation card identify the exact local-state change.
+    std::string bookmark_title;
+    std::uint64_t bookmark_id = 0;
+    std::string bookmark_url;
+    std::string bookmark_folder_path;
+    std::string favorite_scope;
 };
 
 struct GateDecision {
@@ -57,6 +65,9 @@ struct GateDecision {
     std::string host;     // page host without "www."
     // false for card fields, password fields, kUnclassified and pages without a host
     bool trusted_allowed = true;
+    // Whether Allow for this task may remember this confirmation. Bookmark mutations deliberately
+    // allow this even though a trusted site must never bypass their confirmation.
+    bool task_grant_allowed = true;
     // What an "Allow for this task" grant covers besides host and rule: the page's origin, and for
     // a foreign navigation the target origin too. Empty when the origin is unknown.
     std::string scope;

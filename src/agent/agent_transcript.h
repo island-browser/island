@@ -28,6 +28,11 @@ struct TranscriptItem {
     };
     Kind kind = Kind::kNotice;
     std::string text;
+    // Context that accompanied this user turn. It is display-only metadata; the full context
+    // remains in the ACP prompt and is never repeated in the bubble.
+    std::string context_title;
+    std::string context_url;
+    std::string context_selection;
     std::string tool_call_id;
     std::string tool_kind;
     std::string status;
@@ -42,7 +47,7 @@ struct TranscriptItem {
 
 class AgentTranscript {
   public:
-    void AddUserPrompt(std::string text);
+    void AddUserPrompt(std::string text, std::string context = {});
     void AddNotice(std::string text);
     void Apply(const AcpEvent& event);
     // Marks a permission prompt answered with the given label.

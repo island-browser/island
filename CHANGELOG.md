@@ -13,6 +13,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Added
+
+- Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with
+  title/URL editing, folder actions, favorite controls, import handoff, inline save status and
+  destructive folder confirmation. Browser-window state and command wiring land separately.
+- Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
+  add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
+  sites; bulk, import, folder-mutation and reorder tools are not exposed.
+
 ### Changed
 
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
@@ -21,6 +30,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
   URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
   stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
+
+### Fixed
+
+- Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
+  long selection chips stay on one ellipsized line.
 
 ## [0.8.0] - 2026-10-24
 

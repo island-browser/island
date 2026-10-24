@@ -1444,6 +1444,9 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
         case LocalPageKind::kTabOverview:
             HandleOverviewMessage(message);
             return;
+        case LocalPageKind::kBookmarks:
+            // The Bookmarks dispatcher is not connected yet, so reject its messages.
+            return;
         case LocalPageKind::kReport:
             // Report pages live in tabs and reach HandleReportPageMessage through
             // the tab's console handler, which knows which report the URL names.
@@ -1500,6 +1503,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
             return settings_page_.get();
         case LocalPageKind::kTabOverview:
             return overview_page_.get();
+        case LocalPageKind::kBookmarks:
         case LocalPageKind::kAgent:
         case LocalPageKind::kStart:
         case LocalPageKind::kReport:

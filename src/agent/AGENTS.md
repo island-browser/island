@@ -32,12 +32,27 @@ agent panel) lives in `src/main/`.
 | `acp_client.{h,cc}` | ACP v1 client state machine: `initialize` → `session/new` → `session/prompt`, `session/update`, `session/request_permission`, `session/cancel` |
 | `agent_providers.{h,cc}` | Provider registry (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Goose, custom): command, required executable, install hint, docs URL; PATH availability detection (`ExecutableSearchDirs`, `FindExecutable`); `ResolveAgentCommand` (`ISLAND_AGENT_COMMAND` > provider preset or custom command) |
 | `agent_process.{h,cc}` | fork/exec of the agent with stdio pipes, line reader, stderr tail, EOF→SIGTERM→SIGKILL shutdown of the process group |
-| `agent_transcript.{h,cc}` | Folds ACP events into the panel's conversation model; `ToJson()` feeds the view |
+| `agent_transcript.{h,cc}` | Folds ACP events into the panel's conversation model; a user turn extracts its sent page title/URL/selection tags into display-only context-chip metadata, restores escaped closing-tag text for display, and `ToJson()` feeds the view |
 | `plan_graph.{h,cc}` | The research plan as a graph, built from ACP plan entries and their `_meta.island` (node kinds question/step/needs_you/join/result, states, at most 3 branch levels), validated, ordered and laid out on a grid; `plan.html` draws its `PlanGraphJson` |
 | `action_gate.{h,cc}` | The action gate (agent-actions spec §2): `Classify` decides whether a page or browser action is kFree, kConfirm or kBlocked, from element facts, the page URL and the trusted sites; the rules table is below; CEF-free |
 | `agent_task_queue.{h,cc}` | `AgentTaskQueue`: runs the person's agent work one task at a time (`TaskKind` chat/research/collect/ask, `TaskState`), with queue order, move, remove, stop and a waiting state for confirmations and plan approval; the window starts tasks through a `StartFn`; CEF-free |
 | `plan_edits.{h,cc}` | The person's plan edits (skips, edited instructions) and the messages that send them back to the agent (`BuildPlanRunMessage`, `BuildExpandMessage`) |
 | `mcp_bridge_main.cc` | `island_mcp_bridge` executable |
+
+## Bookmark and favorite tool surface
+
+| Tool | Access | Arguments |
+|------|--------|-----------|
+| `browser_list_bookmarks` | Free | optional exact `folder_path` |
+| `browser_list_favorites` | Free | optional `scope`: `global` or persisted decimal space id |
+| `browser_add_bookmark` | `kBookmarkMutation` confirmation | `url`, optional `title`, optional `folder_path` |
+| `browser_remove_bookmark` | `kBookmarkMutation` confirmation | positive bookmark `id` |
+| `browser_add_favorite` | `kBookmarkMutation` confirmation | positive bookmark `id`, `scope` |
+| `browser_remove_favorite` | `kBookmarkMutation` confirmation | positive bookmark `id`, `scope` |
+
+The host seam is asynchronous and CEF-free. Its default implementation returns `bookmarks
+unavailable`; the window bridge is responsible for supplying a real store implementation.
+`ListFavorites(nullopt)` returns every favorite in display order, never non-favorites.
 
 ## For AI Agents
 
@@ -80,12 +95,17 @@ others become kFree on a trusted host. Summaries are what the card shows the per
 | 6 | `kScript` | `page_evaluate` | kConfirm | yes |
 | 7 | `kForeignNavigation` | `browser_navigate` to another origin, in a tab the person opened (agent-opened tabs are free) | kConfirm | yes |
 | 8 | `kClosePersonTab` | `browser_close_tab` on a tab the person opened | kConfirm | yes |
+| 9 | `kBookmarkMutation` | `browser_add/remove_bookmark`, `browser_add/remove_favorite` | kConfirm | no |
 
 Not in the table: a Plan tab is refused before the gate asks anyone (`AgentTabInfo::refusal`), and a
 page with no host or origin is never trusted or granted. "Allow for this task" grants are keyed by
-(host, rule, scope) and cleared at each task start (`ResetTaskGrants`); a decision with
-`trusted_allowed == false` offers neither that grant nor "Trust this site". Cards time out after
-120 s. Withdrawn cards answer `kWithdrawn` ("ask again"), not `kCancel` ("declined"). The host
+(host, rule, scope) and cleared at each task start (`ResetTaskGrants`); `task_grant_allowed`
+controls whether a card offers that grant, while `trusted_allowed` controls only "Trust this site".
+`kBookmarkMutation` permits Allow for this task but never a trusted-site bypass, with a grant
+narrowly bound to the operation, saved bookmark id and scope. Cards render "Allow for this task"
+from `ConfirmationRequest::task_grant_allowed`, independently of `trusted_allowed`; the latter
+controls only "Trust this site". Cards time out after 120 s. Withdrawn cards
+answer `kWithdrawn` ("ask again"), not `kCancel` ("declined"). The host
 (`WindowAgentHost`) owns the card; the toolbox only sees `RequestConfirmation`.
 
 The word list lives in `kConsequentialWords` (`action_gate.cc`): English and Russian entries,
@@ -157,6 +177,17 @@ Add one at a time, in the same commit as its test, and update the table above.
 6. A tool that can be consequential goes through `Gate` as above, and its rule (if it is new) is
    added with the gate steps. A tool that is always safe skips `Gate` entirely. Test it in
    `tests/agent/browser_tools_test.cpp` against `tests/agent/fake_browser_host.h`.
+
+**A bookmark or favorite tool** (`browser_tools.{h,cc}`):
+1. Keep `AgentBrowserHost` CEF-free: exchange only `AgentBookmarkInfo`, `AgentBookmarkDraft` and
+   `AgentFavoriteScope`; asynchronous default methods must fail closed with `bookmarks unavailable`.
+2. Register only list/add/remove tools. Listing may call the host directly; never add bulk, import,
+   folder-mutation or reorder operations to the agent surface.
+3. Validate every argument before listing or asking. For remove/favorite operations, list first and
+   reject an unknown bookmark id before `Gate`.
+4. All persistent add/remove operations use `kBookmarkMutation`; cards name the operation, title,
+   host, folder and/or scope. Do not let a trusted site bypass them. Test the pre-card no-write,
+   Allow once/task, cancel, timeout and host-error paths.
 
 **A new currency mark** (`kCurrencyMarks`, `browser_tools.cc`):
 1. Add the mark to the table. An ASCII-letter mark matches as a whole token in any case ("SEK");
