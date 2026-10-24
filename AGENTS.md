@@ -62,7 +62,8 @@
   `version-tag.yml` on pushes to `main`; build, test, and look at changes locally before
   committing. At the project owner's request (2026-10-06), `build-release.yml` builds all six
   targets on every push to `main` that changes the app and publishes them as **unsigned GitHub
-  prereleases** (`nightly`, plus `vX.Y.Z` once per version) for the in-browser updater.
+  releases** for the in-browser updater: `vX.Y.Z` once per version, marked as the latest release,
+  and the rolling `nightly` as a prerelease.
 - Agent actions (spec `docs/superpowers/specs/2026-10-17-island-agent-actions-design.md`, 2026-10-17):
   every consequential page or browser action the agent takes passes the CEF-free action gate
   (`src/agent/action_gate.*`). Password fields are never typed into; card fields, submits,

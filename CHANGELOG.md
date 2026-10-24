@@ -13,6 +13,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Changed
+
+- Versioned builds are published as the latest GitHub release (still unsigned); nightly stays a prerelease.
+
 ## [0.8.0] - 2026-10-24
 
 ### Added
