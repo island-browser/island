@@ -18,7 +18,6 @@
 #include "agent/plan_fixture.h"
 #include "agent_context.h"
 #include "browser_window.h"
-#include "window_agent_host.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
@@ -31,9 +30,10 @@
 #include "research_prompt.h"
 #include "session_store.h"
 #include "sha256.h"
-#include "table_export.h"
 #include "start_tiles.h"
+#include "table_export.h"
 #include "updater.h"
+#include "window_agent_host.h"
 
 namespace island {
 namespace {
@@ -62,6 +62,65 @@ TEST(LocalPageRegistryTest, BookmarksUsesItsOwnLocalUrlAndDocument) {
     EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kBookmarks), "island://bookmarks");
     EXPECT_NE(LocalPageHtml(LocalPageKind::kBookmarks).find("<title>Bookmarks</title>"),
               std::string_view::npos);
+}
+
+TEST(BrowserWindowPagesTest, BookmarksStateProjectsFoldersScopesAndCurrentSpace) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BookmarkResult bookmark =
+        window->AddFavoriteByUrl(std::nullopt, "Island", "https://island.test/docs");
+    ASSERT_TRUE(bookmark.ok());
+    ASSERT_TRUE(window
+                    ->AddFavoriteByUrl(FavoriteScope{window->active_space_id().value}, "Island",
+                                       "https://island.test/docs")
+                    .ok());
+
+    const std::optional<Value> state = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(state.has_value());
+    ASSERT_NE(state->FindMember("theme"), nullptr);
+    ASSERT_EQ(state->FindMember("folders")->array_val.size(), 1U);
+    ASSERT_EQ(state->FindMember("bookmarks")->array_val.size(), 1U);
+    const Value& item = state->FindMember("bookmarks")->array_val[0];
+    EXPECT_EQ(item.StringOr("host", ""), "island.test");
+    EXPECT_TRUE(item.BoolOr("global", false));
+    ASSERT_EQ(item.FindMember("spaces")->array_val.size(), 1U);
+    EXPECT_EQ(state->FindMember("current_space")->StringOr("name", ""), "Default");
+    EXPECT_EQ(state->StringOr("selected_folder", ""), "all");
+    EXPECT_TRUE(state->FindMember("status")->IsNull());
+}
+
+TEST(BrowserWindowPagesTest, BookmarksDispatcherRejectsBadFieldsAndMutatesKnownRecords) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BookmarkResult bookmark =
+        window->AddFavoriteByUrl(std::nullopt, "Before", "https://before.test/");
+    ASSERT_TRUE(bookmark.ok());
+    const Bookmark* before = window->bookmarks().FindBookmark(bookmark.id);
+    ASSERT_NE(before, nullptr);
+
+    Value wrong_page = Value::MakeObject()
+                           .Set("type", Value::String("bookmarks:delete"))
+                           .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)));
+    Value empty_edit = Value::MakeObject()
+                           .Set("type", Value::String("bookmarks:edit"))
+                           .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
+                           .Set("title", Value::String(""))
+                           .Set("url", Value::String(""));
+    window->OnLocalPageMessage(LocalPageKind::kSettings, wrong_page);
+    window->OnLocalPageMessage(LocalPageKind::kBookmarks, empty_edit);
+    EXPECT_EQ(window->bookmarks().FindBookmark(bookmark.id)->title, "Before");
+
+    Value edit = Value::MakeObject()
+                     .Set("type", Value::String("bookmarks:edit"))
+                     .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
+                     .Set("title", Value::String("After"))
+                     .Set("url", Value::String("https://after.test/"));
+    window->OnLocalPageMessage(LocalPageKind::kBookmarks, edit);
+    const Bookmark* after = window->bookmarks().FindBookmark(bookmark.id);
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(after->title, "After");
+    EXPECT_EQ(after->url, "https://after.test/");
+    window->OnLocalPageMessage(LocalPageKind::kBookmarks,
+                               *json::Parse(R"({"type":"folder:delete","id":1,"mode":"bad"})"));
+    EXPECT_NE(window->bookmarks().FindFolder(1), nullptr);
 }
 
 TEST(BrowserWindowPagesTest, KeymapEditsTakeEffectAndShortcutsRunActions) {
@@ -146,13 +205,26 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     const Value* theme = state->FindMember("theme");
     ASSERT_NE(theme, nullptr);
     const std::pair<std::string_view, std::string_view> expected[] = {
-        {"bg", "#ebebef"},          {"surface", "#ffffff"},   {"surface_2", "#f6f6f8"},
-        {"fill", "#e8e8ed"},        {"text", "#1d1d1f"},      {"text_2", "#636366"},
-        {"text_3", "#8e8e93"},      {"border", "#e5e5ea"},    {"border_2", "#d2d2d7"},
-        {"accent", "#0a64d8"},      {"selection", "#0a64d8"}, {"accent_soft", "#dfe9f8"},
-        {"accent_text", "#0a4fa8"}, {"warn_bg", "#fff8e6"},   {"warn_border", "#f5d38a"},
-        {"warn_text", "#6a4a00"},   {"success", "#248a3d"},   {"danger", "#d70015"},
-        {"segment_selected", "#e3e3e8"},                         {"canvas", "#ebebef"},
+        {"bg", "#ebebef"},
+        {"surface", "#ffffff"},
+        {"surface_2", "#f6f6f8"},
+        {"fill", "#e8e8ed"},
+        {"text", "#1d1d1f"},
+        {"text_2", "#636366"},
+        {"text_3", "#8e8e93"},
+        {"border", "#e5e5ea"},
+        {"border_2", "#d2d2d7"},
+        {"accent", "#0a64d8"},
+        {"selection", "#0a64d8"},
+        {"accent_soft", "#dfe9f8"},
+        {"accent_text", "#0a4fa8"},
+        {"warn_bg", "#fff8e6"},
+        {"warn_border", "#f5d38a"},
+        {"warn_text", "#6a4a00"},
+        {"success", "#248a3d"},
+        {"danger", "#d70015"},
+        {"segment_selected", "#e3e3e8"},
+        {"canvas", "#ebebef"},
     };
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
@@ -2183,8 +2255,9 @@ TEST(BrowserWindowPagesTest, TrustAndTaskAnswersAreCancelWhenTheCardDidNotOfferT
     }
     SendAgent(*window, R"({"type":"confirm","id":"c1","answer":"trust"})");
     SendAgent(*window, R"({"type":"confirm","id":"c2","answer":"task"})");
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
-                                                              agent::ConfirmationAnswer::kCancel}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
+                                                      agent::ConfirmationAnswer::kCancel}));
     EXPECT_TRUE(window->trusted_sites().empty());
     SendAgent(*window, R"({"type":"confirm","id":"nope","answer":"once"})");
     SendAgent(*window, R"({"type":"confirm","answer":"once"})");
@@ -2202,7 +2275,8 @@ TEST(BrowserWindowPagesTest, ConfirmationTimesOutAndWithdrawsTheCard) {
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
 
     window->AdvanceConfirmationClockForTest(std::chrono::seconds(1));
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kTimeout}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kTimeout}));
     EXPECT_TRUE(ListedConfirmationIds(*window).empty());
     EXPECT_FALSE(window->HasPendingConfirmation());
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
@@ -3017,7 +3091,6 @@ TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
                             [](const auto& c) { return c.id == "ask_about_page"; }));
 }
 
-
 constexpr std::string_view kCollectTable =
     "# Grinders\n\n| Source | Price |\n|---|---|\n| [Shop](https://a.test/one) | 189 |\n";
 
@@ -3028,7 +3101,7 @@ TEST(BrowserWindowPagesTest, CollectTaskOpensACollectionReport) {
     BrowserWindow& window = *qw.window;
     window.SetReportPageUrlForTest(std::string(kReportUrl));
     ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/one"));
-    EXPECT_FALSE(window.CollectFromTabs("price", {}));  // nothing to collect
+    EXPECT_FALSE(window.CollectFromTabs("price", {}));                        // nothing to collect
     EXPECT_FALSE(window.CollectFromTabs("  ", {{0, "https://a.test/one"}}));  // no question
 
     ASSERT_TRUE(window.CollectFromTabs("price", {{0, "https://a.test/one"}}));
@@ -3088,14 +3161,14 @@ TEST(BrowserWindowPagesTest, ExportMessageWritesTheChosenFormat) {
     SendReport(*window, id, R"({"type":"export","format":"csv"})");
     std::ifstream csv(target, std::ios::binary);
     std::string written((std::istreambuf_iterator<char>(csv)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(written, "\xEF\xBB\xBFSource,Source title,Price\r\n"
-                       "https://a.test/one,Shop,189\r\n");
+    EXPECT_EQ(written,
+              "\xEF\xBB\xBFSource,Source title,Price\r\n"
+              "https://a.test/one,Shop,189\r\n");
 
     SendReport(*window, id, R"({"type":"export","format":"json"})");
     std::ifstream json_in(target, std::ios::binary);
     written.assign((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(written,
-              R"([{"Source":"https://a.test/one","Source title":"Shop","Price":"189"}])");
+    EXPECT_EQ(written, R"([{"Source":"https://a.test/one","Source title":"Shop","Price":"189"}])");
 
     // A report without a table has nothing to export: nothing is written.
     std::filesystem::remove(target);

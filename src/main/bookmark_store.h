@@ -138,6 +138,9 @@ class BookmarkStore {
     BookmarkResult MoveFolder(std::uint64_t folder_id, std::size_t index);
     // Refuses a folder that still holds bookmarks (kNotEmpty); move them first.
     BookmarkResult DeleteFolder(std::uint64_t folder_id);
+    // Deletes a folder and its contents in one durable commit. With |move_to_unfiled|, contents
+    // are appended to Unfiled (created on demand); otherwise they and every favorite reference go.
+    BookmarkResult DeleteFolderWithContents(std::uint64_t folder_id, bool move_to_unfiled);
     // Moves a bookmark to the end of |folder_id|, out of its current folder.
     BookmarkResult MoveBookmark(std::uint64_t bookmark_id, std::uint64_t folder_id);
     // Rejects a URL that another bookmark already has (kDuplicate).

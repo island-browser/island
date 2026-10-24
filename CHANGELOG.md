@@ -18,9 +18,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - Favorites have their data path in place: each favorite list is projected for the sidebar, and a
   favorite can show its own virtual tab in the content slot without touching the selected tab. No
   sidebar rows or controls for favorites are shown in this build yet.
-- Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with
-  title/URL editing, folder actions, favorite controls, import handoff, inline save status and
-  destructive folder confirmation. Browser-window state and command wiring land separately.
+- Bookmarks is now a complete local library page: manage folders and bookmarks, move entries,
+  toggle global or current-space favorites, import detected browser data, and open saved URLs
+  through Island's normal address validation. Failed saves roll back and offer inline Retry.
 - Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
   add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
   sites; bulk, import, folder-mutation and reorder tools are not exposed.

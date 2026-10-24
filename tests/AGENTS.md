@@ -31,7 +31,7 @@ Two independent test systems live side by side here:
 | `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
 | `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
 | `bookmark_store_test.cpp` | Schema 2 `BookmarkStore`: v1 migration and its backup and write-failure policy, invalid-file backup, unreadable-file read-only, atomic save rollback, folders, favorites, import de-duplication, schema validation |
-| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow`; Native ThemeJson look and palette command icon contracts |
+| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / Bookmarks-page state and message-dispatch / import / shortcut / agent-provider seams of `BrowserWindow`; Native ThemeJson look and palette command icon contracts |
 | `history_recorder_test.cpp` | History URL/privacy filtering, deduplication and visit ranking, cap compaction, reopen rebuild, and clear |
 | `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |

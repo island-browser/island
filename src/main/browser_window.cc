@@ -1467,6 +1467,8 @@ void BrowserWindow::FlushLocalPagesRender() {
         }
     } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
+    } else if (internal_page_ == LocalPageKind::kBookmarks && bookmarks_page_ != nullptr) {
+        bookmarks_page_->Render(BookmarksStateJson());
     }
 }
 
@@ -1489,7 +1491,7 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
             HandleOverviewMessage(message);
             return;
         case LocalPageKind::kBookmarks:
-            // The Bookmarks dispatcher is not connected yet, so reject its messages.
+            HandleBookmarksMessage(message);
             return;
         case LocalPageKind::kReport:
             // Report pages live in tabs and reach HandleReportPageMessage through
@@ -1548,6 +1550,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
         case LocalPageKind::kTabOverview:
             return overview_page_.get();
         case LocalPageKind::kBookmarks:
+            return bookmarks_page_.get();
         case LocalPageKind::kAgent:
         case LocalPageKind::kStart:
         case LocalPageKind::kReport:
@@ -1560,6 +1563,17 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
 void BrowserWindow::ToggleTabOverview() { ToggleInternalPage(LocalPageKind::kTabOverview); }
 
 void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettings); }
+
+void BrowserWindow::OpenBookmarksPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (internal_page_ == LocalPageKind::kBookmarks) {
+        if (bookmarks_page_ != nullptr) {
+            bookmarks_page_->Focus();
+        }
+        return;
+    }
+    ToggleInternalPage(LocalPageKind::kBookmarks);
+}
 
 void BrowserWindow::OpenBlockerSettings() { ShowSettingsSection("privacy"); }
 
@@ -1574,10 +1588,18 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
         HideInternalPage();
         return;
     }
-    std::unique_ptr<LocalPage>& page =
-        kind == LocalPageKind::kSettings ? settings_page_ : overview_page_;
-    if (page == nullptr) {
-        page = std::make_unique<LocalPage>(kind, *this);
+    std::unique_ptr<LocalPage>* page = nullptr;
+    if (kind == LocalPageKind::kSettings) {
+        page = &settings_page_;
+    } else if (kind == LocalPageKind::kTabOverview) {
+        page = &overview_page_;
+    } else if (kind == LocalPageKind::kBookmarks) {
+        page = &bookmarks_page_;
+    } else {
+        return;
+    }
+    if (*page == nullptr) {
+        *page = std::make_unique<LocalPage>(kind, *this);
     }
     if (kind == LocalPageKind::kSettings) {
         provider_statuses_.reset();  // re-detect agents installed meanwhile
@@ -1827,6 +1849,259 @@ std::string BrowserWindow::TabOverviewStateJson() const {
         Value::MakeObject()
             .Set("theme", ThemeJson())
             .Set("overview", Value::MakeObject().Set("spaces", std::move(spaces))));
+}
+
+std::string BrowserWindow::BookmarksStateJson() const {
+    using json::Value;
+    Value folders = Value::MakeArray();
+    Value bookmarks = Value::MakeArray();
+    const BookmarkState& state = bookmarks_.state();
+    for (const BookmarkFolder& folder : state.folders) {
+        folders.Push(
+            Value::MakeObject()
+                .Set("id", Value::Int(static_cast<std::int64_t>(folder.id)))
+                .Set("name", Value::String(folder.name))
+                .Set("count", Value::Int(static_cast<std::int64_t>(folder.bookmark_ids.size()))));
+    }
+    for (const Bookmark& bookmark : state.bookmarks) {
+        const BookmarkFolder* folder = nullptr;
+        for (const BookmarkFolder& candidate : state.folders) {
+            if (std::find(candidate.bookmark_ids.begin(), candidate.bookmark_ids.end(),
+                          bookmark.id) != candidate.bookmark_ids.end()) {
+                folder = &candidate;
+                break;
+            }
+        }
+        Value spaces = Value::MakeArray();
+        for (const auto& [space_id, ids] : state.space_favorite_ids) {
+            if (std::find(ids.begin(), ids.end(), bookmark.id) == ids.end()) {
+                continue;
+            }
+            const Space* space = FindSpace(SpaceId{space_id});
+            spaces.Push(Value::MakeObject()
+                            .Set("id", Value::Int(static_cast<std::int64_t>(space_id)))
+                            .Set("name", Value::String(space != nullptr ? space->name()
+                                                                        : "Removed space")));
+        }
+        const bool global =
+            std::find(state.global_favorite_ids.begin(), state.global_favorite_ids.end(),
+                      bookmark.id) != state.global_favorite_ids.end();
+        bookmarks.Push(Value::MakeObject()
+                           .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
+                           .Set("title", Value::String(bookmark.title))
+                           .Set("url", Value::String(bookmark.url))
+                           .Set("host", Value::String(UrlHost(bookmark.url)))
+                           .Set("folder_id", Value::Int(static_cast<std::int64_t>(
+                                                 folder != nullptr ? folder->id : 0)))
+                           .Set("folder_path", Value::String(folder != nullptr ? folder->name : ""))
+                           .Set("global", Value::Bool(global))
+                           .Set("spaces", std::move(spaces)));
+    }
+    Value sources = Value::MakeArray();
+    for (const ImportSourceInfo& source : DetectInstalledSources(UserBaseHome())) {
+        if (source.available) {
+            sources.Push(Value::MakeObject()
+                             .Set("id", Value::String(std::string(ImportSourceId(source.id))))
+                             .Set("label", Value::String(source.display_name)));
+        }
+    }
+    Value result = Value::MakeObject()
+                       .Set("theme", ThemeJson())
+                       .Set("folders", std::move(folders))
+                       .Set("bookmarks", std::move(bookmarks))
+                       .Set("selected_folder",
+                            selected_bookmark_folder_.has_value()
+                                ? Value::Int(static_cast<std::int64_t>(*selected_bookmark_folder_))
+                                : Value::String("all"))
+                       .Set("import_sources", std::move(sources));
+    if (!spaces_.empty()) {
+        result.Set("current_space",
+                   Value::MakeObject()
+                       .Set("id", Value::Int(static_cast<std::int64_t>(active_space().id().value)))
+                       .Set("name", Value::String(active_space().name())));
+    }
+    if (failed_bookmark_mutation_.has_value()) {
+        result.Set(
+            "status",
+            Value::MakeObject()
+                .Set("kind", Value::String("error"))
+                .Set("text", Value::String(failed_bookmark_mutation_->message))
+                .Set("retry", Value::Bool(static_cast<bool>(failed_bookmark_mutation_->retry))));
+    } else {
+        result.Set("status", Value::Null());
+    }
+    return json::Serialize(result);
+}
+
+void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::string_view type = message.StringOr("type", "");
+    const auto valid_id = [&message](std::string_view key) -> std::optional<std::uint64_t> {
+        const json::Value* value = message.FindMember(key);
+        if (value == nullptr || !value->IsInt() || value->int_val <= 0) {
+            return std::nullopt;
+        }
+        return static_cast<std::uint64_t>(value->int_val);
+    };
+    const auto valid_text = [&message](std::string_view key, std::size_t max,
+                                       bool nonempty) -> std::optional<std::string> {
+        const json::Value* value = message.FindMember(key);
+        if (value == nullptr || !value->IsString() || value->string_val.size() > max ||
+            (nonempty && value->string_val.empty())) {
+            return std::nullopt;
+        }
+        return value->string_val;
+    };
+    const auto reject = [&type] {
+        fprintf(stderr, "island: rejected Bookmarks message: %.*s\n", static_cast<int>(type.size()),
+                type.data());
+    };
+    const auto finish = [this](BookmarkResult result) {
+        if (!result.ok()) {
+            ScheduleLocalPagesRender();
+        }
+    };
+    if (type == "ready") {
+        ScheduleLocalPagesRender();
+        return;
+    }
+    if (type == "select-folder") {
+        const json::Value* value = message.FindMember("id");
+        if (value != nullptr && value->IsString() && value->string_val == "all") {
+            selected_bookmark_folder_.reset();
+            ScheduleLocalPagesRender();
+            return;
+        }
+        const std::optional<std::uint64_t> id = valid_id("id");
+        if (!id || bookmarks_.FindFolder(*id) == nullptr) {
+            reject();
+            return;
+        }
+        selected_bookmark_folder_ = *id;
+        ScheduleLocalPagesRender();
+        return;
+    }
+    if (type == "retry") {
+        finish(RetryLastBookmarkMutation());
+        return;
+    }
+    if (type == "folder:create") {
+        const auto name = valid_text("name", 120, true);
+        if (!name) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, name = *name] { return bookmarks_.CreateFolder(name); }));
+        return;
+    }
+    if (type == "folder:rename") {
+        const auto id = valid_id("id");
+        const auto name = valid_text("name", 120, true);
+        if (!id || !name || bookmarks_.FindFolder(*id) == nullptr) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation(
+            [this, id = *id, name = *name] { return bookmarks_.RenameFolder(id, name); }));
+        return;
+    }
+    if (type == "folder:delete") {
+        const auto id = valid_id("id");
+        const auto mode = valid_text("mode", 6, true);
+        if (!id || !mode || (*mode != "move" && *mode != "delete") ||
+            bookmarks_.FindFolder(*id) == nullptr) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, id = *id, mode = *mode] {
+            return bookmarks_.DeleteFolderWithContents(id, mode == "move");
+        }));
+        if (selected_bookmark_folder_ == id) selected_bookmark_folder_.reset();
+        return;
+    }
+    if (type == "import") {
+        const auto source_id = valid_text("source_id", 32, true);
+        const std::optional<ImportSource> source =
+            source_id ? ImportSourceFromId(*source_id) : std::nullopt;
+        bool available = false;
+        if (source.has_value()) {
+            for (const ImportSourceInfo& info : DetectInstalledSources(UserBaseHome())) {
+                if (info.id == *source && info.available) {
+                    available = true;
+                    break;
+                }
+            }
+        }
+        if (!source_id || !source || !available) {
+            reject();
+            return;
+        }
+        const std::string message_text = ImportFromBrowser(*source_id);
+        if (message_text.rfind("Could not", 0) == 0 || message_text == "Unknown import source.") {
+            failed_bookmark_mutation_ =
+                FailedBookmarkMutation{.message = message_text, .retry = {}};
+            ScheduleLocalPagesRender();
+        }
+        return;
+    }
+    const auto bookmark_id = valid_id("id");
+    if (!bookmark_id || bookmarks_.FindBookmark(*bookmark_id) == nullptr) {
+        reject();
+        return;
+    }
+    if (type == "bookmarks:edit") {
+        const auto title = valid_text("title", 500, false);
+        const auto url = valid_text("url", 4000, true);
+        if (!title || !url) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, id = *bookmark_id, title = *title, url = *url] {
+            return bookmarks_.EditBookmark(id, title, url);
+        }));
+    } else if (type == "bookmarks:delete") {
+        finish(RunBookmarkMutation(
+            [this, id = *bookmark_id] { return bookmarks_.DeleteBookmark(id); }));
+    } else if (type == "bookmarks:move") {
+        const auto folder_id = valid_id("folder_id");
+        if (!folder_id || bookmarks_.FindFolder(*folder_id) == nullptr) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, id = *bookmark_id, folder = *folder_id] {
+            return bookmarks_.MoveBookmark(id, folder);
+        }));
+    } else if (type == "favorite:toggle-global" || type == "favorite:toggle-space") {
+        const FavoriteScope scope = type == "favorite:toggle-global"
+                                        ? FavoriteScope{}
+                                        : FavoriteScope{active_space().id().value};
+        static const std::vector<std::uint64_t> kEmptyFavoriteList;
+        const std::vector<std::uint64_t>* list = &bookmarks_.state().global_favorite_ids;
+        if (scope.has_value()) {
+            const auto found = bookmarks_.state().space_favorite_ids.find(*scope);
+            list = found != bookmarks_.state().space_favorite_ids.end() ? &found->second
+                                                                        : &kEmptyFavoriteList;
+        }
+        const bool present = std::find(list->begin(), list->end(), *bookmark_id) != list->end();
+        finish(present ? RemoveFavorite(scope, *bookmark_id)
+                       : RunBookmarkMutation([this, scope, id = *bookmark_id] {
+                             return bookmarks_.AddFavorite(scope, id);
+                         }));
+    } else if (type == "bookmarks:open" || type == "bookmarks:open-new-tab") {
+        const Bookmark* bookmark = bookmarks_.FindBookmark(*bookmark_id);
+        const ValidatedAddress address = ParseAndValidate(bookmark->url);
+        if (!address.is_valid()) {
+            failed_bookmark_mutation_ = FailedBookmarkMutation{
+                .message = "This bookmark has an unsupported address.", .retry = {}};
+            ScheduleLocalPagesRender();
+            return;
+        }
+        if (type == "bookmarks:open-new-tab") ExecuteCommand(BrowserCommand::kNewTab);
+        HideInternalPage();
+        SubmitPaletteUrl(bookmark->url, address);
+    } else {
+        reject();
+    }
 }
 
 bool BrowserWindow::SetSpaceColorFromHex(std::size_t space_index, std::string_view hex) {
@@ -3278,7 +3553,8 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
 
 void BrowserWindow::CloseAgentPanelAndSession() {
     internal_page_.reset();
-    for (std::unique_ptr<LocalPage>* page : {&agent_panel_, &settings_page_, &overview_page_}) {
+    for (std::unique_ptr<LocalPage>* page :
+         {&agent_panel_, &settings_page_, &overview_page_, &bookmarks_page_}) {
         if (*page != nullptr) {
             (*page)->Close();
             page->reset();
@@ -4849,7 +5125,8 @@ bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
     }
     if (attached.local_page != nullptr) {
         return attached.local_page == settings_page_.get() ||
-               attached.local_page == overview_page_.get();
+               attached.local_page == overview_page_.get() ||
+               attached.local_page == bookmarks_page_.get();
     }
     // A closed tab or a tab whose view was replaced no longer owns this attachment.
     return TabForAttachedView(attached) != nullptr;

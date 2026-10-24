@@ -517,6 +517,8 @@ class BrowserWindow : public CefClient,
     // too. No-op without chrome.
     void ToggleTabOverview() override;
     void ToggleSettings() override;
+    // Shows the managed bookmark library. Repeated requests keep its one local page focused.
+    void OpenBookmarksPage();
     // Opens Settings on one section (the Settings page names: appearance, shortcuts, ...).
     void OpenSettingsSection(std::string section);
     void OpenBlockerSettings() override;
@@ -527,6 +529,7 @@ class BrowserWindow : public CefClient,
     // The state the pages render, exposed for tests.
     [[nodiscard]] std::string SettingsStateJson() const;
     [[nodiscard]] std::string TabOverviewStateJson() const;
+    [[nodiscard]] std::string BookmarksStateJson() const;
 
     // All-tabs overview operations, addressed by space and tab position.
     // Each returns false for out-of-range positions or while closing.
@@ -1150,6 +1153,7 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] json::Value ReportsListJson() const;
     void HandleSettingsMessage(const json::Value& message);
     void HandleOverviewMessage(const json::Value& message);
+    void HandleBookmarksMessage(const json::Value& message);
     // Settings > Updates: the page's update messages, the state it renders,
     // the deferred startup check, and the updater's change notifications.
     [[nodiscard]] bool HandleUpdateMessage(std::string_view type, const json::Value& message);
@@ -1403,6 +1407,8 @@ class BrowserWindow : public CefClient,
         std::function<BookmarkResult()> retry;
     };
     std::optional<FailedBookmarkMutation> failed_bookmark_mutation_;
+    // The local library's transient filter is deliberately not persisted in the session.
+    std::optional<std::uint64_t> selected_bookmark_folder_;
     std::unique_ptr<HistoryRecorder> history_;
     std::unique_ptr<WelcomeFlow> welcome_;
     // Agent integration: the MCP tools endpoint and its DevTools bridge.
@@ -1413,6 +1419,7 @@ class BrowserWindow : public CefClient,
     std::unique_ptr<LocalPage> agent_panel_;
     std::unique_ptr<LocalPage> settings_page_;
     std::unique_ptr<LocalPage> overview_page_;
+    std::unique_ptr<LocalPage> bookmarks_page_;
     std::optional<LocalPageKind> internal_page_;
     // Set while an overview action mutates tabs, so the re-attach that
     // follows keeps the overview on screen instead of the active tab.

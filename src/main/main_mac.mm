@@ -75,6 +75,7 @@
 - (void)toggleAgentPanel:(id)sender;
 - (void)togglePinTab:(id)sender;
 - (void)openSettings:(id)sender;
+- (void)openBookmarks:(id)sender;
 - (void)openTabOverview:(id)sender;
 - (void)showCheatsheet:(id)sender;
 - (void)newTab:(id)sender;
@@ -232,6 +233,12 @@
 - (void)openSettings:(id)sender {
     if (app_ != nullptr) {
         app_->ToggleSettings();
+    }
+}
+
+- (void)openBookmarks:(id)sender {
+    if (app_ != nullptr) {
+        app_->OpenBookmarksPage();
     }
 }
 

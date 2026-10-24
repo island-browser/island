@@ -326,6 +326,13 @@ void IslandApp::ToggleSettings() {
     }
 }
 
+void IslandApp::OpenBookmarksPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenBookmarksPage();
+    }
+}
+
 void IslandApp::OpenSettingsSection(const std::string& section) {
     CEF_REQUIRE_UI_THREAD();
 
