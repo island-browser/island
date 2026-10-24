@@ -393,6 +393,32 @@ TEST(BookmarkStoreTest, GivenAFavoriteBookmarkWhenDeletedThenEveryReferenceIsRem
     EXPECT_EQ(store.DeleteBookmark(bookmark).error, BookmarkError::kNotFound);
 }
 
+TEST(BookmarkStoreTest, DeleteFolderWithContentsMovesOrErasesBookmarksAndFavorites) {
+    BookmarkStore store;
+    const std::uint64_t unfiled = store.CreateFolder("Unfiled").id;
+    const std::uint64_t work = store.CreateFolder("Work").id;
+    const std::uint64_t first = store.AddOrFindByUrl("First", "https://first.test/", work).id;
+    const std::uint64_t second = store.AddOrFindByUrl("Second", "https://second.test/", work).id;
+    const std::uint64_t existing =
+        store.AddOrFindByUrl("Existing", "https://existing.test/", unfiled).id;
+
+    ASSERT_TRUE(store.DeleteFolderWithContents(work, true).ok());
+    ASSERT_NE(store.FindFolder(unfiled), nullptr);
+    EXPECT_EQ(store.FindFolder(unfiled)->bookmark_ids,
+              (std::vector<std::uint64_t>{existing, first, second}));
+    EXPECT_EQ(store.DeleteFolderWithContents(unfiled, true).error, BookmarkError::kInvalidInput);
+
+    const std::uint64_t remove = store.CreateFolder("Remove").id;
+    const std::uint64_t deleted =
+        store.AddOrFindByUrl("Deleted", "https://deleted.test/", remove).id;
+    ASSERT_TRUE(store.AddFavorite(FavoriteScope{}, deleted).ok());
+    ASSERT_TRUE(store.AddFavorite(FavoriteScope{7}, deleted).ok());
+    ASSERT_TRUE(store.DeleteFolderWithContents(remove, false).ok());
+    EXPECT_EQ(store.FindBookmark(deleted), nullptr);
+    EXPECT_TRUE(store.state().global_favorite_ids.empty());
+    EXPECT_TRUE(store.state().space_favorite_ids.empty());
+}
+
 TEST(BookmarkStoreTest, GivenFavoritesWhenAddedReorderedAndRemovedThenScopesStayIndependent) {
     BookmarkStore store;
     const std::uint64_t a = store.AddOrFindByUrl("A", "https://example.com/a").id;

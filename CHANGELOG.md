@@ -39,6 +39,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- The Bookmarks page now keeps bookmark actions in one keyboard-accessible `...` menu, names
+  current-space favorites, omits favorites for removed spaces, and keeps transient open/import
+  feedback separate from a failed-save Retry.
 - Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
   long selection chips stay on one ellipsized line.
 

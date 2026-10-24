@@ -1905,10 +1905,12 @@ std::string BrowserWindow::BookmarksStateJson() const {
                 continue;
             }
             const Space* space = FindSpace(SpaceId{space_id});
+            if (space == nullptr) {
+                continue;
+            }
             spaces.Push(Value::MakeObject()
                             .Set("id", Value::Int(static_cast<std::int64_t>(space_id)))
-                            .Set("name", Value::String(space != nullptr ? space->name()
-                                                                        : "Removed space")));
+                            .Set("name", Value::String(space->name())));
         }
         const bool global =
             std::find(state.global_favorite_ids.begin(), state.global_favorite_ids.end(),
@@ -1926,7 +1928,7 @@ std::string BrowserWindow::BookmarksStateJson() const {
     }
     Value sources = Value::MakeArray();
     for (const ImportSourceInfo& source : DetectInstalledSources(UserBaseHome())) {
-        if (source.available) {
+        if (source.available && source.id != ImportSource::kArc) {
             sources.Push(Value::MakeObject()
                              .Set("id", Value::String(std::string(ImportSourceId(source.id))))
                              .Set("label", Value::String(source.display_name)));
@@ -1937,7 +1939,8 @@ std::string BrowserWindow::BookmarksStateJson() const {
                        .Set("folders", std::move(folders))
                        .Set("bookmarks", std::move(bookmarks))
                        .Set("selected_folder",
-                            selected_bookmark_folder_.has_value()
+                            selected_bookmark_folder_.has_value() &&
+                                    bookmarks_.FindFolder(*selected_bookmark_folder_) != nullptr
                                 ? Value::Int(static_cast<std::int64_t>(*selected_bookmark_folder_))
                                 : Value::String("all"))
                        .Set("import_sources", std::move(sources));
@@ -1956,6 +1959,13 @@ std::string BrowserWindow::BookmarksStateJson() const {
                 .Set("retry", Value::Bool(static_cast<bool>(failed_bookmark_mutation_->retry))));
     } else {
         result.Set("status", Value::Null());
+    }
+    if (bookmarks_page_status_.has_value()) {
+        result.Set("page_status", Value::MakeObject()
+                                      .Set("kind", Value::String(bookmarks_page_status_->kind))
+                                      .Set("text", Value::String(bookmarks_page_status_->message)));
+    } else {
+        result.Set("page_status", Value::Null());
     }
     return json::Serialize(result);
 }
@@ -2040,10 +2050,13 @@ void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
             reject();
             return;
         }
-        finish(RunBookmarkMutation([this, id = *id, mode = *mode] {
+        const BookmarkResult result = RunBookmarkMutation([this, id = *id, mode = *mode] {
             return bookmarks_.DeleteFolderWithContents(id, mode == "move");
-        }));
-        if (selected_bookmark_folder_ == id) selected_bookmark_folder_.reset();
+        });
+        finish(result);
+        if (result.ok() && selected_bookmark_folder_ == id) {
+            selected_bookmark_folder_.reset();
+        }
         return;
     }
     if (type == "import") {
@@ -2063,12 +2076,10 @@ void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
             reject();
             return;
         }
-        const std::string message_text = ImportFromBrowser(*source_id);
-        if (message_text.rfind("Could not", 0) == 0 || message_text == "Unknown import source.") {
-            failed_bookmark_mutation_ =
-                FailedBookmarkMutation{.message = message_text, .retry = {}};
-            ScheduleLocalPagesRender();
-        }
+        const BookmarkImportResult result = ImportBookmarksFromBrowser(*source_id);
+        bookmarks_page_status_ =
+            BookmarksPageStatus{.kind = result.ok ? "ok" : "error", .message = result.text};
+        ScheduleLocalPagesRender();
         return;
     }
     const auto bookmark_id = valid_id("id");
@@ -2099,27 +2110,21 @@ void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
             return bookmarks_.MoveBookmark(id, folder);
         }));
     } else if (type == "favorite:toggle-global" || type == "favorite:toggle-space") {
+        if (type == "favorite:toggle-space" && spaces_.empty()) {
+            reject();
+            return;
+        }
         const FavoriteScope scope = type == "favorite:toggle-global"
                                         ? FavoriteScope{}
                                         : FavoriteScope{active_space().id().value};
-        static const std::vector<std::uint64_t> kEmptyFavoriteList;
-        const std::vector<std::uint64_t>* list = &bookmarks_.state().global_favorite_ids;
-        if (scope.has_value()) {
-            const auto found = bookmarks_.state().space_favorite_ids.find(*scope);
-            list = found != bookmarks_.state().space_favorite_ids.end() ? &found->second
-                                                                        : &kEmptyFavoriteList;
-        }
-        const bool present = std::find(list->begin(), list->end(), *bookmark_id) != list->end();
-        finish(present ? RemoveFavorite(scope, *bookmark_id)
-                       : RunBookmarkMutation([this, scope, id = *bookmark_id] {
-                             return bookmarks_.AddFavorite(scope, id);
-                         }));
+        finish(ToggleFavorite(scope, *bookmark_id));
     } else if (type == "bookmarks:open" || type == "bookmarks:open-new-tab") {
         const Bookmark* bookmark = bookmarks_.FindBookmark(*bookmark_id);
-        const ValidatedAddress address = ParseAndValidate(bookmark->url);
+        const ValidatedAddress address = address_validator_ ? address_validator_(bookmark->url)
+                                                            : ParseAndValidate(bookmark->url);
         if (!address.is_valid()) {
-            failed_bookmark_mutation_ = FailedBookmarkMutation{
-                .message = "This bookmark has an unsupported address.", .retry = {}};
+            bookmarks_page_status_ = BookmarksPageStatus{
+                .kind = "error", .message = "This bookmark has an unsupported address."};
             ScheduleLocalPagesRender();
             return;
         }
@@ -2798,6 +2803,39 @@ std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
     return added == 0 ? "No new bookmarks in " + name + "."
                       : "Imported " + std::to_string(added) + " bookmarks from " + name +
                             ". Find them in the command palette.";
+}
+
+BrowserWindow::BookmarkImportResult BrowserWindow::ImportBookmarksFromBrowser(
+    std::string_view source_id) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::optional<ImportSource> source = ImportSourceFromId(source_id);
+    if (!source.has_value() || *source == ImportSource::kArc || closing_) {
+        return {.ok = false, .text = "Unknown import source."};
+    }
+    std::string name(source_id);
+    for (const ImportSourceInfo& info : DetectInstalledSources(UserBaseHome())) {
+        if (info.id == *source) {
+            name = info.display_name;
+            break;
+        }
+    }
+    const std::optional<std::vector<BookmarkItem>> items =
+        ImportFromSource(*source, UserBaseHome());
+    if (!items.has_value()) {
+        return {.ok = false, .text = "Could not read " + name + " bookmarks."};
+    }
+    const BookmarkResult merged =
+        RunBookmarkMutation([this, folder = "Imported from " + name, items = *items] {
+            return bookmarks_.Import(folder, items);
+        });
+    if (!merged.ok()) {
+        return {.ok = false, .text = merged.message};
+    }
+    const std::size_t added = merged.added;
+    return {.ok = true,
+            .text = added == 0 ? "No new bookmarks in " + name + "."
+                               : "Imported " + std::to_string(added) + " bookmarks from " + name +
+                                     ". Find them in the command palette."};
 }
 
 bool BrowserWindow::ReopenClosedTab() {
@@ -5522,7 +5560,27 @@ BookmarkResult BrowserWindow::ToggleGlobalFavoriteForCurrentPage() {
 
 BookmarkResult BrowserWindow::ToggleSpaceFavoriteForCurrentPage() {
     CEF_REQUIRE_UI_THREAD();
+    if (spaces_.empty()) {
+        return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                              .message = "No current space."};
+    }
     return ToggleFavoriteForCurrentPage(FavoriteScope{active_space().id().value});
+}
+
+BookmarkResult BrowserWindow::ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::vector<std::uint64_t>* favorite_ids = &bookmarks_.state().global_favorite_ids;
+    if (scope.has_value()) {
+        const auto found = bookmarks_.state().space_favorite_ids.find(*scope);
+        favorite_ids =
+            found == bookmarks_.state().space_favorite_ids.end() ? nullptr : &found->second;
+    }
+    if (favorite_ids != nullptr &&
+        std::find(favorite_ids->begin(), favorite_ids->end(), bookmark_id) != favorite_ids->end()) {
+        return RemoveFavorite(scope, bookmark_id);
+    }
+    return RunBookmarkMutation(
+        [this, scope, bookmark_id] { return bookmarks_.AddFavorite(scope, bookmark_id); });
 }
 
 BookmarkResult BrowserWindow::ToggleFavoriteForCurrentPage(FavoriteScope scope) {
@@ -5536,15 +5594,8 @@ BookmarkResult BrowserWindow::ToggleFavoriteForCurrentPage(FavoriteScope scope) 
                               .message = "Only web pages can be favorites."};
     }
     const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(nav.url);
-    const std::vector<std::uint64_t>* favorite_ids = &bookmarks_.state().global_favorite_ids;
-    if (scope.has_value()) {
-        const auto found = bookmarks_.state().space_favorite_ids.find(*scope);
-        favorite_ids =
-            found == bookmarks_.state().space_favorite_ids.end() ? nullptr : &found->second;
-    }
-    if (id.has_value() && favorite_ids != nullptr &&
-        std::find(favorite_ids->begin(), favorite_ids->end(), *id) != favorite_ids->end()) {
-        return RemoveFavorite(scope, *id);
+    if (id.has_value()) {
+        return ToggleFavorite(scope, *id);
     }
     const std::string host = UrlHost(nav.url);
     const std::string title =

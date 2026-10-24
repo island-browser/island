@@ -106,7 +106,9 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherRejectsBadFieldsAndMutatesKnownR
                            .Set("url", Value::String(""));
     window->OnLocalPageMessage(LocalPageKind::kSettings, wrong_page);
     window->OnLocalPageMessage(LocalPageKind::kBookmarks, empty_edit);
-    EXPECT_EQ(window->bookmarks().FindBookmark(bookmark.id)->title, "Before");
+    const Bookmark* unchanged = window->bookmarks().FindBookmark(bookmark.id);
+    ASSERT_NE(unchanged, nullptr);
+    EXPECT_EQ(unchanged->title, "Before");
 
     Value edit = Value::MakeObject()
                      .Set("type", Value::String("bookmarks:edit"))
@@ -121,6 +123,72 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherRejectsBadFieldsAndMutatesKnownR
     window->OnLocalPageMessage(LocalPageKind::kBookmarks,
                                *json::Parse(R"({"type":"folder:delete","id":1,"mode":"bad"})"));
     EXPECT_NE(window->bookmarks().FindFolder(1), nullptr);
+}
+
+TEST(BrowserWindowPagesTest, BookmarksDispatcherHandlesLibraryActionsAndTransientErrors) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const auto send = [&window](std::string_view text) {
+        const std::optional<Value> message = json::Parse(text);
+        ASSERT_TRUE(message.has_value()) << text;
+        window->OnLocalPageMessage(LocalPageKind::kBookmarks, *message);
+    };
+    send(R"({"type":"folder:create","name":"Work"})");
+    send(R"({"type":"folder:create","name":"Archive"})");
+    const std::optional<Value> initial = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(initial.has_value());
+    const Value* folders = initial->FindMember("folders");
+    ASSERT_NE(folders, nullptr);
+    ASSERT_EQ(folders->array_val.size(), 2U);
+    const std::uint64_t work = static_cast<std::uint64_t>(folders->array_val[0].IntOr("id", 0));
+    const std::uint64_t archive = static_cast<std::uint64_t>(folders->array_val[1].IntOr("id", 0));
+    const BookmarkResult added =
+        window->AddFavoriteByUrl(std::nullopt, "Docs", "https://docs.test/");
+    ASSERT_TRUE(added.ok());
+    const std::uint64_t bookmark = added.id;
+    send("{\"type\":\"bookmarks:move\",\"id\":" + std::to_string(bookmark) +
+         ",\"folder_id\":" + std::to_string(work) + "}");
+
+    send("{\"type\":\"select-folder\",\"id\":" + std::to_string(work) + "}");
+    const std::optional<Value> selected = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(selected.has_value());
+    EXPECT_EQ(selected->IntOr("selected_folder", 0), static_cast<std::int64_t>(work));
+
+    send("{\"type\":\"bookmarks:move\",\"id\":" + std::to_string(bookmark) +
+         ",\"folder_id\":" + std::to_string(archive) + "}");
+    ASSERT_NE(window->bookmarks().FindBookmark(bookmark), nullptr);
+    EXPECT_EQ(window->bookmarks().FindFolder(archive)->bookmark_ids,
+              (std::vector<std::uint64_t>{bookmark}));
+    send("{\"type\":\"favorite:toggle-global\",\"id\":" + std::to_string(bookmark) + "}");
+    EXPECT_TRUE(window->bookmarks().state().global_favorite_ids.empty());
+    send("{\"type\":\"favorite:toggle-global\",\"id\":" + std::to_string(bookmark) + "}");
+    send("{\"type\":\"favorite:toggle-space\",\"id\":" + std::to_string(bookmark) + "}");
+    EXPECT_EQ(window->bookmarks().state().global_favorite_ids,
+              (std::vector<std::uint64_t>{bookmark}));
+    EXPECT_EQ(window->bookmarks().state().space_favorite_ids.at(window->active_space_id().value),
+              (std::vector<std::uint64_t>{bookmark}));
+
+    send("{\"type\":\"folder:delete\",\"id\":" + std::to_string(archive) + ",\"mode\":\"move\"}");
+    EXPECT_EQ(window->bookmarks().FindFolder(archive), nullptr);
+    send("{\"type\":\"bookmarks:delete\",\"id\":" + std::to_string(bookmark) + "}");
+    EXPECT_EQ(window->bookmarks().FindBookmark(bookmark), nullptr);
+
+    const BookmarkResult invalid_added =
+        window->AddFavoriteByUrl(std::nullopt, "Old", "https://old.test/");
+    ASSERT_TRUE(invalid_added.ok());
+    const std::uint64_t invalid = invalid_added.id;
+    send("{\"type\":\"bookmarks:edit\",\"id\":" + std::to_string(invalid) +
+         ",\"title\":\"Old\",\"url\":\"javascript:alert(1)\"}");
+    ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
+    send("{\"type\":\"bookmarks:open\",\"id\":" + std::to_string(invalid) + "}");
+    const std::optional<Value> with_error = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(with_error.has_value());
+    ASSERT_NE(with_error->FindMember("page_status"), nullptr);
+    EXPECT_EQ(with_error->FindMember("page_status")->StringOr("kind", ""), "error");
+    send(R"({"type":"import","source_id":"unknown"})");
+    ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
+    const Bookmark* unchanged_invalid = window->bookmarks().FindBookmark(invalid);
+    ASSERT_NE(unchanged_invalid, nullptr);
+    EXPECT_EQ(unchanged_invalid->url, "javascript:alert(1)");
 }
 
 TEST(BrowserWindowPagesTest, KeymapEditsTakeEffectAndShortcutsRunActions) {

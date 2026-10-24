@@ -379,10 +379,13 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   "Joins A + B". Report pages use the same Native sentence-case treatment for their kicker and
   table headers; Arc and Graphite retain their mono uppercase tone.
 - **Bookmarks page:** a local content-slot library with a labelled search field and a compact Import /
-  New folder toolbar. A neutral raised folder row marks the current folder (`aria-current`), while
-  bookmark rows expose title, host, folder move, scoped-favorite controls and edit/delete actions.
-  It collapses from folders-and-results columns into one reading-order column. Failed native saves
-  remain an inline live status directly below the toolbar with Retry; deleting a non-empty folder
+  New folder toolbar. A neutral raised folder row marks the current folder (`aria-current`) and keeps
+  its `...` action inside the folder column. Each bookmark row shows a favicon plate, title, host and
+  scope badges (`Global` and space names); its title and row Enter open the bookmark, while one `...`
+  menu contains Open in new tab, favorite, move, edit and delete actions. Escape closes that menu and
+  returns focus to its trigger. It collapses from folders-and-results columns into one reading-order
+  column. Failed native saves remain an inline live status directly below the toolbar with Retry;
+  separate transient page outcomes never replace that retryable status. Deleting a non-empty folder
   offers Move bookmarks to Unfiled and requires an in-page confirmation before permanent deletion.
   It uses ThemeJson tokens only: neutral raised hover, selection and non-address focus states, with
   the danger token reserved for destructive confirmation.

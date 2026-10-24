@@ -161,6 +161,27 @@ BookmarkResult AddFavoriteIn(BookmarkState& state, FavoriteScope scope, std::uin
     return Ok(bookmark_id);
 }
 
+// Removes a bookmark and every reference to it. Folder deletion and direct deletion must have
+// exactly the same favorite-cleanup behavior.
+bool EraseBookmarkIn(BookmarkState& state, std::uint64_t bookmark_id) {
+    const auto found =
+        std::find_if(state.bookmarks.begin(), state.bookmarks.end(),
+                     [&](const Bookmark& bookmark) { return bookmark.id == bookmark_id; });
+    if (found == state.bookmarks.end()) {
+        return false;
+    }
+    state.bookmarks.erase(found);
+    for (BookmarkFolder& folder : state.folders) {
+        std::erase(folder.bookmark_ids, bookmark_id);
+    }
+    std::erase(state.global_favorite_ids, bookmark_id);
+    for (auto it = state.space_favorite_ids.begin(); it != state.space_favorite_ids.end();) {
+        std::erase(it->second, bookmark_id);
+        it = it->second.empty() ? state.space_favorite_ids.erase(it) : std::next(it);
+    }
+    return true;
+}
+
 // Reads a whole file; nullopt when it cannot be opened or read.
 std::optional<std::string> ReadWholeFile(const std::filesystem::path& path) {
     std::ifstream in(path, std::ios::binary);
@@ -715,18 +736,7 @@ BookmarkResult BookmarkStore::DeleteFolderWithContents(std::uint64_t folder_id,
             unfiled->bookmark_ids.insert(unfiled->bookmark_ids.end(), ids.begin(), ids.end());
         } else {
             for (const std::uint64_t bookmark_id : ids) {
-                std::erase_if(next.bookmarks,
-                              [&](const Bookmark& bookmark) { return bookmark.id == bookmark_id; });
-                std::erase(next.global_favorite_ids, bookmark_id);
-                for (auto it = next.space_favorite_ids.begin();
-                     it != next.space_favorite_ids.end();) {
-                    std::erase(it->second, bookmark_id);
-                    if (it->second.empty()) {
-                        it = next.space_favorite_ids.erase(it);
-                    } else {
-                        ++it;
-                    }
-                }
+                static_cast<void>(EraseBookmarkIn(next, bookmark_id));
             }
         }
         next.folders.erase(next.folders.begin() + static_cast<std::ptrdiff_t>(folder_index));
@@ -778,20 +788,8 @@ BookmarkResult BookmarkStore::EditBookmark(std::uint64_t bookmark_id, std::strin
 
 BookmarkResult BookmarkStore::DeleteBookmark(std::uint64_t bookmark_id) {
     return Commit([&](BookmarkState& next) {
-        const auto found =
-            std::find_if(next.bookmarks.begin(), next.bookmarks.end(),
-                         [&](const Bookmark& bookmark) { return bookmark.id == bookmark_id; });
-        if (found == next.bookmarks.end()) {
+        if (!EraseBookmarkIn(next, bookmark_id)) {
             return Fail(BookmarkError::kNotFound);
-        }
-        next.bookmarks.erase(found);
-        for (BookmarkFolder& folder : next.folders) {
-            std::erase(folder.bookmark_ids, bookmark_id);
-        }
-        std::erase(next.global_favorite_ids, bookmark_id);
-        for (auto it = next.space_favorite_ids.begin(); it != next.space_favorite_ids.end();) {
-            std::erase(it->second, bookmark_id);
-            it = it->second.empty() ? next.space_favorite_ids.erase(it) : std::next(it);
         }
         return Ok(bookmark_id);
     });

@@ -9,7 +9,8 @@
   {theme: ThemeJson, folders:[{id,name,count}], bookmarks:[{id,title,url,host,
   folder_id,folder_path,global,spaces:[{id,name}]}], current_space:{id,name},
   selected_folder:id|"all", import_sources:[{id,label}],
-  status:{kind:"ok"|"error",text,retry}|null, agent_naming?:bool}.
+  status:{kind:"error",text,retry}|null, page_status:{kind:"ok"|"error",text}|null,
+  agent_naming?:bool}.
 
   Page-to-native message table. Native validates every id and string before mutation:
   bookmarks:open(id), bookmarks:open-new-tab(id), bookmarks:edit(id,title,url),
@@ -60,27 +61,32 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
 .folders-top, .list-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .folders h2, .results h2 { margin: 0; font: 600 13px/1.3 var(--font); }
 .folder-list, .bookmark-list { display: flex; flex-direction: column; gap: 3px; margin: 10px 0 0; padding: 0; list-style: none; }
-.folder-row { display: flex; align-items: center; gap: 4px; min-height: 32px; padding: 1px 3px; border-radius: 7px; }
+.folder-row { display: flex; align-items: center; gap: 4px; min-height: 32px; min-width: 0; padding: 1px 3px; border-radius: 7px; }
 .folder-row[aria-current="page"] { background: var(--segment-selected); font-weight: 600; }
-.folder-select { flex: 1; min-width: 0; padding: 4px 5px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
-.folder-count { color: var(--text-2); font-size: 12px; }
-.disclosure { width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); }
+.folder-select { flex: 1; min-width: 0; overflow: hidden; padding: 4px 5px; border: 0; border-radius: 6px; background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.folder-count { flex: none; color: var(--text-2); font-size: 12px; }
+.disclosure { flex: none; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); }
 .folder-tools { display: flex; gap: 4px; padding: 4px 4px 7px 28px; }
 .folder-tools input, .edit input { min-width: 0; height: 29px; padding: 0 8px; border: 1px solid var(--border-2);
   border-radius: 6px; background: var(--surface); }
 .results { min-width: 0; padding: 16px 18px; }
 .results-meta { color: var(--text-2); font-size: 12px; }
-.bookmark { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center;
+.bookmark { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; align-items: center;
   min-height: 62px; padding: 9px 7px; border-top: 1px solid var(--border); border-radius: 7px; }
 .bookmark:first-child { border-top: 0; }
+.bookmark-favicon { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; background: var(--fill); color: var(--text-2); font-size: 11px; }
 .bookmark-main { min-width: 0; }
 .bookmark-title { display: block; max-width: max-content; padding: 1px 3px; border: 0; border-radius: 5px;
   background: transparent; color: var(--text); font-weight: 600; text-align: left; }
 .bookmark-url, .scopes { overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; }
 .bookmark-url { padding-left: 3px; font-size: 12px; }
-.scopes { margin-top: 3px; padding-left: 3px; font-size: 11px; }
-.bookmark-actions { display: flex; align-items: center; gap: 4px; }
-.move { max-width: 128px; height: 29px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface); }
+.scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; padding-left: 3px; }
+.scope { padding: 1px 5px; border-radius: 5px; background: var(--fill); color: var(--text-2); font-size: 11px; }
+.bookmark-actions { position: relative; display: flex; align-items: center; gap: 4px; }
+.bookmark-menu { position: absolute; z-index: 2; top: calc(100% + 4px); right: 0; width: max-content; min-width: 196px; padding: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 4px 14px var(--fill); }
+.bookmark-menu button { display: block; width: 100%; min-height: 29px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
+.bookmark-menu button:hover { background: var(--fill); }
+.bookmark-menu-label { display: block; padding: 5px 8px 2px; color: var(--text-2); font-size: 11px; }
 .edit { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(140px, 2fr) auto auto; gap: 6px; }
 .empty { margin: 30px 0; color: var(--text-2); text-align: center; }
 .new-folder { display: flex; gap: 6px; margin-top: 10px; }
@@ -102,8 +108,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   .library { grid-template-columns: minmax(0, 1fr); }
   .folders { border-right: 0; border-bottom: 1px solid var(--border); }
   .edit { grid-template-columns: minmax(0, 1fr); }
-  .bookmark { grid-template-columns: minmax(0, 1fr); }
-  .bookmark-actions { justify-content: flex-start; flex-wrap: wrap; }
+  .bookmark { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto; transition: none !important; } }
 </style>
@@ -117,6 +122,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     <button class="button" id="new-folder-button">New folder</button>
   </div>
   <div class="status" id="status" role="status" aria-live="polite" hidden><span></span><button class="button" id="retry">Retry</button></div>
+  <div class="status" id="page-status" role="status" aria-live="polite" hidden><span></span></div>
   <section class="library" aria-label="Bookmark library">
     <aside class="folders" aria-label="Bookmark folders">
       <div class="folders-top"><h2>Folders</h2><span class="folder-count" id="folder-total"></span></div>
@@ -146,6 +152,8 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   var folderRenameDraft = null;
   var deletingFolder = null;
   var priorFocus = null;
+  var openMenu = null;
+  var menuFocusId = null;
   var $ = function (id) { return document.getElementById(id); };
   function post(message) { console.log(PREFIX + JSON.stringify(message)); }
   function text(value) { return value === undefined || value === null ? "" : String(value); }
@@ -205,18 +213,22 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
       var choose = button(text(folder.name), "folder-select"); choose.setAttribute("aria-current", String(state.selected_folder) === String(folder.id) ? "page" : "false");
       choose.addEventListener("click", function () { setFolder(folder.id); }); row.appendChild(choose);
       var count = document.createElement("span"); count.className = "folder-count"; count.textContent = text(folder.count); row.appendChild(count);
-      if (folder.id !== "all") { var disclose = button(expandedFolder === folder.id ? "Hide" : "More", "disclosure"); disclose.setAttribute("aria-expanded", expandedFolder === folder.id ? "true" : "false"); disclose.setAttribute("aria-label", "Folder actions for " + text(folder.name)); disclose.addEventListener("click", function () { if (expandedFolder === folder.id) { expandedFolder = null; folderRenameDraft = null; } else { expandedFolder = folder.id; folderRenameDraft = { id: folder.id, name: text(folder.name), restoreFocus: false }; } renderFolders(); }); row.appendChild(disclose); }
+      if (folder.id !== "all") { var disclose = button("\u22ef", "disclosure"); disclose.setAttribute("aria-expanded", expandedFolder === folder.id ? "true" : "false"); disclose.setAttribute("aria-label", "Folder actions for " + text(folder.name)); disclose.addEventListener("click", function () { if (expandedFolder === folder.id) { expandedFolder = null; folderRenameDraft = null; } else { expandedFolder = folder.id; folderRenameDraft = { id: folder.id, name: text(folder.name), restoreFocus: false }; } renderFolders(); }); row.appendChild(disclose); }
       item.appendChild(row); if (expandedFolder === folder.id) item.appendChild(folderTools(folder)); list.appendChild(item);
     });
     $("folder-total").textContent = text((state.folders || []).length) + " folders";
   }
-  function scopeText(bookmark) {
-    var labels = []; if (bookmark.global) labels.push("Global favorite");
-    (bookmark.spaces || []).forEach(function (space) { labels.push(text(space.name) + " favorite"); });
-    return labels.join(" / ");
+  function scopeBadges(bookmark) {
+    var scopes = document.createElement("div"); scopes.className = "scopes";
+    var labels = []; if (bookmark.global) labels.push("Global");
+    (bookmark.spaces || []).forEach(function (space) { labels.push(text(space.name)); });
+    labels.forEach(function (label) { var badge = document.createElement("span"); badge.className = "scope"; badge.textContent = label; scopes.appendChild(badge); });
+    return scopes;
   }
+  function action(label, handler) { var node = button(label, ""); node.addEventListener("click", handler); return node; }
   function renderBookmark(bookmark) {
-    var item = document.createElement("li"); item.className = "bookmark";
+    var item = document.createElement("li"); item.className = "bookmark"; item.tabIndex = 0;
+    item.addEventListener("keydown", function (event) { if (event.key === "Enter" && event.target === item) { event.preventDefault(); post({ type: "bookmarks:open", id: bookmark.id }); } });
     if (editingBookmark && editingBookmark.id === bookmark.id) {
       var edit = document.createElement("form"); edit.className = "edit";
       edit.dataset.bookmarkId = bookmark.id;
@@ -233,23 +245,29 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
       if (focusField) setTimeout(function () { var field = focusField === "url" ? url : title; field.focus(); if (focusField === "title" && selectTitle) field.select(); }, 0);
       return item;
     }
+    var favicon = document.createElement("span"); favicon.className = "bookmark-favicon"; favicon.textContent = "\u25cf"; favicon.setAttribute("aria-hidden", "true"); item.appendChild(favicon);
     var main = document.createElement("div"); main.className = "bookmark-main";
     var titleButton = button(text(bookmark.title) || text(bookmark.url), "bookmark-title"); titleButton.addEventListener("click", function () { post({ type: "bookmarks:open", id: bookmark.id }); });
     var url = document.createElement("div"); url.className = "bookmark-url"; url.textContent = text(bookmark.host) || text(bookmark.url);
-    var scopes = document.createElement("div"); scopes.className = "scopes"; scopes.textContent = scopeText(bookmark);
-    main.appendChild(titleButton); main.appendChild(url); if (scopes.textContent) main.appendChild(scopes); item.appendChild(main);
+    var scopes = scopeBadges(bookmark);
+    main.appendChild(titleButton); main.appendChild(url); if (scopes.children.length) main.appendChild(scopes); item.appendChild(main);
     var actions = document.createElement("div"); actions.className = "bookmark-actions";
-    var openNew = button("Open new", "button"); openNew.setAttribute("aria-label", "Open " + text(bookmark.title) + " in new tab"); openNew.addEventListener("click", function () { post({ type: "bookmarks:open-new-tab", id: bookmark.id }); });
-    var global = button(bookmark.global ? "Global on" : "Global", "button"); global.setAttribute("aria-pressed", bookmark.global ? "true" : "false"); global.addEventListener("click", function () { post({ type: "favorite:toggle-global", id: bookmark.id }); });
     var spaceOn = (bookmark.spaces || []).some(function (entry) { return state.current_space && String(entry.id) === String(state.current_space.id); });
-    var space = button(spaceOn ? "Space on" : "Space", "button"); space.setAttribute("aria-label", "Toggle favorite in current space"); space.setAttribute("aria-pressed", spaceOn ? "true" : "false"); space.disabled = !state.current_space; space.addEventListener("click", function () { post({ type: "favorite:toggle-space", id: bookmark.id }); });
-    var move = document.createElement("select"); move.className = "move"; move.setAttribute("aria-label", "Move " + text(bookmark.title) + " to folder");
-    (state.folders || []).forEach(function (folder) { var option = document.createElement("option"); option.value = folder.id; option.textContent = folder.name; option.selected = String(bookmark.folder_id) === String(folder.id); move.appendChild(option); });
-    move.addEventListener("change", function () { post({ type: "bookmarks:move", id: bookmark.id, folder_id: move.value }); });
-    var edit = button("Edit", "button"); edit.addEventListener("click", function () { editingBookmark = { id: bookmark.id, title: text(bookmark.title), url: text(bookmark.url), restoreFocus: "title", selectTitle: true }; render(); });
-    var remove = button("Delete", "button"); remove.addEventListener("click", function () { post({ type: "bookmarks:delete", id: bookmark.id }); });
-    actions.appendChild(openNew); actions.appendChild(global); actions.appendChild(space); actions.appendChild(move); actions.appendChild(edit); actions.appendChild(remove);
-    if (state.agent_naming) { var agent = button("Name with agent", "button"); agent.disabled = true; agent.title = "Available when agent naming is connected"; actions.appendChild(agent); }
+    var menuButton = button("\u22ef", "icon"); menuButton.dataset.bookmarkId = bookmark.id; menuButton.setAttribute("aria-haspopup", "menu"); menuButton.setAttribute("aria-label", "Actions for " + text(bookmark.title)); menuButton.setAttribute("aria-expanded", openMenu === bookmark.id ? "true" : "false");
+    menuButton.addEventListener("click", function () { openMenu = openMenu === bookmark.id ? null : bookmark.id; menuFocusId = openMenu === bookmark.id ? bookmark.id : null; render(); }); actions.appendChild(menuButton);
+    if (openMenu === bookmark.id) {
+      var menu = document.createElement("div"); menu.className = "bookmark-menu"; menu.setAttribute("role", "menu");
+      menu.appendChild(action("Open in new tab", function () { post({ type: "bookmarks:open-new-tab", id: bookmark.id }); }));
+      menu.appendChild(action(bookmark.global ? "Remove global favorite" : "Add global favorite", function () { post({ type: "favorite:toggle-global", id: bookmark.id }); }));
+      if (state.current_space) menu.appendChild(action((spaceOn ? "Remove " : "Add ") + text(state.current_space.name) + " favorite", function () { post({ type: "favorite:toggle-space", id: bookmark.id }); }));
+      var moveLabel = document.createElement("span"); moveLabel.className = "bookmark-menu-label"; moveLabel.textContent = "Move to folder..."; menu.appendChild(moveLabel);
+      (state.folders || []).forEach(function (folder) { if (String(folder.id) !== String(bookmark.folder_id)) menu.appendChild(action(text(folder.name), function () { post({ type: "bookmarks:move", id: bookmark.id, folder_id: folder.id }); openMenu = null; render(); })); });
+      menu.appendChild(action("Edit", function () { editingBookmark = { id: bookmark.id, title: text(bookmark.title), url: text(bookmark.url), restoreFocus: "title", selectTitle: true }; openMenu = null; render(); }));
+      menu.appendChild(action("Delete", function () { post({ type: "bookmarks:delete", id: bookmark.id }); openMenu = null; render(); }));
+      actions.appendChild(menu);
+      if (menuFocusId === bookmark.id) { menuFocusId = null; setTimeout(function () { var first = menu.querySelector("button"); if (first) first.focus(); }, 0); }
+    }
+    if (state.agent_naming) { /* Reserved for the agent naming action. */ }
     item.appendChild(actions); return item;
   }
   function renderBookmarks() {
@@ -264,7 +282,8 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     (state.import_sources || []).forEach(function (source) { var entry = button(text(source.label), ""); entry.addEventListener("click", function () { post({ type: "import", source_id: source.id }); menu.hidden = true; $("import-button").setAttribute("aria-expanded", "false"); }); menu.appendChild(entry); });
     $("import-button").disabled = !(state.import_sources || []).length;
   }
-  function renderStatus() { var box = $("status"), value = state.status; box.hidden = !value; if (!value) return; box.dataset.kind = text(value.kind); box.querySelector("span").textContent = text(value.text); $("retry").hidden = !value.retry; }
+  function renderOneStatus(id, value) { var box = $(id); if (!box) return; box.hidden = !value; if (!value) return; box.dataset.kind = text(value.kind); box.querySelector("span").textContent = text(value.text); }
+  function renderStatus() { renderOneStatus("status", state.status); $("retry").hidden = !state.status || !state.status.retry; renderOneStatus("page-status", state.page_status); }
   function render() { renderFolders(); renderBookmarks(); renderImports(); renderStatus(); }
   function openFolderDeleteChoice() { priorFocus = document.activeElement; $("confirm-title").textContent = "Delete folder?"; $("confirm-copy").textContent = "Choose Move bookmarks to Unfiled to keep them, or continue to permanently delete them."; $("confirm-move").hidden = false; $("confirm-delete").textContent = "Delete bookmarks"; $("confirm-backdrop").hidden = false; $("confirm-move").focus(); }
   function closeConfirm() { $("confirm-backdrop").hidden = true; if (priorFocus) priorFocus.focus(); priorFocus = null; }
@@ -278,7 +297,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   $("confirm-cancel").addEventListener("click", closeConfirm);
   $("confirm-move").addEventListener("click", function () { if (deletingFolder) post({ type: "folder:delete", id: deletingFolder.id, mode: "move" }); deletingFolder = null; closeConfirm(); });
   $("confirm-delete").addEventListener("click", function () { if (!deletingFolder) return; if (!$("confirm-move").hidden) { $("confirm-title").textContent = "Delete bookmarks permanently?"; $("confirm-copy").textContent = "This cannot be undone. Delete the bookmarks and this folder?"; $("confirm-move").hidden = true; $("confirm-delete").textContent = "Delete permanently"; $("confirm-delete").focus(); return; } post({ type: "folder:delete", id: deletingFolder.id, mode: "delete" }); deletingFolder = null; closeConfirm(); });
-  document.addEventListener("keydown", function (event) { trapConfirm(event); if (!$("confirm-backdrop").hidden && event.key === "Escape") { event.preventDefault(); closeConfirm(); } });
+  document.addEventListener("keydown", function (event) { trapConfirm(event); if (!$("confirm-backdrop").hidden && event.key === "Escape") { event.preventDefault(); closeConfirm(); } else if (openMenu !== null && event.key === "Escape") { event.preventDefault(); var closedMenu = openMenu; openMenu = null; menuFocusId = null; render(); setTimeout(function () { var button = document.querySelector('.bookmark-actions .icon[data-bookmark-id="' + closedMenu + '"]'); if (button) button.focus(); }, 0); } });
   function applyTheme(theme) {
     if (!theme) return; var root = document.documentElement;
     [["bg","--bg"],["surface","--surface"],["surface_2","--surface-2"],["fill","--fill"],["text","--text"],["text_2","--text-2"],["text_3","--text-3"],["border","--border"],["border_2","--border-2"],["accent","--accent"],["selection","--selection"],["accent_soft","--accent-soft"],["accent_text","--accent-text"],["warn_bg","--warn-bg"],["warn_border","--warn-border"],["warn_text","--warn-text"],["success","--success"],["danger","--danger"],["segment_selected","--segment-selected"]].forEach(function (mapping) { if (theme[mapping[0]]) root.style.setProperty(mapping[1], theme[mapping[0]]); });

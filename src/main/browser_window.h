@@ -1195,7 +1195,13 @@ class BrowserWindow : public CefClient,
     // The one path for bookmark mutations (see the favorites methods above). Reconciles virtual
     // tabs with the library afterwards and reprojects the sidebar.
     BookmarkResult RunBookmarkMutation(std::function<BookmarkResult()> mutation);
+    BookmarkResult ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
     BookmarkResult ToggleFavoriteForCurrentPage(FavoriteScope scope);
+    struct BookmarkImportResult {
+        bool ok = false;
+        std::string text;
+    };
+    [[nodiscard]] BookmarkImportResult ImportBookmarksFromBrowser(std::string_view source_id);
     // Disposes the records and virtual tabs of favorites the library no longer lists. Returns true
     // when the displayed virtual tab was one of them, so the caller re-attaches the content slot.
     bool ReconcileFavoriteTabs();
@@ -1414,6 +1420,13 @@ class BrowserWindow : public CefClient,
         std::function<BookmarkResult()> retry;
     };
     std::optional<FailedBookmarkMutation> failed_bookmark_mutation_;
+    // Transient page feedback (such as an unsupported saved URL or import outcome). It never
+    // replaces the durable mutation status above, because that status may carry Retry.
+    struct BookmarksPageStatus {
+        std::string kind;
+        std::string message;
+    };
+    std::optional<BookmarksPageStatus> bookmarks_page_status_;
     // The local library's transient filter is deliberately not persisted in the session.
     std::optional<std::uint64_t> selected_bookmark_folder_;
     std::unique_ptr<HistoryRecorder> history_;
