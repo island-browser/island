@@ -140,6 +140,14 @@ h1.title { margin: 0 0 6px; font-size: 28px; line-height: 1.2; letter-spacing: -
     if (text) statusTimer = setTimeout(function () { statusLine.textContent = ""; }, 4000);
   }
 
+  // The page already shows the title as its H1, so the report's own first H1 goes when it says the
+  // same thing (N3). Only the rendered view drops it; Copy and Export keep the full Markdown.
+  function dropRepeatedTitle(title) {
+    var heading = doc.querySelector("h1");
+    var clean = function (text) { return String(text || "").replace(/\s+/g, " ").trim(); };
+    if (heading && clean(title) && clean(heading.textContent) === clean(title)) heading.remove();
+  }
+
   function dateLabel(ms) {
     if (!ms) return "";
     try { return new Date(ms).toLocaleString(); } catch (error) { return ""; }
@@ -179,6 +187,7 @@ h1.title { margin: 0 0 6px; font-size: 28px; line-height: 1.2; letter-spacing: -
     try {
       doc.innerHTML = islandMarkdown(report.markdown || "");
       doc.classList.remove("plain");
+      dropRepeatedTitle(report.title);
     } catch (error) {
       doc.textContent = report.markdown || "";
       doc.classList.add("plain");

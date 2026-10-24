@@ -192,12 +192,20 @@ pre code { background: none; border: 0; padding: 0; font-size: 12px; }
 .card.ask { border-color: var(--text-2); box-shadow: var(--shadow); }
 .card p { margin: 0 0 10px; }
 /* The approval card: a surface plate with an amber hairline and an amber kicker */
-.card.confirm-card { margin: 0 0 8px; padding: 12px; border-radius: 10px; background: var(--surface);
+/* The container takes the composer's 12 px inset, so the card lines up with it and nothing clips. */
+#confirmations { margin: 12px 12px 0; }
+.card.confirm-card { margin: 0; padding: 12px; border-radius: 10px; background: var(--surface);
   border: 1px solid var(--warn-border); box-shadow: none; }
 .card.confirm-card h4 { color: var(--warn-text); }
+/* Native (N10): the kicker is sentence case system text, not mono capitals. */
+:root[data-look="native"] .card.confirm-card h4 { font: 600 12.5px/1.4 var(--font); text-transform: none;
+  letter-spacing: 0; }
 .confirm-card .host { margin: 0 0 4px; font: 11px/1.4 var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
 .confirm-card .summary { overflow-wrap: anywhere; }
 .card .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Four answers sit in two even columns (two rows), so Cancel is never alone on a row. */
+.confirm-card .actions { display: grid; grid-template-columns: 1fr 1fr; }
+.confirm-card .btn { justify-content: center; min-width: 0; }
 .btn { height: 26px; padding: 0 10px; display: inline-flex; align-items: center; border: 1px solid var(--border);
   background: var(--fill); color: var(--text); border-radius: var(--radius-sm); font-size: 12px; font-weight: 500;
   transition: background .16s, border-color .16s; }
@@ -277,17 +285,20 @@ footer { flex: none; padding: 0; }
 .composer { margin: 12px; padding: 10px; background: var(--surface); border: 1px solid var(--border-2);
   border-radius: 10px; transition: border-color .16s, box-shadow .16s; }
 .composer:focus-within { border-color: var(--text-2); box-shadow: var(--shadow); }
-.context { display: inline-flex; align-items: center; gap: 5px; flex: none; max-width: 55%; height: 22px;
-  padding: 0 8px; margin: 0; border: 0; border-radius: 5px; background: var(--fill); color: var(--text-2);
-  font: 11px/1 var(--font); }
-.context[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
+/* The page chip is one plate: the share toggle, and the clear button that removes the page context */
+.context-plate { display: inline-flex; align-items: center; flex: none; min-width: 0; max-width: 55%; height: 22px;
+  border-radius: 5px; background: var(--fill); }
+.context-plate:has(> .context[aria-pressed="false"]) { opacity: .55; }
+.context { display: inline-flex; align-items: center; gap: 5px; min-width: 0; height: 22px; padding: 0 8px;
+  margin: 0; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font: 11px/1 var(--font); }
+.context[aria-pressed="false"] { text-decoration: line-through; }
 .context span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .context svg { flex: none; }
 .composer-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 .chiprow { display: flex; flex: 1; min-width: 0; align-items: center; gap: 6px; overflow: hidden; }
-.context-clear { width: 18px; height: 18px; flex: none; border: 0; border-radius: 50%; background: transparent;
-  color: var(--text-2); display: grid; place-items: center; padding: 0; }
-.context-clear:hover { background: var(--fill); color: var(--text); }
+.context-clear { width: 18px; height: 18px; flex: none; margin-right: 3px; border: 0; border-radius: 50%;
+  background: transparent; color: var(--text-2); display: grid; place-items: center; padding: 0; }
+.context-clear:hover { background: var(--border); color: var(--text); }
 .quote-chip { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; height: 22px;
   padding: 0 8px; border-radius: 5px; background: var(--fill); color: var(--text-2); font: 11px/1 var(--font); }
 .quote-chip span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -354,11 +365,13 @@ textarea::placeholder { color: var(--text-3); }
     <textarea id="input" rows="1" placeholder="Ask about this tab or anything" aria-label="Message the agent"></textarea>
     <div class="composer-row">
       <div class="chiprow" id="chiprow" hidden>
-        <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
-          <span id="context-label"></span>
-        </button>
-        <button class="context-clear" id="context-clear" title="Remove the page context" aria-label="Remove the page context" hidden><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        <div class="context-plate" id="context-plate">
+          <button class="context" id="context" aria-pressed="true" title="Share the current tab with the agent">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+            <span id="context-label"></span>
+          </button>
+          <button class="context-clear" id="context-clear" title="Remove the page context" aria-label="Remove the page context" hidden><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        </div>
         <div class="quote-chip" id="quote-chip" title="The selected text goes to the agent" hidden><span id="quote-text"></span></div>
       </div>
       <button class="send" id="send" title="Send (Enter)" aria-label="Send" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
@@ -449,8 +462,11 @@ textarea::placeholder { color: var(--text-3); }
     else node.appendChild(el("span", "spinner"));
     var title = item.text || "";
     var cut = title.search(/\s/);
-    node.appendChild(el("span", "name", cut < 0 ? title : title.slice(0, cut)));
+    var full = cut < 0 ? title : title.slice(0, cut);
+    // MCP tools arrive as mcp__<server>__<tool>; the row shows <tool> and the tooltip keeps the rest.
+    node.appendChild(el("span", "name", full.replace(/^mcp__\S+?__(?=\S)/, "")));
     if (cut >= 0) node.appendChild(el("span", "host", title.slice(cut).trim()));
+    node.title = title;
     node.appendChild(el("span", "visually-hidden", status === "in_progress" ? "running" : status));
     return node;
   }
@@ -542,11 +558,14 @@ textarea::placeholder { color: var(--text-3); }
     var row = el("li", "task");
     row.setAttribute("data-state", task.state);
     row.appendChild(el("span", "title", task.title));
+    // Every row states its status in words: "Running \u00b7 3/7", "Queued \u00b7 #1", "Needs you".
     var meta = TASK_STATE[task.state] || task.state;
-    if ((task.state === "running" || task.state === "waiting") && task.total > 0) {
-      meta = (task.state === "waiting" ? "Needs you \u00b7 " : "") + task.done + "/" + task.total;
+    if (task.state === "running" && task.total > 0) {
+      meta = "Running \u00b7 " + task.done + "/" + task.total;
+    } else if (task.state === "waiting" && task.total > 0) {
+      meta = "Needs you \u00b7 " + task.done + "/" + task.total;
     } else if (task.state === "queued") {
-      meta = "#" + task.position;
+      meta = "Queued \u00b7 #" + task.position;
     }
     row.appendChild(el("span", "meta", meta));
     if (task.state === "queued") {
@@ -984,6 +1003,7 @@ textarea::placeholder { color: var(--text-3); }
   function applyTheme(theme) {
     if (!theme) return;
     var root = document.documentElement;
+    root.setAttribute("data-look", theme.look || "");
     ["bg", "surface", "surface-2", "text", "text-2", "border", "accent"].forEach(function (key) {
       var value = theme[key.replace("-", "_")];
       if (value) root.style.setProperty("--" + key, value);

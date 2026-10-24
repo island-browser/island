@@ -102,13 +102,16 @@ input[type="checkbox"] { -webkit-appearance: none; appearance: none; position: r
   margin: 0; flex: none; border-radius: 999px; background: var(--border-2); cursor: pointer; transition: background .16s; }
 input[type="checkbox"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
   border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0, 0, 0, .2); transition: transform .16s; }
-input[type="checkbox"]:checked { background: var(--accent); }
-input[type="checkbox"]:checked::after { transform: translateX(16px); }
+/* "On" is neutral: the text colour is the track, the knob takes the page surface. */
+input[type="checkbox"]:checked { background: var(--text); }
+input[type="checkbox"]:checked::after { transform: translateX(16px); background: var(--surface); }
 input[type="checkbox"]:disabled { opacity: .4; cursor: default; }
 .btn { height: 28px; padding: 0 12px; border: 1px solid var(--border-2); border-radius: 6px; background: var(--surface);
   color: var(--text); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .btn:hover { background: var(--surface-2); }
-.btn.primary { background: var(--selection); border-color: var(--selection); color: #FFFFFF; }
+/* Primary actions are text-coloured plates, like Copy Markdown in the report page. */
+.btn.primary { background: var(--text); border-color: var(--text); color: var(--surface); }
+.btn.primary:hover { opacity: .88; background: var(--text); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--text); font-weight: 600; }
 .btn.quiet:hover { background: var(--fill); }
 .btn:disabled { opacity: .4; cursor: default; }
@@ -174,8 +177,8 @@ input.field.filter { font: inherit; }
 .provider label { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .provider input[type="radio"] { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; margin: 3px 0 0;
   flex: none; border: 1px solid var(--text-2); border-radius: 50%; background: var(--surface); cursor: pointer; }
-.provider input[type="radio"]:checked { border-color: var(--accent); box-shadow: inset 0 0 0 3.5px var(--surface),
-  inset 0 0 0 8px var(--accent); }
+.provider input[type="radio"]:checked { border-color: var(--text); box-shadow: inset 0 0 0 3.5px var(--surface),
+  inset 0 0 0 8px var(--text); }
 .provider .p-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .provider .p-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .provider .p-name { font-size: 13px; font-weight: 500; }
@@ -190,13 +193,13 @@ input.field.filter { font: inherit; }
 .swatches { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .swatch { width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0; background: var(--c);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .18); }
-.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
 .space-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .space-row:first-child { border-top: 0; }
 .space-row .name { width: 110px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space-row .name small { color: var(--text-2); font-weight: 400; }
 input.hex { width: 92px; font: 12px var(--mono); }
-input[type="range"] { width: 180px; accent-color: var(--accent); }
+input[type="range"] { width: 180px; accent-color: var(--text); }
 .range-value { font: 12px var(--mono); color: var(--text-2); min-width: 38px; text-align: right; }
 input.family { width: 180px; font-family: var(--font); font-size: 13px; }
 .status { font: 12px/1.5 var(--mono); }
