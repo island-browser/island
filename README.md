@@ -13,7 +13,7 @@
   <img src="docs/images/hero.png" alt="Island with the Native look: a source-list sidebar with four tabs and a Wikipedia article" width="900">
 </p>
 
-> **Status:** pre-1.0. Every build is an **unsigned GitHub prerelease**. Only macOS Apple Silicon
+> **Status:** pre-1.0. Every build is **unsigned**: each `vX.Y.Z` is the latest GitHub release, and `nightly` is a prerelease. Only macOS Apple Silicon
 > (arm64) has been built, run and packaged by hand. See [Status and platforms](#status-and-platforms).
 
 ## Why Island
@@ -116,7 +116,7 @@ For contrast, here is the **Arc** look: a space-tinted canvas with a rounded pag
    `island_browser-<version>-macosarm64.dmg` (or the `.zip`) for an Apple Silicon Mac. Other
    targets: `island_browser-<version>-macosx64.*`, `-windows64-setup.exe` / `-windows64.zip`,
    `-windowsarm64-*`, `-linux64.deb` / `-linux64.tar.gz`, `-linuxarm64-*`. Each release has a
-   `SHA256SUMS.txt`. `nightly` is a rolling prerelease of `main`; `vX.Y.Z` is one per version.
+   `SHA256SUMS.txt`. `nightly` is a rolling prerelease of `main`; `vX.Y.Z` is one per version, marked latest.
 2. **Open it.** Builds are not signed or notarized, so Gatekeeper refuses at first. Drag Island to
    Applications, then either allow it in System Settings > Privacy & Security or run
    `xattr -dr com.apple.quarantine /Applications/Island.app`.
@@ -217,7 +217,8 @@ The full list, with Windows and Linux keys, is in
 
 ## Status and platforms
 
-- **Unsigned prereleases only.** Stable public release is blocked until signing and notarization
+- **Unsigned builds only.** Versioned releases (`vX.Y.Z`, marked latest) and the `nightly`
+  prerelease are not signed. Stable public release is blocked until signing and notarization
   verification exist.
 - **Platforms.** The intended targets are `macosarm64`, `macosx64`, `windows64`, `windowsarm64`,
   `linux64` and `linuxarm64`. Only macOS arm64 is built, tested and run by hand. The other five
