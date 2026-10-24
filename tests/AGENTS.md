@@ -36,7 +36,8 @@ Two independent test systems live side by side here:
 | `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |
 | `prefs_store_test.cpp` | Preferences round-trip, optional keys (history, agent provider, shortcuts, update checks), agent-command migration, schema errors |
-| `session_store_test.cpp` | Session JSON round-trip — **not currently listed in `CMakeLists.txt`**, so it has never run (PR #27 in flight) |
+| `session_store_test.cpp` | Session JSON round-trip, including optional `favorite_tabs` records (old files load with none) |
+| `favorite_tabs_test.cpp` | CEF-free favorite virtual-tab registry: ensure, reset-on-close, disposal by key, bookmark and scope, and the session form |
 | `address_indicators_test.cpp` | Address-field shield count, its 9999+ cap and tooltip |
 | `appearance_test.cpp` | Appearance prefs round-trip and the Native look written by default |
 | `content_blocker_policy_test.cpp`, `content_blocker_test.cpp`, `content_blocker_stub_test.cpp` | Blocker request types, bypasses and refresh policy; Rust adblock matching; the disabled build that always allows requests |
@@ -85,8 +86,8 @@ with a source that calls `CefInitialize` (`cef_address_parser_test.cpp`). Keep i
 
 - Adding a `*_test.cpp` file does **not** register it. Every C++ test source must be added by hand
   to a target in `CMakeLists.txt`, along with the `src/main/*.cc` files it exercises.
-- Two source sets are on disk but in no target at all: `session_store_test.cpp` (PR #27 in flight)
-  and `integration/`. A default `ctest` run covers neither.
+- One source set is on disk but in no target at all: `integration/`. A default `ctest` run does not
+  cover it.
 - `search/` is registered in both the default root build and the standalone search project. Keep
   both source lists complete when adding a test.
 - GoogleTest is built with `gtest_force_shared_crt OFF` so it matches CEF's static CRT on Windows.

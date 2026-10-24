@@ -13,6 +13,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Added
+
+- Favorites have their data path in place: each favorite list is projected for the sidebar, and a
+  favorite can show its own virtual tab in the content slot without touching the selected tab. No
+  sidebar rows or controls for favorites are shown in this build yet.
+
 ### Changed
 
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and

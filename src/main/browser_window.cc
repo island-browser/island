@@ -250,21 +250,53 @@ CefRefPtr<BrowserWindow> BrowserWindow::CreateHeadlessForTest(std::string initia
         new BrowserWindow(std::move(initial_url), /*persist_session=*/false));
 }
 
+namespace {
+
+// The inline status for a library that did not load cleanly (see the constructor).
+std::string BookmarkLoadMessage(BookmarkError error) {
+    switch (error) {
+        case BookmarkError::kParseError:
+        case BookmarkError::kSchemaError:
+            return "bookmarks.json could not be read. The library starts empty, and the original "
+                   "file is kept as bookmarks.json.invalid.bak on the next save.";
+        case BookmarkError::kFileWriteError:
+            return "bookmarks.json was upgraded but could not be saved. The library is read-only "
+                   "for this run.";
+        default:
+            return "bookmarks.json could not be read. The library is read-only for this run, so "
+                   "the file is not overwritten.";
+    }
+}
+
+}  // namespace
+
 BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
     : initial_url_(std::move(initial_url)),
       persist_session_(persist_session),
       address_validator_(&ParseAndValidate) {
+    // Preferences and bookmarks share the session file's persistence rules:
+    // headless and smoke shapes keep fresh-install defaults and never read or
+    // write the files, so tests and smoke runs stay deterministic. The library
+    // loads before any space exists: its favorite lists own space IDs, which must
+    // be reserved before a fresh or discarded session allocates new ones.
+    if (persist_session_) {
+        prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
+        bookmarks_ = BookmarkStore(BookmarkStore::DefaultBookmarksFilePath());
+        const BookmarkError load_error = bookmarks_.Load();
+        // A missing file is the normal first run. Anything else is shown, and a read-only library
+        // says why it cannot be saved this run.
+        if (load_error != BookmarkError::kNone &&
+            (load_error != BookmarkError::kFileReadError || bookmarks_.read_only())) {
+            failed_bookmark_mutation_ = FailedBookmarkMutation{
+                .message = BookmarkLoadMessage(load_error), .retry = nullptr};
+        }
+    }
+    ReserveSpaceIdsUpTo(bookmarks_.MaxSpaceKey());
     if (!persist_session_ || !RestoreSession()) {
         // CreateDefaultSpace already appends the space's single starting tab.
         spaces_.push_back(CreateDefaultSpace());
     }
-    // Preferences and bookmarks share the session file's persistence rules:
-    // headless and smoke shapes keep fresh-install defaults and never read or
-    // write the files, so tests and smoke runs stay deterministic.
     if (persist_session_) {
-        prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
-        bookmarks_ = BookmarkStore(BookmarkStore::DefaultBookmarksFilePath());
-        static_cast<void>(bookmarks_.Load());
         HistoryRecorder::Options history_options;
         history_options.segment_path =
             PrefsStore::DefaultPrefsFilePath().parent_path() / "history" / "index.seg";
@@ -328,6 +360,12 @@ bool BrowserWindow::IsSessionInternalTabUrl(std::string_view url) const {
 }
 
 bool BrowserWindow::RestoreSessionState(const SessionState& state) {
+    // Virtual-tab records belong to the library, not to a space, so they restore even when the
+    // session has no spaces. The display itself is never restored.
+    virtual_tabs_.clear();
+    displayed_favorite_.reset();
+    favorite_tabs_ = FavoriteTabsFromSession(state.favorite_tabs);
+    static_cast<void>(ReconcileFavoriteTabs());
     if (state.spaces.empty()) {
         return false;
     }
@@ -481,6 +519,12 @@ SessionState BrowserWindow::BuildSessionState() const {
     if (!state.active_space_id.has_value() && !state.spaces.empty()) {
         state.active_space_id = state.spaces.front().id;
     }
+    // A live virtual tab's last URL is where it is now; its record is written from that.
+    FavoriteTabRegistry records = favorite_tabs_;
+    for (const auto& [key, tab] : virtual_tabs_) {
+        records.SetLastUrl(key, EffectiveUrl(tab));
+    }
+    state.favorite_tabs = ToSessionFavoriteTabs(records);
     return state;
 }
 
@@ -2437,7 +2481,10 @@ std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
     if (!items.has_value()) {
         return "Could not read " + name + " bookmarks.";
     }
-    const BookmarkResult merged = bookmarks_.Import("Imported from " + name, *items);
+    const BookmarkResult merged =
+        RunBookmarkMutation([this, folder = "Imported from " + name, items = *items] {
+            return bookmarks_.Import(folder, items);
+        });
     if (!merged.ok()) {
         return merged.message;
     }
@@ -3273,6 +3320,7 @@ bool BrowserWindow::SelectActiveSpaceTabIndex(std::size_t index) {
         return false;
     }
     if (index == space.active_tab_index()) {
+        ReturnToOrdinaryTab();
         return true;
     }
     DetachActiveTabObservers();
@@ -3286,6 +3334,7 @@ void BrowserWindow::SelectTabWithOneAttach(std::size_t space, std::size_t tab) {
     Space& target = spaces_[space];
     if (space == active_space_index_ && target.has_active_tab() &&
         target.active_tab_index() == tab) {
+        ReturnToOrdinaryTab();
         return;
     }
     // A chip describes the tab it was made from; another tab's question starts clean.
@@ -4337,6 +4386,12 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
                 tab.browser()->GetHost()->CloseBrowser(true);
             }
         }
+        // Virtual favorite tabs are not in a space, so they close here too.
+        for (const auto& entry : virtual_tabs_) {
+            if (entry.second.browser() != nullptr) {
+                entry.second.browser()->GetHost()->CloseBrowser(true);
+            }
+        }
     }
     if (active == nullptr || active->browser() == nullptr) {
         return true;
@@ -4617,6 +4672,11 @@ Tab* BrowserWindow::FindTabByBrowser(CefRefPtr<CefBrowser> browser) noexcept {
             }
         }
     }
+    for (auto& [key, tab] : virtual_tabs_) {
+        if (tab.browser() != nullptr && tab.browser()->IsSame(browser)) {
+            return &tab;
+        }
+    }
     return nullptr;
 }
 
@@ -4629,6 +4689,11 @@ const Tab* BrowserWindow::FindTabByBrowser(CefRefPtr<CefBrowser> browser) const 
             if (tab.browser() != nullptr && tab.browser()->IsSame(browser)) {
                 return &tab;
             }
+        }
+    }
+    for (const auto& [key, tab] : virtual_tabs_) {
+        if (tab.browser() != nullptr && tab.browser()->IsSame(browser)) {
+            return &tab;
         }
     }
     return nullptr;
@@ -4645,6 +4710,11 @@ Tab* BrowserWindow::FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view)
             }
         }
     }
+    for (auto& [key, tab] : virtual_tabs_) {
+        if (tab.browser_view() != nullptr && tab.browser_view()->IsSame(browser_view)) {
+            return &tab;
+        }
+    }
     return nullptr;
 }
 
@@ -4658,7 +4728,9 @@ const Tab* BrowserWindow::active_tab() const noexcept {
 
 void BrowserWindow::DetachActiveTabObservers() {
     CEF_REQUIRE_UI_THREAD();
-    // Leaving a tab starts its idle clock.
+    // Leaving a tab starts its idle clock. Any selection change also ends a displayed favorite,
+    // so the slot returns to the selected ordinary tab (the favorite keeps its virtual tab).
+    displayed_favorite_.reset();
     TouchActiveTabs();
     Tab* tab = active_tab();
     if (tab != nullptr) {
@@ -5022,6 +5094,18 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         show_internal_page_ = false;
         shortcut_conflict_.reset();
     }
+    if (displayed_favorite_.has_value()) {
+        // Single-pane display only: the favorite takes the whole slot. A split pair stays in its
+        // space and is shown again once the favorite closes or another tab is selected.
+        Tab* virtual_tab = FindVirtualTab(*displayed_favorite_);
+        if (virtual_tab != nullptr && EnsureTabBrowserView(*virtual_tab)) {
+            chrome_->AttachBrowserView(virtual_tab->browser_view());
+            SetAttachedViews(
+                {AttachedView{.view = virtual_tab->browser_view(), .tab = virtual_tab->id()}});
+            ApplyPageViewVisibility();
+            return;
+        }
+    }
     Space& space = active_space();
     if (space.split().has_value()) {
         Tab* first = space.FindTab(space.split()->first);
@@ -5079,17 +5163,6 @@ void BrowserWindow::UpdateChromeCollections() {
         return;
     }
     const Tab* active = active_tab();
-    std::vector<TabStripEntrySnapshot> tabs;
-    tabs.reserve(active_space().tab_count());
-    for (const Tab& tab : active_space().tabs()) {
-        tabs.push_back({.title = tab.DisplayTitle(),
-                        .active = active != nullptr && tab.id() == active->id(),
-                        .pinned = tab.pinned(),
-                        .favicon = tab.favicon(),
-                        .sleeping = tab.sleeping(),
-                        .group_parent = tab.group_parent(),
-                        .group_label = tab.group_label()});
-    }
     std::vector<SpaceSwitcherEntrySnapshot> spaces;
     spaces.reserve(spaces_.size());
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
@@ -5101,7 +5174,7 @@ void BrowserWindow::UpdateChromeCollections() {
     if (active != nullptr) {
         projected_page_title_ = active->navigation_state().snapshot().page_title;
     }
-    chrome_->SetTabStripEntries(tabs);
+    chrome_->SetSidebarCollection(BuildSidebarCollection());
     chrome_->SetSpaceSwitcherEntries(spaces);
     ScheduleLocalPagesRender();
     // Arc-style space theming: a switch to a differently colored space
@@ -5118,6 +5191,200 @@ void BrowserWindow::CloseSpaceBrowsers(Space& space) {
             tab.browser()->GetHost()->CloseBrowser(true);
         }
     }
+}
+
+BookmarkResult BrowserWindow::AddFavoriteByUrl(FavoriteScope scope, std::string_view title,
+                                               std::string_view url) {
+    CEF_REQUIRE_UI_THREAD();
+    return RunBookmarkMutation([this, scope, title = std::string(title), url = std::string(url)] {
+        return bookmarks_.AddFavoriteByUrl(scope, title, url);
+    });
+}
+
+BookmarkResult BrowserWindow::RemoveFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    return RunBookmarkMutation(
+        [this, scope, bookmark_id] { return bookmarks_.RemoveFavorite(scope, bookmark_id); });
+}
+
+BookmarkResult BrowserWindow::RetryLastBookmarkMutation() {
+    CEF_REQUIRE_UI_THREAD();
+    if (!failed_bookmark_mutation_.has_value() || failed_bookmark_mutation_->retry == nullptr) {
+        return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                              .message = "Nothing to retry."};
+    }
+    return RunBookmarkMutation(failed_bookmark_mutation_->retry);
+}
+
+void BrowserWindow::DismissBookmarkStatus() {
+    CEF_REQUIRE_UI_THREAD();
+    failed_bookmark_mutation_.reset();
+    UpdateChromeCollections();
+}
+
+BookmarkResult BrowserWindow::RunBookmarkMutation(std::function<BookmarkResult()> mutation) {
+    CEF_REQUIRE_UI_THREAD();
+    BookmarkResult result = mutation();
+    if (result.ok()) {
+        failed_bookmark_mutation_.reset();
+    } else {
+        failed_bookmark_mutation_ =
+            FailedBookmarkMutation{.message = result.message, .retry = std::move(mutation)};
+    }
+    if (ReconcileFavoriteTabs()) {
+        // The displayed virtual tab went away: the slot shows the selected ordinary tab.
+        AttachActiveTabObservers();
+    }
+    UpdateChromeCollections();
+    return result;
+}
+
+bool BrowserWindow::ReconcileFavoriteTabs() {
+    std::vector<FavoriteTabKey> gone;
+    for (const auto& entry : favorite_tabs_.records()) {
+        if (!FavoriteListContains(entry.first)) {
+            gone.push_back(entry.first);
+        }
+    }
+    bool displayed_gone = false;
+    for (const FavoriteTabKey& key : gone) {
+        if (displayed_favorite_ == key) {
+            displayed_favorite_.reset();
+            displayed_gone = true;
+        }
+        DropVirtualTab(key);
+        favorite_tabs_.Dispose(key);
+    }
+    return displayed_gone;
+}
+
+bool BrowserWindow::FavoriteListContains(const FavoriteTabKey& key) const {
+    const BookmarkState& state = bookmarks_.state();
+    const std::vector<std::uint64_t>* list = &state.global_favorite_ids;
+    if (key.scope.has_value()) {
+        const auto found = state.space_favorite_ids.find(*key.scope);
+        if (found == state.space_favorite_ids.end()) {
+            return false;
+        }
+        list = &found->second;
+    }
+    return std::find(list->begin(), list->end(), key.bookmark_id) != list->end();
+}
+
+void BrowserWindow::DropVirtualTab(const FavoriteTabKey& key) {
+    CEF_REQUIRE_UI_THREAD();
+    const auto found = virtual_tabs_.find(key);
+    if (found == virtual_tabs_.end()) {
+        return;
+    }
+    const CefRefPtr<CefBrowser> browser = found->second.browser();
+    virtual_tabs_.erase(found);
+    if (browser != nullptr) {
+        browser->GetHost()->CloseBrowser(true);
+    }
+}
+
+Tab* BrowserWindow::FindVirtualTab(const FavoriteTabKey& key) noexcept {
+    const auto found = virtual_tabs_.find(key);
+    return found == virtual_tabs_.end() ? nullptr : &found->second;
+}
+
+void BrowserWindow::ReturnToOrdinaryTab() {
+    if (!displayed_favorite_.has_value()) {
+        return;
+    }
+    displayed_favorite_.reset();
+    AttachActiveTabObservers();
+}
+
+bool BrowserWindow::ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    const FavoriteTabKey key{.scope = scope, .bookmark_id = bookmark_id};
+    const Bookmark* bookmark = bookmarks_.FindBookmark(bookmark_id);
+    if (closing_ || bookmark == nullptr || !FavoriteListContains(key)) {
+        return false;
+    }
+    // A list whose space is gone is kept in the library but is not shown, so it cannot open.
+    if (scope.has_value() && FindSpace(SpaceId{*scope}) == nullptr) {
+        return false;
+    }
+    const FavoriteTabRecord& record = favorite_tabs_.Ensure(key, bookmark->url);
+    if (!virtual_tabs_.contains(key)) {
+        Tab tab{NextTabId()};
+        const ValidatedAddress address = address_validator_ ? address_validator_(record.last_url)
+                                                            : ParseAndValidate(record.last_url);
+        if (address.is_valid()) {
+            tab.SetStartupUrl(address.url);
+        }
+        virtual_tabs_.emplace(key, std::move(tab));
+    }
+    // Only the displayed favorite changes: the ordinary tab list and its selection stay as they
+    // were, so no Detach here (a Detach would end the display we are about to start).
+    displayed_favorite_ = key;
+    AttachActiveTabObservers();
+    return true;
+}
+
+void BrowserWindow::CloseFavoriteTab() {
+    CEF_REQUIRE_UI_THREAD();
+    if (!displayed_favorite_.has_value()) {
+        return;
+    }
+    const FavoriteTabKey key = *displayed_favorite_;
+    displayed_favorite_.reset();
+    DropVirtualTab(key);
+    favorite_tabs_.ResetToFavorite(key);
+    AttachActiveTabObservers();
+}
+
+SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
+    SidebarCollectionSnapshot snapshot;
+    const BookmarkState& state = bookmarks_.state();
+    const auto favorites = [this](FavoriteScope scope, const std::vector<std::uint64_t>& ids) {
+        std::vector<FavoriteEntrySnapshot> entries;
+        for (const std::uint64_t bookmark_id : ids) {
+            const Bookmark* bookmark = bookmarks_.FindBookmark(bookmark_id);
+            if (bookmark == nullptr) {
+                continue;
+            }
+            const FavoriteTabKey key{.scope = scope, .bookmark_id = bookmark_id};
+            FavoriteEntrySnapshot entry{.scope = scope,
+                                        .bookmark_id = bookmark_id,
+                                        .title = bookmark->title,
+                                        .url = bookmark->url,
+                                        .displayed = displayed_favorite_ == key};
+            const auto virtual_tab = virtual_tabs_.find(key);
+            if (virtual_tab != virtual_tabs_.end()) {
+                entry.favicon = virtual_tab->second.favicon();
+            }
+            entries.push_back(std::move(entry));
+        }
+        return entries;
+    };
+    snapshot.global_favorites = favorites(std::nullopt, state.global_favorite_ids);
+    const Space& space = active_space();
+    const auto space_list = state.space_favorite_ids.find(space.id().value);
+    if (space_list != state.space_favorite_ids.end()) {
+        snapshot.space_favorites = favorites(FavoriteScope{space.id().value}, space_list->second);
+    }
+
+    const Tab* active = active_tab();
+    snapshot.tabs.reserve(space.tab_count());
+    for (const Tab& tab : space.tabs()) {
+        snapshot.tabs.push_back({.title = tab.DisplayTitle(),
+                                 .active = active != nullptr && tab.id() == active->id(),
+                                 .pinned = tab.pinned(),
+                                 .favicon = tab.favicon(),
+                                 .sleeping = tab.sleeping(),
+                                 .group_parent = tab.group_parent(),
+                                 .group_label = tab.group_label()});
+    }
+    if (failed_bookmark_mutation_.has_value()) {
+        snapshot.bookmark_status =
+            BookmarkStatusSnapshot{.text = failed_bookmark_mutation_->message,
+                                   .retryable = failed_bookmark_mutation_->retry != nullptr};
+    }
+    return snapshot;
 }
 
 Space BrowserWindow::RemoveSpaceAtIndex(std::size_t index) {
@@ -5145,6 +5412,17 @@ Space BrowserWindow::RemoveSpaceAtIndex(std::size_t index) {
         active_space_index_ = index > 0 ? index - 1 : 0;
     } else if (index < active_space_index_) {
         --active_space_index_;
+    }
+    // A real deletion (never a reorder) ends the space's favorite lists and virtual tabs. The
+    // list is removed only when it exists, so a space without favorites writes nothing.
+    const FavoriteScope removed_scope = FavoriteScope{removed.id().value};
+    for (const FavoriteTabKey& key : favorite_tabs_.DisposeScope(removed_scope)) {
+        DropVirtualTab(key);
+    }
+    if (bookmarks_.state().space_favorite_ids.contains(removed.id().value)) {
+        static_cast<void>(RunBookmarkMutation([this, space_key = removed.id().value] {
+            return bookmarks_.RemoveSpaceFavorites(space_key);
+        }));
     }
     return removed;
 }
@@ -5272,6 +5550,11 @@ Tab* BrowserWindow::FindTabById(TabId id) noexcept {
     for (Space& space : spaces_) {
         if (Tab* tab = space.FindTab(id)) {
             return tab;
+        }
+    }
+    for (auto& [key, tab] : virtual_tabs_) {
+        if (tab.id() == id) {
+            return &tab;
         }
     }
     return nullptr;
@@ -6235,7 +6518,8 @@ void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources)
         if (!items.has_value()) {
             continue;
         }
-        static_cast<void>(bookmarks_.Import("Imported", *items));
+        static_cast<void>(RunBookmarkMutation(
+            [this, items = *items] { return bookmarks_.Import("Imported", items); }));
     }
     prefs_.onboarding_completed = true;
     SavePrefs();
