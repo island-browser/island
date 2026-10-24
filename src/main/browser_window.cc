@@ -3292,6 +3292,37 @@ void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
     static_cast<void>(SetActiveSpaceTabPinned(index, pinned));
 }
 
+void BrowserWindow::ActivateFavoriteFromSidebar(FavoriteScope scope, std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    static_cast<void>(ActivateFavorite(scope, bookmark_id));
+}
+
+void BrowserWindow::OpenMoreGlobalFavorites() {
+    CEF_REQUIRE_UI_THREAD();
+    // The Bookmarks page is a later task; until then the "+N" control only logs.
+    LOG(INFO) << "Show more global favorites: the Bookmarks page is not available yet";
+}
+
+void BrowserWindow::AddCurrentPageToGlobalFavorites() {
+    CEF_REQUIRE_UI_THREAD();
+    const Tab* active = active_tab();
+    if (active == nullptr) {
+        return;
+    }
+    const NavigationSnapshot snapshot = active->navigation_state().snapshot();
+    static_cast<void>(AddFavoriteByUrl(std::nullopt, snapshot.page_title, snapshot.url));
+}
+
+void BrowserWindow::RetryFailedBookmarkMutation() {
+    CEF_REQUIRE_UI_THREAD();
+    static_cast<void>(RetryLastBookmarkMutation());
+}
+
+void BrowserWindow::DismissFailedBookmarkStatus() {
+    CEF_REQUIRE_UI_THREAD();
+    DismissBookmarkStatus();
+}
+
 ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
     ChromeTokens tokens = ChromeTokens::ForLook(prefs_.appearance.look, theme)
                               .Customized(active_space().color(), theme, prefs_.appearance);
@@ -5378,6 +5409,13 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
                                  .sleeping = tab.sleeping(),
                                  .group_parent = tab.group_parent(),
                                  .group_label = tab.group_label()});
+    }
+    if (active != nullptr) {
+        const NavigationSnapshot page = active->navigation_state().snapshot();
+        // The cheap http(s) check comes first: ParseAndValidate calls the CEF URL API, which a
+        // headless window has not initialized, so internal pages never reach it.
+        snapshot.add_current_page_available =
+            IsWebTileUrl(page.url) && ParseAndValidate(page.url).is_valid();
     }
     if (failed_bookmark_mutation_.has_value()) {
         snapshot.bookmark_status =

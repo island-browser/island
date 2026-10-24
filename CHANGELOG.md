@@ -15,6 +15,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Sidebar favorites (Bookmarks 0.9): a global favorites strip (up to six icons, then "+N" and "+" to add the current page), the current space's favorites under "<Space> · Favorites", and a failed-save status row above the footer. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button is removed.
 - Favorites have their data path in place: each favorite list is projected for the sidebar, and a
   favorite can show its own virtual tab in the content slot without touching the selected tab. No
   sidebar rows or controls for favorites are shown in this build yet.

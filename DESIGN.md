@@ -439,6 +439,20 @@ between the groups; the active tab is the same soft `selected` fill as the selec
 - **Status chips:** mono uppercase label plus a 6px dot; meaning is carried by the label, never by
   color alone.
 
+### Sidebar favorites (Bookmarks 0.9)
+
+- Order: global strip, `<Space> · Favorites` rows, `<Space> · Tabs` rows, fixed footer. The
+  collapsed rail uses the same order with 32 DIP icon buttons and one hairline after the globals.
+- Global strip: 28 DIP plates, 4 DIP gaps, at most six icons. `ComputeGlobalStripLayout` fits the
+  icons, `+N` and `+` into the inner width (`rail_width − 2·spacing_3 − 10`); Native 248 shows four
+  icons, Arc/Graphite 286 shows six.
+- A displayed favorite uses `segment_selected` (neutral raised), never `accent`. Hover uses `hover`.
+  The active ordinary tab keeps the only accent treatment.
+- Status row: `warning_bg` fill with `warning_text`, directly above the footer, hidden when no
+  bookmark change failed.
+- No new color tokens were added: the feature reuses `canvas`, `hover`, `segment_selected`, `text`,
+  `warning_bg` and `warning_text`, which already carry light and dark values.
+
 ## 6. Motion & Interaction
 
 - `--motion-fast: 160ms`; `--motion-enter: 480ms`; `--motion-reveal: 700ms`; `--ease-out:

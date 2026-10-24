@@ -88,6 +88,13 @@ platform executable links.
 
 ### Working In This Directory
 
+- Sidebar collections (Bookmarks 0.9): `SidebarCollectionSnapshot` (`browser_chrome.h`) carries the
+  global favorites, the current space's favorites, the tab rows and the failure status. To add a
+  collection: add its field to the snapshot, build it in `BrowserWindow::BuildSidebarCollection`,
+  render it in `BrowserChrome::AddFavoriteSections` (expanded) or `AddCollapsedFavorites` (rail), and
+  route clicks through a `CollectionButtonAction` plus a `BrowserChromeHost` virtual. Pure rules
+  (strip fit, names, headers, fills) live in `sidebar_collection.{h,cc}`. The new `ChromeViewId`s are
+  `1081`–`1092`; `1052` (collapsed New Tab) is retired.
 - `ChromeViewId` values `1001`–`1027` are a hard invariant. Never renumber them; allocate new IDs
   after `1027`.
 - Keep genuinely CEF-free logic (`design_tokens`, `navigation_state`, `address_bar_model`,

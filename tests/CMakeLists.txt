@@ -23,6 +23,7 @@ add_executable(island_tests
     bookmark_import_test.cpp
     bookmark_store_test.cpp
     favorite_tabs_test.cpp
+    sidebar_collection_test.cpp
     browser_import_test.cpp
     browser_window_test.cpp
     browser_window_pages_test.cpp
@@ -79,6 +80,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/favorite_tabs.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/sidebar_collection.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"

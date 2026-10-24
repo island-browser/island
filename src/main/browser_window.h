@@ -732,6 +732,13 @@ class BrowserWindow : public CefClient,
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
     void SetTabPinned(std::size_t index, bool pinned) override;
+    // Bookmarks 0.9 sidebar collection (BrowserChromeHost). OpenMoreGlobalFavorites is a stub until
+    // the Bookmarks page exists; it logs and does nothing.
+    void ActivateFavoriteFromSidebar(FavoriteScope scope, std::uint64_t bookmark_id) override;
+    void OpenMoreGlobalFavorites() override;
+    void AddCurrentPageToGlobalFavorites() override;
+    void RetryFailedBookmarkMutation() override;
+    void DismissFailedBookmarkStatus() override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
 
     [[nodiscard]] CefRefPtr<CefBrowser> ActiveBrowser() override;

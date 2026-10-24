@@ -103,8 +103,8 @@ TEST(CollapsedRailContractTest, GivenTheNewIdsWhenInspectedThenTheyFollow1047And
     };
     for (const ChromeViewId id :
          {ChromeViewId::kCollapsedRail, ChromeViewId::kCollapsedRailTabList,
-          ChromeViewId::kCollapsedRailTab, ChromeViewId::kCollapsedRailNewTab,
-          ChromeViewId::kCollapsedRailSpace, ChromeViewId::kCollapsedRailSpaceList}) {
+          ChromeViewId::kCollapsedRailTab, ChromeViewId::kCollapsedRailSpace,
+          ChromeViewId::kCollapsedRailSpaceList}) {
         EXPECT_FALSE(contains(contains, tree, id));
     }
 }
