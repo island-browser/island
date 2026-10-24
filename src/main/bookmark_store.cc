@@ -40,7 +40,7 @@ std::string_view DefaultMessage(BookmarkError error) {
             return "Could not save bookmarks. The change was not applied.";
         case BookmarkError::kParseError:
         case BookmarkError::kSchemaError:
-            return "The bookmarks file is damaged. It was backed up before the next save.";
+            return "The bookmarks file is damaged. Its original copy is kept before the next save.";
         case BookmarkError::kNotFound:
             return "That bookmark or folder no longer exists.";
         case BookmarkError::kDuplicate:
@@ -50,7 +50,7 @@ std::string_view DefaultMessage(BookmarkError error) {
         case BookmarkError::kNotEmpty:
             return "Move or delete its bookmarks first.";
         case BookmarkError::kReadOnly:
-            return "Bookmarks are read-only until the migration can be saved.";
+            return "Bookmarks are read-only for this run.";
     }
     return {};
 }
@@ -303,9 +303,11 @@ std::optional<BookmarkState> ParseSchemaTwo(const json::Value& root) {
     if (spaces == nullptr || !spaces->IsObject()) {
         return std::nullopt;
     }
+    // Empty lists are not stored in the map, so duplicates are tracked here, not by the map.
+    std::set<std::uint64_t> seen_space_keys;
     for (const auto& [key, list_value] : spaces->object_val) {
         std::uint64_t space_key = 0;
-        if (!ParseSpaceKey(key, space_key) || state.space_favorite_ids.count(space_key) != 0) {
+        if (!ParseSpaceKey(key, space_key) || !seen_space_keys.insert(space_key).second) {
             return std::nullopt;
         }
         std::vector<std::uint64_t> ids;
@@ -460,6 +462,7 @@ BookmarkStore::BookmarkStore(std::filesystem::path path) : path_(std::move(path)
 BookmarkError BookmarkStore::Load() {
     state_ = BookmarkState{};
     read_only_ = false;
+    read_only_message_.clear();
     invalid_original_.reset();
     if (path_.empty()) {
         return BookmarkError::kNone;
@@ -474,6 +477,11 @@ BookmarkError BookmarkStore::Load() {
         const bool exists = std::filesystem::exists(path_, ec);
         // A failed lookup is not proof the file is missing, so it counts as present.
         read_only_ = exists || static_cast<bool>(ec);
+        if (read_only_) {
+            read_only_message_ =
+                "The bookmarks file exists but could not be read, so it was left as it is. "
+                "Bookmarks are read-only for this run.";
+        }
         return BookmarkError::kFileReadError;
     }
     std::optional<json::Value> root = json::Parser(*content).Parse();
@@ -494,10 +502,16 @@ BookmarkError BookmarkStore::Load() {
         state_ = std::move(*migrated);
         if (!WriteAtomically(std::filesystem::path(path_.string() + ".v1.bak"), *content)) {
             read_only_ = true;
+            read_only_message_ =
+                "The old bookmarks file could not be backed up, so it was kept as it is. "
+                "Bookmarks are read-only for this run.";
             return BookmarkError::kFileWriteError;
         }
         if (WriteState(state_) != BookmarkError::kNone) {
             read_only_ = true;
+            read_only_message_ =
+                "The upgraded bookmarks file could not be saved, so the old file was kept. "
+                "Bookmarks are read-only for this run.";
             return BookmarkError::kFileWriteError;
         }
         return BookmarkError::kNone;
@@ -550,14 +564,15 @@ std::uint64_t BookmarkStore::MaxSpaceKey() const {
 
 template <typename Apply>
 BookmarkResult BookmarkStore::Commit(Apply&& apply) {
-    if (read_only_) {
-        return Fail(BookmarkError::kReadOnly);
-    }
-    // The edit runs on a copy, so a rejected or unsaved edit leaves state_ untouched.
+    // The edit runs on a copy, so a rejected or unsaved edit leaves state_ untouched. A read-only
+    // store still answers edits that change nothing (for example, adding a URL already saved).
     BookmarkState next = state_;
     BookmarkResult result = apply(next);
     if (!result.ok() || next == state_) {
         return result;
+    }
+    if (read_only_) {
+        return Fail(BookmarkError::kReadOnly, read_only_message_);
     }
     const BookmarkError error = WriteState(next);
     if (error != BookmarkError::kNone) {

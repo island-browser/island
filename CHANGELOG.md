@@ -16,9 +16,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 ### Changed
 
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
-  imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A file that
-  cannot be read is backed up as `bookmarks.json.invalid.bak` before it is next saved. Duplicate URLs
-  in an old file keep their first copy. A bookmark change that cannot be saved is not applied.
+  imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
+  file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be
+  read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
+  URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
+  stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
 
 ## [0.8.0] - 2026-10-24
 

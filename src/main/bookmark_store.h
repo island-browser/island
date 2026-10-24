@@ -176,6 +176,8 @@ class BookmarkStore {
     std::filesystem::path path_;
     BookmarkState state_;
     bool read_only_ = false;
+    // Why the store is read-only this run (set by Load); empty uses the default message.
+    std::string read_only_message_;
     // Original bytes of an existing file that failed to load. The next save copies them to
     // `bookmarks.json.invalid.bak` first, and the save fails if that copy fails.
     std::optional<std::string> invalid_original_;

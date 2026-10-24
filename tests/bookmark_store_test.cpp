@@ -20,6 +20,16 @@ constexpr char kSchemaV1[] =
     R"({"title":"Island","url":"https://island-browser.github.io/"}]},)"
     R"({"name":"Work","items":[{"title":"Tracker","url":"https://example.org/tracker"}]}]})";
 
+// Review Focus 1: a folder name with a slash, an empty folder, two folders with one name, and one
+// URL in two cases in two folders. The second copy of the URL is the one dropped.
+constexpr char kSchemaV1Tricky[] =
+    R"({"version":1,"folders":[)"
+    R"({"name":"Imported from Chrome/Bar","items":[{"title":"Docs","url":"https://A.com/"},)"
+    R"({"title":"Island","url":"https://island-browser.github.io/"}]},)"
+    R"({"name":"Empty","items":[]},)"
+    R"({"name":"Work","items":[{"title":"Tracker","url":"https://example.org/tracker"}]},)"
+    R"({"name":"Work","items":[{"title":"Copy of docs","url":"https://a.com/"}]}]})";
+
 constexpr char kSchemaV2Valid[] =
     R"({"version":2,"next_id":4,"global_favorite_ids":[],"space_favorite_ids":{},)"
     R"("folders":[{"id":1,"name":"Imported","bookmark_ids":[2]}],)"
@@ -67,12 +77,23 @@ TEST(BookmarkStoreTest, GivenAnUnreadableExistingFileWhenLoadedThenItIsNeverOver
     const std::filesystem::path path = TempDir("unreadable") / "bookmarks.json";
     WriteFile(path, kSchemaV2Valid);
     std::filesystem::permissions(path, std::filesystem::perms::none);
+    // Root (and some file systems) can read a file with no permissions, so the premise fails.
+    const bool still_readable = std::ifstream(path).good();
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    if (still_readable) {
+        GTEST_SKIP() << "The file stays readable with no permissions (running as root?).";
+    }
 
+    std::filesystem::permissions(path, std::filesystem::perms::none);
     BookmarkStore store(path);
     EXPECT_EQ(store.Load(), BookmarkError::kFileReadError);
     EXPECT_TRUE(store.read_only());
-    EXPECT_EQ(store.AddOrFindByUrl("Mail", "https://example.com/mail").error,
-              BookmarkError::kReadOnly);
+    const BookmarkResult refused = store.AddOrFindByUrl("Mail", "https://example.com/mail");
+    EXPECT_EQ(refused.error, BookmarkError::kReadOnly);
+    // The reason names the unreadable file, not a migration.
+    EXPECT_NE(refused.message.find("could not be read"), std::string::npos);
+    EXPECT_EQ(refused.message.find("migrat"), std::string::npos);
 
     // Restore access, then check nothing was written over the user's file.
     std::filesystem::permissions(
@@ -129,6 +150,35 @@ TEST(BookmarkStoreTest, GivenSchemaOneFileWhenLoadedThenMigratesWithStableIdsAnd
     EXPECT_FALSE(reloaded.read_only());
 }
 
+TEST(BookmarkStoreTest, GivenDuplicateAndEmptyFoldersWhenMigratedThenFirstCopyWins) {
+    const std::filesystem::path path = TempDir("migrate_duplicates") / "bookmarks.json";
+    WriteFile(path, kSchemaV1Tricky);
+
+    BookmarkStore store(path);
+    EXPECT_EQ(store.Load(), BookmarkError::kNone);
+    const BookmarkState& state = store.state();
+    // Folder order is kept, and so are the empty and same-named folders. IDs follow folder-then-
+    // item order. The dropped copy takes no ID, so next_id is 8, not 9.
+    EXPECT_EQ(state.next_id, 8U);
+    ASSERT_EQ(state.folders.size(), 4U);
+    EXPECT_EQ(state.folders[0], (BookmarkFolder{1, "Imported from Chrome/Bar", {2, 3}}));
+    EXPECT_EQ(state.folders[1], (BookmarkFolder{4, "Empty", {}}));
+    EXPECT_EQ(state.folders[2], (BookmarkFolder{5, "Work", {6}}));
+    EXPECT_EQ(state.folders[3], (BookmarkFolder{7, "Work", {}}));
+    // The first copy (https://A.com/, in the first folder) survives. The later one is dropped.
+    ASSERT_EQ(state.bookmarks.size(), 3U);
+    EXPECT_EQ(state.bookmarks[0], (Bookmark{2, "Docs", "https://A.com/"}));
+    EXPECT_EQ(state.bookmarks[1], (Bookmark{3, "Island", "https://island-browser.github.io/"}));
+    EXPECT_EQ(state.bookmarks[2], (Bookmark{6, "Tracker", "https://example.org/tracker"}));
+    EXPECT_EQ(store.FindBookmarkByUrl("https://a.com/"), std::optional<std::uint64_t>(2));
+
+    // The original bytes keep the dropped copy, and the saved schema-2 file reloads unchanged.
+    EXPECT_EQ(ReadFile(Sibling(path, ".v1.bak")), kSchemaV1Tricky);
+    BookmarkStore reloaded(path);
+    EXPECT_EQ(reloaded.Load(), BookmarkError::kNone);
+    EXPECT_EQ(reloaded.state(), state);
+}
+
 TEST(BookmarkStoreTest, GivenTheSameSchemaOneFileWhenMigratedTwiceThenOutputIsIdentical) {
     const std::filesystem::path first = TempDir("deterministic_a") / "bookmarks.json";
     const std::filesystem::path second = TempDir("deterministic_b") / "bookmarks.json";
@@ -164,6 +214,23 @@ TEST(BookmarkStoreTest, GivenMigrationBackupWriteFailsWhenLoadedThenV1FileIsKept
 
     const BookmarkResult refused = store.AddOrFindByUrl("Mail", "https://example.com/mail");
     EXPECT_EQ(refused.error, BookmarkError::kReadOnly);
+    EXPECT_NE(refused.message.find("backed up"), std::string::npos);
+    EXPECT_EQ(ReadFile(path), kSchemaV1);
+}
+
+TEST(BookmarkStoreTest, GivenAReadOnlyStoreWhenAnExistingUrlIsAddedThenItSucceedsWithoutWriting) {
+    const std::filesystem::path path = TempDir("read_only_lookup") / "bookmarks.json";
+    WriteFile(path, kSchemaV1);
+    BlockPath(Sibling(path, ".v1.bak"));
+
+    BookmarkStore store(path);
+    EXPECT_EQ(store.Load(), BookmarkError::kFileWriteError);
+    ASSERT_TRUE(store.read_only());
+    // The URL is already saved, so nothing changes and the lookup still answers.
+    const BookmarkResult found = store.AddOrFindByUrl("Docs again", "https://EXAMPLE.com/docs");
+    EXPECT_TRUE(found.ok());
+    EXPECT_EQ(found.id, 2U);
+    EXPECT_EQ(store.state().bookmarks.size(), 3U);
     EXPECT_EQ(ReadFile(path), kSchemaV1);
 }
 
@@ -498,6 +565,20 @@ TEST(BookmarkStoreTest, GivenInvalidReferencesOrIdsWhenLoadedThenSchemaErrorAndE
         EXPECT_TRUE(store.state().bookmarks.empty());
         EXPECT_TRUE(store.state().folders.empty());
     }
+}
+
+TEST(BookmarkStoreTest, GivenADuplicateSpaceKeyWhoseFirstListIsEmptyWhenLoadedThenSchemaError) {
+    // An empty list is not stored, so the duplicate check must not rely on the stored map.
+    const std::string json =
+        R"({"version":2,"next_id":4,"global_favorite_ids":[],)"
+        R"("space_favorite_ids":{"7":[],"7":[2]},)"
+        R"("folders":[{"id":1,"name":"A","bookmark_ids":[2]}],)"
+        R"("bookmarks":[{"id":2,"title":"Docs","url":"https://example.com/docs"}]})";
+    const std::filesystem::path path = TempDir("dup_space_empty_first") / "bookmarks.json";
+    WriteFile(path, json);
+    BookmarkStore store(path);
+    EXPECT_EQ(store.Load(), BookmarkError::kSchemaError);
+    EXPECT_TRUE(store.state().bookmarks.empty());
 }
 
 TEST(BookmarkStoreTest, GivenAValidSchemaTwoFileWhenLoadedThenItIsAcceptedAsIs) {
