@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <span>
 #include <string>
@@ -420,6 +421,7 @@ bool CaptureOwnWindows(const std::string& path) {
 // `sleep_report` logs how many tabs sleep, `find:<text>` opens the find bar on a query, and
 // `key:<id>` runs a keymap action.
 // `research:<question>` starts a Research task and `open_report` opens the newest report.
+// `favorite:global:<i>` and `favorite:space:<i>` show a sidebar favorite (zero-based).
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -433,6 +435,17 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
             island::ParseDevSpaceIconAction(action)) {
         app->SetSpaceIconForDev(space_icon->index, space_icon->icon_id);
         return true;
+    }
+    constexpr std::string_view kFavorite = "favorite:";
+    if (action.compare(0, kFavorite.size(), kFavorite) == 0) {
+        const std::string rest = action.substr(kFavorite.size());
+        const std::size_t colon = rest.find(':');
+        const std::string scope = colon == std::string::npos ? "" : rest.substr(0, colon);
+        if ((scope == "global" || scope == "space") && colon != std::string::npos) {
+            const std::size_t index = std::strtoul(rest.c_str() + colon + 1, nullptr, 10);
+            return app->ActivateFavoriteForDev(scope == "global", index);
+        }
+        return false;
     }
     constexpr std::string_view kPeek = "peek:";
     if (action.compare(0, kPeek.size(), kPeek) == 0) {

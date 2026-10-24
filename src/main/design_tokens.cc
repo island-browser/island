@@ -392,6 +392,7 @@ ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
     tokens.rail_width_dip = appearance.look == LookPreset::kNative ? (compact ? 200 : 248) : 286;
     tokens.control_height_dip =
         appearance.look == LookPreset::kNative ? (compact ? 28 : 34) : (compact ? 26 : 32);
+    tokens.density = appearance.density;
     tokens.row_gap_dip = compact ? 0 : 2;
     const std::string& family = appearance.font_family;
     if (family == "geist") {

@@ -15,11 +15,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
-- Sidebar favorites (Bookmarks 0.9): a global favorites strip (up to six icons, then "+N" and "+" to add the current page), the current space's favorites under "<Space> · Favorites", and a failed-save status row above the footer. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button is removed.
+- Sidebar favorites (Bookmarks 0.9): a global favorites strip shows the first six favorites then "+N", and the "+" that adds the current page sits at the end of the "Global favorites" header row. The strip's plates and gaps shrink to fit the sidebar (down to 24 and 2 DIP). The current space's favorites appear under "<Space> · Favorites" (Graphite: "Favorites"), and the tabs follow under a "Tabs" header (Arc and Graphite show it only when favorites come first). Pinned tabs sit under the tabs header. A failed save shows a status row above the footer, with Retry when the change can run again. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button is removed.
 - Favorites have their data path in place: each favorite list is projected for the sidebar, and a
   favorite can show its own virtual tab in the content slot without touching the selected tab. While
   it is shown, the address field, navigation, find, zoom and the agent's current page act on it, and
-  Cmd+W closes it. No sidebar rows or controls for favorites are shown in this build yet.
+  Cmd+W closes it.
 
 ### Changed
 

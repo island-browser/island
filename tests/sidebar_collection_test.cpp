@@ -10,54 +10,90 @@
 namespace island {
 namespace {
 
-constexpr int kPlate = 28;
-constexpr int kGap = 4;
+// The inner width of each look's sidebar: rail width less the 12-DIP side gutters and the 10-DIP
+// scroll gutter (BrowserChrome::TabListScrollGutterDip). Native comfortable 248, Native compact
+// 200, Arc and Graphite 286.
+constexpr int kNativeComfortableStrip = 248 - 2 * 12 - 10;
+constexpr int kNativeCompactStrip = 200 - 2 * 12 - 10;
+constexpr int kArcStrip = 286 - 2 * 12 - 10;
 
-TEST(GlobalStrip, GivenSixOrFewerFavoritesWhenWideEnoughThenAllIconsShow) {
-    const GlobalStripLayout layout = ComputeGlobalStripLayout(6, 252, kPlate, kGap, true);
+TEST(GlobalStrip, GivenSixOrFewerFavoritesThenAllIconsShowAndNoMoreControl) {
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(6, kNativeComfortableStrip);
 
-    // 6 icons + "+" = 7 controls = 7*28 + 6*4 = 220 DIP; no "+N" when nothing is hidden.
-    EXPECT_EQ(layout, (GlobalStripLayout{.icons = 6, .hidden = 0, .add_visible = true}));
+    EXPECT_EQ(layout.icons, 6u);
+    EXPECT_EQ(layout.hidden, 0u);
 }
 
-TEST(GlobalStrip, GivenEightFavoritesInAWideSidebarThenSixShowAndPlusTwo) {
-    // Arc and Graphite (286 DIP): inner width 286 - 2*12 - 10 = 252 fits 8 controls exactly.
-    const GlobalStripLayout layout = ComputeGlobalStripLayout(8, 252, kPlate, kGap, true);
+TEST(GlobalStrip, GivenEightFavoritesThenSixIconsShowAndPlusTwoFollows) {
+    // Ruling a: every look shows exactly min(6, count) icons, then "+N".
+    for (const int width : {kNativeComfortableStrip, kArcStrip}) {
+        const GlobalStripLayout layout = ComputeGlobalStripLayout(8, width);
 
-    EXPECT_EQ(layout, (GlobalStripLayout{.icons = 6, .hidden = 2, .add_visible = true}));
+        EXPECT_EQ(layout.icons, 6u) << "width " << width;
+        EXPECT_EQ(layout.hidden, 2u) << "width " << width;
+    }
 }
 
-TEST(GlobalStrip, GivenANarrowNativeSidebarThenFewerIconsAndALargerOverflow) {
-    // Native comfortable (248 DIP): inner width 214 cannot hold 6 icons + "+N" + "+" (252 DIP).
-    const GlobalStripLayout comfortable = ComputeGlobalStripLayout(8, 214, kPlate, kGap, true);
-    EXPECT_EQ(comfortable, (GlobalStripLayout{.icons = 4, .hidden = 4, .add_visible = true}));
+TEST(GlobalStrip, GivenALookWithRoomThenThePlateStaysAt28AndTheGapAt4) {
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(8, kArcStrip);
 
-    // Native compact (200 DIP): inner width 166.
-    const GlobalStripLayout compact = ComputeGlobalStripLayout(8, 166, kPlate, kGap, true);
-    EXPECT_EQ(compact, (GlobalStripLayout{.icons = 3, .hidden = 5, .add_visible = true}));
+    // 6 icons + "+2" = 7 controls: 7 * 28 + 6 * 4 = 220 <= 252.
+    EXPECT_EQ(layout.plate_dip, 28);
+    EXPECT_EQ(layout.gap_dip, 4);
 }
 
-TEST(GlobalStrip, GivenNoAcceptablePageThenTheAddControlIsHidden) {
-    const GlobalStripLayout layout = ComputeGlobalStripLayout(2, 252, kPlate, kGap, false);
+TEST(GlobalStrip, GivenNativeComfortableThenTheGapShrinksBeforeTheIconCountDrops) {
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(8, kNativeComfortableStrip);
 
-    EXPECT_EQ(layout, (GlobalStripLayout{.icons = 2, .hidden = 0, .add_visible = false}));
+    // 7 controls at a 28-DIP plate need 7 * 28 + 6 * 3 = 214 DIP: the gap gives way, the plate
+    // holds, and the icon count is unchanged.
+    EXPECT_EQ(layout.icons, 6u);
+    EXPECT_EQ(layout.plate_dip, 28);
+    EXPECT_EQ(layout.gap_dip, 3);
+    EXPECT_LE(7 * layout.plate_dip + 6 * layout.gap_dip, kNativeComfortableStrip);
 }
 
-TEST(GlobalStrip, GivenNoFavoritesThenOnlyTheAddControlCanShow) {
-    const GlobalStripLayout layout = ComputeGlobalStripLayout(0, 252, kPlate, kGap, true);
+TEST(GlobalStrip, GivenAnyFitThenThePlateAndGapStayWithinTheirFloorsAndCeilings) {
+    for (std::size_t count = 1; count <= 12; ++count) {
+        for (const int width : {kNativeCompactStrip, kNativeComfortableStrip, kArcStrip}) {
+            const GlobalStripLayout layout = ComputeGlobalStripLayout(count, width);
+            EXPECT_GE(layout.plate_dip, 24) << count << " favorites, width " << width;
+            EXPECT_LE(layout.plate_dip, 28) << count << " favorites, width " << width;
+            EXPECT_GE(layout.gap_dip, 2) << count << " favorites, width " << width;
+            EXPECT_LE(layout.gap_dip, 4) << count << " favorites, width " << width;
+        }
+    }
+}
 
-    EXPECT_EQ(layout, (GlobalStripLayout{.icons = 0, .hidden = 0, .add_visible = true}));
+TEST(GlobalStrip, GivenNativeCompactThenTheSixPlusNFloorsDoNotFitAndFewerIconsShow) {
+    // Open decision (see REPORT): 6 icons + "+N" need 7 * 24 + 6 * 2 = 180 DIP at the floors,
+    // and Native compact has 166. The strip keeps the floors and shows the largest count that
+    // fits, 5 icons + "+3".
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(8, kNativeCompactStrip);
+
+    EXPECT_EQ(layout.icons, 5u);
+    EXPECT_EQ(layout.hidden, 3u);
+    EXPECT_GE(layout.plate_dip, 24);
+    EXPECT_LE(6 * layout.plate_dip + 5 * layout.gap_dip, kNativeCompactStrip);
+}
+
+TEST(GlobalStrip, GivenNoFavoritesThenTheStripHasNoIconsAndNoOverflow) {
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(0, kArcStrip);
+
+    EXPECT_EQ(layout.icons, 0u);
+    EXPECT_EQ(layout.hidden, 0u);
 }
 
 TEST(GlobalStrip, GivenNoRoomAtAllThenNoIconsAndTheOverflowStaysReachable) {
-    const GlobalStripLayout layout = ComputeGlobalStripLayout(3, 10, kPlate, kGap, true);
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(3, 10);
 
     EXPECT_EQ(layout.icons, 0u);
     EXPECT_EQ(layout.hidden, 3u);
 }
 
 TEST(SidebarAccessibleNames, UseTheSpecWording) {
-    EXPECT_EQ(GlobalFavoriteAccessibleName("Island"), "Global favorite: Island");
+    // Spec §6: the name carries the title plus its position and total.
+    EXPECT_EQ(GlobalFavoriteAccessibleName("Island", 2, 8), "Global favorite: Island (2 of 8)");
     EXPECT_EQ(MoreGlobalFavoritesAccessibleName(2), "Show 2 more global favorites");
     EXPECT_EQ(MoreGlobalFavoritesLabel(2), "+2");
     EXPECT_EQ(std::string(AddGlobalFavoriteAccessibleName()),
@@ -71,8 +107,54 @@ TEST(SidebarHeaders, GlobalHeaderFollowsEachLook) {
     EXPECT_EQ(GlobalFavoritesHeaderTitle(LookPreset::kGraphite), "Global");
 }
 
-TEST(SidebarHeaders, SpaceHeaderIsTheSpaceNameDotFavorites) {
-    EXPECT_EQ(SpaceFavoritesHeaderTitle("Work"), "Work \xC2\xB7 Favorites");
+TEST(SidebarHeaders, SpaceFavoritesHeaderIsTheSpaceNameDotFavoritesExceptGraphite) {
+    EXPECT_EQ(SpaceFavoritesHeaderTitle(LookPreset::kNative, "Work"), "Work \xC2\xB7 Favorites");
+    EXPECT_EQ(SpaceFavoritesHeaderTitle(LookPreset::kArc, "Work"), "Work \xC2\xB7 Favorites");
+    // Spec §3.1 table: Graphite's space favorites read "Favorites".
+    EXPECT_EQ(SpaceFavoritesHeaderTitle(LookPreset::kGraphite, "Work"), "Favorites");
+    EXPECT_EQ(SpaceFavoritesHeaderTitle(LookPreset::kNative, ""), "Favorites");
+}
+
+TEST(SidebarHeaders, TabsHeaderNamesTheSpaceOnlyInNative) {
+    EXPECT_EQ(TabsHeaderTitle(LookPreset::kNative, "Work"), "Work \xC2\xB7 Tabs");
+    EXPECT_EQ(TabsHeaderTitle(LookPreset::kNative, ""), "Tabs");
+    // Ruling c: Arc and Graphite show a small "Tabs" label.
+    EXPECT_EQ(TabsHeaderTitle(LookPreset::kArc, "Work"), "Tabs");
+    EXPECT_EQ(TabsHeaderTitle(LookPreset::kGraphite, "Work"), "Tabs");
+}
+
+TEST(SidebarHeaders, NativeAlwaysHeadsTheTabsBeforeTheirFirstRow) {
+    EXPECT_TRUE(TabsHeaderBeforeFirstRow(LookPreset::kNative, /*favorites_precede=*/false,
+                                         /*has_tabs=*/true));
+    EXPECT_TRUE(TabsHeaderBeforeFirstRow(LookPreset::kNative, /*favorites_precede=*/true,
+                                         /*has_tabs=*/true));
+}
+
+TEST(SidebarHeaders, ArcAndGraphiteHeadTheTabsOnlyWhenFavoritesPrecedeThem) {
+    for (const LookPreset look : {LookPreset::kArc, LookPreset::kGraphite}) {
+        EXPECT_FALSE(TabsHeaderBeforeFirstRow(look, /*favorites_precede=*/false,
+                                              /*has_tabs=*/true));
+        EXPECT_TRUE(TabsHeaderBeforeFirstRow(look, /*favorites_precede=*/true,
+                                             /*has_tabs=*/true));
+    }
+}
+
+TEST(SidebarHeaders, NoLookEverShowsATrailingTabsHeaderOverNoRows) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        for (const bool favorites : {false, true}) {
+            EXPECT_FALSE(TabsHeaderBeforeFirstRow(look, favorites, /*has_tabs=*/false));
+        }
+    }
+}
+
+TEST(SidebarRows, SpaceFavoriteRowsFollowSpecSection31Heights) {
+    // Native: 28 compact, 34 comfortable. Arc and Graphite: 32 in both densities.
+    EXPECT_EQ(SpaceFavoriteRowHeightDip(LookPreset::kNative, Density::kCompact), 28);
+    EXPECT_EQ(SpaceFavoriteRowHeightDip(LookPreset::kNative, Density::kComfortable), 34);
+    for (const LookPreset look : {LookPreset::kArc, LookPreset::kGraphite}) {
+        EXPECT_EQ(SpaceFavoriteRowHeightDip(look, Density::kCompact), 32);
+        EXPECT_EQ(SpaceFavoriteRowHeightDip(look, Density::kComfortable), 32);
+    }
 }
 
 TEST(FavoriteFill, GivenTheDisplayedFavoriteThenItIsNeutralRaisedNeverTheAccent) {

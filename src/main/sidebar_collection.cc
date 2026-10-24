@@ -3,29 +3,68 @@
 #include <algorithm>
 
 namespace island {
+namespace {
 
-GlobalStripLayout ComputeGlobalStripLayout(std::size_t count, int width_dip, int plate_dip,
-                                           int gap_dip, bool add_visible) {
-    const std::size_t largest = std::min(kGlobalStripMaxIcons, count);
-    // Largest icon count first; each candidate counts its own "+N" and "+" controls.
-    for (std::size_t icons = largest + 1; icons-- > 0;) {
-        const std::size_t hidden = count - icons;
-        const std::size_t controls = icons + (hidden > 0 ? 1 : 0) + (add_visible ? 1 : 0);
-        if (controls == 0) {
-            return {.icons = 0, .hidden = hidden, .add_visible = add_visible};
+// The plate size that fits `controls` squares with at least the minimum gap in `width_dip`, or 0
+// when even the floors do not fit. The largest plate wins; the gap then takes the spare room.
+struct PlateFit {
+    int plate_dip = 0;
+    int gap_dip = 0;
+};
+
+PlateFit FitPlate(std::size_t controls, int width_dip) {
+    const int count = static_cast<int>(controls);
+    const int gaps = count - 1;
+    for (int plate = kGlobalStripMaxPlateDip; plate >= kGlobalStripMinPlateDip; --plate) {
+        const int used = count * plate;
+        if (gaps == 0) {
+            if (used <= width_dip) {
+                return {.plate_dip = plate, .gap_dip = kGlobalStripMaxGapDip};
+            }
+            continue;
         }
-        const int needed =
-            static_cast<int>(controls) * plate_dip + static_cast<int>(controls - 1) * gap_dip;
-        if (needed <= width_dip) {
-            return {.icons = icons, .hidden = hidden, .add_visible = add_visible};
+        if (used + gaps * kGlobalStripMinGapDip > width_dip) {
+            continue;
         }
+        const int room = (width_dip - used) / gaps;
+        return {.plate_dip = plate,
+                .gap_dip = std::clamp(room, kGlobalStripMinGapDip, kGlobalStripMaxGapDip)};
     }
-    // Not even one control fits: keep the "+N" (or "+") reachable with no icons.
-    return {.icons = 0, .hidden = count, .add_visible = add_visible};
+    return {};
 }
 
-std::string GlobalFavoriteAccessibleName(std::string_view title) {
-    return "Global favorite: " + std::string(title);
+}  // namespace
+
+GlobalStripLayout ComputeGlobalStripLayout(std::size_t count, int width_dip) {
+    // Largest icon count first; each candidate counts its own "+N" control.
+    for (std::size_t icons = std::min(kGlobalStripMaxIcons, count) + 1; icons-- > 0;) {
+        const std::size_t hidden = count - icons;
+        const std::size_t controls = icons + (hidden > 0 ? 1 : 0);
+        if (controls == 0) {
+            return {.icons = 0, .hidden = 0};
+        }
+        if (const PlateFit fit = FitPlate(controls, width_dip); fit.plate_dip > 0) {
+            return {.icons = icons,
+                    .hidden = hidden,
+                    .plate_dip = fit.plate_dip,
+                    .gap_dip = fit.gap_dip};
+        }
+    }
+    // Not even one control fits at the floors: keep "+N" reachable with no icons.
+    return {.icons = 0,
+            .hidden = count,
+            .plate_dip = kGlobalStripMinPlateDip,
+            .gap_dip = kGlobalStripMinGapDip};
+}
+
+std::string GlobalFavoriteAccessibleName(std::string_view title, std::size_t position,
+                                         std::size_t total) {
+    return "Global favorite: " + std::string(title) + " (" + std::to_string(position) + " of " +
+           std::to_string(total) + ")";
+}
+
+std::string SpaceFavoriteAccessibleName(std::string_view title) {
+    return "Favorite: " + std::string(title);
 }
 
 std::string MoreGlobalFavoritesAccessibleName(std::size_t hidden) {
@@ -36,10 +75,6 @@ std::string MoreGlobalFavoritesLabel(std::size_t hidden) { return "+" + std::to_
 
 std::string_view AddGlobalFavoriteAccessibleName() {
     return "Add current page as a global favorite";
-}
-
-std::string SpaceFavoriteAccessibleName(std::string_view title) {
-    return "Favorite: " + std::string(title);
 }
 
 std::string GlobalFavoritesHeaderTitle(LookPreset look) {
@@ -54,8 +89,32 @@ std::string GlobalFavoritesHeaderTitle(LookPreset look) {
     return "Global favorites";
 }
 
-std::string SpaceFavoritesHeaderTitle(std::string_view space_name) {
+std::string SpaceFavoritesHeaderTitle(LookPreset look, std::string_view space_name) {
+    if (look == LookPreset::kGraphite || space_name.empty()) {
+        return "Favorites";
+    }
     return std::string(space_name) + " \xC2\xB7 Favorites";
+}
+
+std::string TabsHeaderTitle(LookPreset look, std::string_view space_name) {
+    if (look != LookPreset::kNative || space_name.empty()) {
+        return "Tabs";
+    }
+    return std::string(space_name) + " \xC2\xB7 Tabs";
+}
+
+bool TabsHeaderBeforeFirstRow(LookPreset look, bool favorites_precede, bool has_tabs) {
+    if (!has_tabs) {
+        return false;
+    }
+    return look == LookPreset::kNative || favorites_precede;
+}
+
+int SpaceFavoriteRowHeightDip(LookPreset look, Density density) {
+    if (look != LookPreset::kNative) {
+        return 32;
+    }
+    return density == Density::kCompact ? 28 : 34;
 }
 
 ArgbColor FavoriteFillColor(const ChromeTokens& tokens, bool displayed, bool hovered) {

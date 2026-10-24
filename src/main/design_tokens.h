@@ -111,6 +111,9 @@ struct ChromeTokens {
     bool card_shadow = true;
     SidebarSide sidebar_side = SidebarSide::kLeft;
     int control_height_dip = 32;
+    // The density the control heights were derived from (Settings > Appearance). Favorite rows
+    // size from it (sidebar_collection.h).
+    Density density = Density::kComfortable;
     int row_gap_dip = 2;
     // Frameless macOS window: the height of the sidebar's top strip that hosts the traffic lights
     // and drags the window (0 = the platform keeps its own title bar). Set by the window host.

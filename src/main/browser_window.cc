@@ -5406,6 +5406,17 @@ void BrowserWindow::ReturnToOrdinaryTab() {
     AttachActiveTabObservers();
 }
 
+bool BrowserWindow::ActivateFavoriteForDev(bool global, std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    const SidebarCollectionSnapshot collection = BuildSidebarCollection();
+    const std::vector<FavoriteEntrySnapshot>& list =
+        global ? collection.global_favorites : collection.space_favorites;
+    if (index >= list.size()) {
+        return false;
+    }
+    return ActivateFavorite(list[index].scope, list[index].bookmark_id);
+}
+
 bool BrowserWindow::ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
     CEF_REQUIRE_UI_THREAD();
     const FavoriteTabKey key{.scope = scope, .bookmark_id = bookmark_id};
@@ -5493,10 +5504,13 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
     }
     if (active != nullptr) {
         const NavigationSnapshot page = active->navigation_state().snapshot();
-        // The cheap http(s) check comes first: ParseAndValidate calls the CEF URL API, which a
-        // headless window has not initialized, so internal pages never reach it.
+        // The same validator the address bar uses, so "acceptable" means one thing everywhere.
+        // Headless tests inject theirs (SetAddressValidatorForTest); an empty URL is never
+        // acceptable.
         snapshot.add_current_page_available =
-            IsWebTileUrl(page.url) && ParseAndValidate(page.url).is_valid();
+            !page.url.empty() &&
+            (address_validator_ ? address_validator_(page.url) : ParseAndValidate(page.url))
+                .is_valid();
     }
     if (failed_bookmark_mutation_.has_value()) {
         snapshot.bookmark_status =

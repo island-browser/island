@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "browser_chrome.h"
 
@@ -723,6 +727,250 @@ TEST(BrowserChromeNativeContractTest, GivenANameThatDoesNotFitThenItEndsWithAnEl
 
 TEST(BrowserChromeNativeContractTest, GivenNoRoomThenOnlyTheEllipsisRemains) {
     EXPECT_EQ(BrowserChrome::FitAgentEntryText("Claude Code", 0, CodePointWidth), "\xE2\x80\xA6");
+}
+
+// Bookmarks 0.9 sidebar collection (spec §3, §3.1, §6). The projections below go through the same
+// decision functions the runtime builder calls (ComputeGlobalStripLayout, TabsHeaderBeforeFirstRow,
+// the header titles), so an ordering rule changed in the builder changes these answers too.
+
+std::vector<ChromeViewId> ChildIdsOf(const ChromeViewTreeNode& node) {
+    std::vector<ChromeViewId> ids;
+    for (const ChromeViewTreeNode& child : node.children) {
+        ids.push_back(child.id);
+    }
+    return ids;
+}
+
+FavoriteEntrySnapshot GlobalFavorite(std::string title) {
+    return {.scope = std::nullopt, .title = std::move(title)};
+}
+
+FavoriteEntrySnapshot SpaceFavorite(std::string title) {
+    return {.scope = FavoriteScope{std::uint64_t{1}}, .title = std::move(title)};
+}
+
+SidebarCollectionSnapshot Collection(std::size_t globals, std::size_t spaces, std::size_t tabs,
+                                     bool pinned_tabs = false, bool add_visible = false) {
+    SidebarCollectionSnapshot collection;
+    for (std::size_t i = 0; i < globals; ++i) {
+        collection.global_favorites.push_back(GlobalFavorite("G" + std::to_string(i)));
+    }
+    for (std::size_t i = 0; i < spaces; ++i) {
+        collection.space_favorites.push_back(SpaceFavorite("S" + std::to_string(i)));
+    }
+    for (std::size_t i = 0; i < tabs; ++i) {
+        collection.tabs.push_back({.title = "Tab " + std::to_string(i), .pinned = pinned_tabs});
+    }
+    collection.add_current_page_available = add_visible;
+    return collection;
+}
+
+const std::vector<SpaceSwitcherEntrySnapshot> kWorkSpace = {{.name = "Work", .active = true}};
+
+TEST(BrowserChromeFavoritesContractTest, GivenFavoritesWhenProjectedThenTheStripLeadsTheTabs) {
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(/*globals=*/8, /*spaces=*/2, /*tabs=*/3), kWorkSpace, LookPreset::kNative);
+
+    // Section order: global strip, current space's favorites, tabs, then (outside this tree) the
+    // footer. Every header sits before the rows it names.
+    const std::vector<ChromeViewId> expected = {ChromeViewId::kGlobalFavoritesHeaderRow,
+                                                ChromeViewId::kGlobalFavoritesStrip,
+                                                ChromeViewId::kFavoritesSectionHeader,
+                                                ChromeViewId::kSpaceFavoriteRow,
+                                                ChromeViewId::kSpaceFavoriteRow,
+                                                ChromeViewId::kTabsSectionHeader,
+                                                ChromeViewId::kTabStripEntry,
+                                                ChromeViewId::kTabStripEntry,
+                                                ChromeViewId::kTabStripEntry};
+    EXPECT_EQ(ChildIdsOf(strip), expected);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenEightGlobalFavoritesThenSixIconsAndPlusTwoShow) {
+    const ChromeViewTreeNode strip =
+        BrowserChrome::SidebarCollectionContract(Collection(8, 0, 0), kWorkSpace, LookPreset::kArc);
+    const ChromeViewTreeNode* global_strip = FindChild(strip, ChromeViewId::kGlobalFavoritesStrip);
+    ASSERT_NE(global_strip, nullptr);
+
+    const std::vector<ChromeViewId> expected = {
+        ChromeViewId::kGlobalFavoriteIcon, ChromeViewId::kGlobalFavoriteIcon,
+        ChromeViewId::kGlobalFavoriteIcon, ChromeViewId::kGlobalFavoriteIcon,
+        ChromeViewId::kGlobalFavoriteIcon, ChromeViewId::kGlobalFavoriteIcon,
+        ChromeViewId::kGlobalFavoritesMore};
+    EXPECT_EQ(ChildIdsOf(*global_strip), expected);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenTheAddControlThenItTrailsTheGlobalHeaderNotTheStrip) {
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(8, 0, 0, /*pinned_tabs=*/false, /*add_visible=*/true), kWorkSpace,
+        LookPreset::kNative);
+    const ChromeViewTreeNode* header_row =
+        FindChild(strip, ChromeViewId::kGlobalFavoritesHeaderRow);
+    const ChromeViewTreeNode* global_strip = FindChild(strip, ChromeViewId::kGlobalFavoritesStrip);
+    ASSERT_NE(header_row, nullptr);
+    ASSERT_NE(global_strip, nullptr);
+
+    // Ruling a: "+" is the trailing child of the global header row; the strip holds only icons
+    // and "+N".
+    EXPECT_EQ(ChildIdsOf(*header_row),
+              (std::vector<ChromeViewId>{ChromeViewId::kGlobalFavoritesHeader,
+                                         ChromeViewId::kGlobalFavoritesAdd}));
+    EXPECT_EQ(FindChild(*global_strip, ChromeViewId::kGlobalFavoritesAdd), nullptr);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenNoAcceptablePageThenNoAddControlShows) {
+    const ChromeViewTreeNode strip =
+        BrowserChrome::SidebarCollectionContract(Collection(2, 0, 0), kWorkSpace, LookPreset::kArc);
+
+    EXPECT_EQ(FindChild(strip, ChromeViewId::kGlobalFavoritesAdd), nullptr);
+    EXPECT_NE(FindChild(strip, ChromeViewId::kGlobalFavoritesStrip), nullptr);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenOnlyTheAddControlThenTheHeaderRowHasNoStripOrLabel) {
+    // No favorite yet: the row keeps "+" so the person can add the page, and nothing else shows.
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(0, 0, 0, /*pinned_tabs=*/false, /*add_visible=*/true), kWorkSpace,
+        LookPreset::kArc);
+
+    EXPECT_EQ(ChildIdsOf(strip),
+              (std::vector<ChromeViewId>{ChromeViewId::kGlobalFavoritesHeaderRow}));
+    EXPECT_NE(FindChild(strip, ChromeViewId::kGlobalFavoritesAdd), nullptr);
+    EXPECT_EQ(FindChild(strip, ChromeViewId::kGlobalFavoritesStrip), nullptr);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenOnlyTheAddControlThenArcShowsNoTabsLabel) {
+    // Ruling c counts favorites, not the add control: the header row alone is not a scope.
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(0, 0, 2, /*pinned_tabs=*/false, /*add_visible=*/true), kWorkSpace,
+        LookPreset::kArc);
+
+    EXPECT_EQ(FindChild(strip, ChromeViewId::kTabsSectionHeader), nullptr);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenNativePinnedTabsThenTheTabsHeaderPrecedesThem) {
+    // Spec §6: a pinned ordinary tab never sits under the space-favorites header.
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(0, 1, 2, /*pinned_tabs=*/true), kWorkSpace, LookPreset::kNative);
+
+    const std::vector<ChromeViewId> expected = {
+        ChromeViewId::kFavoritesSectionHeader, ChromeViewId::kSpaceFavoriteRow,
+        ChromeViewId::kTabsSectionHeader, ChromeViewId::kTabStripEntry,
+        ChromeViewId::kTabStripEntry};
+    EXPECT_EQ(ChildIdsOf(strip), expected);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenAllTabsPinnedInNativeThenNoHeaderTrailsTheRows) {
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(0, 0, 2, /*pinned_tabs=*/true), kWorkSpace, LookPreset::kNative);
+
+    const std::vector<ChromeViewId> children = ChildIdsOf(strip);
+    ASSERT_FALSE(children.empty());
+    EXPECT_EQ(children.front(), ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(children.back(), ChromeViewId::kTabStripEntry);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenNoTabsThenNoTabsHeaderIsProjected) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        const ChromeViewTreeNode strip =
+            BrowserChrome::SidebarCollectionContract(Collection(0, 0, 0), kWorkSpace, look);
+        EXPECT_EQ(FindChild(strip, ChromeViewId::kTabsSectionHeader), nullptr);
+    }
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenArcWithoutFavoritesThenNoTabsLabelShows) {
+    // Ruling c: the "Tabs" label appears in Arc and Graphite only when favorites precede the tabs.
+    const ChromeViewTreeNode plain =
+        BrowserChrome::SidebarCollectionContract(Collection(0, 0, 2), kWorkSpace, LookPreset::kArc);
+    EXPECT_EQ(FindChild(plain, ChromeViewId::kTabsSectionHeader), nullptr);
+
+    const ChromeViewTreeNode with_space =
+        BrowserChrome::SidebarCollectionContract(Collection(0, 1, 2), kWorkSpace, LookPreset::kArc);
+    const std::vector<ChromeViewId> expected = {
+        ChromeViewId::kFavoritesSectionHeader, ChromeViewId::kSpaceFavoriteRow,
+        ChromeViewId::kTabsSectionHeader, ChromeViewId::kTabStripEntry,
+        ChromeViewId::kTabStripEntry};
+    EXPECT_EQ(ChildIdsOf(with_space), expected);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenNoFavoritesThenTheCollectionIsTheTabsAlone) {
+    const ChromeViewTreeNode strip =
+        BrowserChrome::SidebarCollectionContract(Collection(0, 0, 0), kWorkSpace, LookPreset::kArc);
+    EXPECT_TRUE(strip.children.empty());
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenTheFavoriteIdsWhenComparedThenTheyAppendAfter1080) {
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoritesHeader), 1081);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoritesStrip), 1082);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoriteIcon), 1083);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoritesMore), 1084);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoritesAdd), 1085);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kSpaceFavoriteRow), 1086);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kBookmarkStatusRow), 1087);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kBookmarkStatusText), 1088);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kBookmarkStatusRetry), 1089);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kBookmarkStatusDismiss), 1090);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailGlobalFavorite), 1091);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailSpaceFavorite), 1092);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoritesHeaderRow), 1093);
+    // 1052 stays reserved for the retired collapsed New Tab control; no view carries it.
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailNewTabRetired), 1052);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenFavoritesWhenProjectedThenNoNewTabControlAppears) {
+    const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
+        Collection(8, 2, 3), kWorkSpace, LookPreset::kNative);
+    const std::vector<ChromeViewId> collapsed =
+        BrowserChrome::CollapsedRailOrder(Collection(8, 2, 3));
+
+    for (const ChromeViewId id : collapsed) {
+        EXPECT_NE(id, ChromeViewId::kCollapsedRailNewTabRetired);
+    }
+    EXPECT_EQ(FindChild(strip, ChromeViewId::kCollapsedRailNewTabRetired), nullptr);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenTheCollapsedRailThenGlobalsSeparateFromSpaces) {
+    const std::vector<ChromeViewId> order = BrowserChrome::CollapsedRailOrder(Collection(2, 2, 2));
+
+    // Same logical order as the expanded sidebar: global icons, a hairline, space favorites,
+    // then the tab icons.
+    const std::vector<ChromeViewId> expected = {ChromeViewId::kCollapsedRailGlobalFavorite,
+                                                ChromeViewId::kCollapsedRailGlobalFavorite,
+                                                ChromeViewId::kCollapsedRailSeparator,
+                                                ChromeViewId::kCollapsedRailSpaceFavorite,
+                                                ChromeViewId::kCollapsedRailSpaceFavorite,
+                                                ChromeViewId::kCollapsedRailTab,
+                                                ChromeViewId::kCollapsedRailTab};
+    EXPECT_EQ(order, expected);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenNoStatusThenTheFailureRowIsAbsent) {
+    EXPECT_TRUE(BrowserChrome::BookmarkStatusContract(std::nullopt).empty());
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenAFailedWriteThenTheStatusRowShowsRetryAndDismiss) {
+    const BookmarkStatusSnapshot retryable{.text = "Could not save.", .retryable = true};
+    EXPECT_EQ(BrowserChrome::BookmarkStatusContract(retryable),
+              (std::vector<ChromeViewId>{
+                  ChromeViewId::kBookmarkStatusRow, ChromeViewId::kBookmarkStatusText,
+                  ChromeViewId::kBookmarkStatusRetry, ChromeViewId::kBookmarkStatusDismiss}));
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenAnInvalidInputStatusThenNoRetryIsOffered) {
+    const BookmarkStatusSnapshot final_status{.text = "bookmarks.json could not be read.",
+                                              .retryable = false};
+    const std::vector<ChromeViewId> row = BrowserChrome::BookmarkStatusContract(final_status);
+    EXPECT_EQ(std::count(row.begin(), row.end(), ChromeViewId::kBookmarkStatusRetry), 0);
+    EXPECT_EQ(row.back(), ChromeViewId::kBookmarkStatusDismiss);
+}
+
+TEST(BrowserChromeFavoritesContractTest, GivenStripHeadersThenEachLookNamesItsScope) {
+    const ChromeViewTreeNode native = BrowserChrome::SidebarCollectionContract(
+        Collection(0, 1, 0), kWorkSpace, LookPreset::kNative);
+    const ChromeViewTreeNode graphite = BrowserChrome::SidebarCollectionContract(
+        Collection(0, 1, 0), kWorkSpace, LookPreset::kGraphite);
+    // The projection names only ids; the titles come from the same functions the runtime uses.
+    EXPECT_EQ(ChildIdsOf(native).front(), ChromeViewId::kFavoritesSectionHeader);
+    EXPECT_EQ(ChildIdsOf(graphite).front(), ChromeViewId::kFavoritesSectionHeader);
+    EXPECT_EQ(SpaceFavoritesHeaderTitle(LookPreset::kGraphite, "Work"), "Favorites");
 }
 
 }  // namespace

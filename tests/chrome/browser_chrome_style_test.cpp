@@ -257,5 +257,24 @@ TEST(BrowserChromeGraphiteTest, AddressOutlineIsTheHairlineAtRest) {
     }
 }
 
+// Bookmarks 0.9: favorites never take the accent, and the failure row speaks in warning tokens.
+TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenTheDisplayedFavoriteIsNeutral) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+            const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
+            EXPECT_NE(tokens.segment_selected.argb, tokens.accent.argb);
+            EXPECT_NE(tokens.warning_text.argb, tokens.accent.argb);
+        }
+    }
+}
+
+TEST(BrowserChromeFavoritesStyleTest, GivenTheFailureRowThenItUsesTheWarningTokens) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+        EXPECT_NE(tokens.warning_bg.argb, tokens.warning_text.argb);
+        EXPECT_NE(tokens.warning_bg.argb, tokens.accent.argb);
+    }
+}
+
 }  // namespace
 }  // namespace island

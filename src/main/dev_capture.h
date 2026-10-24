@@ -10,7 +10,9 @@
 //       Besides the menu-backed names, `navigate:<address>` loads an address in the active
 //       tab and `sidebar:expanded|collapsed` sets the persistent sidebar state. `peek:<address>`
 //       opens the peek card, `sleep_tabs` puts eligible inactive tabs to sleep and
-//       `sleep_report` logs the sleeping-tab count, `wait:<seconds>` pauses the sequence,
+//       `sleep_report` logs the sleeping-tab count, `favorite:global:<i>` or
+//       `favorite:space:<i>` shows the i-th (zero-based) sidebar favorite, `wait:<seconds>`
+//       pauses the sequence,
 //       `research:<question>` starts a Research task and `open_report` opens the newest stored
 //       report in a new tab, `plan_fixture` opens a Plan tab with the sample research plan
 //       waiting for approval, `agent_pages:<count>[:<gap>]` opens that many agent pages through

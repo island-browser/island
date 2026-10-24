@@ -200,6 +200,12 @@ bool IslandApp::OpenPeek(const std::string& address) {
     return browser_window_ != nullptr && browser_window_->OpenPeek(address);
 }
 
+bool IslandApp::ActivateFavoriteForDev(bool global, std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+
+    return browser_window_ != nullptr && browser_window_->ActivateFavoriteForDev(global, index);
+}
+
 std::size_t IslandApp::SleepingTabCount() const {
     return browser_window_ != nullptr ? browser_window_->sleeping_tab_count() : 0;
 }

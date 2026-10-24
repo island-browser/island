@@ -181,6 +181,9 @@ enum class ChromeViewId : int {
     kBookmarkStatusDismiss = 1090,
     kCollapsedRailGlobalFavorite = 1091,
     kCollapsedRailSpaceFavorite = 1092,
+    // The header row above the global strip: the "Global favorites" label with the "+" add control
+    // at its trailing end (ruling a).
+    kGlobalFavoritesHeaderRow = 1093,
 };
 
 // What the Agent entry's status dot shows, from the agent state the window already tracks.
@@ -943,6 +946,102 @@ class BrowserChrome final : public NavigationObserver {
         return {ChromeViewId::kRoot, std::move(root_children)};
     }
 
+    // The children of the expanded collection's tab strip, in the order SetTabStripEntries builds
+    // them (spec §3, §6): the global header row (label, then "+") and strip (icons, then "+N"),
+    // the current space's favorites header and rows, the tabs header, then one node per tab. The
+    // runtime calls the same decisions (ComputeGlobalStripLayout, TabsHeaderBeforeFirstRow).
+    [[nodiscard]] static std::vector<ChromeViewTreeNode> TabStripContract(
+        const SidebarCollectionSnapshot& collection,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look) {
+        const bool native = look == LookPreset::kNative;
+        const ChromeTokens tokens = ChromeTokens::ForLook(look, ChromeTheme::kLight);
+        const GlobalStripLayout layout = ComputeGlobalStripLayout(
+            collection.global_favorites.size(), GlobalStripWidthDip(tokens));
+        const bool add_visible = collection.add_current_page_available;
+        std::vector<ChromeViewTreeNode> children;
+        if (layout.icons > 0 || layout.hidden > 0 || add_visible) {
+            ChromeViewTreeNode row = {ChromeViewId::kGlobalFavoritesHeaderRow,
+                                      {{ChromeViewId::kGlobalFavoritesHeader, {}}}};
+            if (add_visible) {
+                row.children.push_back({ChromeViewId::kGlobalFavoritesAdd, {}});
+            }
+            children.push_back(std::move(row));
+        }
+        if (layout.icons > 0 || layout.hidden > 0) {
+            ChromeViewTreeNode strip = {ChromeViewId::kGlobalFavoritesStrip, {}};
+            for (std::size_t i = 0; i < layout.icons; ++i) {
+                strip.children.push_back({ChromeViewId::kGlobalFavoriteIcon, {}});
+            }
+            if (layout.hidden > 0) {
+                strip.children.push_back({ChromeViewId::kGlobalFavoritesMore, {}});
+            }
+            children.push_back(std::move(strip));
+        }
+        if (!collection.space_favorites.empty()) {
+            children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
+            for (std::size_t i = 0; i < collection.space_favorites.size(); ++i) {
+                children.push_back({ChromeViewId::kSpaceFavoriteRow, {}});
+            }
+        }
+        // Any favorite above the tabs makes the tabs header a scope boundary (ruling c). The "+"
+        // add control alone is not a favorite, so it does not count.
+        const bool tabs_precede =
+            !collection.global_favorites.empty() || !collection.space_favorites.empty();
+        const std::vector<TabStripEntrySnapshot>& tabs = collection.tabs;
+        if (TabsHeaderBeforeFirstRow(look, tabs_precede, !tabs.empty())) {
+            children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+        }
+        for (std::size_t i = 0; i < tabs.size(); ++i) {
+            if (native && NeedsGroupKicker(tabs, i)) {
+                children.push_back({ChromeViewId::kTabGroupKicker, {}});
+            }
+            children.push_back({ChromeViewId::kTabStripEntry,
+                                {{ChromeViewId::kTabStripEntryFavicon, {}},
+                                 {ChromeViewId::kTabStripEntryTitle, {}},
+                                 {ChromeViewId::kTabStripEntryClose, {}}}});
+        }
+        return children;
+    }
+
+    // The whole expanded collection as one tree node (the tab strip with its favorites).
+    [[nodiscard]] static ChromeViewTreeNode SidebarCollectionContract(
+        const SidebarCollectionSnapshot& collection,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look) {
+        return {ChromeViewId::kTabStrip, TabStripContract(collection, spaces, look)};
+    }
+
+    // The collapsed rail's icons, top to bottom (spec §3): global favorites, the hairline when
+    // anything follows them, space favorites, then the tab icons.
+    [[nodiscard]] static std::vector<ChromeViewId> CollapsedRailOrder(
+        const SidebarCollectionSnapshot& collection) {
+        std::vector<ChromeViewId> order;
+        const std::size_t globals = collection.global_favorites.size();
+        const std::size_t spaces = collection.space_favorites.size();
+        order.insert(order.end(), globals, ChromeViewId::kCollapsedRailGlobalFavorite);
+        if (globals > 0 && (spaces > 0 || !collection.tabs.empty())) {
+            order.push_back(ChromeViewId::kCollapsedRailSeparator);
+        }
+        order.insert(order.end(), spaces, ChromeViewId::kCollapsedRailSpaceFavorite);
+        order.insert(order.end(), collection.tabs.size(), ChromeViewId::kCollapsedRailTab);
+        return order;
+    }
+
+    // The failure row's children: the status text, "Retry" only when the failed write can run
+    // again, and "Dismiss". Absent when there is no status (spec §5).
+    [[nodiscard]] static std::vector<ChromeViewId> BookmarkStatusContract(
+        const std::optional<BookmarkStatusSnapshot>& status) {
+        if (!status.has_value()) {
+            return {};
+        }
+        std::vector<ChromeViewId> row = {ChromeViewId::kBookmarkStatusRow,
+                                         ChromeViewId::kBookmarkStatusText};
+        if (status->retryable) {
+            row.push_back(ChromeViewId::kBookmarkStatusRetry);
+        }
+        row.push_back(ChromeViewId::kBookmarkStatusDismiss);
+        return row;
+    }
+
     // Projects the collection regions the way U4/U5 wire them at runtime: one
     // entry node per tab/space snapshot, each with the fixed sub-shape the
     // design requires (tab: favicon-or-fallback, truncating title, close
@@ -971,29 +1070,8 @@ class BrowserChrome final : public NavigationObserver {
         };
         if (ChromeViewTreeNode* tab_strip = find(tree, ChromeViewId::kTabStrip, find);
             tab_strip != nullptr) {
-            tab_strip->children.reserve(tabs.size() + 3);
-            bool favorites_header_added = false;
-            bool tabs_header_added = false;
-            for (std::size_t i = 0; i < tabs.size(); ++i) {
-                if (native && tabs[i].pinned && !favorites_header_added) {
-                    tab_strip->children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
-                    favorites_header_added = true;
-                }
-                if (native && !tabs[i].pinned && !tabs_header_added) {
-                    tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-                    tabs_header_added = true;
-                }
-                if (native && NeedsGroupKicker(tabs, i)) {
-                    tab_strip->children.push_back({ChromeViewId::kTabGroupKicker, {}});
-                }
-                tab_strip->children.push_back({ChromeViewId::kTabStripEntry,
-                                               {{ChromeViewId::kTabStripEntryFavicon, {}},
-                                                {ChromeViewId::kTabStripEntryTitle, {}},
-                                                {ChromeViewId::kTabStripEntryClose, {}}}});
-            }
-            if (native && !tabs_header_added) {
-                tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-            }
+            tab_strip->children =
+                TabStripContract(SidebarCollectionSnapshot{.tabs = tabs}, spaces, look);
         }
         if (ChromeViewTreeNode* switcher = find(tree, ChromeViewId::kSpaceSwitcher, find);
             switcher != nullptr) {
@@ -1091,6 +1169,10 @@ class BrowserChrome final : public NavigationObserver {
     // right inset by this gutter so a classic scrollbar never forces a
     // horizontal one.
     [[nodiscard]] static constexpr int TabListScrollGutterDip() { return 10; }
+    // The global header row (label plus "+") is one plate tall, so the add control fits its row.
+    [[nodiscard]] static constexpr int GlobalHeaderRowHeightDip() { return 24; }
+    // The width the global strip and the header row share: the sidebar's inner width.
+    [[nodiscard]] static int GlobalStripWidthDip(const ChromeTokens& tokens);
 
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
@@ -1201,7 +1283,11 @@ class BrowserChrome final : public NavigationObserver {
         return tokens_.look == LookPreset::kNative ? NativeAddressHeightDip()
                                                    : tokens_.control_height_dip;
     }
-    [[nodiscard]] std::string ActiveSpaceSectionTitle() const;
+    // The active space's name as a header shows it (truncated), or empty when it has none.
+    [[nodiscard]] std::string ActiveSpaceHeaderName() const;
+    // Creates one section header label (no focus, no ink) and appends it to tab_strip_.
+    CefRefPtr<CefLabelButton> AddSectionHeader(const std::string& text, ChromeViewId id,
+                                               const std::string& accessible_name);
     void ApplyCollectionTheme();
     // Re-renders the soft rounded fill (selected / hovered / none) of one row's edge buttons.
     void ApplyTabRowVisual(std::size_t index);
@@ -1286,6 +1372,9 @@ class BrowserChrome final : public NavigationObserver {
     // Bookmarks 0.9: the global strip's header and strip, and the failure status row above the
     // fixed footer. favorites_section_header_ names the current space's favorites.
     CefRefPtr<CefLabelButton> global_header_;
+    // The header row holds the label and, at its trailing end, the "+" add control (ruling a).
+    CefRefPtr<CefPanel> global_header_row_;
+    CefRefPtr<CefLabelButton> global_add_;
     CefRefPtr<CefPanel> global_strip_;
     // Height and child count the favorite block adds to tab_strip_ (strip plus space rows), so
     // UpdateTabStripPreferredSize can size the scroll content.

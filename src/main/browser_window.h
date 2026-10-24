@@ -652,6 +652,9 @@ class BrowserWindow : public CefClient,
     // list, or it is a scoped list of a space that is not the active one (global favorites are
     // reachable from any space).
     bool ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Developer capture (`favorite:global:<i>` / `favorite:space:<i>`): activates the i-th favorite
+    // of the sidebar's global strip or the active space's list, as a click on its row would.
+    bool ActivateFavoriteForDev(bool global, std::size_t index);
     // Closes the displayed virtual tab: its record returns to the favorite URL and the content slot
     // shows the selected ordinary tab again. Does nothing when no favorite is displayed.
     void CloseFavoriteTab();

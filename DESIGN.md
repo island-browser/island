@@ -441,11 +441,19 @@ between the groups; the active tab is the same soft `selected` fill as the selec
 
 ### Sidebar favorites (Bookmarks 0.9)
 
-- Order: global strip, `<Space> · Favorites` rows, `<Space> · Tabs` rows, fixed footer. The
-  collapsed rail uses the same order with 32 DIP icon buttons and one hairline after the globals.
-- Global strip: 28 DIP plates, 4 DIP gaps, at most six icons. `ComputeGlobalStripLayout` fits the
-  icons, `+N` and `+` into the inner width (`rail_width − 2·spacing_3 − 10`); Native 248 shows four
-  icons, Arc/Graphite 286 shows six.
+- Order: global strip, `<Space> · Favorites` rows (Graphite: "Favorites"), the tabs header, tab
+  rows, fixed footer. The tabs header sits before the first tab row (pinned or not) in Native; Arc
+  and Graphite show a small "Tabs" label only when favorites come first. No header trails an empty
+  list. The collapsed rail uses the same order with 32 DIP icon buttons and one hairline after the
+  globals.
+- Global strip: exactly `min(6, count)` icons then `+N`, never more. The "+" (add current page) is
+  not in the strip: it trails the "Global favorites" header row. `ComputeGlobalStripLayout` fits the
+  strip into the inner width (`rail_width − 2·spacing_3 − 10`): the plate shrinks from 28 toward
+  24 DIP and the gap from 4 toward 2 DIP. Native 248 (inner 214) shows six icons with a 28-DIP plate
+  and a 3-DIP gap. Arc/Graphite 286 (inner 252) keep 28/4. Native compact (200, inner 166) cannot
+  hold six icons and "+N" at the 24/2 floors, so it shows five icons and "+N" (open decision, see
+  the 0.9 REPORT).
+- Space favorite rows: Native 28 DIP compact, 34 comfortable; Arc and Graphite 32 DIP in both.
 - A displayed favorite uses `segment_selected` (neutral raised), never `accent`. Hover uses `hover`.
   The active ordinary tab keeps the only accent treatment.
 - Status row: `warning_bg` fill with `warning_text`, directly above the footer, hidden when no

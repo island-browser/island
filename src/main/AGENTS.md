@@ -93,8 +93,14 @@ platform executable links.
   collection: add its field to the snapshot, build it in `BrowserWindow::BuildSidebarCollection`,
   render it in `BrowserChrome::AddFavoriteSections` (expanded) or `AddCollapsedFavorites` (rail), and
   route clicks through a `CollectionButtonAction` plus a `BrowserChromeHost` virtual. Pure rules
-  (strip fit, names, headers, fills) live in `sidebar_collection.{h,cc}`. The new `ChromeViewId`s are
-  `1081`–`1092`; `1052` (collapsed New Tab) is retired.
+  (strip fit, names, headers, the Tabs-header placement, row heights, fills) live in
+  `sidebar_collection.{h,cc}`. The contract tests project the tab strip with
+  `BrowserChrome::SidebarCollectionContract` (its tabs part is `TabStripContract`, shared with
+  `CollectionCountContract`), the rail with `CollapsedRailOrder` and the failure row with
+  `BookmarkStatusContract`; each calls the same decision functions the runtime builder calls. The
+  new `ChromeViewId`s are `1081`–`1093` (`1093` is the global header row holding the label and the
+  trailing "+"); `1052` (collapsed New Tab) is retired. Dev capture: `favorite:global:<i>` and
+  `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`).
 - `ChromeViewId` values `1001`–`1027` are a hard invariant. Never renumber them; allocate new IDs
   after `1027`.
 - Keep genuinely CEF-free logic (`design_tokens`, `navigation_state`, `address_bar_model`,
