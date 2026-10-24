@@ -44,6 +44,11 @@ const assert = (c, m) => { if (!c) { console.log('FAIL ' + m); process.exitCode 
   assert(sent.some(m => m.type === 'cancel'), 'Esc cancels while busy');
   await page.click('#send');
   assert(sent.filter(m => m.type === 'cancel').length === 2, 'stop button cancels while busy');
+  await render({ session: { state: 'ready', busy: false, items: [
+    { kind: 'user', text: 'Explain this', context: { title: 'Example Domain', url: 'https://example.com/', selection: 'A short quote.' } }
+  ] } });
+  assert((await page.textContent('.sent-chips')).indexOf('Example Domain') >= 0, 'sent user turn shows its page chip');
+  assert((await page.textContent('.sent-chips')).indexOf('A short quote.') >= 0, 'sent user turn shows its quote chip');
   await render({ session: { state: 'ready', busy: false, items: [{ kind: 'agent', text: 'see https://example.com/a.' }] } });
   await page.click('.agent a');
   assert(sent.some(m => m.type === 'open_url' && m.url === 'https://example.com/a'), 'links open in a tab (trailing dot trimmed)');

@@ -115,6 +115,21 @@ TEST(AgentTranscriptTest, JsonCarriesKindsAndIsBounded) {
               "n" + std::to_string(AgentTranscript::kMaxItems + 19));
 }
 
+TEST(AgentTranscriptTest, UserTurnCarriesTheSentPageAndQuoteChips) {
+    AgentTranscript transcript;
+    transcript.AddUserPrompt("Explain this",
+                             "<page_title>Example Domain</page_title>\n"
+                             "<page_url>https://example.com/</page_url>\n"
+                             "<selection>A short quote.</selection>");
+    const auto parsed = json::Parse(transcript.ToJson());
+    ASSERT_TRUE(parsed.has_value());
+    const json::Value* context = parsed->array_val[0].FindMember("context");
+    ASSERT_NE(context, nullptr);
+    EXPECT_EQ(context->StringOr("title", ""), "Example Domain");
+    EXPECT_EQ(context->StringOr("url", ""), "https://example.com/");
+    EXPECT_EQ(context->StringOr("selection", ""), "A short quote.");
+}
+
 TEST(AgentTranscriptTest, CountsEndedTurnsAndKeepsTheLastReasonAcrossClear) {
     AgentTranscript transcript;
     EXPECT_EQ(transcript.turns_ended(), 0U);

@@ -13,6 +13,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Fixed
+
+- Agent messages retain the neutral page and selection-quote chips that were sent with that turn.
+
 ### Added
 
 - Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with

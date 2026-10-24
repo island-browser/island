@@ -136,7 +136,7 @@ bool AgentSession::Send(std::string text, std::string context) {
     if (client_ == nullptr || client_->state() == AcpState::kFailed) {
         if (!Start(config_)) return false;
     }
-    transcript_.AddUserPrompt(text);
+    transcript_.AddUserPrompt(text, context);
     if (client_->state() == AcpState::kReady) {
         client_->Prompt(text, context);
     } else {

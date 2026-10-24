@@ -23,8 +23,8 @@ defined in `src/agent/CMakeLists.txt` (not `tests/CMakeLists.txt`) so the standa
 | `agent_process_test.cpp` | Command-line splitting, child stdio, exit codes, stubborn-child termination |
 | `agent_session_test.cpp` | Full conversation against a real fake agent subprocess (`fixtures/fake_acp_agent.py`): queued first prompt, streaming, permissions, cancel, crash + relaunch, provider switch |
 | `fixtures/fake_acp_agent.py` | Minimal ACP agent over stdio used by the session tests (needs `python3`) |
-| `panel/agent_panel_behavior.js` | Optional Playwright check of `src/main/pages/agent.html` (messages, keys, provider switcher and install hints, no HTML injection) |
-| `agent_transcript_test.cpp` | Event folding, in-place tool/plan updates, permission resolution, bounds |
+| `panel/agent_panel_behavior.js` | Optional Playwright check of `src/main/pages/agent.html` (messages, keys, provider switcher, sent context chips and install hints, no HTML injection) |
+| `agent_transcript_test.cpp` | Event folding, in-place tool/plan updates, permission resolution, bounds, and sent page/quote chip JSON metadata |
 | `facts_probe.cjs` | Runs the gate's page helpers (`kFactsJs`) on DOM stand-ins and the page-side counter normalizer (`kLiveCountersJs`) on the pairs the C++ tests use. CommonJS with ES2015 syntax only; the version check is its first statement (direct run on Node < 18 exits 77) |
 | `run_facts_probe.cmake` | Launcher for `facts_probe.cjs` (`BrowserToolsFactsProbe`): checks `node -p` for a major version of 18 or more, prints `FACTS_PROBE_SKIP` when node is missing, not numeric, or older, so ctest shows Skipped; a failing probe fails the test. No SKIP_RETURN_CODE: cmake -P cannot exit 77 |
 
