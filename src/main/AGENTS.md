@@ -207,8 +207,11 @@ kind switch of `BrowserWindow::TasksStateJson`.
 - **One mutation seam.** Every bookmark mutation goes through `RunBookmarkMutation(std::function)`,
   including the two `Import` calls. A failure stores `{message, retry}` as `failed_bookmark_mutation_`;
   a success clears it. Either way it reconciles virtual tabs with the library and reprojects.
-  `RetryLastBookmarkMutation()` re-runs the stored closure; `DismissBookmarkStatus()` clears it.
-  Load problems have no retry closure.
+  `retry` is kept only for I/O failures (`kFileReadError`, `kFileWriteError`): invalid input or a
+  missing item fails the same way again, so its status has no Retry. `RetryLastBookmarkMutation()`
+  re-runs the stored closure (an empty one returns an error); `DismissBookmarkStatus()` clears it.
+  Load problems have no retry closure. A failed import is reported once, on the status row, so
+  `ImportFromBrowser` returns an empty settings message for it.
 - **Projection.** `BuildSidebarCollection()` (const, test-callable) returns a
   `SidebarCollectionSnapshot`: `global_favorites`, then the active space's `space_favorites`, then
   `tabs` (the existing rows), then `bookmark_status`. Each `FavoriteEntrySnapshot` carries scope,
@@ -223,9 +226,21 @@ kind switch of `BrowserWindow::TasksStateJson`.
   the record's last URL, validated) and calls `AttachActiveTabObservers`; the selected ordinary tab
   and its list are not touched. `AttachActiveTabBrowserView` shows a displayed favorite ahead of the
   split and ordinary paths. `FindTabById`, `FindTabByBrowser` and `FindTabByBrowserView` search the
-  virtual tabs too, so CEF callbacks and view swaps resolve them.
+  virtual tabs too, so CEF callbacks and view swaps resolve them. A favicon finished for a virtual
+  tab reprojects only when that tab is global or in the active space (`FaviconAffectsCollections`).
+- **The shown tab.** `DisplayedTab()` is the displayed virtual tab, else `active_tab()`; `shown_tab_id()`
+  is its public form. Page commands (back, forward, reload, reload ignoring cache, zoom, stop, copy
+  URL, Enter in the address field, the palette's URL), find, the reader state, the address shield and
+  reader indicators, the agent's current page and context chip (`ActiveBrowser`), and the
+  pending-confirmation check all use it. Cmd+W while a favorite is shown calls `CloseFavoriteTab`
+  and returns (it never closes the hidden ordinary tab). Tab selection, sessions, sleep, split and
+  the tab strip keep `active_tab()`. Only the shown tab's navigation observer is set
+  (`ClearShownTabObservers` runs before any change of the shown tab), so the address field follows
+  the favorite and never the hidden tab.
 - **Lifecycle rules.** Any `DetachActiveTabObservers` (every selection change, space removal) ends a
-  displayed favorite; re-selecting the already-selected tab does too (`ReturnToOrdinaryTab`).
+  displayed favorite; re-selecting the already-selected tab or space does too (`ReturnToOrdinaryTab`).
+  `ActivateFavorite` accepts global favorites and the active space's list only; another live
+  space's list opens after switching to that space.
   `CloseFavoriteTab` drops the virtual tab and resets its record to the favorite URL. Removing a
   favorite (or deleting its bookmark) drops its records through `ReconcileFavoriteTabs`. Really
   deleting a space (`RemoveSpaceAtIndex`, never the reorder in `MoveSpace`) drops that scope's
@@ -235,10 +250,10 @@ kind switch of `BrowserWindow::TasksStateJson`.
   each live virtual tab's current URL as its last URL. `RestoreSessionState` restores records before
   anything else (they belong to the library) and drops those whose favorite is gone. The display is
   never restored. Older builds ignore the key, so they drop these records only when they save.
-- **Known limits (Task 2).** The address field and navigation still describe the selected ordinary
-  tab while a favorite is displayed. A split pair is hidden, not dropped, while a favorite fills
-  the slot. Virtual tabs are not sleep candidates. Only `BuildSidebarCollection` and the window
-  logic are unit-tested; `SetSidebarCollection` needs CEF and is not.
+- **Known limits (Task 2).** A split pair is hidden, not dropped, while a favorite fills the slot.
+  Virtual tabs are not sleep candidates. Only `BuildSidebarCollection` and the window logic are
+  unit-tested; `SetSidebarCollection` needs CEF and is not. The tab strip's active entry is still the
+  selected ordinary tab while a favorite is shown (the favorite's `displayed` flag is the only mark).
 - **Extension points.** A new favorite list kind goes into `FavoriteScope`'s users and
   `FavoriteListContains`. A new per-tab record field goes into `FavoriteTabRecord`,
   `ToSessionFavoriteTabs`/`FavoriteTabsFromSession`, and `FavoriteTabState` (session store). A new
