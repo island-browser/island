@@ -93,8 +93,10 @@ platform executable links.
   collection: add its field to the snapshot, build it in `BrowserWindow::BuildSidebarCollection`,
   render it in `BrowserChrome::AddFavoriteSections` (expanded) or `AddCollapsedFavorites` (rail), and
   route clicks through a `CollectionButtonAction` plus a `BrowserChromeHost` virtual. Pure rules
-  (strip fit, names, headers, the Tabs-header placement, row heights, fills) live in
-  `sidebar_collection.{h,cc}`. The contract tests project the tab strip with
+  (strip fit, names, headers, the Tabs-header placement, row heights, fills, favorite ink) live in
+  `sidebar_collection.{h,cc}`. Favorite text and glyph colors repaint only on a theme change:
+  `BrowserChrome::ApplyFavoriteInk` (from `ApplyCollectionTheme`, never hover) paints
+  `FavoriteInkPlan`; add a themed favorite surface as a plan target plus an `ApplyFavoriteInk` case. The contract tests project the tab strip with
   `BrowserChrome::SidebarCollectionContract` (its tabs part is `TabStripContract`, shared with
   `CollectionCountContract`), the rail with `CollapsedRailOrder` and the failure row with
   `BookmarkStatusContract`. The header-row, strip, "tabs follow favorites" and rail-separator

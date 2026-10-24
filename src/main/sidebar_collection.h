@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "design_tokens.h"
 
@@ -108,6 +109,21 @@ struct BookmarkStatusColors {
 // Both are re-asserted on every theme change, so they are token reads, never build-time constants.
 [[nodiscard]] ArgbColor FavoriteTextColor(const ChromeTokens& tokens);
 [[nodiscard]] ArgbColor FavoriteMoreTextColor(const ChromeTokens& tokens);
+
+// Everything a theme change must repaint in the favorites' ink. `BrowserChrome::ApplyFavoriteInk`
+// paints each entry onto its views, so a surface missing here keeps the previous theme's color.
+// To give a new favorite surface themed ink, add a target here and a case in ApplyFavoriteInk.
+enum class FavoriteInkTarget {
+    kRowText,        // space-favorite row titles
+    kMoreText,       // the strip's "+N" label
+    kAddGlyph,       // the strip's "+" glyph
+    kFallbackGlyph,  // the generic glyph of a favorite without a favicon
+};
+struct FavoriteInkEntry {
+    FavoriteInkTarget target;
+    ArgbColor color;
+};
+[[nodiscard]] std::vector<FavoriteInkEntry> FavoriteInkPlan(const ChromeTokens& tokens);
 
 }  // namespace island
 

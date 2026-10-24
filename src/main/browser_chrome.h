@@ -1280,6 +1280,8 @@ class BrowserChrome final : public NavigationObserver {
     void AddCollapsedFavorites();
     // Re-asserts the fill of every favorite plate and row (displayed, hovered, or neutral).
     void ApplyFavoriteVisuals();
+    // Re-asserts the favorites' text and glyph ink from FavoriteInkPlan; theme path only.
+    void ApplyFavoriteInk();
     // Every favorite plate (strip icons, the "+N"/"+" controls, space rows, rail icons) with
     // whether it is the displayed favorite.
     [[nodiscard]] std::vector<std::pair<CefRefPtr<CefButton>, bool>> FavoriteSurfaces() const;

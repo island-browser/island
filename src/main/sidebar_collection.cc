@@ -173,4 +173,13 @@ ArgbColor FavoriteTextColor(const ChromeTokens& tokens) { return tokens.text; }
 
 ArgbColor FavoriteMoreTextColor(const ChromeTokens& tokens) { return tokens.text_secondary; }
 
+std::vector<FavoriteInkEntry> FavoriteInkPlan(const ChromeTokens& tokens) {
+    return {
+        {FavoriteInkTarget::kRowText, FavoriteTextColor(tokens)},
+        {FavoriteInkTarget::kMoreText, FavoriteMoreTextColor(tokens)},
+        {FavoriteInkTarget::kAddGlyph, tokens.text_secondary},
+        {FavoriteInkTarget::kFallbackGlyph, tokens.text_secondary},
+    };
+}
+
 }  // namespace island

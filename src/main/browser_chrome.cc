@@ -2351,8 +2351,12 @@ void BrowserChrome::ApplyFavoriteVisuals() {
         button->SetBackgroundColor(
             FavoriteFillColor(tokens_, displayed, FavoriteHovered(button)).argb);
     }
-    // Text and glyph colors are re-asserted with the fills: a theme change re-runs this without
-    // rebuilding the rows, so a color set only at build time would keep the old theme's ink.
+}
+
+// Re-asserts the favorites' ink. Runs from the theme path only (ApplyCollectionTheme), never from
+// hover: it reloads tinted glyphs. What it paints is FavoriteInkPlan, which the style tests pin.
+void BrowserChrome::ApplyFavoriteInk() {
+    CEF_REQUIRE_UI_THREAD();
     const auto set_text = [](const CefRefPtr<CefLabelButton>& button, ArgbColor color) {
         for (const cef_button_state_t state :
              {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED}) {
@@ -2360,60 +2364,78 @@ void BrowserChrome::ApplyFavoriteVisuals() {
         }
         button->SetEnabledTextColors(color.argb);
     };
-    for (const CefRefPtr<CefLabelButton>& row : space_favorite_rows_) {
-        set_text(row, FavoriteTextColor(tokens_));
-    }
-    if (global_strip_ != nullptr) {
-        for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
-            const CefRefPtr<CefView> view = global_strip_->GetChildViewAt(static_cast<int>(child));
-            if (view->GetID() == static_cast<int>(ChromeViewId::kGlobalFavoritesMore)) {
-                set_text(view->AsButton()->AsLabelButton(), FavoriteMoreTextColor(tokens_));
-            }
-        }
-    }
-    if (global_add_ != nullptr) {
-        if (const std::optional<CefRefPtr<CefImage>> plus = icon_catalog_.LoadTinted(
-                ChromeIcon::kPlus, tokens_.text_secondary, ChromeIconSize::k16);
-            plus.has_value()) {
-            SetAllStateImages(global_add_, *plus);
-        }
-    }
-    // Favorites without a favicon show the generic glyph, tinted for the current theme.
-    if (const std::optional<CefRefPtr<CefImage>> fallback = icon_catalog_.LoadTinted(
-            ChromeIcon::kLocation, tokens_.text_secondary, ChromeIconSize::k16);
-        fallback.has_value()) {
-        const auto& globals = sidebar_collection_.global_favorites;
-        const auto& spaces = sidebar_collection_.space_favorites;
-        for (std::size_t index = 0; index < space_favorite_rows_.size() && index < spaces.size();
-             ++index) {
-            if (spaces[index].favicon == nullptr) {
-                SetAllStateImages(space_favorite_rows_[index], *fallback);
-            }
-        }
-        if (global_strip_ != nullptr) {
-            std::size_t icon = 0;
-            for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
-                const CefRefPtr<CefView> view =
-                    global_strip_->GetChildViewAt(static_cast<int>(child));
-                if (view->GetID() != static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
-                    continue;
+    const auto tinted = [this](ArgbColor color) {
+        return icon_catalog_.LoadTinted(ChromeIcon::kLocation, color, ChromeIconSize::k16);
+    };
+    for (const FavoriteInkEntry& entry : FavoriteInkPlan(tokens_)) {
+        switch (entry.target) {
+            case FavoriteInkTarget::kRowText:
+                for (const CefRefPtr<CefLabelButton>& row : space_favorite_rows_) {
+                    set_text(row, entry.color);
                 }
-                if (icon < globals.size() && globals[icon].favicon == nullptr) {
-                    SetAllStateImages(view->AsButton()->AsLabelButton(), *fallback);
+                break;
+            case FavoriteInkTarget::kMoreText:
+                if (global_strip_ != nullptr) {
+                    for (std::size_t child = 0; child < global_strip_->GetChildViewCount();
+                         ++child) {
+                        const CefRefPtr<CefView> view =
+                            global_strip_->GetChildViewAt(static_cast<int>(child));
+                        if (view->GetID() == static_cast<int>(ChromeViewId::kGlobalFavoritesMore)) {
+                            set_text(view->AsButton()->AsLabelButton(), entry.color);
+                        }
+                    }
                 }
-                ++icon;
-            }
-        }
-        for (std::size_t index = 0; index < collapsed_favorite_buttons_.size(); ++index) {
-            const FavoriteEntrySnapshot* entry = nullptr;
-            if (index < globals.size()) {
-                entry = &globals[index];
-            } else if (index - globals.size() < spaces.size()) {
-                entry = &spaces[index - globals.size()];
-            }
-            if (entry != nullptr && entry->favicon == nullptr) {
-                SetAllStateImages(collapsed_favorite_buttons_[index], *fallback);
-            }
+                break;
+            case FavoriteInkTarget::kAddGlyph:
+                if (global_add_ != nullptr) {
+                    if (const auto plus = icon_catalog_.LoadTinted(
+                            ChromeIcon::kPlus, entry.color, ChromeIconSize::k16);
+                        plus.has_value()) {
+                        SetAllStateImages(global_add_, *plus);
+                    }
+                }
+                break;
+            case FavoriteInkTarget::kFallbackGlyph:
+                if (const auto fallback = tinted(entry.color); fallback.has_value()) {
+                    // Favorites without a favicon show the generic glyph for the current theme.
+                    const auto& globals = sidebar_collection_.global_favorites;
+                    const auto& spaces = sidebar_collection_.space_favorites;
+                    for (std::size_t index = 0;
+                         index < space_favorite_rows_.size() && index < spaces.size(); ++index) {
+                        if (spaces[index].favicon == nullptr) {
+                            SetAllStateImages(space_favorite_rows_[index], *fallback);
+                        }
+                    }
+                    if (global_strip_ != nullptr) {
+                        std::size_t icon = 0;
+                        for (std::size_t child = 0; child < global_strip_->GetChildViewCount();
+                             ++child) {
+                            const CefRefPtr<CefView> view =
+                                global_strip_->GetChildViewAt(static_cast<int>(child));
+                            if (view->GetID() !=
+                                static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
+                                continue;
+                            }
+                            if (icon < globals.size() && globals[icon].favicon == nullptr) {
+                                SetAllStateImages(view->AsButton()->AsLabelButton(), *fallback);
+                            }
+                            ++icon;
+                        }
+                    }
+                    for (std::size_t index = 0; index < collapsed_favorite_buttons_.size();
+                         ++index) {
+                        const FavoriteEntrySnapshot* fav = nullptr;
+                        if (index < globals.size()) {
+                            fav = &globals[index];
+                        } else if (index - globals.size() < spaces.size()) {
+                            fav = &spaces[index - globals.size()];
+                        }
+                        if (fav != nullptr && fav->favicon == nullptr) {
+                            SetAllStateImages(collapsed_favorite_buttons_[index], *fallback);
+                        }
+                    }
+                }
+                break;
         }
     }
     if (collapsed_favorite_separator_wrapper_ != nullptr) {
@@ -3986,6 +4008,7 @@ void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
     ApplyCollapsedRailTheme();
     ApplyFavoriteVisuals();
+    ApplyFavoriteInk();
     UpdateBookmarkStatusRow();
     if (global_header_row_ != nullptr) {
         global_header_row_->SetBackgroundColor(tokens_.canvas.argb);

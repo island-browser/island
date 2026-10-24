@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "browser_chrome.h"
@@ -296,20 +297,40 @@ TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenADisplayedFavori
     }
 }
 
-TEST(BrowserChromeFavoritesStyleTest, GivenAThemeSwitchThenFavoriteTextFollowsTheNewThemeTokens) {
+// BrowserChrome::ApplyFavoriteInk paints exactly FavoriteInkPlan(tokens_) on every theme change
+// (ApplyCollectionTheme), so a theme switch is the plan of the new tokens replacing the old one.
+// Every themed favorite surface must be in the plan and carry the target theme's token.
+TEST(BrowserChromeFavoritesStyleTest, GivenAThemeSwitchThenTheInkPlanRepaintsEverySurface) {
+    const auto color_of = [](const std::vector<FavoriteInkEntry>& plan, FavoriteInkTarget target) {
+        std::optional<std::uint32_t> found;
+        int count = 0;
+        for (const FavoriteInkEntry& entry : plan) {
+            if (entry.target == target) {
+                found = entry.color.argb;
+                ++count;
+            }
+        }
+        EXPECT_EQ(count, 1) << "each surface is repainted exactly once";
+        return found;
+    };
     for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
-        const ChromeTokens light = ChromeTokens::ForLook(look, ChromeTheme::kLight);
-        const ChromeTokens dark = ChromeTokens::ForLook(look, ChromeTheme::kDark);
-        // Dark -> light and light -> dark: the ink is the target theme's token, so a row built
-        // under the other theme is repainted rather than left near-white on a light canvas.
-        EXPECT_EQ(FavoriteTextColor(light).argb, light.text.argb);
-        EXPECT_EQ(FavoriteTextColor(dark).argb, dark.text.argb);
-        EXPECT_NE(FavoriteTextColor(light).argb, FavoriteTextColor(dark).argb);
-        EXPECT_EQ(FavoriteMoreTextColor(light).argb, light.text_secondary.argb);
-        EXPECT_EQ(FavoriteMoreTextColor(dark).argb, dark.text_secondary.argb);
-        // The ink must stay legible on the fills a row can take.
-        EXPECT_NE(FavoriteTextColor(light).argb, light.canvas.argb);
-        EXPECT_NE(FavoriteTextColor(dark).argb, dark.canvas.argb);
+        for (const auto& [from, to] : {std::pair{ChromeTheme::kDark, ChromeTheme::kLight},
+                                       std::pair{ChromeTheme::kLight, ChromeTheme::kDark}}) {
+            const ChromeTokens before = ChromeTokens::ForLook(look, from);
+            const ChromeTokens after = ChromeTokens::ForLook(look, to);
+            const std::vector<FavoriteInkEntry> old_plan = FavoriteInkPlan(before);
+            const std::vector<FavoriteInkEntry> new_plan = FavoriteInkPlan(after);
+            ASSERT_EQ(new_plan.size(), 4U) << "row text, +N, +, fallback glyph";
+            EXPECT_EQ(color_of(new_plan, FavoriteInkTarget::kRowText), after.text.argb);
+            EXPECT_EQ(color_of(new_plan, FavoriteInkTarget::kMoreText), after.text_secondary.argb);
+            EXPECT_EQ(color_of(new_plan, FavoriteInkTarget::kAddGlyph), after.text_secondary.argb);
+            EXPECT_EQ(color_of(new_plan, FavoriteInkTarget::kFallbackGlyph),
+                      after.text_secondary.argb);
+            // The switch changes every surface: nothing keeps the previous theme's ink.
+            for (const FavoriteInkEntry& entry : new_plan) {
+                EXPECT_NE(color_of(old_plan, entry.target), color_of(new_plan, entry.target));
+            }
+        }
     }
 }
 
