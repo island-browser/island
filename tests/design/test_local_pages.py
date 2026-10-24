@@ -321,6 +321,25 @@ findAll(ids["folder-list"], "button").find((node) => node.textContent === "More"
 findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
 document.dispatch("keydown", { key: "Escape" });
 if (messages.filter((message) => message.type === "folder:delete").length !== 1) throw new Error("cancel or escape sent delete");
+const switching = { folders: [{ id: "f-a", name: "Folder A", count: 1 }, { id: "f-b", name: "Folder B", count: 1 }], bookmarks: [{ id: "a", title: "Bookmark A", url: "https://a.test", host: "a.test", folder_id: "f-a", spaces: [] }, { id: "b", title: "Bookmark B", url: "https://b.test", host: "b.test", folder_id: "f-b", spaces: [] }], selected_folder: "all", import_sources: [] };
+window.islandRender(switching);
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
+edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]'); title.value = "Bookmark A draft"; title.dispatch("input");
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
+edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]'); url = edit.querySelector('[data-edit-field="url"]');
+if (title.value !== "Bookmark B" || url.value !== "https://b.test") throw new Error("bookmark A draft leaked into bookmark B");
+if (document.activeElement !== title) throw new Error("bookmark B title was not focused");
+edit.dispatch("submit");
+let saved = messages.filter((message) => message.type === "bookmarks:edit").pop();
+if (!saved || saved.id !== "b" || saved.title !== "Bookmark B" || saved.url !== "https://b.test") throw new Error("bookmark B save used bookmark A values");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input"); rename.value = "Folder A draft"; rename.dispatch("input");
+findAll(ids["folder-list"], "button").filter((node) => node.textContent === "More")[0].dispatch("click");
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (rename.value !== "Folder B") throw new Error("folder A draft leaked into folder B");
+find(ids["folder-list"], ".folder-tools").dispatch("submit");
+saved = messages.filter((message) => message.type === "folder:rename").pop();
+if (!saved || saved.id !== "f-b" || saved.name !== "Folder B") throw new Error("folder B save used folder A values");
 '''],
             capture_output=True,
             text=True,

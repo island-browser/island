@@ -164,14 +164,14 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   function captureFolderRenameDraft() {
     if (!folderRenameDraft) return;
     var input = document.querySelector(".folder-tools input");
-    if (!input) return;
+    if (!input || String(input.dataset.folderId) !== String(folderRenameDraft.id)) return;
     folderRenameDraft.name = input.value;
     folderRenameDraft.restoreFocus = document.activeElement === input;
   }
   function captureBookmarkDraft() {
     if (!editingBookmark) return;
     var form = document.querySelector(".edit");
-    if (!form) return;
+    if (!form || String(form.dataset.bookmarkId) !== String(editingBookmark.id)) return;
     var title = form.querySelector('[data-edit-field="title"]');
     var url = form.querySelector('[data-edit-field="url"]');
     editingBookmark.title = title.value; editingBookmark.url = url.value;
@@ -180,7 +180,9 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   }
   function folderTools(folder) {
     var tools = document.createElement("form"); tools.className = "folder-tools";
+    tools.dataset.folderId = folder.id;
     var input = document.createElement("input"); input.value = folderRenameDraft ? folderRenameDraft.name : text(folder.name); input.maxLength = 120; input.setAttribute("aria-label", "Rename " + text(folder.name));
+    input.dataset.folderId = folder.id;
     var save = button("Save", "button"); save.type = "submit";
     var remove = button("Delete", "button");
     tools.appendChild(input); tools.appendChild(save); tools.appendChild(remove);
@@ -217,6 +219,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     var item = document.createElement("li"); item.className = "bookmark";
     if (editingBookmark && editingBookmark.id === bookmark.id) {
       var edit = document.createElement("form"); edit.className = "edit";
+      edit.dataset.bookmarkId = bookmark.id;
       var title = document.createElement("input"); title.value = editingBookmark.title; title.maxLength = 500; title.dataset.editField = "title"; title.setAttribute("aria-label", "Bookmark title");
       var url = document.createElement("input"); url.value = editingBookmark.url; url.maxLength = 4000; url.dataset.editField = "url"; url.setAttribute("aria-label", "Bookmark URL");
       var save = button("Save", "button"); save.type = "submit"; var cancel = button("Cancel", "button quiet");
