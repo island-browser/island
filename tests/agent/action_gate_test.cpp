@@ -46,6 +46,19 @@ TEST(ActionGateTest, ReadingAndLinksAreFree) {
     EXPECT_EQ(Classify(Call("page_type", Input("search")), kNone).action, ActionClass::kFree);
 }
 
+TEST(ActionGateTest, BookmarkMutationsAlwaysAskEvenForTrustedSites) {
+    GateInput input = Call("browser_add_favorite");
+    input.bookmark_title = "Island";
+    input.bookmark_url = "https://shop.example.com/";
+    input.favorite_scope = "space 12 favorites";
+    GateDecision decision = Classify(input, kTrusted);
+    EXPECT_EQ(decision.action, ActionClass::kConfirm);
+    EXPECT_EQ(decision.rule, GateRule::kBookmarkMutation);
+    EXPECT_FALSE(decision.trusted_allowed);
+    EXPECT_TRUE(decision.task_grant_allowed);
+    EXPECT_EQ(decision.summary, "Add \"Island\" on shop.example.com to space 12 favorites");
+}
+
 TEST(ActionGateTest, PasswordFieldsAreBlockedEvenWhenTrusted) {
     for (auto facts : {Input("password"), Input("text", "current-password"),
                        Input("text", "new-password"), Input("text", "one-time-code")}) {

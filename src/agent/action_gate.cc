@@ -303,12 +303,44 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
     const bool typing = input.tool == "page_type";
     const bool keying = input.tool == "page_press_key";
 
+    if (input.tool == "browser_add_bookmark" || input.tool == "browser_remove_bookmark" ||
+        input.tool == "browser_add_favorite" || input.tool == "browser_remove_favorite") {
+        decision.action = ActionClass::kConfirm;
+        decision.rule = GateRule::kBookmarkMutation;
+        decision.host = HostOf(input.bookmark_url);
+        const std::string bookmark_host = decision.host.empty() ? "this page" : decision.host;
+        const std::string title = CollapseSpaces(input.bookmark_title).empty()
+                                      ? input.bookmark_url
+                                      : Clip(CollapseSpaces(input.bookmark_title));
+        if (input.tool == "browser_add_bookmark") {
+            decision.summary = "Add bookmark \"" + title + "\" on " + bookmark_host +
+                               " to folder \"" + CollapseSpaces(input.bookmark_folder_path) + "\"";
+        } else if (input.tool == "browser_remove_bookmark") {
+            decision.summary = "Remove bookmark \"" + title + "\" on " + bookmark_host +
+                               " from folder \"" + CollapseSpaces(input.bookmark_folder_path) +
+                               "\"";
+        } else if (input.tool == "browser_add_favorite") {
+            decision.summary =
+                "Add \"" + title + "\" on " + bookmark_host + " to " + input.favorite_scope;
+        } else {
+            decision.summary =
+                "Remove \"" + title + "\" on " + bookmark_host + " from " + input.favorite_scope;
+        }
+        decision.trusted_allowed = false;
+        decision.task_grant_allowed = true;
+        // Keep an Allow-for-task grant narrowly bound to this persistent operation and object.
+        decision.scope = input.tool + "|" + input.bookmark_url + "|" + input.bookmark_folder_path +
+                         "|" + input.favorite_scope;
+        return decision;
+    }
+
     // Rule 1 covers typing and key presses only, so the agent can still focus a password field.
     if ((typing || keying) && facts_present && IsPasswordField(*input.facts)) {
         decision.action = ActionClass::kBlocked;
         decision.rule = GateRule::kPassword;
         decision.summary = "Use a password or sign-in code field on " + host;
         decision.trusted_allowed = false;
+        decision.task_grant_allowed = false;
         return decision;
     }
     // Rule 2 covers typing into a card field, on every site.
@@ -317,6 +349,7 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
         decision.rule = GateRule::kCardField;
         decision.summary = "Type into the card number field on " + host;
         decision.trusted_allowed = false;
+        decision.task_grant_allowed = false;
         return decision;
     }
     // Without the element, the gate cannot tell what the action does. It asks on every site.
@@ -326,6 +359,7 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
         decision.rule = GateRule::kUnclassified;
         decision.summary = "Type into an unidentified field on " + host;
         decision.trusted_allowed = false;
+        decision.task_grant_allowed = false;
         return decision;
     }
     if (keying && !facts_present && input.key != "Enter") {
@@ -333,6 +367,7 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
         decision.rule = GateRule::kUnclassified;
         decision.summary = "Press a key on an unidentified element on " + host;
         decision.trusted_allowed = false;
+        decision.task_grant_allowed = false;
         return decision;
     }
 
@@ -389,7 +424,10 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
     // A hostless page cannot be trusted or granted: one entry would cover every such page.
     decision.scope = OriginOf(input.page_url);
     if (rule == GateRule::kForeignNavigation) decision.scope += "->" + OriginOf(input.target_url);
-    if (decision.host.empty() || decision.scope.empty()) decision.trusted_allowed = false;
+    if (decision.host.empty() || decision.scope.empty()) {
+        decision.trusted_allowed = false;
+        decision.task_grant_allowed = false;
+    }
     return decision;
 }
 

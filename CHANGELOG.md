@@ -13,6 +13,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+### Added
+
+- Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
+  add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
+  sites; bulk, import, folder-mutation and reorder tools are not exposed.
+
 ## [0.8.0] - 2026-10-24
 
 ### Added
