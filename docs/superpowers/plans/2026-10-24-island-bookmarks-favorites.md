@@ -1,19 +1,20 @@
 # Island 0.9 Bookmarks and Favorites Implementation Plan
 
 > **For implementation workers:** Implement only after the owner accepts
-> `2026-10-24-island-bookmarks-favorites-design.md`, including every OPEN decision in §9. Keep
-> this plan's checkboxes as the implementation record.
+> `2026-10-24-island-bookmarks-favorites-design.md`, including its binding §9 decisions. Keep this
+> plan's checkboxes as the implementation record.
 
 **Goal:** Turn the existing imported-bookmark store into a local bookmark library with folders,
 global favorites, and per-space favorites, shown in the sidebar and usable through ⌘K and a local
 Bookmarks page.
 
 **Architecture:** `BookmarkStore` remains CEF-free and schema-validates one durable
-`bookmarks.json`; it owns bookmark, folder, and favorite identity/order. `BrowserWindow` projects
-the active space's favorites and tabs into `BrowserChrome`, routes all activation through the
-existing address-validation path, and gives the local page an explicit message/state contract.
-`BrowserChrome` is a renderer of snapshots, not a second bookmark model. Optional MCP tools cross
-the existing CEF-free agent host seam and action gate.
+`bookmarks.json`; it owns bookmark, folder, and favorite identity/order. `session.json` owns each
+favorite's one virtual-tab state. `BrowserWindow` projects the active space's favorites and tabs into
+`BrowserChrome`, restores a favorite virtual tab in the focused content slot, routes ordinary URL
+openings through the existing address-validation path, and gives the local page an explicit
+message/state contract. `BrowserChrome` is a renderer of snapshots, not a second bookmark model.
+MCP/ACP tools cross the existing CEF-free agent host seam and action gate.
 
 **Tech stack:** C++20, CEF 150 Alloy + `cef_views`, GoogleTest, pytest design checks, local HTML
 pages rendered as `data:` URLs using `ThemeJson` CSS variables.
@@ -22,12 +23,14 @@ pages rendered as `data:` URLs using `ThemeJson` CSS variables.
 
 ## Global Constraints
 
-- Work from the accepted 0.9 branch and resolve all §9 OPEN decisions before implementation.
+- Work from the accepted 0.9 branch; §9 decisions are binding before implementation.
 - This is one `CefWindow`; no sync, profiles/accounts, extensions, or multiple top-level windows.
-- `BookmarkStore` is the only persistent bookmark/favorite model. `bookmarks.json` owns schema 2;
-  `session.json` continues to own only space/tab session state and `prefs.json` only preferences.
-- Schema-1 `bookmarks.json` must load without loss and migrate according to the accepted decision;
-  corrupt or invalid stores retain the current all-or-nothing empty fallback. Persist atomically.
+- `BookmarkStore` is the only persistent bookmark/favorite library. `bookmarks.json` owns schema 2;
+  `session.json` owns ordinary space/tab state plus favorite virtual-tab state, and `prefs.json` only
+  preferences.
+- A clean schema-1 `bookmarks.json` migrates at startup: retain `bookmarks.json.v1.bak`, then
+  atomically replace the original with schema 2. Corrupt or invalid stores retain the current
+  all-or-nothing empty fallback.
 - All bookmark/favorite navigation goes through `ParseAndValidate` and the existing submission
   path. Do not create a second URL parser or force-load stored values.
 - Do not restore the retired 0.8 sidebar New Tab row or reuse `ChromeViewId` 1042. New view IDs
@@ -63,8 +66,8 @@ pages rendered as `data:` URLs using `ThemeJson` CSS variables.
    new tab, or Peek path.
 6. Reorder works fully by keyboard/menu with no drag implementation and announces the resulting
    position.
-7. If agent tools are accepted, a trusted web site cannot silently add local bookmarks: every add
-   reaches the action-gate confirmation and a timeout/cancel writes nothing.
+7. A trusted web site cannot silently add or remove local bookmarks/favorites: every mutation reaches
+   the action-gate confirmation and a timeout/cancel writes nothing.
 
 ---
 
@@ -78,7 +81,8 @@ pages rendered as `data:` URLs using `ThemeJson` CSS variables.
 types; `BookmarkStore` operation methods. Keep ordering, mutation, serialization and validation
 inside this store rather than spreading ID logic into `BrowserWindow`.
 
-- [ ] Write failing tests for schema-1 → schema-2 migration, deterministic schema-2 output,
+- [ ] Write failing tests for startup schema-1 → schema-2 migration with a retained original-byte
+  backup, backup/write failure that preserves the v1 file, deterministic schema-2 output,
   bookmark/folder/favorite ID uniqueness, atomic save, duplicate rejection, favorite reorder,
   removing one scope, deleting a bookmark, and invalid dangling/duplicate scope IDs.
 - [ ] Replace schema-1 item-in-folder representation with IDs, folders and ordered favorite scope
@@ -94,20 +98,23 @@ inside this store rather than spreading ID logic into `BrowserWindow`.
 
 **Files:**
 - Modify: `src/main/browser_window.{h,cc}`, `src/main/space.{h,cc}` only if a stable space-removal
-  hook is absent, `src/main/browser_chrome.{h,cc}`, `src/main/CMakeLists.txt`, `tests/CMakeLists.txt`
+  hook is absent, `src/main/session_store.{h,cc}`, `src/main/browser_chrome.{h,cc}`,
+  `src/main/CMakeLists.txt`, `tests/CMakeLists.txt`
 - Test: `tests/browser_window_test.cpp`, `tests/browser_chrome_test.cpp` or the existing focused
   collection/contract test files
 
-**Extension points:** `BrowserWindow::UpdateChromeCollections`, `BuildSessionState` / space lifecycle
-hooks, `BrowserChrome::SetTabStripEntries` (replace with a typed sidebar collection snapshot rather
-than smuggling favorites through `TabStripEntrySnapshot`), and append-only `ChromeViewId`.
+**Extension points:** `BrowserWindow::UpdateChromeCollections`, favorite virtual-tab/session
+serialization and space lifecycle hooks, `BrowserChrome::SetTabStripEntries` (replace with a typed
+sidebar collection snapshot rather than smuggling favorites through `TabStripEntrySnapshot`), and
+append-only `ChromeViewId`.
 
 - [ ] Add failing tests that global favorites project before the active space's favorite rows and
-  tabs, scope follows active `SpaceId`, a deleted space drops only its list, and a current-page
-  favorite never changes tab pinning.
-- [ ] Define `FavoriteEntrySnapshot` / sidebar collection snapshot with stable bookmark ID, title,
-  URL, scope, favicon and active-URL metadata. Rebuild the projection after bookmark mutations,
-  tab title/favicon changes, and space switches.
+  tabs, scope follows active `SpaceId`, a deleted space drops only its list, activation displays a
+  virtual favorite tab without changing/pinning/adding an ordinary tab, and the virtual state
+  round-trips through the session.
+- [ ] Define `FavoriteEntrySnapshot` / sidebar collection snapshot with stable favorite identity,
+  bookmark ID, title, URL, scope, favicon and displayed-virtual-tab metadata. Rebuild the projection
+  after bookmark mutations, virtual-tab state changes, tab title/favicon changes, and space switches.
 - [ ] Allocate only new `ChromeViewId`s after 1080. Keep the 1042 New Tab ID retired and make no
   new permanent New Tab button in expanded or collapsed sidebar.
 - [ ] Run the focused browser-window/chrome tests and
@@ -125,10 +132,12 @@ than smuggling favorites through `TabStripEntrySnapshot`), and append-only `Chro
 **Extension points:** `ChromeViewId`, `CollectionButtonAction`, sidebar snapshot collections,
 `ApplyCollectionTheme`, `PushCornerPatches`, and the `ChromeTokens`/DESIGN token contract.
 
-- [ ] Write failing contract/style tests for global icons, section ordering, favorite menus, collapsed
-  rail ordering, accessible names, 28/34-DIP density geometry, and the absence of a New Tab row.
-- [ ] Build one scrollable sidebar collection with global icon strip, current-space favorite rows and
-  current-space tab rows; preserve fixed existing footer/space controls and collapse behavior.
+- [ ] Write failing contract/style tests for six visible global icons plus a `+N` overflow control,
+  section ordering, favorite menus, collapsed rail ordering, accessible names, 28/34-DIP density
+  geometry, displayed-favorite neutral state, inline failure status, and the absence of a New Tab row.
+- [ ] Build one scrollable sidebar collection with the six-icon global strip, `+N` overflow and add
+  affordances, current-space favorite rows, and current-space tab rows; preserve fixed existing
+  footer/space controls and collapse behavior.
 - [ ] Apply the three-look, two-theme visual rules in spec §3. Do not make favorites active-blue;
   use rounded neutral raised/hover/focus token surfaces and existing favicon plates.
 - [ ] Add/review design-token tests so every new native/CSS token has light/dark values and local
@@ -146,12 +155,13 @@ than smuggling favorites through `TabStripEntrySnapshot`), and append-only `Chro
 **Extension points:** `CollectionButtonAction`, Browser/menu command dispatch table, `KeyAction` /
 `kActions`, `Keymap` conflict registry, existing context-menu IDs, and palette command registry.
 
-- [ ] Add failing tests for add/remove global and current-space favorites, duplicate URL reuse,
-  Cmd/Ctrl+Shift+D, Cmd/Ctrl+Alt+D, Cmd/Ctrl+Shift+B defaults and override conflicts, keyboard/menu
-  reorder, and all activation paths using the address validation seam.
-- [ ] Implement favorite overflow/context actions: Open, new tab, Peek, edit, remove scoped
-  favorite, and scoped move. Use Option+arrows locally for reorder and announce positions; do not
-  add drag listeners.
+- [ ] Add failing tests for add/remove global and current-space favorites, duplicate URL reuse and
+  page-title default, Cmd/Ctrl+Shift+D, Cmd/Ctrl+Alt+D, Cmd/Ctrl+Shift+B defaults and override
+  conflicts, keyboard/menu reorder, virtual-tab activation versus ordinary new-tab opening, and all
+  ordinary URL-opening paths using the address-validation seam.
+- [ ] Implement favorite overflow/context actions: Open virtual tab, new ordinary tab, Peek, edit,
+  proposed Name with agent, remove scoped favorite, and scoped move. Use Option+arrows locally for
+  reorder and announce positions; do not add drag listeners.
 - [ ] Add three configurable key actions with the exact accepted defaults, Settings labels and macOS
   menu equivalents. Keep Cmd/Ctrl+D for tab pinning.
 - [ ] Run `./build/tests/island_tests --gtest_filter='KeymapTest.*:BrowserWindowTest.*:BrowserChrome*'`.
@@ -190,8 +200,8 @@ than smuggling favorites through `TabStripEntrySnapshot`), and append-only `Chro
 type table. Every message validates its IDs and fields before mutating the store.
 
 - [ ] Write failing tests for the local page URL, state JSON, accepted/rejected messages, folder
-  delete confirmation, import handoff, title/URL editing, token-only CSS, focus order, reduced
-  motion and no external requests.
+  delete confirmation, import handoff, title/URL editing, save rollback with inline error/Retry,
+  token-only CSS, focus order, reduced motion and no external requests.
 - [ ] Implement the local `data:` page described in spec §5 with folder/library search, CRUD,
   favorite labels/toggles and current import sources. Use native state render, not direct filesystem
   access from JavaScript.
@@ -199,7 +209,7 @@ type table. Every message validates its IDs and fields before mutating the store
   in Native, Arc and Graphite light/dark.
 - [ ] Run `python3 -m pytest tests/design/test_local_pages.py` and the focused page/window tests.
 
-### Task 7: Cover lifecycle, sleep, Peek, and persistence failures
+### Task 7: Cover virtual-tab lifecycle, sleep, Peek, and persistence failures
 
 **Files:**
 - Modify: `src/main/browser_window.{h,cc}`, `src/main/tab_sleep_policy.h` only if a pure policy seam
@@ -208,16 +218,21 @@ type table. Every message validates its IDs and fields before mutating the store
 - Test: `tests/browser_window_test.cpp`, `tests/tab_sleep_policy_test.cpp`,
   `tests/peek_state_test.cpp`, `tests/bookmark_store_test.cpp`
 
-**Extension points:** `OpenBookmark`, tab sleep activation/restore path, `PeekState` transition API,
+**Extension points:** `OpenFavoriteVirtualTab` / close-reset lifecycle, favorite virtual-tab session
+serialization, tab sleep activation/restore path, `PeekState` transition API, split-pane selection,
 space-removal lifecycle, and the bookmark save result seam.
 
-- [ ] Write tests for a favorite whose tab is open, closing that tab, sleep/wake, Peek/open-as-tab,
-  invalid stored URL, scope cleanup on space delete, and the accepted persistence-failure behavior.
-- [ ] Implement only the glue necessary to keep favorites metadata independent of `CefBrowser` and
-  Peek overlay lifetime. Do not create a persistent overlay.
+- [ ] Write tests that a favorite opens its one virtual tab rather than an ordinary tab, close unloads
+  and resets it to the favorite URL, split moves it between focused panes without duplication,
+  sleep/wake restores session state, Peek is independent, agent targeting treats it as the person's
+  tab, invalid stored URL is harmless, space deletion cleans scope/state, and save failure rolls back
+  with a retryable status.
+- [ ] Implement only the glue necessary to keep favorite library metadata separate from
+  `CefBrowser`, retain favorite virtual-tab session state, and preserve Peek overlay lifetime. Do
+  not create a persistent overlay.
 - [ ] Run the listed focused tests.
 
-### Task 8: Optional, owner-approved agent bookmark tools
+### Task 8: Add owner-approved agent bookmark and favorite tools
 
 **Files:**
 - Modify: `src/agent/browser_tools.{h,cc}`, `src/agent/action_gate.{h,cc}`, `src/main/window_agent_host.{h,cc}`,
@@ -228,11 +243,12 @@ space-removal lifecycle, and the bookmark save result seam.
 **Extension points:** tool registration table in `BrowserToolbox`, `GateRule` / `Classify`,
 `AgentBrowserHost` virtual seam, and the window-side bridge. `src/agent/` stays CEF-free.
 
-- [ ] Skip this task unless spec §9 OPEN agent scope is accepted.
-- [ ] Write failing tests for list filtering, no-op/invalid add, confirmation content, trusted-site
-  non-bypass, Allow once/task, cancel, timeout, and no writes before confirmation.
-- [ ] Add only `browser_list_bookmarks` and gated `browser_add_bookmark`; do not add bulk, delete,
-  import, folder mutation, reorder or removal tools.
+- [ ] Write failing tests for bookmark/favorite list filtering, invalid add/remove, confirmation
+  content, trusted-site non-bypass, Allow once/task, cancel, timeout, no writes before confirmation,
+  and favorite virtual-tab targeting as the person's tab.
+- [ ] Add `browser_list_bookmarks`, `browser_list_favorites`, and gated `browser_add_bookmark`,
+  `browser_remove_bookmark`, `browser_add_favorite`, and `browser_remove_favorite`. Do not add bulk,
+  import, folder mutation, or reorder tools.
 - [ ] Run `cmake -S src/agent -B build-agent && cmake --build build-agent && ctest --test-dir
   build-agent --output-on-failure` plus focused root tests.
 
@@ -248,9 +264,10 @@ space-removal lifecycle, and the bookmark save result seam.
 **Extension points:** directory maps and Key Files tables, DESIGN token contract/version, GitBook
 SUMMARY navigation, and `[Unreleased]` release notes.
 
-- [ ] Document `BookmarkStore` schema 2, favorite scopes, sidebar order, no-drag rationale, palette
-  and page entry points, shortcuts, import continuity, agent tool decision, and how to add a future
-  sidebar collection/palette command.
+- [ ] Document `BookmarkStore` schema 2/startup migration backup, favorite scopes and virtual-tab
+  lifecycle, six-plus-overflow sidebar order, no-drag rationale, palette and page entry points,
+  shortcuts, inline save-failure retry, import continuity, action-gated agent tools, and how to add
+  a future sidebar collection/palette command.
 - [ ] Add concise user-facing `[Unreleased]` release notes without changing `VERSION` until the
   release PR does so through `scripts/version.py`.
 - [ ] Capture and visually review all six Native/Arc/Graphite × light/dark states for expanded and
