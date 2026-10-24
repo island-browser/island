@@ -465,6 +465,11 @@ class BrowserWindow : public CefClient,
         spaces_[space].tabs()[tab].navigation_state().SetAddress(std::move(url));
         return true;
     }
+    // The navigation state of the shown tab: the displayed favorite's, else the selected tab's.
+    [[nodiscard]] NavigationState* DisplayedNavigationForTest() {
+        Tab* tab = DisplayedTab();
+        return tab != nullptr ? &tab->navigation_state() : nullptr;
+    }
     // Marks a research task as running without sending anything, as if the
     // prompt had gone out after `turns_ended_before` turns.
     void SetResearchTaskForTest(std::string question, std::uint64_t turns_ended_before = 0) {

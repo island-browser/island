@@ -26,6 +26,7 @@
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
+#include "json_util.h"
 #include "navigation_state.h"
 #include "row_raster.h"
 #include "runtime_style.h"
@@ -1437,6 +1438,65 @@ TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenItsVirtualTabShowsWithout
     ASSERT_NE(record, nullptr);
     EXPECT_EQ(record->last_url, record->reset_url);
     EXPECT_EQ(record->reset_url, "https://mail.test/");
+}
+
+TEST(BrowserWindowTest, GivenADisplayedFavoriteWhenSettingsOpensAndClosesThenTheAddressStaysOnIt) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    window->DisplayedNavigationForTest()->SetAddress("https://mail.test/inbox");
+
+    // The public snapshot and the observer's initial push describe the favorite, not the tab
+    // hidden behind it.
+    EXPECT_EQ(window->navigation_snapshot().url, "https://mail.test/inbox");
+    RecordingNavigationObserver observer;
+    window->SetNavigationObserver(&observer);
+    ASSERT_EQ(observer.snapshots().size(), 1U);
+    EXPECT_EQ(observer.snapshots()[0].url, "https://mail.test/inbox");
+    window->SetNavigationObserver(nullptr);
+
+    // Settings neither ends the display nor lets the hidden tab's URL into the address field.
+    window->ToggleSettings();
+    window->ToggleSettings();
+    ASSERT_TRUE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/inbox");
+    EXPECT_EQ(window->navigation_snapshot().url, "https://mail.test/inbox");
+}
+
+TEST(BrowserWindowTest,
+     GivenADisplayedFavoriteWhenTheAgentPanelStateIsBuiltThenItNamesTheFavorite) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    window->DisplayedNavigationForTest()->SetAddress("https://mail.test/inbox");
+
+    const std::optional<json::Value> state = json::Parse(window->AgentPanelStateJson());
+    ASSERT_TRUE(state.has_value());
+    const json::Value* context = state->FindMember("context");
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->IsObject());
+    EXPECT_EQ(context->StringOr("url", ""), "https://mail.test/inbox");
+}
+
+TEST(BrowserWindowTest,
+     GivenADisplayedFavoriteWhenTheCurrentPageIsAddedThenTheFavoritesPageIsUsed) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    window->DisplayedNavigationForTest()->SetAddress("https://mail.test/inbox");
+    window->DisplayedNavigationForTest()->OnTitleChange("Inbox");
+
+    // Whatever the library does with the shown page, the hidden tab's URL never reaches it.
+    window->AddCurrentPageToGlobalFavorites();
+    for (const FavoriteEntrySnapshot& entry : window->BuildSidebarCollection().global_favorites) {
+        EXPECT_EQ(entry.url.find("hidden.test"), std::string::npos) << entry.url;
+    }
 }
 
 TEST(BrowserWindowTest, GivenADisplayedFavoriteWhenAnOrdinaryTabIsSelectedThenItReturns) {

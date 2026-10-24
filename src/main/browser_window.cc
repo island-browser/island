@@ -904,7 +904,7 @@ CefRefPtr<CefBrowser> BrowserWindow::BrowserForTab(std::optional<std::size_t> in
     if (index.has_value()) {
         return *index < space.tab_count() ? space.tabs()[*index].browser() : nullptr;
     }
-    const Tab* tab = active_tab();
+    const Tab* tab = DisplayedTab();
     return tab != nullptr ? tab->browser() : nullptr;
 }
 
@@ -1397,7 +1397,7 @@ void BrowserWindow::RunPaletteCommand(std::string_view id) {
 std::string BrowserWindow::AgentPanelStateJson() const {
     json::Value theme = ThemeJson();
     json::Value context = json::Value::Null();
-    if (const Tab* tab = active_tab(); tab != nullptr) {
+    if (const Tab* tab = DisplayedTab(); tab != nullptr) {
         const NavigationSnapshot& nav = tab->navigation_state().snapshot();
         if (IsWebUrl(nav.url)) {
             context = json::Value::MakeObject()
@@ -2512,7 +2512,7 @@ bool BrowserWindow::ReopenClosedTab() {
 }
 
 bool BrowserWindow::CanStopLoading() const {
-    const Tab* tab = active_tab();
+    const Tab* tab = DisplayedTab();
     return !closing_ && tab != nullptr && tab->browser() != nullptr && tab->browser()->IsLoading();
 }
 
@@ -3311,7 +3311,7 @@ void BrowserWindow::OpenMoreGlobalFavorites() {
 
 void BrowserWindow::AddCurrentPageToGlobalFavorites() {
     CEF_REQUIRE_UI_THREAD();
-    const Tab* active = active_tab();
+    const Tab* active = DisplayedTab();
     if (active == nullptr) {
         return;
     }
@@ -3555,7 +3555,7 @@ void BrowserWindow::SetNavigationObserver(NavigationObserver* observer) {
 
     navigation_observer_ = observer == this ? nullptr : observer;
     if (navigation_observer_ != nullptr && !closing_) {
-        const Tab* tab = active_tab();
+        const Tab* tab = DisplayedTab();
         if (tab != nullptr) {
             navigation_observer_->OnNavigationChanged(tab->navigation_state().snapshot());
         }
@@ -3572,7 +3572,7 @@ void BrowserWindow::SetChromeObserver(ChromeObserver* observer) {
 }
 
 const NavigationSnapshot& BrowserWindow::navigation_snapshot() const noexcept {
-    const Tab* tab = active_tab();
+    const Tab* tab = DisplayedTab();
     static const NavigationSnapshot kEmpty;
     return tab != nullptr ? tab->navigation_state().snapshot() : kEmpty;
 }
@@ -3699,7 +3699,7 @@ void BrowserWindow::FocusBrowserView() {
             return;
         }
     }
-    const Tab* tab = active_tab();
+    const Tab* tab = DisplayedTab();
     if (!closing_ && tab != nullptr && tab->browser_view() != nullptr) {
         tab->browser_view()->RequestFocus();
     }
@@ -4170,7 +4170,7 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
 
     // The blocked-request badge counts the current page, not the tab's history.
     owner->ResetBlockedRequests();
-    if (active_tab() == owner) {
+    if (DisplayedTab() == owner) {
         RefreshAddressIndicators();
     }
     owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
@@ -4710,7 +4710,7 @@ cef_runtime_style_t BrowserWindow::GetWindowRuntimeStyle() { return kIslandRunti
 
 void BrowserWindow::OnFocus(CefRefPtr<CefView> view) {
     CEF_REQUIRE_UI_THREAD();
-    const Tab* tab = active_tab();
+    const Tab* tab = DisplayedTab();
     if (!closing_ && tab != nullptr && tab->browser_view() != nullptr && view != nullptr &&
         view->IsSame(tab->browser_view())) {
         CancelAddressEditing();
@@ -5252,7 +5252,9 @@ void BrowserWindow::UpdateChromeCollections() {
     if (chrome_ == nullptr || closing_) {
         return;
     }
-    const Tab* active = active_tab();
+    // The projected title follows the shown page, so a displayed favorite does not rebuild the
+    // collections on every title it publishes.
+    const Tab* active = DisplayedTab();
     std::vector<SpaceSwitcherEntrySnapshot> spaces;
     spaces.reserve(spaces_.size());
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
@@ -5652,10 +5654,7 @@ void BrowserWindow::DetachChromeAndObservers() {
         find_overlay_->Detach();
         find_overlay_.reset();
     }
-    Tab* tab = active_tab();
-    if (tab != nullptr) {
-        tab->navigation_state().SetObserver(nullptr);
-    }
+    ClearShownTabObservers();
     if (chrome_ != nullptr) {
         CefRefPtr<CefPanel> root = chrome_->root();
         chrome_->Detach();
@@ -5667,7 +5666,7 @@ void BrowserWindow::DetachChromeAndObservers() {
 }
 
 void BrowserWindow::UpdateWindowTitle() {
-    const Tab* tab = active_tab();
+    const Tab* tab = DisplayedTab();
     if (window_ != nullptr && tab != nullptr) {
         window_->SetTitle(CefString(tab->navigation_state().snapshot().display_title));
     }
@@ -6533,7 +6532,7 @@ void BrowserWindow::RecordBlockedRequestForTab(TabId tab_id) {
         return;
     }
     tab->IncrementBlockedRequests();
-    if (active_tab() == tab) {
+    if (DisplayedTab() == tab) {
         RefreshAddressIndicators();
     }
     ScheduleLocalPagesRender();
