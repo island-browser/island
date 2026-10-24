@@ -1674,6 +1674,56 @@ TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsIconArrivesThenTheSidebarProje
     EXPECT_NE(snapshot.global_favorites[0].favicon.get(), nullptr);
 }
 
+TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenTheAddressFieldShowsItsUrlThroughAFailedLoad) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://example.net/"));
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(window->navigation_snapshot().url, "https://mail.test/");
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/");
+
+    // A failed load reports no address of its own; the field keeps the favorite's URL.
+    NavigationState* shown = window->DisplayedNavigationForTest();
+    ASSERT_NE(shown, nullptr);
+    shown->OnLoadError(-105);
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/");
+
+    // The hidden ordinary tab navigating meanwhile does not reach the field.
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://example.org/"));
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/");
+
+    window->CloseFavoriteTab();
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://example.org/");
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteThenFocusAndBadgeFollowTheVirtualTab) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const TabId selected = window->active_tab_id();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    const std::optional<TabId> shown = window->shown_tab_id();
+    ASSERT_TRUE(shown.has_value());
+    ASSERT_NE(*shown, selected);
+
+    // FocusBrowserView must reach the virtual tab's view, never the hidden selected tab's.
+    EXPECT_EQ(window->FocusTargetTabIdForTest(), shown);
+
+    window->RecordBlockedRequestForTab(*shown);
+    window->RecordBlockedRequestForTab(*shown);
+    EXPECT_TRUE(window->address_indicators().show_shield);
+    EXPECT_EQ(window->address_indicators().shield_label, "2");
+
+    window->CloseFavoriteTab();
+    EXPECT_EQ(window->FocusTargetTabIdForTest(), std::optional<TabId>(selected));
+    EXPECT_FALSE(window->address_indicators().show_shield);
+}
+
 TEST(BrowserWindowTest, GivenAFailedBookmarkMutationThenItIsRetryableUntilDismissedOrSucceeds) {
     const CefRefPtr<BrowserWindow> window = MakeWebWindow();
     // A missing item fails the same way every time, so its status is shown without Retry.

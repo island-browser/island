@@ -3699,7 +3699,7 @@ void BrowserWindow::FocusBrowserView() {
             return;
         }
     }
-    const Tab* tab = DisplayedTab();
+    const Tab* tab = FocusTargetTab();
     if (!closing_ && tab != nullptr && tab->browser_view() != nullptr) {
         tab->browser_view()->RequestFocus();
     }
@@ -3722,8 +3722,9 @@ void BrowserWindow::OnNavigationChanged(const NavigationSnapshot& snapshot) {
     chrome_snapshot_.active_page_title =
         snapshot.page_title.empty() ? "Island" : snapshot.page_title;
     if (snapshot.page_title != projected_page_title_) {
-        // Only the active tab publishes here, so a changed title means the tab
-        // strip's active entry text changed; skip the rebuild otherwise.
+        // Only the displayed tab publishes here (the selected tab, or the displayed favorite's
+        // virtual tab), so a changed title means a projected title changed; skip the rebuild
+        // otherwise.
         UpdateChromeCollections();
     }
     PublishChromeSnapshot();
@@ -5443,6 +5444,9 @@ bool BrowserWindow::ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark
                                                             : ParseAndValidate(record.last_url);
         if (address.is_valid()) {
             tab.SetStartupUrl(address.url);
+            // No observer yet: the tab's snapshot carries the favorite's URL from the first push
+            // on, before the browser (or a failed load) reports an address of its own.
+            tab.navigation_state().SetAddress(address.url);
         }
         virtual_tabs_.emplace(key, std::move(tab));
     }

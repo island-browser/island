@@ -470,6 +470,12 @@ class BrowserWindow : public CefClient,
         Tab* tab = DisplayedTab();
         return tab != nullptr ? &tab->navigation_state() : nullptr;
     }
+    // The tab FocusBrowserView() hands keyboard focus to: the displayed favorite's, else the
+    // selected tab's (never the hidden selected tab behind a favorite).
+    [[nodiscard]] std::optional<TabId> FocusTargetTabIdForTest() const noexcept {
+        const Tab* tab = FocusTargetTab();
+        return tab != nullptr ? std::optional<TabId>(tab->id()) : std::nullopt;
+    }
     // Marks a research task as running without sending anything, as if the
     // prompt had gone out after `turns_ended_before` turns.
     void SetResearchTaskForTest(std::string question, std::uint64_t turns_ended_before = 0) {
@@ -911,6 +917,7 @@ class BrowserWindow : public CefClient,
     // address field and the agent read this; tab selection, sessions and sleep keep active_tab().
     [[nodiscard]] Tab* DisplayedTab() noexcept;
     [[nodiscard]] const Tab* DisplayedTab() const noexcept;
+    [[nodiscard]] const Tab* FocusTargetTab() const noexcept { return DisplayedTab(); }
     // Clears the navigation observer of both candidate tabs, so only the tab on screen reports.
     void ClearShownTabObservers();
     // True when a favicon finished for |id| changes what the sidebar shows: an ordinary tab of the
