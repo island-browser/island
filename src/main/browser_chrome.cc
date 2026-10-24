@@ -2060,6 +2060,12 @@ void BrowserChrome::UpdateTabStripPreferredSize() {
     }
 }
 
+void BrowserChrome::SetSidebarCollection(const SidebarCollectionSnapshot& snapshot) {
+    CEF_REQUIRE_UI_THREAD();
+    sidebar_collection_ = snapshot;
+    SetTabStripEntries(snapshot.tabs);
+}
+
 void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {

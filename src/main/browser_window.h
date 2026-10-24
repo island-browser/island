@@ -35,6 +35,7 @@
 #include "collect_prompt.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
+#include "favorite_tabs.h"
 #include "find_bar_model.h"
 #include "find_bar_overlay.h"
 #include "history_recorder.h"
@@ -631,6 +632,34 @@ class BrowserWindow : public CefClient,
     }
     [[nodiscard]] const ChromeSnapshot& chrome_snapshot() const noexcept;
     [[nodiscard]] ChromeViewTreeNode chrome_view_tree_snapshot() const;
+    // Favorites (0.9). A scope is std::nullopt for the global strip or a space's SpaceId value.
+    // Every bookmark mutation runs through one helper: a failure is kept as the sidebar status
+    // with its retry, and a success clears it.
+    BookmarkResult AddFavoriteByUrl(FavoriteScope scope, std::string_view title,
+                                    std::string_view url);
+    BookmarkResult RemoveFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Runs the last failed bookmark mutation again. With no retryable failure it returns an error.
+    BookmarkResult RetryLastBookmarkMutation();
+    void DismissBookmarkStatus();
+    // Shows the favorite's virtual tab in the focused content slot. The selected ordinary tab is
+    // unchanged and returns when the virtual tab closes. False when the favorite is not in that
+    // list, or its space does not exist.
+    bool ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Closes the displayed virtual tab: its record returns to the favorite URL and the content slot
+    // shows the selected ordinary tab again. Does nothing when no favorite is displayed.
+    void CloseFavoriteTab();
+    [[nodiscard]] std::optional<FavoriteTabKey> displayed_favorite() const noexcept {
+        return displayed_favorite_;
+    }
+    [[nodiscard]] const FavoriteTabRecord* FavoriteTabRecordFor(const FavoriteTabKey& key) const {
+        return favorite_tabs_.Find(key);
+    }
+    // The sidebar collection for the current state: global favorites, the active space's
+    // favorites, its tab rows and the bookmark status. Built on demand; UpdateChromeCollections
+    // pushes it to the chrome.
+    [[nodiscard]] SidebarCollectionSnapshot BuildSidebarCollection() const;
+    [[nodiscard]] const BookmarkStore& bookmarks() const noexcept { return bookmarks_; }
+
     void RequestClose();
     // Opens the Cmd/Ctrl+K search palette, creating it on first use. Public so the
     // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
@@ -1153,6 +1182,18 @@ class BrowserWindow : public CefClient,
     // and an empty window recreates a single fresh default space. Returns the
     // removed space so its browsers can be closed after the model mutation.
     Space RemoveSpaceAtIndex(std::size_t index);
+    // The one path for bookmark mutations (see the favorites methods above). Reconciles virtual
+    // tabs with the library afterwards and reprojects the sidebar.
+    BookmarkResult RunBookmarkMutation(std::function<BookmarkResult()> mutation);
+    // Disposes the records and virtual tabs of favorites the library no longer lists. Returns true
+    // when the displayed virtual tab was one of them, so the caller re-attaches the content slot.
+    bool ReconcileFavoriteTabs();
+    [[nodiscard]] bool FavoriteListContains(const FavoriteTabKey& key) const;
+    // Destroys a virtual tab and closes its browser. Its record is left to the caller.
+    void DropVirtualTab(const FavoriteTabKey& key);
+    [[nodiscard]] Tab* FindVirtualTab(const FavoriteTabKey& key) noexcept;
+    // Returns the content slot to the selected ordinary tab when a virtual tab is displayed.
+    void ReturnToOrdinaryTab();
     // Closes every CefBrowser owned by |space|'s tabs. Must run after the
     // model mutation, never while iterating spaces_.
     void CloseSpaceBrowsers(Space& space);
@@ -1347,7 +1388,21 @@ class BrowserWindow : public CefClient,
     // headless/no-persistence shapes, which never touch the prefs file.
     PrefsState prefs_;
     Keymap keymap_ = Keymap::Defaults();
-    BookmarkState bookmarks_;
+    // In-memory until the persisted path is set in the constructor (headless and smoke shapes
+    // never touch bookmarks.json).
+    BookmarkStore bookmarks_;
+    // Virtual ("phantom") favorite tabs: live Tabs kept outside spaces_, one per favorite that has
+    // been activated, keyed like their session records. Their TabIds are fresh each run.
+    std::map<FavoriteTabKey, Tab> virtual_tabs_;
+    FavoriteTabRegistry favorite_tabs_;
+    std::optional<FavoriteTabKey> displayed_favorite_;
+    // The last failed bookmark mutation (or the load problem) and how to run it again. A null retry
+    // means the status cannot be retried, only dismissed.
+    struct FailedBookmarkMutation {
+        std::string message;
+        std::function<BookmarkResult()> retry;
+    };
+    std::optional<FailedBookmarkMutation> failed_bookmark_mutation_;
     std::unique_ptr<HistoryRecorder> history_;
     std::unique_ptr<WelcomeFlow> welcome_;
     // Agent integration: the MCP tools endpoint and its DevTools bridge.

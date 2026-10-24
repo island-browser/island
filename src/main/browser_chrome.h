@@ -23,6 +23,7 @@
 #include "address_bar_model.h"
 #include "address_indicators.h"
 #include "agent_task_queue.h"
+#include "bookmark_store.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "collapsed_rail.h"
@@ -220,6 +221,41 @@ struct SpaceSwitcherEntrySnapshot {
     bool active = false;
 
     bool operator==(const SpaceSwitcherEntrySnapshot&) const = default;
+};
+
+// One favorite as the sidebar shows it. |scope| is std::nullopt for the global strip, otherwise the
+// space's SpaceId value. |displayed| marks the favorite whose virtual tab fills the content slot;
+// it gets a neutral marker, never the tab accent. |favicon| is the virtual tab's favicon when that
+// tab exists (null otherwise, drawn as the globe fallback).
+struct FavoriteEntrySnapshot {
+    FavoriteScope scope;
+    std::uint64_t bookmark_id = 0;
+    std::string title;
+    std::string url;
+    bool displayed = false;
+    CefRefPtr<CefImage> favicon;
+
+    bool operator==(const FavoriteEntrySnapshot&) const = default;
+};
+
+// The last failed bookmark mutation, shown inline. |retryable| means RetryLastBookmarkMutation can
+// run it again; DismissBookmarkStatus clears it.
+struct BookmarkStatusSnapshot {
+    std::string text;
+    bool retryable = false;
+
+    bool operator==(const BookmarkStatusSnapshot&) const = default;
+};
+
+// The expanded sidebar's collection, top to bottom: global favorites, the active space's favorites,
+// then its tab rows. The collapsed rail uses the same order for its icons.
+struct SidebarCollectionSnapshot {
+    std::vector<FavoriteEntrySnapshot> global_favorites;
+    std::vector<FavoriteEntrySnapshot> space_favorites;
+    std::vector<TabStripEntrySnapshot> tabs;
+    std::optional<BookmarkStatusSnapshot> bookmark_status;
+
+    bool operator==(const SidebarCollectionSnapshot&) const = default;
 };
 
 struct ChromeGeometrySnapshot {
@@ -966,6 +1002,12 @@ class BrowserChrome final : public NavigationObserver {
     // the space switcher from the window's space list. Rows are keyboard
     // focusable through their affordance buttons and announce active state.
     void SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries);
+    // Stores the typed collection (favorites, status and tab rows). The tab rows are forwarded to
+    // SetTabStripEntries, so the existing tab list keeps its behavior.
+    void SetSidebarCollection(const SidebarCollectionSnapshot& snapshot);
+    [[nodiscard]] const SidebarCollectionSnapshot& sidebar_collection() const noexcept {
+        return sidebar_collection_;
+    }
     void SetSpaceSwitcherEntries(const std::vector<SpaceSwitcherEntrySnapshot>& entries);
     // Swaps the CefBrowserView living in the content slot when the active tab
     // or space changes. The previous view is detached, not destroyed; the new
@@ -1273,6 +1315,7 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefLabelButton> name;
     };
     std::vector<TabStripEntrySnapshot> tab_entries_;
+    SidebarCollectionSnapshot sidebar_collection_;
     std::vector<SpaceSwitcherEntrySnapshot> space_entries_;
     std::vector<TabEntryViews> tab_entry_views_;
     std::vector<SpaceEntryViews> space_entry_views_;

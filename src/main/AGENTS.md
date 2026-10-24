@@ -64,6 +64,8 @@ platform executable links.
 | `content_blocker.{h,cc}`, `content_blocker_policy.{h,cc}` | RAII wrapper for the Rust engine plus CEF-free request-type, bypass, allowlist, and four-day refresh policy |
 | `cef_content_blocker.{h,cc}` | Background EasyList/EasyPrivacy cache loading, `CefURLRequest` refreshes, atomic engine publication, and request checks |
 | `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers, Safari, Firefox (`.jsonlz4` bookmark backups) and Arc (spaces + pinned tabs) |
+| `bookmark_store.{h,cc}` | CEF-free bookmark library, schema 2 in `bookmarks.json`: bookmarks with IDs, folders holding ordered bookmark IDs, one global favorite list and one favorite list per SpaceId (decimal keys). `BookmarkStore` is the single mutation seam. Each operation (`AddOrFindByUrl`, folder create/rename/move/delete, `MoveBookmark`, `EditBookmark`, `DeleteBookmark`, `AddFavorite`/`AddFavoriteByUrl`/`RemoveFavorite`/`ReorderFavorite`, `RemoveSpaceFavorites`, `Import`) applies to a copy, saves atomically and commits only on success, and returns a `BookmarkResult` (`BookmarkError`, a short message, the affected ID, the import count). A default-constructed store is in-memory. `Load()` migrates schema 1 (original bytes to `bookmarks.json.v1.bak` first; a failed write leaves the v1 file and makes the store read-only for the run). Migration collapses duplicate and case-variant URLs: the first occurrence in folder-then-item order wins, keeping its title and folder; later copies are dropped from the live library (their bytes stay in `.v1.bak`); empty and same-named folders are kept. Read-only runs carry their own reason message; edits that change nothing still succeed. Load also backs up an invalid file to `bookmarks.json.invalid.bak` before the first save; an existing file that cannot be read makes the store read-only, so it is never overwritten. `Flattened()` is the read-only (folder, title, URL) projection the palette uses; `MaxSpaceKey()` lets the window reserve SpaceIds above it. Extension points: a new record field goes into the struct, `SerializeToJson`, `ParseSchemaTwo`, `IsConsistent`; a new operation is a `Commit` lambda over the copy, so it inherits rollback and atomic save |
+| `favorite_tabs.{h,cc}` | CEF-free registry of favorite virtual-tab records: `FavoriteTabKey` (scope plus bookmark ID, defaulted `<=>`), `FavoriteTabRecord` (reset URL, last URL), `Ensure`/`Find`/`SetLastUrl`/`ResetToFavorite`/`Dispose`/`DisposeBookmark`/`DisposeScope`, and `ToSessionFavoriteTabs`/`FavoriteTabsFromSession` for `session.json`. The window pairs records with live `Tab`s; see "Favorites and virtual tabs" below |
 | `tab_sleep_policy.h`, `peek_state.h` | CEF-free models: tab sleep decisions (injected clock, per-tab last-active time, exclusions as inputs; `Expired` for the timed sweep, `AllEligible` for "Sleep inactive tabs now") and the peek card's state (open/replace/close/open-as-tab/Escape, generation counter for stale callbacks) |
 | `peek_overlay.{h,cc}` | The peek card: an overlay of the one `CefWindow`, created in `Open` and released in `Close` (see `overlay_lifetime.h`), covering only the card, holding a title bar and its own `CefBrowserView` with its own client (popups load in the card, Escape claimed in `OnPreKeyEvent`) |
 | `overlay_lifetime.h`, `overlay_card.h` | CEF-free overlay rule (an overlay exists only while its surface is shown, because a live `CefWindow` overlay blocks mouse input on macOS) and the solid-color `OverlayFillDelegate` that re-asserts its color on theme change |
@@ -188,6 +190,54 @@ kind switch of `BrowserWindow::TasksStateJson`.
 - **Sleeping a tab** (`BrowserWindow::SleepTab`): set the model first (startup URL = committed web URL, saved scroll, `sleeping`), then `Tab::SetBrowser(nullptr)`/`SetBrowserView(nullptr)`, then `CloseBrowser(true)`. The order is load-bearing: `OnBrowserDestroyed` runs `DetachChromeAndObservers()` for any browser it can still map to a tab. The closed browser's id goes into `sleep_closing_browser_ids_` so its `OnBeforeClose` is never read as the window's final close during shutdown. Waking is `EnsureTabBrowserView`; scroll is replayed from `OnLoadEnd`.
 - **The probe** (`SleepProbeScript`) answers scroll offset, unsaved input and playing media in one console message `\x01island-sleep:<token>:x,y,dirty,playing`, accepted only with a live token from the probed browser (500 ms timeout) and routed before the start-page bridge. Web Audio and iframes are not inspected.
 - **Peek** entry points: `OnBeforePopup` (new-tab dispositions with a user gesture; popups and windows stay rejected), `OnOpenURLFromTab`, and the context-menu item (`MENU_ID_USER_FIRST`). Opening is deferred one UI task. Escape reaches the card through the `Stop Loading (Escape)` menu item (`CanStopLoadingWithEscape`) and the card's own key handler. Selection changes close the peek. Dev actions: `peek:<url>`, `sleep_tabs`, `sleep_report`, `wait:<s>`; with `--island-dev-keep-open`, SIGUSR1 saves another capture and SIGUSR2 logs tab/sleep/peek state.
+
+### Favorites and virtual tabs (0.9)
+
+- **Library first.** The constructor loads `bookmarks_` before any space exists, then calls
+  `ReserveSpaceIdsUpTo(bookmarks_.MaxSpaceKey())`, so a fresh or discarded session never reuses a
+  SpaceId that still owns a favorite list. A load problem is kept as the status (`kFileReadError` on
+  a missing file is the normal first run and shows nothing; a read-only or invalid library shows
+  why). Lists whose space does not exist are kept but not projected.
+- **One mutation seam.** Every bookmark mutation goes through `RunBookmarkMutation(std::function)`,
+  including the two `Import` calls. A failure stores `{message, retry}` as `failed_bookmark_mutation_`;
+  a success clears it. Either way it reconciles virtual tabs with the library and reprojects.
+  `RetryLastBookmarkMutation()` re-runs the stored closure; `DismissBookmarkStatus()` clears it.
+  Load problems have no retry closure.
+- **Projection.** `BuildSidebarCollection()` (const, test-callable) returns a
+  `SidebarCollectionSnapshot`: `global_favorites`, then the active space's `space_favorites`, then
+  `tabs` (the existing rows), then `bookmark_status`. Each `FavoriteEntrySnapshot` carries scope,
+  bookmark ID, title (the bookmark's), URL, `displayed` and the virtual tab's favicon. Identical
+  favorites never collapse across scopes. `UpdateChromeCollections` pushes the result through
+  `BrowserChrome::SetSidebarCollection`, which forwards `tabs` to `SetTabStripEntries`; the chrome
+  keeps the snapshot for Task 3's drawing. Projection is rebuilt by every existing
+  `UpdateChromeCollections` call (mutations, selection, title and favicon changes).
+- **Virtual tabs.** `virtual_tabs_` (`std::map<FavoriteTabKey, Tab>`) holds live `Tab`s outside
+  `spaces_`; their `TabId`s come from `NextTabId()` and are never persisted. `displayed_favorite_`
+  names the one shown. `ActivateFavorite` ensures the record, creates the tab (its startup URL is
+  the record's last URL, validated) and calls `AttachActiveTabObservers`; the selected ordinary tab
+  and its list are not touched. `AttachActiveTabBrowserView` shows a displayed favorite ahead of the
+  split and ordinary paths. `FindTabById`, `FindTabByBrowser` and `FindTabByBrowserView` search the
+  virtual tabs too, so CEF callbacks and view swaps resolve them.
+- **Lifecycle rules.** Any `DetachActiveTabObservers` (every selection change, space removal) ends a
+  displayed favorite; re-selecting the already-selected tab does too (`ReturnToOrdinaryTab`).
+  `CloseFavoriteTab` drops the virtual tab and resets its record to the favorite URL. Removing a
+  favorite (or deleting its bookmark) drops its records through `ReconcileFavoriteTabs`. Really
+  deleting a space (`RemoveSpaceAtIndex`, never the reorder in `MoveSpace`) drops that scope's
+  records and virtual tabs and removes its favorite list when one exists.
+- **Session.** `SessionState::favorite_tabs` is optional in `session.json` (`space_id` absent means
+  global); the schema version is still 1 and an old file loads with none. `BuildSessionState` writes
+  each live virtual tab's current URL as its last URL. `RestoreSessionState` restores records before
+  anything else (they belong to the library) and drops those whose favorite is gone. The display is
+  never restored. Older builds ignore the key, so they drop these records only when they save.
+- **Known limits (Task 2).** The address field and navigation still describe the selected ordinary
+  tab while a favorite is displayed. A split pair is hidden, not dropped, while a favorite fills
+  the slot. Virtual tabs are not sleep candidates. Only `BuildSidebarCollection` and the window
+  logic are unit-tested; `SetSidebarCollection` needs CEF and is not.
+- **Extension points.** A new favorite list kind goes into `FavoriteScope`'s users and
+  `FavoriteListContains`. A new per-tab record field goes into `FavoriteTabRecord`,
+  `ToSessionFavoriteTabs`/`FavoriteTabsFromSession`, and `FavoriteTabState` (session store). A new
+  bookmark mutation is a lambda passed to `RunBookmarkMutation`. Any new `Tab` lookup must consult
+  `virtual_tabs_` as well.
 
 ### Testing Requirements
 

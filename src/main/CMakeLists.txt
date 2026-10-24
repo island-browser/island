@@ -11,6 +11,7 @@ add_library(island_browser_core STATIC
     app_resources.cc
     bookmark_import.cc
     bookmark_store.cc
+    favorite_tabs.cc
     browser_import.cc
     app_runtime.cc
     browser_chrome.cc

@@ -62,12 +62,25 @@ struct SpaceState {
     bool operator==(const SpaceState&) const = default;
 };
 
+// The saved record of one favorite's virtual tab (see favorite_tabs.h). Absent |space_id| means
+// the global favorite strip. Optional in the file: a session without the key has none.
+struct FavoriteTabState {
+    std::optional<SpaceId> space_id;
+    std::uint64_t bookmark_id = 0;
+    std::string reset_url;
+    std::string last_url;
+
+    bool operator==(const FavoriteTabState&) const = default;
+};
+
 struct SessionState {
     static constexpr int kCurrentSchemaVersion = 1;
 
     int version = kCurrentSchemaVersion;
     std::optional<SpaceId> active_space_id;
     std::vector<SpaceState> spaces;
+    // Optional in the file (absent = none), so the schema version does not change for it.
+    std::vector<FavoriteTabState> favorite_tabs;
 
     bool operator==(const SessionState&) const = default;
 

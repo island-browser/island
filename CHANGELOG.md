@@ -13,19 +13,31 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
-### Fixed
-
-- Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
-  long selection chips stay on one ellipsized line.
-
 ### Added
 
+- Favorites have their data path in place: each favorite list is projected for the sidebar, and a
+  favorite can show its own virtual tab in the content slot without touching the selected tab. No
+  sidebar rows or controls for favorites are shown in this build yet.
 - Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with
   title/URL editing, folder actions, favorite controls, import handoff, inline save status and
   destructive folder confirmation. Browser-window state and command wiring land separately.
 - Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
   add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
   sites; bulk, import, folder-mutation and reorder tools are not exposed.
+
+### Changed
+
+- The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
+  imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
+  file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be
+  read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
+  URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
+  stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
+
+### Fixed
+
+- Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
+  long selection chips stay on one ellipsized line.
 
 ## [0.8.0] - 2026-10-24
 

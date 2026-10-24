@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
 #include "tab_id.h"
@@ -556,6 +557,38 @@ TEST(SessionStore, OpenedByAgentRoundTripsAndOldFilesLoad) {
     WriteFile(path,
               R"({"version":1,"active_space_id":1,"spaces":[{"id":1,"name":"A","color_argb":1,)"
               R"("tabs":[{"id":1,"url":"https://a.test/","opened_by_agent":"yes"}]}]})");
+    EXPECT_EQ(SessionStore::Load(path).error, SessionError::kSchemaError);
+    std::filesystem::remove(path);
+}
+
+TEST(SessionStore, FavoriteTabRecordsRoundTripAndOldFilesLoad) {
+    SessionState original = BuildSampleState();
+    original.favorite_tabs.push_back({std::nullopt, 7, "https://a.test/", "https://a.test/moved"});
+    original.favorite_tabs.push_back({SpaceId{100}, 8, "https://b.test/", "https://b.test/"});
+    const auto path = std::filesystem::temp_directory_path() / "island_test_favorite_tabs.json";
+    ASSERT_EQ(SessionStore::Save(path, original), SessionError::kNone);
+    LoadResult result = SessionStore::Load(path);
+    EXPECT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state, original);
+    EXPECT_EQ(result.state.version, SessionState::kCurrentSchemaVersion);
+
+    // Sessions written before the key existed load with no favorite virtual tabs.
+    WriteFile(path,
+              R"({"version":1,"active_space_id":1,"spaces":[{"id":1,"name":"A","color_argb":1,)"
+              R"("tabs":[{"id":1,"url":"https://a.test/"}]}]})");
+    result = SessionStore::Load(path);
+    EXPECT_EQ(result.error, SessionError::kNone);
+    EXPECT_TRUE(result.state.favorite_tabs.empty());
+
+    // A global record has no space_id; a wrong type is a schema error, never a silent default.
+    WriteFile(path, R"({"version":1,"spaces":[],"favorite_tabs":[{"bookmark_id":3,)"
+                    R"("reset_url":"https://a.test/","last_url":"https://a.test/"}]})");
+    result = SessionStore::Load(path);
+    EXPECT_EQ(result.error, SessionError::kNone);
+    ASSERT_EQ(result.state.favorite_tabs.size(), 1U);
+    EXPECT_FALSE(result.state.favorite_tabs[0].space_id.has_value());
+    WriteFile(path, R"({"version":1,"spaces":[],"favorite_tabs":[{"bookmark_id":"three",)"
+                    R"("reset_url":"https://a.test/","last_url":"https://a.test/"}]})");
     EXPECT_EQ(SessionStore::Load(path).error, SessionError::kSchemaError);
     std::filesystem::remove(path);
 }
