@@ -1444,7 +1444,7 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
             HandleOverviewMessage(message);
             return;
         case LocalPageKind::kBookmarks:
-            // Task 6b owns the Bookmarks page dispatcher. Ignore its messages until then.
+            // The Bookmarks dispatcher is not connected yet, so reject its messages.
             return;
         case LocalPageKind::kReport:
             // Report pages live in tabs and reach HandleReportPageMessage through

@@ -41,7 +41,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
 .search { display: flex; align-items: center; flex: 1 1 250px; height: 32px; min-width: 170px;
   padding: 0 10px; border: 1px solid var(--border-2); border-radius: 7px; background: var(--surface-2); }
 .search:focus-within { box-shadow: 0 0 0 2px var(--text-2); }
-.search input { width: 100%; border: 0; outline: 0; background: transparent; }
+.search input { width: 100%; border: 0; outline: 0; box-shadow: none; background: transparent; }
 .search input::placeholder { color: var(--text-3); }
 .button, .icon { min-height: 30px; border: 1px solid var(--border-2); border-radius: 7px;
   background: var(--surface); color: var(--text); }
@@ -166,7 +166,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     var input = document.querySelector(".folder-tools input");
     if (!input) return;
     folderRenameDraft.name = input.value;
-    if (document.activeElement === input) folderRenameDraft.restoreFocus = true;
+    folderRenameDraft.restoreFocus = document.activeElement === input;
   }
   function captureBookmarkDraft() {
     if (!editingBookmark) return;
@@ -175,8 +175,8 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     var title = form.querySelector('[data-edit-field="title"]');
     var url = form.querySelector('[data-edit-field="url"]');
     editingBookmark.title = title.value; editingBookmark.url = url.value;
-    if (document.activeElement === title) editingBookmark.restoreFocus = "title";
-    if (document.activeElement === url) editingBookmark.restoreFocus = "url";
+    editingBookmark.restoreFocus = document.activeElement === title ? "title" :
+        document.activeElement === url ? "url" : null;
   }
   function folderTools(folder) {
     var tools = document.createElement("form"); tools.className = "folder-tools";

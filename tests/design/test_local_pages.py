@@ -219,6 +219,10 @@ class BookmarksPage(unittest.TestCase):
         self.assertIn(":focus-visible", stylesheet)
         self.assertIn("box-shadow: 0 0 0 2px var(--text-2)", stylesheet)
         self.assertIn(".search:focus-within", stylesheet)
+        search_input = stylesheet[stylesheet.index(".search input") : stylesheet.index(
+            ".search input::placeholder"
+        )]
+        self.assertIn("box-shadow: none", search_input)
         self.assertIn("@media (prefers-reduced-motion: reduce)", stylesheet)
         self.assertIn("var(--danger)", stylesheet)
 
@@ -244,7 +248,9 @@ class BookmarksPage(unittest.TestCase):
 class Node {
   constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset = {};
     this.style = { setProperty() {} }; this.attributes = {}; this.hidden = false; this.value = "";
-    this.textContent = ""; this.className = ""; this.type = ""; }
+    this._textContent = ""; this.className = ""; this.type = ""; }
+  get textContent() { return this._textContent; }
+  set textContent(value) { this._textContent = String(value); this.children = []; }
   appendChild(node) { this.children.push(node); return node; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); }
@@ -270,9 +276,10 @@ function find(node, selector) {
   if (selector === ".folder-tools input") { const tools = find(node, ".folder-tools"); return tools && find(tools, "input"); }
   return findAll(node, selector)[0] || null;
 }
+function findIncluding(node, selector) { return match(node, selector) ? node : find(node, selector); }
 const ids = {}; const document = { activeElement: null, documentElement: new Node("html"),
   createElement(tag) { return new Node(tag); }, getElementById(id) { return ids[id]; },
-  querySelector(selector) { for (const node of Object.values(ids)) { if (match(node, selector)) return node.querySelector(selector) || (match(node, selector) ? node : null); } return null; },
+  querySelector(selector) { for (const node of Object.values(ids)) { const found = findIncluding(node, selector); if (found) return found; } return null; },
   listeners: {}, addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
   dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); } };
 for (const id of ["query", "new-folder", "new-folder-name", "folder-list", "folder-total", "bookmark-list", "results-title", "result-count", "empty", "import-menu", "import-button", "status", "retry", "confirm-title", "confirm-copy", "confirm-move", "confirm-delete", "confirm-backdrop", "confirm-cancel", "new-folder-button", "cancel-folder"]) ids[id] = new Node(id === "query" || id.includes("name") ? "input" : "div");
@@ -285,7 +292,12 @@ const base = { folders: [{ id: "f", name: "Folder", count: 1 }], bookmarks: [{ i
 window.islandRender(base);
 findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
 let edit = find(ids["bookmark-list"], ".edit"); let title = edit.querySelector('[data-edit-field="title"]'); let url = edit.querySelector('[data-edit-field="url"]');
-url.value = "https://draft.test"; url.focus(); url.dispatch("input"); window.islandRender(base);
+title.value = "Title draft"; title.focus(); title.dispatch("input");
+ids.query.focus(); ids.query.dispatch("input");
+if (document.activeElement !== ids.query) throw new Error("search focus was stolen");
+edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]');
+if (title.value !== "Title draft") throw new Error("rebuilt title draft lost");
+url = edit.querySelector('[data-edit-field="url"]'); url.value = "https://draft.test"; url.focus(); url.dispatch("input"); window.islandRender(base);
 edit = find(ids["bookmark-list"], ".edit"); url = edit.querySelector('[data-edit-field="url"]');
 if (url.value !== "https://draft.test" || document.activeElement !== url) throw new Error("draft or URL focus lost");
 findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
@@ -298,6 +310,10 @@ let rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
 rename.value = "Folder draft"; rename.focus(); rename.dispatch("input"); window.islandRender(base);
 rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
 if (rename.value !== "Folder draft" || document.activeElement !== rename) throw new Error("folder draft or focus lost");
+ids.query.focus(); window.islandRender(base);
+if (document.activeElement !== ids.query) throw new Error("search focus was stolen by folder rename");
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (rename.value !== "Folder draft") throw new Error("rebuilt folder draft lost");
 findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
 ids["confirm-cancel"].dispatch("click");
 findAll(ids["folder-list"], "button").find((node) => node.textContent === "Hide").dispatch("click");
