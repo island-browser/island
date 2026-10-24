@@ -1,18 +1,21 @@
-name: Build and publish unsigned prereleases
+name: Build and publish unsigned releases
 
 # On every push to main that changes what ships, build, test, and package all six
-# targets (package.yml), then publish GitHub *prereleases*. Nothing here makes a
-# stable release: release.yml stays the only path to one, and it is blocked until
-# signing and notarization exist. Publishing needs all six targets to succeed.
+# targets (package.yml), then publish GitHub releases. Everything published here is
+# unsigned: release.yml stays the only path to a signed, stable release, and it is
+# blocked until signing and notarization exist. Publishing needs all six targets to
+# succeed.
 #
 # Release contract (the in-browser updater relies on it):
 # - `v<VERSION>`: created once per VERSION, the first time a build of the commit
 #   tagged v<VERSION> succeeds (or of the commit that bumped VERSION, when the
-#   tag does not exist yet; the release creates it). Prerelease, titled
-#   "Island <VERSION> (unsigned)", body = that version's CHANGELOG.md section.
-#   Never replaced afterwards.
+#   tag does not exist yet; the release creates it). A normal (not prerelease)
+#   release marked as the latest GitHub release, titled "Island <VERSION>
+#   (unsigned)", body = that version's CHANGELOG.md section. Never replaced
+#   afterwards.
 # - `nightly`: one rolling prerelease, deleted and recreated on every successful
 #   build so its tag moves to the built commit. It only moves forward along main.
+#   It is never marked latest.
 # - Package version: <VERSION> for a build that creates v<VERSION>; otherwise
 #   <VERSION>-nightly.<run number>. Each release carries the six archives
 #   island_browser-<version>-<target>.<zip|tar.gz>, one installer per target
@@ -128,7 +131,7 @@ jobs:
             echo "- Commit: \`$sha\`"
             echo "- VERSION: \`$base\` (release v$base: $release)"
             echo "- Package version: \`$version\`"
-            echo "- Creates the v$base prerelease: $version_release"
+            echo "- Creates the v$base release: $version_release"
           } >> "$GITHUB_STEP_SUMMARY"
 
   build:
@@ -150,7 +153,7 @@ jobs:
       version: ${{ needs.resolve.outputs.version }}
 
   publish-version:
-    name: Publish the v<VERSION> prerelease
+    name: Publish the v<VERSION> release
     needs: [resolve, build]
     if: github.ref == 'refs/heads/main' && needs.resolve.outputs.version_release == 'true'
     runs-on: ubuntu-24.04
@@ -204,7 +207,7 @@ jobs:
           \`-setup.exe\` (no administrator rights needed). Linux: \`sudo apt install ./<file>.deb\`.
           The \`.zip\` / \`.tar.gz\` archives are the portable builds the in-browser updater uses.
 
-          **Unsigned prerelease.** These builds are not code-signed with a Developer ID or
+          **Unsigned release.** These builds are not code-signed with a Developer ID or
           notarized (the macOS app is ad-hoc signed; \`build-metadata.json\`: \`signed: false\`,
           \`notarized: false\`, \`publicReleaseEligible: false\`). On first launch macOS asks you to
           allow Island in System Settings > Privacy & Security > Open Anyway (or run
@@ -215,7 +218,7 @@ jobs:
           EOF
           } > notes.md
           cat notes.md
-      - name: Create the prerelease
+      - name: Create the release
         shell: bash
         run: |
           set -euo pipefail
@@ -235,7 +238,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "Island $BASE_VERSION (unsigned)" \
-            --prerelease \
+            --latest \
             --notes-file notes.md
           echo "Published ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
 
@@ -340,6 +343,7 @@ jobs:
             --target "$SHA" \
             --title "Island $VERSION (nightly, unsigned)" \
             --prerelease \
+            --latest=false \
             --notes-file notes.md
           tagged="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq '.object.sha')"
           if [ "$tagged" != "$SHA" ]; then
