@@ -217,7 +217,8 @@ class BookmarksPage(unittest.TestCase):
         stylesheet = self.html[self.html.index("<style>") : self.html.index("</style>")]
         self.assertNotRegex(stylesheet, r"#[0-9a-fA-F]{3,8}|rgb|hsl")
         self.assertIn(":focus-visible", stylesheet)
-        self.assertIn("var(--segment-selected)", stylesheet)
+        self.assertIn("box-shadow: 0 0 0 2px var(--text-2)", stylesheet)
+        self.assertIn(".search:focus-within", stylesheet)
         self.assertIn("@media (prefers-reduced-motion: reduce)", stylesheet)
         self.assertIn("var(--danger)", stylesheet)
 
@@ -234,6 +235,82 @@ class BookmarksPage(unittest.TestCase):
         self.assertIn("state.agent_naming", self.html)
         self.assertIn("agent.disabled = true", self.html)
         self.assertIn('aria-current", "page"', self.html)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_node_harness_keeps_edit_draft_focus_and_two_step_delete_safe(self) -> None:
+        """The page script is run against a small DOM harness, not just parsed."""
+        script = re.search(r"<script>(.*?)</script>", self.html, re.DOTALL).group(1)
+        harness = r'''
+class Node {
+  constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset = {};
+    this.style = { setProperty() {} }; this.attributes = {}; this.hidden = false; this.value = "";
+    this.textContent = ""; this.className = ""; this.type = ""; }
+  appendChild(node) { this.children.push(node); return node; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); }
+  setAttribute(key, value) { this.attributes[key] = String(value); }
+  getAttribute(key) { return this.attributes[key]; }
+  querySelector(selector) { return find(this, selector); }
+  querySelectorAll(selector) { return findAll(this, selector); }
+  focus() { document.activeElement = this; }
+  select() { this.selected = true; }
+}
+function hasClass(node, name) { return node.className.split(/\s+/).includes(name); }
+function match(node, selector) {
+  if (selector === "button" || selector === "input") return node.tagName === selector;
+  if (selector === ".edit") return hasClass(node, "edit");
+  if (selector === ".folder-tools") return hasClass(node, "folder-tools");
+  if (selector === '[data-edit-field="title"]') return node.dataset.editField === "title";
+  if (selector === '[data-edit-field="url"]') return node.dataset.editField === "url";
+  if (selector === "button:not([disabled])") return node.tagName === "button" && !node.disabled;
+  return false;
+}
+function findAll(node, selector) { let out = []; for (const child of node.children) { if (match(child, selector)) out.push(child); out = out.concat(findAll(child, selector)); } return out; }
+function find(node, selector) {
+  if (selector === ".folder-tools input") { const tools = find(node, ".folder-tools"); return tools && find(tools, "input"); }
+  return findAll(node, selector)[0] || null;
+}
+const ids = {}; const document = { activeElement: null, documentElement: new Node("html"),
+  createElement(tag) { return new Node(tag); }, getElementById(id) { return ids[id]; },
+  querySelector(selector) { for (const node of Object.values(ids)) { if (match(node, selector)) return node.querySelector(selector) || (match(node, selector) ? node : null); } return null; },
+  listeners: {}, addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+  dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); } };
+for (const id of ["query", "new-folder", "new-folder-name", "folder-list", "folder-total", "bookmark-list", "results-title", "result-count", "empty", "import-menu", "import-button", "status", "retry", "confirm-title", "confirm-copy", "confirm-move", "confirm-delete", "confirm-backdrop", "confirm-cancel", "new-folder-button", "cancel-folder"]) ids[id] = new Node(id === "query" || id.includes("name") ? "input" : "div");
+ids.status.appendChild(new Node("span")); ids["confirm-backdrop"].appendChild(ids["confirm-cancel"]); ids["confirm-backdrop"].appendChild(ids["confirm-move"]); ids["confirm-backdrop"].appendChild(ids["confirm-delete"]);
+const messages = []; const console = { log(value) { messages.push(JSON.parse(value.slice(8))); } }; const window = {}; global.setTimeout = (fn) => fn();
+'''
+        result = subprocess.run(
+            [NODE, "-e", harness + script + r'''
+const base = { folders: [{ id: "f", name: "Folder", count: 1 }], bookmarks: [{ id: "b", title: "Old", url: "https://old.test", host: "old.test", folder_id: "f", spaces: [] }], selected_folder: "all", import_sources: [] };
+window.islandRender(base);
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
+let edit = find(ids["bookmark-list"], ".edit"); let title = edit.querySelector('[data-edit-field="title"]'); let url = edit.querySelector('[data-edit-field="url"]');
+url.value = "https://draft.test"; url.focus(); url.dispatch("input"); window.islandRender(base);
+edit = find(ids["bookmark-list"], ".edit"); url = edit.querySelector('[data-edit-field="url"]');
+if (url.value !== "https://draft.test" || document.activeElement !== url) throw new Error("draft or URL focus lost");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
+ids["confirm-delete"].dispatch("click"); ids["confirm-delete"].dispatch("click");
+if (messages.filter((message) => message.type === "folder:delete" && message.mode === "delete").length !== 1) throw new Error("delete did not send exactly once");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "Hide").dispatch("click");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+let rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+rename.value = "Folder draft"; rename.focus(); rename.dispatch("input"); window.islandRender(base);
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (rename.value !== "Folder draft" || document.activeElement !== rename) throw new Error("folder draft or focus lost");
+findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
+ids["confirm-cancel"].dispatch("click");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "Hide").dispatch("click");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
+document.dispatch("keydown", { key: "Escape" });
+if (messages.filter((message) => message.type === "folder:delete").length !== 1) throw new Error("cancel or escape sent delete");
+'''],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class StartPage(unittest.TestCase):
