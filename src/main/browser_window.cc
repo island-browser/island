@@ -263,7 +263,8 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
     // write the files, so tests and smoke runs stay deterministic.
     if (persist_session_) {
         prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
-        bookmarks_ = BookmarkStore::Load(BookmarkStore::DefaultBookmarksFilePath()).state;
+        bookmarks_ = BookmarkStore(BookmarkStore::DefaultBookmarksFilePath());
+        static_cast<void>(bookmarks_.Load());
         HistoryRecorder::Options history_options;
         history_options.segment_path =
             PrefsStore::DefaultPrefsFilePath().parent_path() / "history" / "index.seg";
@@ -2436,12 +2437,11 @@ std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
     if (!items.has_value()) {
         return "Could not read " + name + " bookmarks.";
     }
-    const std::size_t added =
-        BookmarkStore::MergeFolder(bookmarks_, "Imported from " + name, *items);
-    if (persist_session_ && added > 0) {
-        static_cast<void>(
-            BookmarkStore::Save(BookmarkStore::DefaultBookmarksFilePath(), bookmarks_));
+    const BookmarkResult merged = bookmarks_.Import("Imported from " + name, *items);
+    if (!merged.ok()) {
+        return merged.message;
     }
+    const std::size_t added = merged.added;
     return added == 0 ? "No new bookmarks in " + name + "."
                       : "Imported " + std::to_string(added) + " bookmarks from " + name +
                             ". Find them in the command palette.";
@@ -5570,10 +5570,8 @@ void BrowserWindow::ShowCommandPalette() {
         spaces.push_back({.id = space.id(), .name = space.name()});
     }
     std::vector<PaletteBookmarkEntry> bookmarks;
-    for (const BookmarkFolder& folder : bookmarks_.folders) {
-        for (const BookmarkItem& item : folder.items) {
-            bookmarks.push_back({.title = item.title, .url = item.url});
-        }
+    for (const FlatBookmark& entry : bookmarks_.Flattened()) {
+        bookmarks.push_back({.title = entry.title, .url = entry.url});
     }
     std::vector<PaletteReportEntry> reports;
     reports.reserve(reports_.reports.size());
@@ -6226,7 +6224,6 @@ void BrowserWindow::ApplyPageViewVisibility() {
 
 void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources) {
     CEF_REQUIRE_UI_THREAD();
-    std::size_t imported = 0;
     for (const ImportSource source : sources) {
         if (source == ImportSource::kArc) {
             // Arc's spaces come over as spaces, not bookmarks.
@@ -6238,11 +6235,7 @@ void BrowserWindow::OnWelcomeCompleted(const std::vector<ImportSource>& sources)
         if (!items.has_value()) {
             continue;
         }
-        imported += BookmarkStore::MergeFolder(bookmarks_, "Imported", *items);
-    }
-    if (imported > 0) {
-        static_cast<void>(
-            BookmarkStore::Save(BookmarkStore::DefaultBookmarksFilePath(), bookmarks_));
+        static_cast<void>(bookmarks_.Import("Imported", *items));
     }
     prefs_.onboarding_completed = true;
     SavePrefs();

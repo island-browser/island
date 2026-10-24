@@ -1347,7 +1347,9 @@ class BrowserWindow : public CefClient,
     // headless/no-persistence shapes, which never touch the prefs file.
     PrefsState prefs_;
     Keymap keymap_ = Keymap::Defaults();
-    BookmarkState bookmarks_;
+    // In-memory until the persisted path is set in the constructor (headless and smoke shapes
+    // never touch bookmarks.json).
+    BookmarkStore bookmarks_;
     std::unique_ptr<HistoryRecorder> history_;
     std::unique_ptr<WelcomeFlow> welcome_;
     // Agent integration: the MCP tools endpoint and its DevTools bridge.
