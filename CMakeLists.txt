@@ -219,6 +219,7 @@ string(REGEX REPLACE "\n+$" "" ISLAND_MARKDOWN_SOURCE "${ISLAND_MARKDOWN_SOURCE}
 set(ISLAND_LOCAL_PAGE_SOURCES)
 foreach(_island_page IN ITEMS "pages/agent.html:AgentPageHtml" "pages/settings.html:SettingsPageHtml"
                               "pages/tab_overview.html:TabOverviewPageHtml"
+                              "pages/bookmarks.html:BookmarksPageHtml"
                               "pages/start.html:StartPageHtml"
                               "pages/report.html:ReportPageHtml"
                               "pages/plan.html:PlanPageHtml"

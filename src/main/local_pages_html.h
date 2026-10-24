@@ -12,6 +12,7 @@ namespace island {
 [[nodiscard]] std::string_view AgentPageHtml() noexcept;
 [[nodiscard]] std::string_view SettingsPageHtml() noexcept;
 [[nodiscard]] std::string_view TabOverviewPageHtml() noexcept;
+[[nodiscard]] std::string_view BookmarksPageHtml() noexcept;
 [[nodiscard]] std::string_view StartPageHtml() noexcept;
 // Reader view assets under src/main/reader/: the document template and the extraction script
 // the window injects into the page being read.
@@ -28,6 +29,8 @@ namespace island {
             return SettingsPageHtml();
         case LocalPageKind::kTabOverview:
             return TabOverviewPageHtml();
+        case LocalPageKind::kBookmarks:
+            return BookmarksPageHtml();
         case LocalPageKind::kStart:
             return StartPageHtml();
         case LocalPageKind::kReport:

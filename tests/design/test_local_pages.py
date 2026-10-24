@@ -112,8 +112,8 @@ class EveryLocalPage(unittest.TestCase):
     def test_pages_exist(self) -> None:
         self.assertEqual(
             [path.name for path in PAGE_FILES],
-            ["agent.html", "plan.html", "report.html", "settings.html", "start.html",
-             "tab_overview.html"],
+            ["agent.html", "bookmarks.html", "plan.html", "report.html", "settings.html",
+             "start.html", "tab_overview.html"],
         )
         self.assertEqual([path.name for path in SCRIPT_FILES], ["markdown.js"])
 
@@ -140,7 +140,7 @@ class EveryLocalPage(unittest.TestCase):
                 self.assertNotIn("@@ISLAND_MARKDOWN@@", built)
                 self.assertIn("function islandMarkdown(", built)
                 self.assertNotIn("function islandMarkdown(", page(name))
-        for name in ("settings.html", "start.html", "tab_overview.html"):
+        for name in ("bookmarks.html", "settings.html", "start.html", "tab_overview.html"):
             with self.subTest(page=name):
                 self.assertNotIn(PLACEHOLDER, page(name))
 
@@ -190,6 +190,50 @@ class EveryLocalPage(unittest.TestCase):
                 for variable in BRANCH_VARIABLES:
                     self.assertIn(f'"{variable}"', apply_theme)
         self.assertGreater(checked_pages, 0)
+
+
+class BookmarksPage(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("bookmarks.html")
+
+    def test_documents_the_native_state_and_message_table(self) -> None:
+        for key in (
+            "folders:", "bookmarks:", "current_space:", "selected_folder:",
+            "import_sources:", "status:", "agent_naming?:bool",
+        ):
+            self.assertIn(key, self.html)
+        for message in (
+            'type: "bookmarks:open"', 'type: "bookmarks:open-new-tab"',
+            'type: "bookmarks:edit"', 'type: "bookmarks:delete"',
+            'type: "bookmarks:move"', 'type: "folder:create"',
+            'type: "folder:rename"', 'type: "folder:delete"',
+            'type: "favorite:toggle-global"', 'type: "favorite:toggle-space"',
+            'type: "import"', 'type: "retry"', 'type: "select-folder"',
+        ):
+            with self.subTest(message=message):
+                self.assertIn(message, self.html)
+
+    def test_uses_theme_tokens_and_neutral_accessible_states(self) -> None:
+        stylesheet = self.html[self.html.index("<style>") : self.html.index("</style>")]
+        self.assertNotRegex(stylesheet, r"#[0-9a-fA-F]{3,8}|rgb|hsl")
+        self.assertIn(":focus-visible", stylesheet)
+        self.assertIn("var(--segment-selected)", stylesheet)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", stylesheet)
+        self.assertIn("var(--danger)", stylesheet)
+
+    def test_has_live_status_retry_and_folder_delete_confirmation(self) -> None:
+        self.assertIn('role="status" aria-live="polite"', self.html)
+        self.assertIn('id="retry">Retry</button>', self.html)
+        self.assertIn('role="dialog" aria-modal="true"', self.html)
+        self.assertIn("Move bookmarks to Unfiled", self.html)
+        self.assertIn("Delete bookmarks permanently?", self.html)
+        self.assertIn("function trapConfirm", self.html)
+
+    def test_keeps_editing_and_agent_naming_safe(self) -> None:
+        self.assertIn('event.key === "Escape"', self.html)
+        self.assertIn("state.agent_naming", self.html)
+        self.assertIn("agent.disabled = true", self.html)
+        self.assertIn('aria-current", "page"', self.html)
 
 
 class StartPage(unittest.TestCase):
