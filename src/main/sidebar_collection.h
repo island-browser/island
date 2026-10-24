@@ -2,6 +2,7 @@
 #define ISLAND_SIDEBAR_COLLECTION_H_
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -39,6 +40,22 @@ struct GlobalStripLayout {
 // the gap takes the remaining room (up to 4 DIP).
 [[nodiscard]] GlobalStripLayout ComputeGlobalStripLayout(std::size_t count, int width_dip);
 
+// Decisions shared by the runtime builders (AddFavoriteSections, AddCollapsedFavorites) and the
+// contract projections (BrowserChrome::TabStripContract, CollapsedRailOrder), so the two cannot
+// drift. Each one names a condition the builders used to spell out inline.
+
+// The global header row (label, then "+") exists when the strip shows icons or "+N", or when the
+// add control is available.
+[[nodiscard]] bool GlobalHeaderRowVisible(const GlobalStripLayout& layout, bool add_visible);
+// The strip of icons and "+N" exists when it has at least one control.
+[[nodiscard]] bool GlobalStripVisible(const GlobalStripLayout& layout);
+// Any global or space favorite makes the tabs header a scope boundary (ruling c). The "+" add
+// control alone is not a favorite.
+[[nodiscard]] bool FavoritesPrecedeTabs(std::size_t global_count, std::size_t space_count);
+// The collapsed rail's hairline sits between the global icons and anything below them: space
+// favorites or tab icons (`below`).
+[[nodiscard]] bool CollapsedRailSeparatorVisible(std::size_t global_count, bool below);
+
 // The accessible names (spec §6). A global favorite's name carries its 1-based position and the
 // total; a space favorite is named by its title only.
 [[nodiscard]] std::string GlobalFavoriteAccessibleName(std::string_view title, std::size_t position,
@@ -65,6 +82,23 @@ struct GlobalStripLayout {
 // A space favorite row's height (spec §3.1): Native 28 compact, 34 comfortable; Arc and Graphite
 // 32 in both densities.
 [[nodiscard]] int SpaceFavoriteRowHeightDip(LookPreset look, Density density);
+
+// The fill of a tab row (spec §3.1, R15). The active tab takes the selected fill (Native: the
+// accent selection). While a favorite tab is on screen the space's active ordinary tab is not what
+// the person sees, so it takes the neutral raised `segment_selected` plate instead, until the
+// favorite closes. Otherwise a pinned tab, a hovered tab or an idle tab keeps its usual fill.
+[[nodiscard]] std::optional<ArgbColor> TabRowFill(const ChromeTokens& tokens, bool active,
+                                                  bool pinned, bool hovered, bool behind_favorite);
+
+// The failure row's paint (spec §5): the warning surface behind every button, warning text on the
+// message and "Dismiss", and the normal text on "Retry" (a retry is an action, not a warning).
+struct BookmarkStatusColors {
+    ArgbColor row;
+    ArgbColor text;
+    ArgbColor retry;
+    ArgbColor dismiss;
+};
+[[nodiscard]] BookmarkStatusColors BookmarkStatusRowColors(const ChromeTokens& tokens);
 
 // The fill of a favorite plate or row (spec §3.1): the neutral raised `segment_selected` when it
 // is the displayed favorite, the soft hover fill under the pointer, and the surface otherwise.

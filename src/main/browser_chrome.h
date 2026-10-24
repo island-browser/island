@@ -205,6 +205,9 @@ struct AgentEntryStatus {
 struct ChromeViewTreeNode {
     ChromeViewId id;
     std::vector<ChromeViewTreeNode> children;
+    // The accessible name the runtime view carries, when the contract pins one (favorite icons,
+    // "+N", "+", space favorite rows). Empty when the view has no contract name.
+    std::string name;
 
     bool operator==(const ChromeViewTreeNode&) const = default;
 };
@@ -228,6 +231,10 @@ struct TabStripEntrySnapshot {
     // names the plan branch and is drawn as a kicker line above the first row of a run.
     std::optional<TabId> group_parent;
     std::string group_label;
+    // R15: the space's active ordinary tab while a favorite tab is on screen. It is not the tab the
+    // person sees, so it takes the neutral selected plate, not the accent, until the favorite
+    // closes. `active` keeps its meaning (the space's selected tab).
+    bool behind_favorite = false;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -949,7 +956,9 @@ class BrowserChrome final : public NavigationObserver {
     // The children of the expanded collection's tab strip, in the order SetTabStripEntries builds
     // them (spec §3, §6): the global header row (label, then "+") and strip (icons, then "+N"),
     // the current space's favorites header and rows, the tabs header, then one node per tab. The
-    // runtime calls the same decisions (ComputeGlobalStripLayout, TabsHeaderBeforeFirstRow).
+    // builders and this projection call the same decisions (GlobalHeaderRowVisible,
+    // GlobalStripVisible, FavoritesPrecedeTabs, TabsHeaderBeforeFirstRow) and the same accessible
+    // name functions, so a name here is the name the runtime button carries.
     [[nodiscard]] static std::vector<ChromeViewTreeNode> TabStripContract(
         const SidebarCollectionSnapshot& collection,
         const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look) {
@@ -958,35 +967,43 @@ class BrowserChrome final : public NavigationObserver {
         const GlobalStripLayout layout = ComputeGlobalStripLayout(
             collection.global_favorites.size(), GlobalStripWidthDip(tokens));
         const bool add_visible = collection.add_current_page_available;
+        const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
+        const std::vector<FavoriteEntrySnapshot>& space_favorites = collection.space_favorites;
         std::vector<ChromeViewTreeNode> children;
-        if (layout.icons > 0 || layout.hidden > 0 || add_visible) {
+        if (GlobalHeaderRowVisible(layout, add_visible)) {
             ChromeViewTreeNode row = {ChromeViewId::kGlobalFavoritesHeaderRow,
                                       {{ChromeViewId::kGlobalFavoritesHeader, {}}}};
             if (add_visible) {
-                row.children.push_back({ChromeViewId::kGlobalFavoritesAdd, {}});
+                row.children.push_back({ChromeViewId::kGlobalFavoritesAdd,
+                                        {},
+                                        std::string(AddGlobalFavoriteAccessibleName())});
             }
             children.push_back(std::move(row));
         }
-        if (layout.icons > 0 || layout.hidden > 0) {
+        if (GlobalStripVisible(layout)) {
             ChromeViewTreeNode strip = {ChromeViewId::kGlobalFavoritesStrip, {}};
             for (std::size_t i = 0; i < layout.icons; ++i) {
-                strip.children.push_back({ChromeViewId::kGlobalFavoriteIcon, {}});
+                strip.children.push_back(
+                    {ChromeViewId::kGlobalFavoriteIcon,
+                     {},
+                     GlobalFavoriteAccessibleName(globals[i].title, i + 1, globals.size())});
             }
             if (layout.hidden > 0) {
-                strip.children.push_back({ChromeViewId::kGlobalFavoritesMore, {}});
+                strip.children.push_back({ChromeViewId::kGlobalFavoritesMore,
+                                          {},
+                                          MoreGlobalFavoritesAccessibleName(layout.hidden)});
             }
             children.push_back(std::move(strip));
         }
-        if (!collection.space_favorites.empty()) {
+        if (!space_favorites.empty()) {
             children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
-            for (std::size_t i = 0; i < collection.space_favorites.size(); ++i) {
-                children.push_back({ChromeViewId::kSpaceFavoriteRow, {}});
+            for (const FavoriteEntrySnapshot& entry : space_favorites) {
+                children.push_back({ChromeViewId::kSpaceFavoriteRow,
+                                    {},
+                                    SpaceFavoriteAccessibleName(entry.title)});
             }
         }
-        // Any favorite above the tabs makes the tabs header a scope boundary (ruling c). The "+"
-        // add control alone is not a favorite, so it does not count.
-        const bool tabs_precede =
-            !collection.global_favorites.empty() || !collection.space_favorites.empty();
+        const bool tabs_precede = FavoritesPrecedeTabs(globals.size(), space_favorites.size());
         const std::vector<TabStripEntrySnapshot>& tabs = collection.tabs;
         if (TabsHeaderBeforeFirstRow(look, tabs_precede, !tabs.empty())) {
             children.push_back({ChromeViewId::kTabsSectionHeader, {}});
@@ -1011,18 +1028,31 @@ class BrowserChrome final : public NavigationObserver {
     }
 
     // The collapsed rail's icons, top to bottom (spec §3): global favorites, the hairline when
-    // anything follows them, space favorites, then the tab icons.
-    [[nodiscard]] static std::vector<ChromeViewId> CollapsedRailOrder(
+    // anything follows them, space favorites, then the tab icons. Each favorite carries the name
+    // AddCollapsedFavorites gives its button.
+    [[nodiscard]] static std::vector<ChromeViewTreeNode> CollapsedRailOrder(
         const SidebarCollectionSnapshot& collection) {
-        std::vector<ChromeViewId> order;
-        const std::size_t globals = collection.global_favorites.size();
-        const std::size_t spaces = collection.space_favorites.size();
-        order.insert(order.end(), globals, ChromeViewId::kCollapsedRailGlobalFavorite);
-        if (globals > 0 && (spaces > 0 || !collection.tabs.empty())) {
-            order.push_back(ChromeViewId::kCollapsedRailSeparator);
+        std::vector<ChromeViewTreeNode> order;
+        const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
+        const std::vector<FavoriteEntrySnapshot>& spaces = collection.space_favorites;
+        for (std::size_t i = 0; i < globals.size(); ++i) {
+            order.push_back(
+                {ChromeViewId::kCollapsedRailGlobalFavorite,
+                 {},
+                 GlobalFavoriteAccessibleName(globals[i].title, i + 1, globals.size())});
         }
-        order.insert(order.end(), spaces, ChromeViewId::kCollapsedRailSpaceFavorite);
-        order.insert(order.end(), collection.tabs.size(), ChromeViewId::kCollapsedRailTab);
+        if (CollapsedRailSeparatorVisible(globals.size(),
+                                          !spaces.empty() || !collection.tabs.empty())) {
+            order.push_back({ChromeViewId::kCollapsedRailSeparator, {}});
+        }
+        for (const FavoriteEntrySnapshot& entry : spaces) {
+            order.push_back({ChromeViewId::kCollapsedRailSpaceFavorite,
+                             {},
+                             SpaceFavoriteAccessibleName(entry.title)});
+        }
+        for (std::size_t i = 0; i < collection.tabs.size(); ++i) {
+            order.push_back({ChromeViewId::kCollapsedRailTab, {}});
+        }
         return order;
     }
 
@@ -1117,6 +1147,9 @@ class BrowserChrome final : public NavigationObserver {
     // Stores the typed collection (favorites, status and tab rows). The tab rows are forwarded to
     // SetTabStripEntries, so the existing tab list keeps its behavior.
     void SetSidebarCollection(const SidebarCollectionSnapshot& snapshot);
+    // Developer capture (`focus:global_favorite:<i>`): moves keyboard focus to the i-th global
+    // strip icon so its focus ring can be captured. False when no such icon is shown.
+    bool FocusGlobalFavoriteIcon(std::size_t index);
     [[nodiscard]] const SidebarCollectionSnapshot& sidebar_collection() const noexcept {
         return sidebar_collection_;
     }

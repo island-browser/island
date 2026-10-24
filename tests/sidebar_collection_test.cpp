@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <optional>
 #include <string>
 
 #include "design_tokens.h"
@@ -177,6 +178,61 @@ TEST(FavoriteFill, GivenAnOrdinaryFavoriteThenHoverUsesTheHoverFillAndRestIsTheS
 
     EXPECT_EQ(FavoriteFillColor(tokens, false, true).argb, tokens.hover.argb);
     EXPECT_EQ(FavoriteFillColor(tokens, false, false).argb, tokens.canvas.argb);
+}
+
+TEST(SectionDecisions, GivenTheAddControlAloneThenTheHeaderRowShowsButNoStrip) {
+    const GlobalStripLayout empty = ComputeGlobalStripLayout(0, kArcStrip);
+
+    EXPECT_TRUE(GlobalHeaderRowVisible(empty, /*add_visible=*/true));
+    EXPECT_FALSE(GlobalStripVisible(empty));
+    EXPECT_FALSE(GlobalHeaderRowVisible(empty, /*add_visible=*/false));
+}
+
+TEST(SectionDecisions, GivenIconsOrOverflowThenTheStripAndHeaderRowShow) {
+    const GlobalStripLayout icons = ComputeGlobalStripLayout(2, kArcStrip);
+    const GlobalStripLayout overflow = ComputeGlobalStripLayout(8, kArcStrip);
+
+    EXPECT_TRUE(GlobalStripVisible(icons));
+    EXPECT_TRUE(GlobalStripVisible(overflow));
+    EXPECT_TRUE(GlobalHeaderRowVisible(icons, /*add_visible=*/false));
+}
+
+TEST(SectionDecisions, GivenOnlyTheAddControlThenItIsNotAFavorite) {
+    // Ruling c: "+" does not make the tabs header a scope boundary; a favorite does.
+    EXPECT_FALSE(FavoritesPrecedeTabs(0, 0));
+    EXPECT_TRUE(FavoritesPrecedeTabs(1, 0));
+    EXPECT_TRUE(FavoritesPrecedeTabs(0, 1));
+}
+
+TEST(SectionDecisions, GivenGlobalsThenTheRailHairlineNeedsSomethingBelowThem) {
+    EXPECT_FALSE(CollapsedRailSeparatorVisible(0, /*below=*/true));
+    EXPECT_FALSE(CollapsedRailSeparatorVisible(2, /*below=*/false));
+    EXPECT_TRUE(CollapsedRailSeparatorVisible(2, /*below=*/true));
+}
+
+TEST(TabRowFill, GivenAShownFavoriteThenTheSelectedTabLosesTheAccentWhileItStaysSelected) {
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+
+    const std::optional<ArgbColor> behind =
+        TabRowFill(tokens, /*active=*/true, /*pinned=*/false, /*hovered=*/false,
+                   /*behind_favorite=*/true);
+    ASSERT_TRUE(behind.has_value());
+    EXPECT_EQ(behind->argb, tokens.segment_selected.argb);
+    EXPECT_NE(behind->argb, tokens.selection.argb);
+
+    const std::optional<ArgbColor> selected =
+        TabRowFill(tokens, /*active=*/true, /*pinned=*/false, /*hovered=*/false,
+                   /*behind_favorite=*/false);
+    ASSERT_TRUE(selected.has_value());
+    EXPECT_EQ(selected->argb, tokens.selection.argb);
+}
+
+TEST(BookmarkStatus, GivenTheFailureRowThenItsSurfaceIsTheWarningSurface) {
+    const ChromeTokens tokens = ChromeTokens::ForTheme(ChromeTheme::kDark);
+    const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens);
+
+    EXPECT_EQ(colors.row.argb, tokens.warning_bg.argb);
+    EXPECT_EQ(colors.retry.argb, tokens.text.argb);
 }
 
 }  // namespace

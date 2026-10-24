@@ -23,6 +23,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Sidebar favorites, fix round 2: while a favorite is shown, the space's selected tab is drawn with the neutral selected plate instead of the accent, until the favorite closes. Favorite icons, "+N", "+" and rail favorites carry the accessible names the runtime uses, and the section decisions are shared by the builders and the contract tests.
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
   imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
   file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be

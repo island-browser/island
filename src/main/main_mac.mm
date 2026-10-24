@@ -421,7 +421,8 @@ bool CaptureOwnWindows(const std::string& path) {
 // `sleep_report` logs how many tabs sleep, `find:<text>` opens the find bar on a query, and
 // `key:<id>` runs a keymap action.
 // `research:<question>` starts a Research task and `open_report` opens the newest report.
-// `favorite:global:<i>` and `favorite:space:<i>` show a sidebar favorite (zero-based).
+// `favorite:global:<i>` and `favorite:space:<i>` show a sidebar favorite (zero-based), and
+// `focus:global_favorite:<i>` moves keyboard focus to a global strip icon.
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -446,6 +447,11 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
             return app->ActivateFavoriteForDev(scope == "global", index);
         }
         return false;
+    }
+    constexpr std::string_view kFocusFavorite = "focus:global_favorite:";
+    if (action.compare(0, kFocusFavorite.size(), kFocusFavorite) == 0) {
+        const std::size_t index = std::strtoul(action.c_str() + kFocusFavorite.size(), nullptr, 10);
+        return app->FocusGlobalFavoriteForDev(index);
     }
     constexpr std::string_view kPeek = "peek:";
     if (action.compare(0, kPeek.size(), kPeek) == 0) {

@@ -5408,6 +5408,11 @@ void BrowserWindow::ReturnToOrdinaryTab() {
     AttachActiveTabObservers();
 }
 
+bool BrowserWindow::FocusGlobalFavoriteForDev(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    return chrome_ != nullptr && chrome_->FocusGlobalFavoriteIcon(index);
+}
+
 bool BrowserWindow::ActivateFavoriteForDev(bool global, std::size_t index) {
     CEF_REQUIRE_UI_THREAD();
     const SidebarCollectionSnapshot collection = BuildSidebarCollection();
@@ -5494,15 +5499,21 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
     }
 
     const Tab* active = active_tab();
+    // DisplayedTab() shows the favorite's virtual tab only while that tab exists.
+    const bool favorite_shown =
+        displayed_favorite_.has_value() && virtual_tabs_.contains(*displayed_favorite_);
     snapshot.tabs.reserve(space.tab_count());
     for (const Tab& tab : space.tabs()) {
+        const bool is_active = active != nullptr && tab.id() == active->id();
         snapshot.tabs.push_back({.title = tab.DisplayTitle(),
-                                 .active = active != nullptr && tab.id() == active->id(),
+                                 .active = is_active,
                                  .pinned = tab.pinned(),
                                  .favicon = tab.favicon(),
                                  .sleeping = tab.sleeping(),
                                  .group_parent = tab.group_parent(),
-                                 .group_label = tab.group_label()});
+                                 .group_label = tab.group_label(),
+                                 // R15: the shown tab is the favorite, not this selected tab.
+                                 .behind_favorite = is_active && favorite_shown});
     }
     if (active != nullptr) {
         const NavigationSnapshot page = active->navigation_state().snapshot();

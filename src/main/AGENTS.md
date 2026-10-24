@@ -97,10 +97,16 @@ platform executable links.
   `sidebar_collection.{h,cc}`. The contract tests project the tab strip with
   `BrowserChrome::SidebarCollectionContract` (its tabs part is `TabStripContract`, shared with
   `CollectionCountContract`), the rail with `CollapsedRailOrder` and the failure row with
-  `BookmarkStatusContract`; each calls the same decision functions the runtime builder calls. The
+  `BookmarkStatusContract`. The header-row, strip, "tabs follow favorites" and rail-separator
+  conditions are the functions `GlobalHeaderRowVisible`, `GlobalStripVisible`,
+  `FavoritesPrecedeTabs` and `CollapsedRailSeparatorVisible`, called by both the builders and the
+  projections; button names come from the same `*AccessibleName` helpers. Tab row fills (R15) go
+  through `TabRowFill`, and the failure row's colors through `BookmarkStatusRowColors`. The
   new `ChromeViewId`s are `1081`–`1093` (`1093` is the global header row holding the label and the
   trailing "+"); `1052` (collapsed New Tab) is retired. Dev capture: `favorite:global:<i>` and
-  `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`).
+  `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`), and
+  `focus:global_favorite:<i>` moves keyboard focus to the i-th global strip icon
+  (`IslandApp::FocusGlobalFavoriteForDev`).
 - `ChromeViewId` values `1001`–`1027` are a hard invariant. Never renumber them; allocate new IDs
   after `1027`.
 - Keep genuinely CEF-free logic (`design_tokens`, `navigation_state`, `address_bar_model`,

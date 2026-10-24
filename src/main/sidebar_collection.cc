@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "row_raster.h"
+
 namespace island {
 namespace {
 
@@ -55,6 +57,46 @@ GlobalStripLayout ComputeGlobalStripLayout(std::size_t count, int width_dip) {
             .hidden = count,
             .plate_dip = kGlobalStripMinPlateDip,
             .gap_dip = kGlobalStripMinGapDip};
+}
+
+BookmarkStatusColors BookmarkStatusRowColors(const ChromeTokens& tokens) {
+    return {.row = tokens.warning_bg,
+            .text = tokens.warning_text,
+            .retry = tokens.text,
+            .dismiss = tokens.warning_text};
+}
+
+bool GlobalHeaderRowVisible(const GlobalStripLayout& layout, bool add_visible) {
+    return GlobalStripVisible(layout) || add_visible;
+}
+
+bool GlobalStripVisible(const GlobalStripLayout& layout) {
+    return layout.icons > 0 || layout.hidden > 0;
+}
+
+bool FavoritesPrecedeTabs(std::size_t global_count, std::size_t space_count) {
+    return global_count > 0 || space_count > 0;
+}
+
+bool CollapsedRailSeparatorVisible(std::size_t global_count, bool below) {
+    return global_count > 0 && below;
+}
+
+std::optional<ArgbColor> TabRowFill(const ChromeTokens& tokens, bool active, bool pinned,
+                                    bool hovered, bool behind_favorite) {
+    if (active && behind_favorite) {
+        return tokens.segment_selected;
+    }
+    if (active) {
+        return ResolveRowColors(tokens, /*selected=*/true, hovered, /*slept=*/false).fill;
+    }
+    if (hovered) {
+        return ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/true, /*slept=*/false).fill;
+    }
+    if (pinned && tokens.look != LookPreset::kNative) {
+        return MixColor(tokens.canvas, tokens.selected, 0.5);
+    }
+    return std::nullopt;
 }
 
 std::string GlobalFavoriteAccessibleName(std::string_view title, std::size_t position,

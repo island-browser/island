@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "browser_chrome.h"
@@ -258,12 +259,21 @@ TEST(BrowserChromeGraphiteTest, AddressOutlineIsTheHairlineAtRest) {
 }
 
 // Bookmarks 0.9: favorites never take the accent, and the failure row speaks in warning tokens.
-TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenTheDisplayedFavoriteIsNeutral) {
+TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenADisplayedFavoriteFillsNeutral) {
     for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
         for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
             const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
-            EXPECT_NE(tokens.segment_selected.argb, tokens.accent.argb);
-            EXPECT_NE(tokens.warning_text.argb, tokens.accent.argb);
+            // The accent is never a favorite's fill; the displayed plate is the raised neutral.
+            for (const bool hovered : {false, true}) {
+                const ArgbColor fill = FavoriteFillColor(tokens, /*displayed=*/true, hovered);
+                EXPECT_EQ(fill.argb, tokens.segment_selected.argb);
+                EXPECT_NE(fill.argb, tokens.accent.argb);
+                EXPECT_NE(fill.argb, tokens.selection.argb);
+            }
+            EXPECT_EQ(FavoriteFillColor(tokens, /*displayed=*/false, /*hovered=*/true).argb,
+                      tokens.hover.argb);
+            EXPECT_EQ(FavoriteFillColor(tokens, /*displayed=*/false, /*hovered=*/false).argb,
+                      tokens.canvas.argb);
         }
     }
 }
@@ -271,8 +281,55 @@ TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenTheDisplayedFavo
 TEST(BrowserChromeFavoritesStyleTest, GivenTheFailureRowThenItUsesTheWarningTokens) {
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
         const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
-        EXPECT_NE(tokens.warning_bg.argb, tokens.warning_text.argb);
-        EXPECT_NE(tokens.warning_bg.argb, tokens.accent.argb);
+        const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens);
+        EXPECT_EQ(colors.row.argb, tokens.warning_bg.argb);
+        EXPECT_EQ(colors.text.argb, tokens.warning_text.argb);
+        EXPECT_EQ(colors.dismiss.argb, tokens.warning_text.argb);
+        // Retry is an action, so it reads in the normal text color, not the warning color.
+        EXPECT_EQ(colors.retry.argb, tokens.text.argb);
+        EXPECT_NE(colors.row.argb, colors.text.argb);
+        EXPECT_NE(colors.row.argb, tokens.accent.argb);
+    }
+}
+
+TEST(BrowserChromeFavoritesStyleTest, GivenAFavoriteShownThenTheSelectedTabIsNeutralUntilItCloses) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+            const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
+            // R15: while the favorite is on screen the space's selected tab keeps a neutral plate,
+            // hovered or not, never the accent.
+            for (const bool hovered : {false, true}) {
+                const std::optional<ArgbColor> shown =
+                    TabRowFill(tokens, /*active=*/true, /*pinned=*/false, hovered,
+                               /*behind_favorite=*/true);
+                ASSERT_TRUE(shown.has_value());
+                EXPECT_EQ(shown->argb, tokens.segment_selected.argb);
+                EXPECT_NE(shown->argb, tokens.accent.argb);
+                EXPECT_NE(shown->argb, tokens.selection.argb);
+            }
+            // Once the favorite closes the selected tab takes its accent-or-selected fill again.
+            const std::optional<ArgbColor> restored =
+                TabRowFill(tokens, /*active=*/true, /*pinned=*/false, /*hovered=*/false,
+                           /*behind_favorite=*/false);
+            ASSERT_TRUE(restored.has_value());
+            const ArgbColor selected_fill =
+                look == LookPreset::kNative ? tokens.selection : tokens.selected;
+            EXPECT_EQ(restored->argb, selected_fill.argb);
+        }
+    }
+}
+
+TEST(BrowserChromeFavoritesStyleTest, GivenAFavoriteShownThenOtherTabsKeepTheirFills) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc}) {
+        const ChromeTokens tokens = ChromeTokens::ForLook(look, ChromeTheme::kLight);
+        // Only the selected tab is affected: an idle row and a hovered row keep their fills.
+        EXPECT_FALSE(TabRowFill(tokens, /*active=*/false, /*pinned=*/false, /*hovered=*/false,
+                                /*behind_favorite=*/true)
+                         .has_value());
+        const std::optional<ArgbColor> hovered = TabRowFill(
+            tokens, /*active=*/false, /*pinned=*/false, /*hovered=*/true, /*behind_favorite=*/true);
+        ASSERT_TRUE(hovered.has_value());
+        EXPECT_EQ(hovered->argb, tokens.hover.argb);
     }
 }
 

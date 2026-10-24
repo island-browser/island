@@ -2132,15 +2132,16 @@ void BrowserChrome::UpdateBookmarkStatusRow() {
     if (status.has_value()) {
         bookmark_status_text_->SetText(status->text);
         bookmark_status_text_->SetTooltipText(status->text);
-        bookmark_status_text_->SetEnabledTextColors(tokens_.warning_text.argb);
+        const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens_);
+        bookmark_status_text_->SetEnabledTextColors(colors.text.argb);
         bookmark_status_retry_->SetVisible(status->retryable);
-        bookmark_status_retry_->SetEnabledTextColors(tokens_.text.argb);
-        bookmark_status_dismiss_->SetEnabledTextColors(tokens_.warning_text.argb);
+        bookmark_status_retry_->SetEnabledTextColors(colors.retry.argb);
+        bookmark_status_dismiss_->SetEnabledTextColors(colors.dismiss.argb);
         for (const CefRefPtr<CefLabelButton>& button :
              {bookmark_status_text_, bookmark_status_retry_, bookmark_status_dismiss_}) {
-            button->SetBackgroundColor(tokens_.warning_bg.argb);
+            button->SetBackgroundColor(colors.row.argb);
         }
-        bookmark_status_row_->SetBackgroundColor(tokens_.warning_bg.argb);
+        bookmark_status_row_->SetBackgroundColor(colors.row.argb);
     }
     sidebar_->Layout();
 }
@@ -2167,7 +2168,7 @@ void BrowserChrome::AddFavoriteSections() {
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
         icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
 
-    if (layout.icons > 0 || layout.hidden > 0 || collection.add_current_page_available) {
+    if (GlobalHeaderRowVisible(layout, collection.add_current_page_available)) {
         global_header_row_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, header_row)));
         global_header_row_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesHeaderRow));
         CefBoxLayoutSettings row_settings;
@@ -2208,7 +2209,7 @@ void BrowserChrome::AddFavoriteSections() {
         favorite_block_children_ += 1;
     }
 
-    if (layout.icons > 0 || layout.hidden > 0) {
+    if (GlobalStripVisible(layout)) {
         global_strip_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, plate)));
         global_strip_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesStrip));
         CefBoxLayoutSettings strip_settings;
@@ -2384,7 +2385,7 @@ void BrowserChrome::AddCollapsedFavorites() {
                  ChromeViewId::kCollapsedRailGlobalFavorite,
                  GlobalFavoriteAccessibleName(globals[index].title, index + 1, globals.size()));
     }
-    if (!globals.empty() && (!spaces.empty() || !tab_entries_.empty())) {
+    if (CollapsedRailSeparatorVisible(globals.size(), !spaces.empty() || !tab_entries_.empty())) {
         // The hairline between the global icons and everything below them.
         CefRefPtr<SurfacePanelDelegate> wrapper_delegate = new SurfacePanelDelegate(
             this, SurfaceSlot::kRail, CefSize(button, kCollapsedRailSeparatorHeightDip),
@@ -2410,6 +2411,25 @@ void BrowserChrome::AddCollapsedFavorites() {
                  ChromeViewId::kCollapsedRailSpaceFavorite,
                  SpaceFavoriteAccessibleName(spaces[index].title));
     }
+}
+
+bool BrowserChrome::FocusGlobalFavoriteIcon(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    if (global_strip_ == nullptr) {
+        return false;
+    }
+    std::size_t icon = 0;
+    for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
+        const CefRefPtr<CefView> view = global_strip_->GetChildViewAt(static_cast<int>(child));
+        if (view->GetID() != static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
+            continue;
+        }
+        if (icon++ == index) {
+            view->RequestFocus();
+            return true;
+        }
+    }
+    return false;
 }
 
 void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries) {
@@ -2440,8 +2460,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     // the tabs (pinned or not). The header sits before the first tab row (spec §6): a pinned tab
     // never reads as a favorite, and no header trails an empty list.
     AddFavoriteSections();
-    const bool favorites_precede = !sidebar_collection_.global_favorites.empty() ||
-                                   !sidebar_collection_.space_favorites.empty();
+    const bool favorites_precede = FavoritesPrecedeTabs(sidebar_collection_.global_favorites.size(),
+                                                        sidebar_collection_.space_favorites.size());
     if (TabsHeaderBeforeFirstRow(tokens_.look, favorites_precede, !entries.empty())) {
         const std::string title = TabsHeaderTitle(tokens_.look, ActiveSpaceHeaderName());
         tabs_section_header_ =
@@ -3939,34 +3959,23 @@ void BrowserChrome::ApplyCollectionTheme() {
     }
 }
 
-// The row's fill: `selected` for the active tab, `hover` under the pointer, none otherwise.
-namespace {
-std::optional<ArgbColor> RowFill(const ChromeTokens& tokens, bool active, bool pinned,
-                                 bool hovered) {
-    if (active) {
-        return ResolveRowColors(tokens, /*selected=*/true, hovered, /*slept=*/false).fill;
-    }
-    if (hovered) {
-        return ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/true, /*slept=*/false).fill;
-    }
-    if (pinned && tokens.look != LookPreset::kNative) {
-        return MixColor(tokens.canvas, tokens.selected, 0.5);
-    }
-    return std::nullopt;
-}
-}  // namespace
-
 void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
     if (index >= tab_entry_views_.size() || index >= tab_entries_.size()) {
         return;
     }
     const TabStripEntrySnapshot& entry = tab_entries_[index];
     const TabEntryViews& views = tab_entry_views_[index];
-    const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+    // R15: a favorite on screen takes the accent away from the space's active ordinary tab.
+    const bool accent_selected = entry.active && !entry.behind_favorite;
+    EntryColors colors = TabRowColors(tokens_, accent_selected, entry.pinned);
+    if (entry.behind_favorite) {
+        colors.title = tokens_.text;
+    }
     const ArgbColor bg =
-        RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+        TabRowFill(tokens_, entry.active, entry.pinned, views.hovered, entry.behind_favorite)
+            .value_or(tokens_.canvas);
     const RowColors row_colors =
-        ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
+        ResolveRowColors(tokens_, accent_selected, views.hovered, entry.sleeping);
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
     views.favicon->SetBackgroundColor(bg.argb);
@@ -3979,7 +3988,7 @@ void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
             .argb);
     // Native's selected row is a blue fill with white text, so its glyphs turn white too; the
     // close × is 70% white, the generic globe is full white.
-    const bool on_selection = tokens_.look == LookPreset::kNative && entry.active;
+    const bool on_selection = tokens_.look == LookPreset::kNative && accent_selected;
     views.close->SetEnabledTextColors(
         (on_selection ? MixColor(bg, {.argb = 0xFFFFFFFFU}, kSelectedCloseOpacity)
                       : colors.trailing)
@@ -4010,14 +4019,19 @@ void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
         return;
     }
     const TabStripEntrySnapshot& entry = tab_entries_[views.source_index];
-    const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+    const bool accent_selected = entry.active && !entry.behind_favorite;
+    EntryColors colors = TabRowColors(tokens_, accent_selected, entry.pinned);
+    if (entry.behind_favorite) {
+        colors.title = tokens_.text;
+    }
     const ArgbColor bg =
-        RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+        TabRowFill(tokens_, entry.active, entry.pinned, views.hovered, entry.behind_favorite)
+            .value_or(tokens_.canvas);
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
     views.button->SetBackgroundColor(bg.argb);
     const RowColors row_colors =
-        ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
+        ResolveRowColors(tokens_, accent_selected, views.hovered, entry.sleeping);
     views.button->SetEnabledTextColors(
         (tokens_.look == LookPreset::kNative
              ? row_colors.title
@@ -4028,7 +4042,7 @@ void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
                                          ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
                                          : views.favicon_source;
         // Match the expanded selected row: the generic globe is white on Native's blue plate.
-        if (tokens_.look == LookPreset::kNative && entry.active && !views.favicon_is_page) {
+        if (tokens_.look == LookPreset::kNative && accent_selected && !views.favicon_is_page) {
             source = WhiteGlyphImage(source, 1.0);
         }
         SetAllStateImages(views.button,
@@ -4071,7 +4085,8 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
         }
     };
     const auto filled = [this](const TabStripEntrySnapshot& entry, bool hovered) {
-        return RowFill(tokens_, entry.active, entry.pinned, hovered).has_value();
+        return TabRowFill(tokens_, entry.active, entry.pinned, hovered, entry.behind_favorite)
+            .has_value();
     };
     for (const auto& [button, displayed] : FavoriteSurfaces()) {
         const bool filled = FavoriteFillColor(tokens_, displayed, FavoriteHovered(button)).argb !=

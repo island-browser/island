@@ -47,6 +47,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // Shows the favorite at `index` of the global strip (or of the active space's list) the way a
     // click on its sidebar row does (`favorite:global:<i>`, `favorite:space:<i>`).
     bool ActivateFavoriteForDev(bool global, std::size_t index);
+    // Moves keyboard focus to the i-th global strip icon (`focus:global_favorite:<i>`).
+    bool FocusGlobalFavoriteForDev(std::size_t index);
     [[nodiscard]] std::size_t SleepingTabCount() const;
     // One-line state for the dev log: tab, sleeping-tab and peek state.
     [[nodiscard]] std::string DevStateReport() const;

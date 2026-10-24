@@ -451,11 +451,14 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   strip into the inner width (`rail_width − 2·spacing_3 − 10`): the plate shrinks from 28 toward
   24 DIP and the gap from 4 toward 2 DIP. Native 248 (inner 214) shows six icons with a 28-DIP plate
   and a 3-DIP gap. Arc/Graphite 286 (inner 252) keep 28/4. Native compact (200, inner 166) cannot
-  hold six icons and "+N" at the 24/2 floors, so it shows five icons and "+N" (open decision, see
-  the 0.9 REPORT).
+  hold six icons and "+N" at the 24/2 floors, so it shows five icons and "+N" (ruling R14, accepted:
+  Native compact shows 5 icons plus `+N`).
 - Space favorite rows: Native 28 DIP compact, 34 comfortable; Arc and Graphite 32 DIP in both.
 - A displayed favorite uses `segment_selected` (neutral raised), never `accent`. Hover uses `hover`.
-  The active ordinary tab keeps the only accent treatment.
+- While a favorite is on screen, the space's selected ordinary tab is not the tab the person sees
+  (ruling R15). It takes the neutral `segment_selected` plate with `text` (no accent fill, selection
+  or white glyphs) until the favorite closes; the accent returns when the ordinary tab is shown
+  again. `TabRowFill` and `TabStripEntrySnapshot::behind_favorite` carry this rule.
 - Status row: `warning_bg` fill with `warning_text`, directly above the footer, hidden when no
   bookmark change failed.
 - No new color tokens were added: the feature reuses `canvas`, `hover`, `segment_selected`, `text`,

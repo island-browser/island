@@ -1425,6 +1425,14 @@ TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenItsVirtualTabShowsWithout
     const SidebarCollectionSnapshot snapshot = window->BuildSidebarCollection();
     ASSERT_EQ(snapshot.global_favorites.size(), 1U);
     EXPECT_TRUE(snapshot.global_favorites[0].displayed);
+    // R15: the selected ordinary tab is the one behind the shown favorite, so it is not accented.
+    ASSERT_FALSE(snapshot.tabs.empty());
+    for (const TabStripEntrySnapshot& tab : snapshot.tabs) {
+        EXPECT_FALSE(tab.behind_favorite && !tab.active);
+    }
+    EXPECT_TRUE(std::any_of(
+        snapshot.tabs.begin(), snapshot.tabs.end(),
+        [](const TabStripEntrySnapshot& tab) { return tab.active && tab.behind_favorite; }));
 
     // Activating again keeps one virtual tab; closing it returns the slot to the ordinary tab.
     ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
@@ -1433,6 +1441,10 @@ TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenItsVirtualTabShowsWithout
     EXPECT_FALSE(window->displayed_favorite().has_value());
     EXPECT_EQ(window->active_tab_id(), selected);
     EXPECT_FALSE(window->BuildSidebarCollection().global_favorites[0].displayed);
+    // Closing clears the R15 flag on the selected tab.
+    for (const TabStripEntrySnapshot& tab : window->BuildSidebarCollection().tabs) {
+        EXPECT_FALSE(tab.behind_favorite);
+    }
     const FavoriteTabRecord* record =
         window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id});
     ASSERT_NE(record, nullptr);
