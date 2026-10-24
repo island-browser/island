@@ -314,6 +314,10 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   custom view colors on every theme change, so each chrome view reports the reset and the chrome
   repaints from the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`,
   `SpaceChipColors`).
+  - *Keyboard focus (R16):* every sidebar control (the global strip icons, `+N`, `+`, favorite and tab
+    rows, rail icons, footer and status buttons) shows a rounded neutral 2 DIP `text_secondary` ring
+    (`BrowserChrome::TextfieldFocusRingColor`, `address_focused=false`), in every look and theme. Only the
+    address field keeps the accent focus ring. Tests: `BrowserChromeFocusRingStyleTest`.
 - **Collapsed rail, Arc and Graphite:** the rail shows only tabs and spaces (no Back, Forward or
   address controls). This is the intended toolbar-less rail for those looks, not a defect.
 - **Collapsed icon rail (native):** Cmd/Ctrl+B swaps the 286 DIP sidebar for a 52 DIP rail on the
@@ -482,7 +486,8 @@ the window margin on macOS, optional in Settings). No glass stacks, no glow, no 
 
 ### Constraints
 - WCAG 2.2 AA: 4.5:1 body contrast (every text token on every surface), 3:1 large text and UI,
-  keyboard reachability, semantic landmarks, visible 2–3px accent focus rings, no color-only
+  keyboard reachability, semantic landmarks, visible 2–3px focus rings (accent on the address field
+  only; neutral `text_secondary` on sidebar controls, see Sidebar above), no color-only
   information, no auto-playing media.
 - Status is stated in text, never by color alone. Decorative product mockups are `aria-hidden`.
 - Motion is optional under `prefers-reduced-motion`; no action depends on hover, motion, or JS.

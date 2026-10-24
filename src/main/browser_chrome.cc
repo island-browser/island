@@ -566,7 +566,10 @@ ArgbColor BrowserChrome::TextfieldFocusRingColor(const ChromeTokens& tokens, boo
         // TextfieldFocusRingBackdrop). The plate fill makes that ring vanish into the plate.
         return AddressPlateStyleFor(tokens).fill;
     }
-    return tokens.accent;
+    // Every other keyboard focus ring (sidebar icons, rows, footer and status buttons) is the
+    // neutral text_secondary ring, never the accent (DESIGN.md §8). Only the address field keeps
+    // the accent ring.
+    return tokens.text_secondary;
 }
 
 ArgbColor BrowserChrome::TextfieldFocusRingBackdrop(const ChromeTokens& tokens,

@@ -258,6 +258,24 @@ TEST(BrowserChromeGraphiteTest, AddressOutlineIsTheHairlineAtRest) {
     }
 }
 
+// R16: keyboard focus rings on sidebar controls are neutral in every look and theme; only the
+// address field keeps the accent ring.
+TEST(BrowserChromeFocusRingStyleTest, GivenEveryLookAndThemeThenOnlyTheAddressRingIsAccent) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+            const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
+            const ArgbColor sidebar_ring =
+                BrowserChrome::TextfieldFocusRingColor(tokens, /*address_focused=*/false);
+            EXPECT_EQ(sidebar_ring.argb, tokens.text_secondary.argb);
+            EXPECT_NE(sidebar_ring.argb, tokens.accent.argb);
+            EXPECT_NE(sidebar_ring.argb, tokens.selection.argb);
+            // The address ring is the plate fill while the field is focused, never the accent.
+            EXPECT_NE(BrowserChrome::TextfieldFocusRingColor(tokens, /*address_focused=*/true).argb,
+                      tokens.accent.argb);
+        }
+    }
+}
+
 // Bookmarks 0.9: favorites never take the accent, and the failure row speaks in warning tokens.
 TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenADisplayedFavoriteFillsNeutral) {
     for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {

@@ -238,7 +238,9 @@ TEST(BrowserWindowTest, GivenAddressFocusWhenTextfieldRingResolvedThenItIsThePla
               (ArgbColor{.argb = 0xFF000000U}));
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/false),
               dark.canvas);
-    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false), dark.accent);
+    // Non-address focus rings (sidebar controls) are neutral, never the accent.
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false),
+              dark.text_secondary);
     // Arc and Graphite: the inner textfield ring is the well it sits on (one ring, the outer
     // pill's accent), and the outer ring stays the accent.
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.well);
