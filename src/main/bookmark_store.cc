@@ -467,6 +467,13 @@ BookmarkError BookmarkStore::Load() {
 
     std::optional<std::string> content = ReadWholeFile(path_);
     if (!content.has_value()) {
+        // An existing file that cannot be read has no bytes to back up, and a rename over it
+        // would destroy it, so it stays untouched and the store is read-only. Only a missing
+        // file starts writable.
+        std::error_code ec;
+        const bool exists = std::filesystem::exists(path_, ec);
+        // A failed lookup is not proof the file is missing, so it counts as present.
+        read_only_ = exists || static_cast<bool>(ec);
         return BookmarkError::kFileReadError;
     }
     std::optional<json::Value> root = json::Parser(*content).Parse();

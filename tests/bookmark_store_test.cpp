@@ -63,6 +63,23 @@ TEST(BookmarkStoreTest, GivenFreshInstallWhenLoadedThenReadErrorAndNoFileIsCreat
     EXPECT_FALSE(std::filesystem::exists(path));
 }
 
+TEST(BookmarkStoreTest, GivenAnUnreadableExistingFileWhenLoadedThenItIsNeverOverwritten) {
+    const std::filesystem::path path = TempDir("unreadable") / "bookmarks.json";
+    WriteFile(path, kSchemaV2Valid);
+    std::filesystem::permissions(path, std::filesystem::perms::none);
+
+    BookmarkStore store(path);
+    EXPECT_EQ(store.Load(), BookmarkError::kFileReadError);
+    EXPECT_TRUE(store.read_only());
+    EXPECT_EQ(store.AddOrFindByUrl("Mail", "https://example.com/mail").error,
+              BookmarkError::kReadOnly);
+
+    // Restore access, then check nothing was written over the user's file.
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
+    EXPECT_EQ(ReadFile(path), kSchemaV2Valid);
+}
+
 TEST(BookmarkStoreTest, GivenAnInMemoryStoreWhenMutatedThenNothingIsWrittenToDisk) {
     BookmarkStore store;
     EXPECT_TRUE(store.AddOrFindByUrl("Island", "https://island-browser.github.io/").ok());

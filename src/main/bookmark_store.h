@@ -107,9 +107,11 @@ class BookmarkStore {
     // Reads the file once and must be called before use on a file-backed store. Schema 1 is
     // migrated to schema 2 (see
     // docs/superpowers/specs/2026-10-24-island-bookmarks-favorites-design.md §2.2). A missing file
-    // gives kFileReadError; a malformed or schema-invalid file gives an empty state, and the first
-    // save copies its original bytes to `bookmarks.json.invalid.bak`. When a migration write fails,
-    // the migrated state is kept read-only for this run and the error is kFileWriteError.
+    // gives kFileReadError and the store stays writable. An existing file that cannot be read also
+    // gives kFileReadError, but the store is read-only so the file is never overwritten. A
+    // malformed or schema-invalid file gives an empty state, and the first save copies its original
+    // bytes to `bookmarks.json.invalid.bak`. When a migration write fails, the migrated state is
+    // kept read-only for this run and the error is kFileWriteError.
     BookmarkError Load();
 
     [[nodiscard]] const BookmarkState& state() const noexcept { return state_; }
@@ -149,8 +151,9 @@ class BookmarkStore {
     // Finds or creates the bookmark for |url| and adds it to the list in one save.
     BookmarkResult AddFavoriteByUrl(FavoriteScope scope, std::string_view title,
                                     std::string_view url);
+    // Removes a favorite. A space's list is dropped when it becomes empty.
     BookmarkResult RemoveFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
-    // Moves a favorite to |index| within its list. Removes the list when it becomes empty.
+    // Moves a favorite to |index| within its list.
     BookmarkResult ReorderFavorite(FavoriteScope scope, std::uint64_t bookmark_id,
                                    std::size_t index);
     // Drops one space's favorite list. Called when the session really deletes that space. The
