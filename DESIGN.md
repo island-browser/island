@@ -382,7 +382,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground. The accent is used only for the
   active tab, the address focus ring, the agent's own message bubble and its send button; selected
-  states (a selected row, segment or node) are neutral. The agent panel's focus ring is a neutral
+  states (a selected row, segment, node, radio, swatch or "on" switch) are neutral: a `--text`
+  mark or a `--fill` plate, in every look. Settings' range slider takes `--text` too. The agent panel's focus ring is a neutral
   2 px `--text-2` ring (see below), never the accent.
 - **Agent panel (native, `pages/agent.html`):**
   - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
@@ -396,7 +397,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     `--accent-text` text, radius 8). Agent replies are plain `--text` with no bubble. A tool call is
     one compact 12 px line in `--text-2`: a check in `--success` (a cross in `--danger` on failure,
     a spinner while it runs), the tool name in mono 11.5 px `--text`, then the host or detail.
-    Each row also speaks its status.
+    An MCP tool's `mcp__<server>__` prefix is dropped from the name; the full name is the row's
+    tooltip. Each row also speaks its status.
   - *Composer:* one card with a 1 px `--border-2` outline, radius 10, `--surface`, and a 10 px
     inset. The textarea sits above a bottom row: the page chip (22 px tall, radius 5, `--fill`,
     `--text-2`, 11 px, ellipsis) and the quote chip on the left, and a round 24 px send button
@@ -408,22 +410,25 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     paint the ring itself. There is no outline and no blue focus ring, and the ring never appears
     on mouse focus. Selected and pressed states use neutral raised plates (`--fill`,
     `--segment-selected`), never blue.
-  - *Confirmation card:* a `.card.confirm-card` above the composer on a `--surface` plate with a
-    1 px `--warn-border` hairline and a `--warn-text` kicker. It is titled "Allow this action?",
-    shows the host in mono `--text-2` and the summary, and has buttons for Allow once (the primary),
-    Allow for this task, Trust this site and Cancel, on 26 px buttons with 6 px radius. A card that
+  - *Confirmation card:* a `.card.confirm-card` on the composer's 12 px inset (the same left and
+    right edges as the composer, never clipped) on a `--surface` plate with a full 1 px
+    `--warn-border` hairline and a `--warn-text` kicker. In Native the kicker is sentence case
+    system text ("Allow this action?"), not mono capitals. It shows the host in mono `--text-2` and
+    the summary, and has buttons for Allow once (the primary), Allow for this task, Trust this site
+    and Cancel, on 26 px buttons with 6 px radius, in two even columns so Cancel is never alone. A card that
     cannot be trusted (card fields, password and unclassified fields) offers
     only Allow once and Cancel. Esc declines the oldest card. The card never takes focus.
   - *Tasks strip:* a `--surface` block with a `--border` outline and `--radius` corners, above the
     conversation, with a mono uppercase "Tasks" heading and a "Clear finished" link. Each row shows
-    its state as text (Queued, Running, Needs you, Done, Failed, Stopped), in compact 12 px rows.
+    its state as text in compact 12 px rows: "Running · 3/7", "Queued · #1", "Needs you" (with the
+    count when known), Done, Failed, Stopped.
     A running or waiting row takes a neutral `--fill` plate, and "Needs you" is `--warn-text`.
     Queued rows have Move up, Move down and Remove buttons; running ones have Stop. A queued chat
     message sits under the conversation as a bubble with a 1 px dashed `--border-2` border at
     65 % opacity and the tag "Queued · #n".
-  - *Chips in the composer's bottom row:* the page chip (a share toggle, with a ✕ that removes the
-    page context) and, for a selection, a quote chip. Both share the 22 px chip style and
-    ellipsize on one line.
+  - *Chips in the composer's bottom row:* the page chip (one 22 px plate: the share toggle, with
+    the ✕ that removes the page context inside the same `--fill` plate) and, for a selection, a
+    quote chip. Both share the 22 px chip style and ellipsize on one line.
   - *Collect sheet:* a 12 px-radius dialog over a 20 % scrim, with one text field labelled in
     sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px
     `--border-2` list) and a Collect button that is disabled until something is typed. Checkboxes

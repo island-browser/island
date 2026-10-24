@@ -21,6 +21,17 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   focus ring also closes cleanly at the top-right corner.
 - The Native welcome appearance switcher uses 24 DIP plates without a square inner outline, and
   the waiting Agent footer shows one readable amber status dot.
+- Settings: primary buttons, the selected provider radio, "on" switches, the range slider and the
+  selected colour swatch use the text colour (or a neutral plate) in every look, not the blue
+  selection accent. A design test keeps the accent out of those states.
+- Agent panel: the confirmation card sits on the composer's inset with its full 1 px amber hairline
+  and is no longer clipped; its four answers form two even rows (Cancel is never alone), and its
+  kicker is sentence case in Native.
+- Agent panel: tool rows drop the `mcp__<server>__` prefix (the full name is the tooltip), and the
+  Tasks strip states each status in words: "Running · 3/7", "Queued · #1", "Needs you".
+- Agent panel: the page chip's ✕ sits inside the chip's plate instead of floating beside it.
+- Research reports: a first heading that repeats the report title is not shown twice; Copy and
+  Export keep the full Markdown.
 - Agent confirmation cards during a research bind to the research page the action targets, not to
   the tab the person is viewing. Switching tabs or spaces keeps such a card; a reshuffled index or
   a navigation to another origin withdraws it.
