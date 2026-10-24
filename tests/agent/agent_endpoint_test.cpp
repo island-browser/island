@@ -159,10 +159,14 @@ TEST_F(LiveEndpointTest, DiscoveryFileIsOwnerOnlyAndRemovedOnStop) {
                                       ("island-agent-test-" + endpoint_.token().substr(0, 8));
     const std::filesystem::path file = dir / "agent-endpoint.json";
     ASSERT_TRUE(endpoint_.WriteDiscoveryFile(file));
-    std::ifstream in(file);
-    std::stringstream text;
-    text << in.rdbuf();
-    std::string content = text.str();
+    std::string content;
+    {
+        // Closed before Stop() removes the file: Windows cannot delete an open file.
+        std::ifstream in(file);
+        std::stringstream text;
+        text << in.rdbuf();
+        content = text.str();
+    }
     while (!content.empty() && content.back() == '\n') content.pop_back();
     const auto parsed = json::Parse(content);
     ASSERT_TRUE(parsed.has_value());
