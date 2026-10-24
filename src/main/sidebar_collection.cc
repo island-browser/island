@@ -169,4 +169,8 @@ ArgbColor FavoriteFillColor(const ChromeTokens& tokens, bool displayed, bool hov
     return tokens.canvas;
 }
 
+ArgbColor FavoriteTextColor(const ChromeTokens& tokens) { return tokens.text; }
+
+ArgbColor FavoriteMoreTextColor(const ChromeTokens& tokens) { return tokens.text_secondary; }
+
 }  // namespace island

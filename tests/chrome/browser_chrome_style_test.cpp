@@ -296,6 +296,23 @@ TEST(BrowserChromeFavoritesStyleTest, GivenEveryLookAndThemeThenADisplayedFavori
     }
 }
 
+TEST(BrowserChromeFavoritesStyleTest, GivenAThemeSwitchThenFavoriteTextFollowsTheNewThemeTokens) {
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        const ChromeTokens light = ChromeTokens::ForLook(look, ChromeTheme::kLight);
+        const ChromeTokens dark = ChromeTokens::ForLook(look, ChromeTheme::kDark);
+        // Dark -> light and light -> dark: the ink is the target theme's token, so a row built
+        // under the other theme is repainted rather than left near-white on a light canvas.
+        EXPECT_EQ(FavoriteTextColor(light).argb, light.text.argb);
+        EXPECT_EQ(FavoriteTextColor(dark).argb, dark.text.argb);
+        EXPECT_NE(FavoriteTextColor(light).argb, FavoriteTextColor(dark).argb);
+        EXPECT_EQ(FavoriteMoreTextColor(light).argb, light.text_secondary.argb);
+        EXPECT_EQ(FavoriteMoreTextColor(dark).argb, dark.text_secondary.argb);
+        // The ink must stay legible on the fills a row can take.
+        EXPECT_NE(FavoriteTextColor(light).argb, light.canvas.argb);
+        EXPECT_NE(FavoriteTextColor(dark).argb, dark.canvas.argb);
+    }
+}
+
 TEST(BrowserChromeFavoritesStyleTest, GivenTheFailureRowThenItUsesTheWarningTokens) {
     for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
         const ChromeTokens tokens = ChromeTokens::ForTheme(theme);

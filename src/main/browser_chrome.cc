@@ -61,6 +61,8 @@ int ControlHeight(const ChromeTokens& tokens) { return tokens.control_height_dip
 constexpr int kHairlineDip = 1;
 // Native paints focus as a 2 DIP accent ring; the row inset is that ring.
 constexpr int kNativeFocusRingDip = 2;
+// Room around a strip icon for its keyboard focus ring (2 DIP ring plus a pixel of air).
+constexpr int kStripFocusInsetDip = 4;
 
 // Gap between the address outline and the textfield. Native's field already sits inside a 2 DIP
 // accent ring. Arc and Graphite put the field straight on their 1 DIP outline, and Chromium's
@@ -2164,8 +2166,8 @@ void BrowserChrome::AddFavoriteSections() {
     const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
     const std::vector<FavoriteEntrySnapshot>& spaces = collection.space_favorites;
     // Ruling a: min(6, count) icons then "+N"; the plate and gap shrink to fit the width.
-    const GlobalStripLayout layout =
-        ComputeGlobalStripLayout(globals.size(), GlobalStripWidthDip(tokens_));
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(
+        globals.size(), GlobalStripWidthDip(tokens_) - 2 * kStripFocusInsetDip);
     const int plate = layout.plate_dip;
     const int header_row = GlobalHeaderRowHeightDip();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
@@ -2213,14 +2215,20 @@ void BrowserChrome::AddFavoriteSections() {
     }
 
     if (GlobalStripVisible(layout)) {
-        global_strip_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, plate)));
+        // The keyboard focus ring is drawn just outside the icon and the strip clips it, so the
+        // strip keeps a ring-wide inset on every side and the ring is centred on the plate.
+        const int strip_height = plate + 2 * kStripFocusInsetDip;
+        global_strip_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, strip_height)));
         global_strip_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesStrip));
         CefBoxLayoutSettings strip_settings;
         strip_settings.horizontal = static_cast<int>(true);
         strip_settings.between_child_spacing = layout.gap_dip;
+        strip_settings.inside_border_insets = CefInsets(kStripFocusInsetDip, kStripFocusInsetDip,
+                                                        kStripFocusInsetDip, kStripFocusInsetDip);
+        strip_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
         global_strip_->SetToBoxLayout(strip_settings);
         tab_strip_->AddChildView(global_strip_);
-        favorite_block_height_dip_ += plate;
+        favorite_block_height_dip_ += strip_height;
         favorite_block_children_ += 1;
         for (std::size_t index = 0; index < layout.icons; ++index) {
             const FavoriteEntrySnapshot& entry = globals[index];
@@ -2282,7 +2290,7 @@ void BrowserChrome::AddFavoriteSections() {
             row->SetMinimumSize(CefSize(0, row_height));
             row->SetFontList(FontList(
                 13, entry.displayed ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
-            row->SetEnabledTextColors(tokens_.text.argb);
+            row->SetEnabledTextColors(FavoriteTextColor(tokens_).argb);
             if (entry.favicon != nullptr) {
                 SetAllStateImages(row, entry.favicon);
             } else if (fallback.has_value()) {
@@ -2342,6 +2350,71 @@ void BrowserChrome::ApplyFavoriteVisuals() {
     for (const auto& [button, displayed] : FavoriteSurfaces()) {
         button->SetBackgroundColor(
             FavoriteFillColor(tokens_, displayed, FavoriteHovered(button)).argb);
+    }
+    // Text and glyph colors are re-asserted with the fills: a theme change re-runs this without
+    // rebuilding the rows, so a color set only at build time would keep the old theme's ink.
+    const auto set_text = [](const CefRefPtr<CefLabelButton>& button, ArgbColor color) {
+        for (const cef_button_state_t state :
+             {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED}) {
+            button->SetTextColor(state, color.argb);
+        }
+        button->SetEnabledTextColors(color.argb);
+    };
+    for (const CefRefPtr<CefLabelButton>& row : space_favorite_rows_) {
+        set_text(row, FavoriteTextColor(tokens_));
+    }
+    if (global_strip_ != nullptr) {
+        for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
+            const CefRefPtr<CefView> view = global_strip_->GetChildViewAt(static_cast<int>(child));
+            if (view->GetID() == static_cast<int>(ChromeViewId::kGlobalFavoritesMore)) {
+                set_text(view->AsButton()->AsLabelButton(), FavoriteMoreTextColor(tokens_));
+            }
+        }
+    }
+    if (global_add_ != nullptr) {
+        if (const std::optional<CefRefPtr<CefImage>> plus = icon_catalog_.LoadTinted(
+                ChromeIcon::kPlus, tokens_.text_secondary, ChromeIconSize::k16);
+            plus.has_value()) {
+            SetAllStateImages(global_add_, *plus);
+        }
+    }
+    // Favorites without a favicon show the generic glyph, tinted for the current theme.
+    if (const std::optional<CefRefPtr<CefImage>> fallback = icon_catalog_.LoadTinted(
+            ChromeIcon::kLocation, tokens_.text_secondary, ChromeIconSize::k16);
+        fallback.has_value()) {
+        const auto& globals = sidebar_collection_.global_favorites;
+        const auto& spaces = sidebar_collection_.space_favorites;
+        for (std::size_t index = 0; index < space_favorite_rows_.size() && index < spaces.size();
+             ++index) {
+            if (spaces[index].favicon == nullptr) {
+                SetAllStateImages(space_favorite_rows_[index], *fallback);
+            }
+        }
+        if (global_strip_ != nullptr) {
+            std::size_t icon = 0;
+            for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
+                const CefRefPtr<CefView> view =
+                    global_strip_->GetChildViewAt(static_cast<int>(child));
+                if (view->GetID() != static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
+                    continue;
+                }
+                if (icon < globals.size() && globals[icon].favicon == nullptr) {
+                    SetAllStateImages(view->AsButton()->AsLabelButton(), *fallback);
+                }
+                ++icon;
+            }
+        }
+        for (std::size_t index = 0; index < collapsed_favorite_buttons_.size(); ++index) {
+            const FavoriteEntrySnapshot* entry = nullptr;
+            if (index < globals.size()) {
+                entry = &globals[index];
+            } else if (index - globals.size() < spaces.size()) {
+                entry = &spaces[index - globals.size()];
+            }
+            if (entry != nullptr && entry->favicon == nullptr) {
+                SetAllStateImages(collapsed_favorite_buttons_[index], *fallback);
+            }
+        }
     }
     if (collapsed_favorite_separator_wrapper_ != nullptr) {
         collapsed_favorite_separator_wrapper_->SetBackgroundColor(

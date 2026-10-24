@@ -22,6 +22,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Cmd+W closes it.
 
 ### Changed
+- Sidebar favorites repaint their text and generic icons on a theme switch (round 4: the row titles were near-white on the light canvas), and the keyboard focus ring on a strip icon is centred and no longer clipped.
 
 - Sidebar favorites, fix round 2: while a favorite is shown, the space's selected tab is drawn with the neutral selected plate instead of the accent, until the favorite closes. Favorite icons, "+N", "+" and rail favorites carry the accessible names the runtime uses, and the section decisions are shared by the builders and the contract tests.
 - Sidebar favorites, fix round 3: keyboard focus on sidebar controls (the global strip, favorite and tab rows, rail icons, footer and status buttons) is a rounded neutral ring, not the accent. Only the address field keeps the accent focus ring.

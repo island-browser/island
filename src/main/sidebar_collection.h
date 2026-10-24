@@ -104,6 +104,10 @@ struct BookmarkStatusColors {
 // is the displayed favorite, the soft hover fill under the pointer, and the surface otherwise.
 // The accent is never used for a favorite.
 [[nodiscard]] ArgbColor FavoriteFillColor(const ChromeTokens& tokens, bool displayed, bool hovered);
+// The ink of a space-favorite row title (`text`) and of the strip's `+N` label (`text_secondary`).
+// Both are re-asserted on every theme change, so they are token reads, never build-time constants.
+[[nodiscard]] ArgbColor FavoriteTextColor(const ChromeTokens& tokens);
+[[nodiscard]] ArgbColor FavoriteMoreTextColor(const ChromeTokens& tokens);
 
 }  // namespace island
 
