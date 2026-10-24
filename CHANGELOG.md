@@ -15,32 +15,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [0.8.0] - 2026-10-24
 
-### Fixed
-
-- Native chrome keeps Back and Forward clear of the macOS traffic lights in the collapsed rail,
-  makes the focused address field one flush plate, and renders the selected rail globe in white.
-- Arc and Graphite now keep idle address fields scrolled to the start of their URL; their address
-  focus ring also closes cleanly at the top-right corner.
-- The Native welcome appearance switcher uses 24 DIP plates without a square inner outline, and
-  the waiting Agent footer shows one readable amber status dot.
-- Settings: primary buttons, the selected provider radio, "on" switches, the range slider and the
-  selected colour swatch use the text colour (or a neutral plate) in every look, not the blue
-  selection accent. A design test keeps the accent out of those states.
-- Agent panel: the confirmation card sits on the composer's inset with its full 1 px amber hairline
-  and is no longer clipped; its four answers form two even rows (Cancel is never alone), and its
-  kicker is sentence case in Native.
-- Agent panel: tool rows drop the `mcp__<server>__` prefix (the full name is the tooltip), and the
-  Tasks strip states each status in words: "Running · 3/7", "Queued · #1", "Needs you".
-- Agent panel: the page chip's ✕ sits inside the chip's plate instead of floating beside it.
-- Research reports: a first heading that repeats the report title is not shown twice; Copy and
-  Export keep the full Markdown.
-- Agent confirmation cards during a research bind to the research page the action targets, not to
-  the tab the person is viewing. Switching tabs or spaces keeps such a card; a reshuffled index or
-  a navigation to another origin withdraws it.
-- The live-label rule no longer treats "５0:42" and "５9:42" as the same label: a time run touching
-  a non-ASCII digit is compared exactly.
-- `page_type` returns an error instead of "Typed." when the target does not take focus.
-
 ### Added
 
 - Collect from tabs: the command palette's "Collect from tabs…" opens a Collect sheet in the agent
@@ -94,6 +68,29 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- Native chrome keeps Back and Forward clear of the macOS traffic lights in the collapsed rail,
+  makes the focused address field one flush plate, and renders the selected rail globe in white.
+- Arc and Graphite now keep idle address fields scrolled to the start of their URL; their address
+  focus ring also closes cleanly at the top-right corner.
+- The Native welcome appearance switcher uses 24 DIP plates without a square inner outline, and
+  the waiting Agent footer shows one readable amber status dot.
+- Settings: primary buttons, the selected provider radio, "on" switches, the range slider and the
+  selected colour swatch use the text colour (or a neutral plate) in every look, not the blue
+  selection accent. A design test keeps the accent out of those states.
+- Agent panel: the confirmation card sits on the composer's inset with its full 1 px amber hairline
+  and is no longer clipped; its four answers form two even rows (Cancel is never alone), and its
+  kicker is sentence case in Native.
+- Agent panel: tool rows drop the `mcp__<server>__` prefix (the full name is the tooltip), and the
+  Tasks strip states each status in words: "Running · 3/7", "Queued · #1", "Needs you".
+- Agent panel: the page chip's ✕ sits inside the chip's plate instead of floating beside it.
+- Research reports: a first heading that repeats the report title is not shown twice; Copy and
+  Export keep the full Markdown.
+- Agent confirmation cards during a research bind to the research page the action targets, not to
+  the tab the person is viewing. Switching tabs or spaces keeps such a card; a reshuffled index or
+  a navigation to another origin withdraws it.
+- The live-label rule no longer treats "５0:42" and "５9:42" as the same label: a time run touching
+  a non-ASCII digit is compared exactly.
+- `page_type` returns an error instead of "Typed." when the target does not take focus.
 - The address field in Arc and Graphite shows one focus ring (the pill's outline) instead of an
   inner blue ring inside it, like Native.
 - The agent can press buttons with a live countdown (a timer such as "0:42") or a trailing count
