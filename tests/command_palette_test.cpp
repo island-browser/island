@@ -342,7 +342,7 @@ TEST(CommandPaletteTest, GivenLibraryBookmarksThenFolderAndFavoriteMetadataStayO
     EXPECT_EQ(results[0].bookmark.scope_label, "Global");
 }
 
-TEST(CommandPaletteTest, GivenABookmarkSelectionThenItDoesNotRunTheUrlValidator) {
+TEST(CommandPaletteTest, GivenABookmarkSelectionThenTheModelReturnsItForTheWindowToValidate) {
     CommandPaletteModel palette(NeverCalledValidator());
     palette.SetBookmarks(
         {{.id = 7, .title = "Saved", .url = "https://saved.test/", .folder_path = "Unfiled"}});
@@ -720,6 +720,34 @@ TEST(CommandPaletteCommandsTest, GivenCommandsThenTheyFollowSpacesAndMatchByTitl
     ASSERT_EQ(found.size(), 2U);  // the command, then the go-to row
     EXPECT_EQ(found[0].kind, PaletteEntryKind::kCommand);
     EXPECT_EQ(found[0].command.id, "sleep_inactive_tabs");
+}
+
+TEST(CommandPaletteCommandsTest, GivenBookmarkCommandsThenTheyHeadTheBookmarksGroupBeforeItsRows) {
+    const std::vector<PaletteCommandEntry> commands{
+        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
+        {.id = "add_bookmark", .title = "Add bookmark", .bookmark_group = true}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {Bookmark("Docs", "https://docs.test/")};
+
+    const std::vector<PaletteEntry> all =
+        ComposePaletteResults("", {}, {}, bookmarks, {}, commands);
+
+    ASSERT_EQ(all.size(), 3U);
+    EXPECT_EQ(all[0].kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(all[0].command.id, "sleep_inactive_tabs");
+    EXPECT_EQ(all[1].kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(all[1].command.id, "add_bookmark");
+    EXPECT_EQ(all[2].kind, PaletteEntryKind::kBookmark);
+    EXPECT_EQ(PaletteGroupHeader(all[0]), "Commands");
+    EXPECT_EQ(PaletteGroupHeader(all[1]), "Bookmarks");
+    EXPECT_EQ(PaletteGroupHeader(all[2]), "Bookmarks");
+    EXPECT_EQ(PaletteKindLabel(all[1], /*sentence_case=*/true), "Bookmark");
+
+    // A query that matches only the bookmark command still lists it in its group.
+    const std::vector<PaletteEntry> found =
+        ComposePaletteResults("add book", {}, {}, bookmarks, {}, commands);
+    ASSERT_GE(found.size(), 1U);
+    EXPECT_EQ(found[0].command.id, "add_bookmark");
+    EXPECT_EQ(PaletteGroupHeader(found[0]), "Bookmarks");
 }
 
 TEST(CommandPaletteCommandsTest, GivenAHighlightedCommandWhenSubmittedThenItsIdIsReturnedOnce) {

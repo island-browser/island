@@ -98,6 +98,9 @@ struct PaletteCommandEntry {
     // resolves the person's current binding at palette-open time; the view never hard-codes keys.
     std::string shortcut_action_id;
     std::string shortcut;
+    // Bookmark and favorite commands sit in the "Bookmarks" group, before the bookmark rows, and
+    // not in the general "Commands" group. They still run through the command dispatch.
+    bool bookmark_group = false;
 
     bool operator==(const PaletteCommandEntry&) const = default;
 };
@@ -151,6 +154,9 @@ struct PaletteEntry;
 [[nodiscard]] std::span<const PaletteKindStyle> PaletteKindStyles() noexcept;
 [[nodiscard]] const PaletteKindStyle& PaletteKindStyleFor(PaletteEntryKind kind) noexcept;
 [[nodiscard]] std::string PaletteKindLabel(const PaletteEntry& entry, bool sentence_case);
+// The group a row is listed under: its kind's header, except that bookmark commands share the
+// Bookmarks header with the bookmark rows.
+[[nodiscard]] std::string_view PaletteGroupHeader(const PaletteEntry& entry) noexcept;
 
 // One row of palette results. `tab`, `space`, `url_query`, and `bookmark` are
 // meaningful for their kind only; the unused members stay defaulted so rows

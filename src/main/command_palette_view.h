@@ -75,6 +75,8 @@ class CommandPaletteView final {
     void SetHistoryResults(std::string_view query, std::vector<PaletteHistoryEntry> history);
     // Hides the palette without acting on the highlighted row.
     void Hide();
+    // Developer capture only (`palette_query:<text>`): sets the query field as if typed.
+    void SetQueryForDev(std::string_view query);
     // Re-positions the overlay for the window's current bounds.
     void UpdateBounds();
     void ApplyTheme(ChromeTokens tokens);
@@ -123,6 +125,8 @@ class CommandPaletteView final {
     std::vector<CefRefPtr<CefLabelButton>> result_right_caps_;
     std::vector<CefRefPtr<CefLabelButton>> result_icons_;
     std::vector<CefRefPtr<CefLabelButton>> result_labels_;
+    // The muted secondary text after a row's title (a bookmark's folder and favorite scopes).
+    std::vector<CefRefPtr<CefLabelButton>> result_details_;
     OverlaySlot overlay_;
     OverlayLifetime overlay_lifetime_;
     // The right-aligned kind tag (Native sentence case; legacy looks keep their uppercase tone).

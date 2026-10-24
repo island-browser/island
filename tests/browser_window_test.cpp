@@ -1648,25 +1648,244 @@ TEST(BrowserWindowTest, GivenALocalPageWhenFavoriteToggleRunsThenItDoesNotAddABo
     EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
 }
 
-TEST(BrowserWindowTest, GivenBookmarkPaletteCommandsThenTheyIncludeLibraryActionsAndScopeLabels) {
-    const std::vector<PaletteCommandEntry> commands =
-        BrowserWindow::PaletteCommands("Work", /*global_favorite=*/true, /*space_favorite=*/false);
-    const auto find = [&commands](std::string_view id) {
-        return std::find_if(commands.begin(), commands.end(),
-                            [id](const PaletteCommandEntry& command) { return command.id == id; });
-    };
+std::optional<PaletteCommandEntry> FindCommand(const std::vector<PaletteCommandEntry>& commands,
+                                               std::string_view id) {
+    const auto found =
+        std::find_if(commands.begin(), commands.end(),
+                     [id](const PaletteCommandEntry& command) { return command.id == id; });
+    return found == commands.end() ? std::nullopt : std::optional<PaletteCommandEntry>(*found);
+}
 
-    ASSERT_NE(find("open_bookmarks"), commands.end());
-    ASSERT_NE(find("add_bookmark"), commands.end());
-    const auto global = find("toggle_global_favorite");
-    ASSERT_NE(global, commands.end());
+BookmarkCommandState BookmarkStateFor(std::string space_name, bool page_bookmarkable) {
+    return BookmarkCommandState{.space_name = std::move(space_name),
+                                .page_bookmarkable = page_bookmarkable};
+}
+
+std::vector<std::uint64_t> GlobalFavorites(const BrowserWindow& window) {
+    return window.bookmarks().state().global_favorite_ids;
+}
+
+std::vector<std::uint64_t> SpaceFavoriteIds(const BrowserWindow& window, SpaceId space) {
+    const auto& lists = window.bookmarks().state().space_favorite_ids;
+    const auto found = lists.find(space.value);
+    return found == lists.end() ? std::vector<std::uint64_t>{} : found->second;
+}
+
+TEST(BrowserWindowTest, GivenBookmarkPaletteCommandsThenTheyIncludeLibraryActionsAndScopeLabels) {
+    BookmarkCommandState state = BookmarkStateFor("Work", /*page_bookmarkable=*/true);
+    state.global_position = 0;
+    state.global_count = 1;
+    const std::vector<PaletteCommandEntry> commands = BrowserWindow::PaletteCommands(state);
+
+    const std::optional<PaletteCommandEntry> open = FindCommand(commands, "open_bookmarks");
+    ASSERT_TRUE(open.has_value());
+    EXPECT_EQ(open->title, "Open Bookmarks");
+    ASSERT_TRUE(FindCommand(commands, "add_bookmark").has_value());
+    const auto global = FindCommand(commands, "toggle_global_favorite");
+    ASSERT_TRUE(global.has_value());
     EXPECT_EQ(global->title, "Remove global favorite");
-    const auto space = find("toggle_space_favorite");
-    ASSERT_NE(space, commands.end());
+    const auto space = FindCommand(commands, "toggle_space_favorite");
+    ASSERT_TRUE(space.has_value());
     EXPECT_EQ(space->title, "Add Work favorite");
-    ASSERT_NE(find("new_bookmark_folder"), commands.end());
-    ASSERT_NE(find("import_bookmarks"), commands.end());
-    ASSERT_NE(find("show_global_favorites"), commands.end());
+    EXPECT_TRUE(FindCommand(commands, "new_bookmark_folder").has_value());
+    EXPECT_TRUE(FindCommand(commands, "import_bookmarks").has_value());
+    // The "show all" promise was dropped: nothing here opens a view it cannot focus.
+    EXPECT_FALSE(FindCommand(commands, "show_global_favorites").has_value());
+    // Every bookmark command is in the Bookmarks group, not the general Commands group.
+    for (const PaletteCommandEntry& command : commands) {
+        if (command.id == "sleep_inactive_tabs" || command.id == "agent_tasks" ||
+            command.id == "summarize_page" || command.id == "ask_about_page" ||
+            command.id == "collect_from_tabs" ||
+            command.id == std::string(kChangeSpaceIconCommandId)) {
+            EXPECT_FALSE(command.bookmark_group) << command.id;
+        } else {
+            EXPECT_TRUE(command.bookmark_group) << command.id;
+        }
+    }
+}
+
+TEST(BrowserWindowTest, GivenAPageThatCannotBeBookmarkedThenThePageRowsAreLeftOut) {
+    const std::vector<PaletteCommandEntry> commands =
+        BrowserWindow::PaletteCommands(BookmarkStateFor("Work", /*page_bookmarkable=*/false));
+
+    EXPECT_FALSE(FindCommand(commands, "add_bookmark").has_value());
+    EXPECT_FALSE(FindCommand(commands, "toggle_global_favorite").has_value());
+    EXPECT_FALSE(FindCommand(commands, "toggle_space_favorite").has_value());
+    // The library commands do not depend on the page.
+    EXPECT_TRUE(FindCommand(commands, "open_bookmarks").has_value());
+    EXPECT_TRUE(FindCommand(commands, "new_bookmark_folder").has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteNotAtAnEndThenOnlyTheMoveRowsThatCanRunAreListed) {
+    BookmarkCommandState state = BookmarkStateFor("Work", /*page_bookmarkable=*/true);
+    state.global_position = 0;
+    state.global_count = 3;
+    state.space_position = 1;
+    state.space_count = 2;
+    const std::vector<PaletteCommandEntry> middle = BrowserWindow::PaletteCommands(state);
+    EXPECT_FALSE(FindCommand(middle, "move_global_favorite_left").has_value());
+    EXPECT_TRUE(FindCommand(middle, "move_global_favorite_right").has_value());
+    EXPECT_TRUE(FindCommand(middle, "move_space_favorite_up").has_value());
+    EXPECT_FALSE(FindCommand(middle, "move_space_favorite_down").has_value());
+    ASSERT_TRUE(FindCommand(middle, "move_space_favorite_up").has_value());
+    EXPECT_EQ(FindCommand(middle, "move_space_favorite_up")->title, "Move Work favorite up");
+
+    // A page that is not a favorite has no reorder rows at all.
+    const std::vector<PaletteCommandEntry> none =
+        BrowserWindow::PaletteCommands(BookmarkStateFor("Work", /*page_bookmarkable=*/true));
+    EXPECT_FALSE(FindCommand(none, "move_global_favorite_right").has_value());
+    EXPECT_FALSE(FindCommand(none, "move_space_favorite_up").has_value());
+}
+
+TEST(BrowserWindowTest, GivenTheDisplayedFavoriteWhenBookmarkCommandsRunThenTheyActOnThatPage) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    // The ordinary tab stays on its own page while a favorite's virtual tab is displayed.
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+
+    // Add bookmark finds the displayed page's bookmark, not the hidden ordinary tab.
+    window->RunPaletteCommand("add_bookmark");
+    EXPECT_FALSE(window->bookmarks().FindBookmarkByUrl("https://ordinary.test/").has_value());
+    EXPECT_EQ(window->bookmarks().FindBookmarkByUrl("https://mail.test/"), mail.id);
+
+    // The state the palette shows describes the displayed page too.
+    const BookmarkCommandState state = window->CurrentBookmarkCommandState();
+    EXPECT_TRUE(state.page_bookmarkable);
+    EXPECT_TRUE(state.global_favorite());
+    EXPECT_FALSE(state.space_favorite());
+
+    // Removing the displayed favorite drops its virtual tab; the slot returns to the ordinary tab.
+    window->RunPaletteCommand("toggle_global_favorite");
+    EXPECT_TRUE(GlobalFavorites(*window).empty());
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_FALSE(window->bookmarks().FindBookmarkByUrl("https://ordinary.test/").has_value());
+}
+
+TEST(BrowserWindowTest, GivenALocalPageOnScreenWhenBookmarkCommandRunsThenTheStatusSaysWhy) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    window->ToggleInternalPageForSwapTest(LocalPageKind::kBookmarks);
+
+    EXPECT_FALSE(window->CurrentBookmarkCommandState().page_bookmarkable);
+    const BookmarkResult result = window->ToggleGlobalFavoriteForCurrentPage();
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(status->text, "Only web pages can be favorites.");
+    EXPECT_FALSE(status->retryable);
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWhenMovedThenTheListOrderChangesAndTheEndsRefuse) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult first = window->AddFavoriteByUrl(std::nullopt, "A", "https://a.test/");
+    const BookmarkResult second = window->AddFavoriteByUrl(std::nullopt, "B", "https://b.test/");
+    ASSERT_TRUE(first.ok());
+    ASSERT_TRUE(second.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, second.id));
+    ASSERT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{first.id, second.id}));
+
+    window->RunPaletteCommand("move_global_favorite_left");
+    EXPECT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{second.id, first.id}));
+    // B is now at the front, so a second left move is refused and reported.
+    window->RunPaletteCommand("move_global_favorite_left");
+    EXPECT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{second.id, first.id}));
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(status->text, "This favorite is already at that end.");
+}
+
+TEST(BrowserWindowTest, GivenEachBookmarkPaletteCommandWhenRunThenItRunsItsAction) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    const SpaceId space = window->active_space_id();
+
+    window->RunPaletteCommand("add_bookmark");
+    const std::optional<std::uint64_t> id =
+        window->bookmarks().FindBookmarkByUrl("https://ordinary.test/");
+    ASSERT_TRUE(id.has_value());
+
+    window->RunPaletteCommand("toggle_global_favorite");
+    EXPECT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{*id}));
+    window->RunPaletteCommand("toggle_global_favorite");
+    EXPECT_TRUE(GlobalFavorites(*window).empty());
+
+    window->RunPaletteCommand("toggle_space_favorite");
+    EXPECT_EQ(SpaceFavoriteIds(*window, space), (std::vector<std::uint64_t>{*id}));
+    window->RunPaletteCommand("toggle_space_favorite");
+    EXPECT_TRUE(SpaceFavoriteIds(*window, space).empty());
+
+    window->RunPaletteCommand("new_bookmark_folder");
+    const BookmarkState& state = window->bookmarks().state();
+    EXPECT_TRUE(
+        std::any_of(state.folders.begin(), state.folders.end(),
+                    [](const BookmarkFolder& folder) { return folder.name == "New folder"; }));
+
+    // A headless window has no chrome to show the Bookmarks page in, so opening it is a no-op
+    // here; the page itself is checked by the captures. Neither command touches the library.
+    const std::size_t folders = window->bookmarks().state().folders.size();
+    window->RunPaletteCommand("open_bookmarks");
+    window->RunPaletteCommand("import_bookmarks");
+    EXPECT_EQ(window->bookmarks().state().folders.size(), folders);
+}
+
+TEST(BrowserWindowTest, GivenTwoBookmarksThenThePaletteRowsKeepTheLibraryFolderOrder) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    static_cast<void>(window->AddFavoriteByUrl(std::nullopt, "Second", "https://second.test/"));
+    static_cast<void>(window->AddFavoriteByUrl(std::nullopt, "First", "https://first.test/"));
+
+    const std::vector<PaletteBookmarkEntry> rows = window->PaletteBookmarkEntries();
+    const std::vector<FlatBookmark> flat = window->bookmarks().Flattened();
+    ASSERT_EQ(rows.size(), 2U);
+    ASSERT_EQ(flat.size(), 2U);
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        EXPECT_EQ(rows[index].title, flat[index].title);
+        EXPECT_EQ(rows[index].folder_path, flat[index].folder_name);
+        EXPECT_NE(rows[index].id, 0U);
+    }
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteInTwoListsThenItIsOneRowLabelledWithEachListOnce) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    const std::string space_name = ActiveSpace(*window).name();
+    ASSERT_TRUE(window
+                    ->AddFavoriteByUrl(FavoriteScope{window->active_space_id().value}, "Mail",
+                                       "https://mail.test/")
+                    .ok());
+    // A list of a space that no longer exists is kept in the library but not presented.
+    ASSERT_TRUE(window->AddFavoriteByUrl(FavoriteScope{999999}, "Mail", "https://mail.test/").ok());
+
+    const std::vector<PaletteBookmarkEntry> rows = window->PaletteBookmarkEntries();
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(rows[0].scope_label, "Global, " + space_name);
+}
+
+TEST(BrowserWindowTest, GivenABookmarkTheAllowListRejectsThenThePaletteLeavesTheTabUnchanged) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    const BookmarkResult plain =
+        window->AddFavoriteByUrl(std::nullopt, "Plain", "http://plain.test/");
+    ASSERT_TRUE(plain.ok());
+
+    // The selected bookmark still goes through the one validator, which rejects it.
+    int validations = 0;
+    window->SetAddressValidatorForTest([&validations](std::string_view text) {
+        ++validations;
+        return AcceptHttps(text);
+    });
+    window->OpenPaletteBookmarkForTest(window->PaletteBookmarkEntries().front());
+
+    EXPECT_EQ(validations, 1);
+    EXPECT_EQ(window->spaces()[0].tabs()[0].navigation_state().snapshot().url,
+              "https://ordinary.test/");
 }
 
 TEST(BrowserWindowTest, GivenAFailedWriteThenItIsRetryableUntilTheLibraryCanBeSaved) {

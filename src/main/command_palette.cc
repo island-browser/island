@@ -99,8 +99,20 @@ std::string PaletteKindLabel(const PaletteEntry& entry, bool sentence_case) {
     if (entry.kind == PaletteEntryKind::kReport && entry.report.kind == "collection") {
         return sentence_case ? "Table" : "TABLE";
     }
-    const PaletteKindStyle& style = PaletteKindStyleFor(entry.kind);
+    // A bookmark command reads as a bookmark row, so it is labelled like one.
+    const PaletteEntryKind kind =
+        entry.kind == PaletteEntryKind::kCommand && entry.command.bookmark_group
+            ? PaletteEntryKind::kBookmark
+            : entry.kind;
+    const PaletteKindStyle& style = PaletteKindStyleFor(kind);
     return std::string(sentence_case ? style.sentence_label : style.legacy_label);
+}
+
+std::string_view PaletteGroupHeader(const PaletteEntry& entry) noexcept {
+    if (entry.kind == PaletteEntryKind::kCommand && entry.command.bookmark_group) {
+        return PaletteKindStyleFor(PaletteEntryKind::kBookmark).group_header;
+    }
+    return PaletteKindStyleFor(entry.kind).group_header;
 }
 
 PaletteMatchRank ClassifyPaletteMatch(std::string_view candidate, std::string_view query) {
@@ -226,11 +238,15 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
     };
     std::vector<PaletteEntry> results;
     results.reserve(canonical.size() + history.size() + 1U);
-    const auto append_section = [&](PaletteEntryKind kind) {
+    const auto append_section = [&](PaletteEntryKind kind, bool bookmark_commands = false) {
         std::vector<ScoredEntry> scored;
         for (std::size_t index = 0; index < canonical.size(); ++index) {
             const PaletteEntry& entry = canonical[index];
             if (entry.kind != kind) {
+                continue;
+            }
+            if (kind == PaletteEntryKind::kCommand &&
+                entry.command.bookmark_group != bookmark_commands) {
                 continue;
             }
             PaletteMatchRank rank = PaletteMatchRank::kNone;
@@ -263,6 +279,8 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
     append_section(PaletteEntryKind::kTab);
     append_section(PaletteEntryKind::kSpace);
     append_section(PaletteEntryKind::kCommand);
+    // The Bookmarks group: its commands, then the bookmark rows under the same header.
+    append_section(PaletteEntryKind::kCommand, /*bookmark_commands=*/true);
     append_section(PaletteEntryKind::kBookmark);
     append_section(PaletteEntryKind::kReport);
     for (const PaletteHistoryEntry& item : history) {

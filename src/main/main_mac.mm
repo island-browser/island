@@ -536,6 +536,13 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
                                    equals == std::string::npos ? "" : rest.substr(equals + 1));
         return true;
     }
+    // `palette_query:<text>` opens ⌘K with the query typed in (the palette's bookmark rows and
+    // their folder and favorite labels are captured this way).
+    constexpr std::string_view kPaletteQuery = "palette_query:";
+    if (action.compare(0, kPaletteQuery.size(), kPaletteQuery) == 0) {
+        app->ShowCommandPaletteWithQueryForDev(action.substr(kPaletteQuery.size()));
+        return true;
+    }
     const std::string_view settings_section = island::DevSettingsSectionName(action);
     if (!settings_section.empty()) {
         app->OpenSettingsSection(std::string(settings_section));

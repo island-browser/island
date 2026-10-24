@@ -27,8 +27,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
   sites; bulk, import, folder-mutation and reorder tools are not exposed.
 - The command palette now searches the full bookmark library with folder and favorite-scope
-  metadata, and offers Bookmarks actions for adding a bookmark or favorite, opening/importing the
-  library, creating a `New folder`, and showing global favorites.
+  metadata, and offers a "Bookmarks" group: Open Bookmarks, Add bookmark, add/remove global or
+  current-space favorite, move the current page's favorite (left/right in the global list, up/down
+  in a space list, only where it can move), `New folder`, and "Open Bookmarks to import…".
+  The bookmark commands act on the page on screen, including a displayed favorite, and a refusal
+  (for example a non-web page) shows in the bookmark status.
 
 ### Changed
 

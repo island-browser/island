@@ -92,6 +92,27 @@ class WindowAgentHost;
     return luminance < kDarkThemeLuminance ? ChromeTheme::kDark : ChromeTheme::kLight;
 }
 
+// What the palette's bookmark commands need to know about the page on screen, read when the
+// palette opens. Positions index the page's favorite within its list (kNoFavoritePosition when it
+// is not there); the counts are the list sizes. The commands are titled and filtered from this.
+struct BookmarkCommandState {
+    static constexpr std::size_t kNoFavoritePosition = static_cast<std::size_t>(-1);
+
+    std::string space_name;
+    bool page_bookmarkable = false;
+    std::size_t global_position = kNoFavoritePosition;
+    std::size_t global_count = 0;
+    std::size_t space_position = kNoFavoritePosition;
+    std::size_t space_count = 0;
+
+    [[nodiscard]] bool global_favorite() const noexcept {
+        return global_position != kNoFavoritePosition;
+    }
+    [[nodiscard]] bool space_favorite() const noexcept {
+        return space_position != kNoFavoritePosition;
+    }
+};
+
 class BrowserWindow : public CefClient,
                       public CefDisplayHandler,
                       public CefDownloadHandler,
@@ -449,16 +470,21 @@ class BrowserWindow : public CefClient,
     void SetExportPathForTest(std::filesystem::path path) {
         export_path_for_test_ = std::move(path);
     }
-    // The command palette's command list (the window's own commands).
+    // The command palette's command list (the window's own commands). The bookmark rows come
+    // from `bookmarks` in the "Bookmarks" group; the page-changing ones are left out unless the
+    // page on screen can be bookmarked, and the reorder rows only for a page that is a favorite.
     [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands(
-        std::string_view active_space_name = {}, bool global_favorite = false,
-        bool space_favorite = false);
+        const BookmarkCommandState& bookmarks = {});
     void SetPlanCloseConfirmationForTest(
         std::function<bool(std::string_view, std::string_view, std::string_view)> confirm) {
         plan_close_confirmation_for_test_ = std::move(confirm);
     }
     void SetPlanEntriesForTest(std::vector<agent::AcpPlanEntry> entries) {
         plan_entries_ = std::move(entries);
+    }
+    // Test seam: a palette bookmark selection through the same path as Enter in the palette.
+    void OpenPaletteBookmarkForTest(const PaletteBookmarkEntry& bookmark) {
+        OpenBookmark(bookmark);
     }
     bool SetTabAddressForTest(std::size_t space, std::size_t tab, std::string url) {
         if (space >= spaces_.size() || tab >= spaces_[space].tab_count()) {
@@ -653,6 +679,11 @@ class BrowserWindow : public CefClient,
     // These small public seams are also the keyboard-shortcut targets.
     BookmarkResult ToggleGlobalFavoriteForCurrentPage();
     BookmarkResult ToggleSpaceFavoriteForCurrentPage();
+    // The palette's bookmark state, read when the palette opens: the page on screen and its
+    // favorite positions. One row per library bookmark, in folder order, with its favorite scopes
+    // joined as one label.
+    [[nodiscard]] BookmarkCommandState CurrentBookmarkCommandState() const;
+    [[nodiscard]] std::vector<PaletteBookmarkEntry> PaletteBookmarkEntries() const;
     // Runs the last failed bookmark mutation again. With no retryable failure it returns an error.
     BookmarkResult RetryLastBookmarkMutation();
     void DismissBookmarkStatus();
@@ -688,6 +719,8 @@ class BrowserWindow : public CefClient,
     // creating it on first use. The Phase 3 design fixes Cmd/Ctrl+K on the
     // command palette; the later search palette keeps Cmd/Ctrl+Shift+K.
     void ShowCommandPalette();
+    // Developer capture only (`palette_query:<text>`): opens the palette and types `query` into it.
+    void ShowCommandPaletteWithQueryForDev(std::string_view query);
     // Reopens the palette listing only the space icons (and None) for the active space.
     void ShowSpaceIconPicker();
     // Queues ShowSpaceIconPicker on the next UI task. The palette's own submit runs inside its
@@ -1222,7 +1255,23 @@ class BrowserWindow : public CefClient,
     // tabs with the library afterwards and reprojects the sidebar.
     BookmarkResult RunBookmarkMutation(std::function<BookmarkResult()> mutation);
     BookmarkResult ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // The unrouted library steps behind the toggles and the reorder: callers run them inside
+    // RunBookmarkMutation so a failure reaches the status.
+    BookmarkResult ToggleFavoriteInLibrary(FavoriteScope scope, std::uint64_t bookmark_id);
     BookmarkResult ToggleFavoriteForCurrentPage(FavoriteScope scope);
+    BookmarkResult AddCurrentPageBookmark();
+    // Moves the current page's favorite by `step` (-1 or +1) within its list.
+    BookmarkResult MoveCurrentPageFavorite(FavoriteScope scope, int step);
+    // The page the bookmark commands act on: the displayed favorite's virtual tab when one is
+    // shown, else the selected ordinary tab. Empty while a local page fills the slot or the page is
+    // not http(s).
+    struct BookmarkablePage {
+        std::string url;
+        std::string title;
+    };
+    [[nodiscard]] std::optional<BookmarkablePage> CurrentBookmarkablePage() const;
+    [[nodiscard]] const std::vector<std::uint64_t>* FavoriteIdsFor(FavoriteScope scope) const;
+    [[nodiscard]] bool IsFavorite(FavoriteScope scope, std::uint64_t bookmark_id) const;
     struct BookmarkImportResult {
         bool ok = false;
         std::string text;

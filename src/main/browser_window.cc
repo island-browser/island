@@ -1367,33 +1367,30 @@ bool BrowserWindow::RunAgentMenuCommand(int offset, const AgentContextChip& page
 }
 
 void BrowserWindow::RunPaletteCommand(std::string_view id) {
-    if (id == "open_bookmarks") {
+    if (id == "open_bookmarks" || id == "import_bookmarks") {
+        // The Bookmarks page holds the import menu; the palette does not open it for the person.
         OpenBookmarksPage();
     } else if (id == "add_bookmark") {
-        const Tab* tab = active_tab();
-        if (tab == nullptr) {
-            return;
-        }
-        const NavigationSnapshot& nav = tab->navigation_state().snapshot();
-        if (!IsWebUrl(nav.url)) {
-            return;
-        }
-        const std::string title = !nav.page_title.empty()
-                                      ? nav.page_title
-                                      : (!UrlHost(nav.url).empty() ? UrlHost(nav.url) : nav.url);
-        static_cast<void>(RunBookmarkMutation(
-            [this, title, url = nav.url] { return bookmarks_.AddOrFindByUrl(title, url); }));
+        static_cast<void>(AddCurrentPageBookmark());
     } else if (id == "toggle_global_favorite") {
         static_cast<void>(ToggleGlobalFavoriteForCurrentPage());
     } else if (id == "toggle_space_favorite") {
         static_cast<void>(ToggleSpaceFavoriteForCurrentPage());
+    } else if (id == "move_global_favorite_left") {
+        static_cast<void>(MoveCurrentPageFavorite(std::nullopt, -1));
+    } else if (id == "move_global_favorite_right") {
+        static_cast<void>(MoveCurrentPageFavorite(std::nullopt, 1));
+    } else if (id == "move_space_favorite_up" || id == "move_space_favorite_down") {
+        if (!spaces_.empty()) {
+            const FavoriteScope scope{active_space().id().value};
+            static_cast<void>(
+                MoveCurrentPageFavorite(scope, id == "move_space_favorite_up" ? -1 : 1));
+        }
     } else if (id == "new_bookmark_folder") {
         // A direct creation keeps this palette action simple; folder editing
         // remains available in the Bookmarks page.
         static_cast<void>(
             RunBookmarkMutation([this] { return bookmarks_.CreateFolder("New folder"); }));
-    } else if (id == "import_bookmarks" || id == "show_global_favorites") {
-        OpenBookmarksPage();
     } else if (id == "sleep_inactive_tabs") {
         static_cast<void>(SleepInactiveTabsNow());
     } else if (id == "agent_tasks") {
@@ -3656,12 +3653,15 @@ void BrowserWindow::OpenMoreGlobalFavorites() {
 
 void BrowserWindow::AddCurrentPageToGlobalFavorites() {
     CEF_REQUIRE_UI_THREAD();
-    const Tab* active = active_tab();
-    if (active == nullptr) {
-        return;
-    }
-    const NavigationSnapshot snapshot = active->navigation_state().snapshot();
-    static_cast<void>(AddFavoriteByUrl(std::nullopt, snapshot.page_title, snapshot.url));
+    // The page on screen, the same one the palette's commands act on.
+    static_cast<void>(RunBookmarkMutation([this]() -> BookmarkResult {
+        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+        if (!page.has_value()) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "Only web pages can be favorites."};
+        }
+        return bookmarks_.AddFavoriteByUrl(std::nullopt, page->title, page->url);
+    }));
 }
 
 void BrowserWindow::RetryFailedBookmarkMutation() {
@@ -5657,40 +5657,172 @@ BookmarkResult BrowserWindow::ToggleSpaceFavoriteForCurrentPage() {
     return ToggleFavoriteForCurrentPage(FavoriteScope{active_space().id().value});
 }
 
+const std::vector<std::uint64_t>* BrowserWindow::FavoriteIdsFor(FavoriteScope scope) const {
+    const BookmarkState& state = bookmarks_.state();
+    if (!scope.has_value()) {
+        return &state.global_favorite_ids;
+    }
+    const auto found = state.space_favorite_ids.find(*scope);
+    return found == state.space_favorite_ids.end() ? nullptr : &found->second;
+}
+
+bool BrowserWindow::IsFavorite(FavoriteScope scope, std::uint64_t bookmark_id) const {
+    const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+    return favorite_ids != nullptr && std::find(favorite_ids->begin(), favorite_ids->end(),
+                                                bookmark_id) != favorite_ids->end();
+}
+
 BookmarkResult BrowserWindow::ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
     CEF_REQUIRE_UI_THREAD();
-    const std::vector<std::uint64_t>* favorite_ids = &bookmarks_.state().global_favorite_ids;
-    if (scope.has_value()) {
-        const auto found = bookmarks_.state().space_favorite_ids.find(*scope);
-        favorite_ids =
-            found == bookmarks_.state().space_favorite_ids.end() ? nullptr : &found->second;
-    }
-    if (favorite_ids != nullptr &&
-        std::find(favorite_ids->begin(), favorite_ids->end(), bookmark_id) != favorite_ids->end()) {
-        return RemoveFavorite(scope, bookmark_id);
-    }
     return RunBookmarkMutation(
-        [this, scope, bookmark_id] { return bookmarks_.AddFavorite(scope, bookmark_id); });
+        [this, scope, bookmark_id] { return ToggleFavoriteInLibrary(scope, bookmark_id); });
+}
+
+BookmarkResult BrowserWindow::ToggleFavoriteInLibrary(FavoriteScope scope,
+                                                      std::uint64_t bookmark_id) {
+    if (IsFavorite(scope, bookmark_id)) {
+        return bookmarks_.RemoveFavorite(scope, bookmark_id);
+    }
+    return bookmarks_.AddFavorite(scope, bookmark_id);
+}
+
+std::optional<BrowserWindow::BookmarkablePage> BrowserWindow::CurrentBookmarkablePage() const {
+    // A local page (Bookmarks, Settings, All tabs) fills the slot the person sees, so it is the
+    // page on screen and it cannot be bookmarked.
+    if (internal_page_.has_value() && show_internal_page_) {
+        return std::nullopt;
+    }
+    // The displayed favorite's virtual tab is the page on screen; the ordinary tab is hidden
+    // behind it. A page that has not loaded yet names its startup address.
+    const Tab* tab = DisplayedTab();
+    if (tab == nullptr) {
+        return std::nullopt;
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    const std::string& url = nav.url.empty() ? tab->startup_url() : nav.url;
+    if (!IsWebUrl(url)) {
+        return std::nullopt;
+    }
+    const std::string host = UrlHost(url);
+    std::string title = !nav.page_title.empty() ? nav.page_title : (!host.empty() ? host : url);
+    return BookmarkablePage{.url = url, .title = std::move(title)};
 }
 
 BookmarkResult BrowserWindow::ToggleFavoriteForCurrentPage(FavoriteScope scope) {
-    const Tab* tab = active_tab();
-    if (tab == nullptr) {
-        return BookmarkResult{.error = BookmarkError::kInvalidInput, .message = "No current page."};
+    CEF_REQUIRE_UI_THREAD();
+    // Every outcome, including "not a web page", goes through the mutation seam so the status
+    // shows it. The page is read inside the mutation, after any earlier change to the slot.
+    return RunBookmarkMutation([this, scope]() -> BookmarkResult {
+        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+        if (!page.has_value()) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "Only web pages can be favorites."};
+        }
+        const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(page->url);
+        if (id.has_value()) {
+            return ToggleFavoriteInLibrary(scope, *id);
+        }
+        return bookmarks_.AddFavoriteByUrl(scope, page->title, page->url);
+    });
+}
+
+BookmarkResult BrowserWindow::AddCurrentPageBookmark() {
+    CEF_REQUIRE_UI_THREAD();
+    return RunBookmarkMutation([this]() -> BookmarkResult {
+        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+        if (!page.has_value()) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "Only web pages can be bookmarked."};
+        }
+        return bookmarks_.AddOrFindByUrl(page->title, page->url);
+    });
+}
+
+BookmarkResult BrowserWindow::MoveCurrentPageFavorite(FavoriteScope scope, int step) {
+    CEF_REQUIRE_UI_THREAD();
+    return RunBookmarkMutation([this, scope, step]() -> BookmarkResult {
+        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+        const std::optional<std::uint64_t> id =
+            page.has_value() ? bookmarks_.FindBookmarkByUrl(page->url) : std::nullopt;
+        const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+        const auto found = !id.has_value() || favorite_ids == nullptr
+                               ? std::vector<std::uint64_t>::const_iterator{}
+                               : std::find(favorite_ids->begin(), favorite_ids->end(), *id);
+        if (!id.has_value() || favorite_ids == nullptr || found == favorite_ids->end()) {
+            return BookmarkResult{.error = BookmarkError::kNotFound,
+                                  .message = "This page is not in that favorites list."};
+        }
+        const auto position = static_cast<std::size_t>(found - favorite_ids->begin());
+        const bool at_end = step < 0 ? position == 0 : position + 1 >= favorite_ids->size();
+        if (at_end) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "This favorite is already at that end."};
+        }
+        const std::size_t target = step < 0 ? position - 1 : position + 1;
+        return bookmarks_.ReorderFavorite(scope, *id, target);
+    });
+}
+
+BookmarkCommandState BrowserWindow::CurrentBookmarkCommandState() const {
+    BookmarkCommandState state{.space_name = spaces_.empty() ? "" : active_space().name()};
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    if (!page.has_value()) {
+        return state;
     }
-    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
-    if (!IsWebUrl(nav.url)) {
-        return BookmarkResult{.error = BookmarkError::kInvalidInput,
-                              .message = "Only web pages can be favorites."};
+    state.page_bookmarkable = true;
+    const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(page->url);
+    if (!id.has_value()) {
+        return state;
     }
-    const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(nav.url);
-    if (id.has_value()) {
-        return ToggleFavorite(scope, *id);
+    const auto position_in = [&](FavoriteScope scope, std::size_t& count) {
+        const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+        if (favorite_ids == nullptr) {
+            return BookmarkCommandState::kNoFavoritePosition;
+        }
+        count = favorite_ids->size();
+        const auto found = std::find(favorite_ids->begin(), favorite_ids->end(), *id);
+        return found == favorite_ids->end()
+                   ? BookmarkCommandState::kNoFavoritePosition
+                   : static_cast<std::size_t>(found - favorite_ids->begin());
+    };
+    state.global_position = position_in(std::nullopt, state.global_count);
+    if (!spaces_.empty()) {
+        state.space_position =
+            position_in(FavoriteScope{active_space().id().value}, state.space_count);
     }
-    const std::string host = UrlHost(nav.url);
-    const std::string title =
-        !nav.page_title.empty() ? nav.page_title : (!host.empty() ? host : nav.url);
-    return AddFavoriteByUrl(scope, title, nav.url);
+    return state;
+}
+
+std::vector<PaletteBookmarkEntry> BrowserWindow::PaletteBookmarkEntries() const {
+    const BookmarkState& state = bookmarks_.state();
+    std::vector<PaletteBookmarkEntry> entries;
+    for (const FlatBookmark& entry : bookmarks_.Flattened()) {
+        const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(entry.url);
+        // A favorite in several lists is one row, labelled with each list it is in: "Global" or
+        // a space's name. A list of a space that no longer exists is not presented.
+        std::vector<std::string> scopes;
+        if (id.has_value()) {
+            if (IsFavorite(std::nullopt, *id)) {
+                scopes.emplace_back("Global");
+            }
+            for (const auto& [space_id, favorite_ids] : state.space_favorite_ids) {
+                const Space* space = FindSpace(SpaceId{space_id});
+                if (space != nullptr && IsFavorite(FavoriteScope{space_id}, *id)) {
+                    scopes.push_back(space->name());
+                }
+            }
+        }
+        std::string scope_label;
+        for (const std::string& scope : scopes) {
+            scope_label += (scope_label.empty() ? "" : ", ") + scope;
+        }
+        entries.push_back({.id = id.value_or(0),
+                           .title = entry.title,
+                           .url = entry.url,
+                           .folder_path = entry.folder_name,
+                           .scope_label = std::move(scope_label)});
+    }
+    return entries;
 }
 
 BookmarkResult BrowserWindow::RetryLastBookmarkMutation() {
@@ -5887,14 +6019,13 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
                                  .group_parent = tab.group_parent(),
                                  .group_label = tab.group_label()});
     }
-    if (active != nullptr) {
-        const NavigationSnapshot page = active->navigation_state().snapshot();
+    if (const std::optional<BookmarkablePage> page = CurrentBookmarkablePage(); page.has_value()) {
         // The cheap http(s) check comes first, so internal pages never reach the validator. The
         // injected validator (the same seam the other address paths use) keeps headless tests off
         // the CEF URL API, which they have not initialized.
         snapshot.add_current_page_available =
-            IsWebTileUrl(page.url) &&
-            (address_validator_ ? address_validator_(page.url) : ParseAndValidate(page.url))
+            IsWebTileUrl(page->url) &&
+            (address_validator_ ? address_validator_(page->url) : ParseAndValidate(page->url))
                 .is_valid();
     }
     if (failed_bookmark_mutation_.has_value()) {
@@ -6370,33 +6501,7 @@ void BrowserWindow::ShowCommandPalette() {
     for (const Space& space : spaces_) {
         spaces.push_back({.id = space.id(), .name = space.name()});
     }
-    std::vector<PaletteBookmarkEntry> bookmarks;
-    for (const FlatBookmark& entry : bookmarks_.Flattened()) {
-        const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(entry.url);
-        std::string scope_label;
-        if (id.has_value()) {
-            const BookmarkState& state = bookmarks_.state();
-            if (std::find(state.global_favorite_ids.begin(), state.global_favorite_ids.end(),
-                          *id) != state.global_favorite_ids.end()) {
-                scope_label = "Global";
-            } else {
-                for (const auto& [space_id, favorite_ids] : state.space_favorite_ids) {
-                    if (std::find(favorite_ids.begin(), favorite_ids.end(), *id) ==
-                        favorite_ids.end()) {
-                        continue;
-                    }
-                    const Space* space = FindSpace(SpaceId{space_id});
-                    scope_label = space != nullptr ? space->name() : "Removed space";
-                    break;
-                }
-            }
-        }
-        bookmarks.push_back({.id = id.value_or(0),
-                             .title = entry.title,
-                             .url = entry.url,
-                             .folder_path = entry.folder_name,
-                             .scope_label = std::move(scope_label)});
-    }
+    std::vector<PaletteBookmarkEntry> bookmarks = PaletteBookmarkEntries();
     std::vector<PaletteReportEntry> reports;
     reports.reserve(reports_.reports.size());
     for (const ResearchReport& report : reports_.reports) {
@@ -6405,23 +6510,7 @@ void BrowserWindow::ShowCommandPalette() {
                            .question = report.question,
                            .kind = report.kind});
     }
-    const Tab* active = active_tab();
-    const std::string active_url =
-        active != nullptr ? active->navigation_state().snapshot().url : "";
-    const std::optional<std::uint64_t> active_bookmark = bookmarks_.FindBookmarkByUrl(active_url);
-    const BookmarkState& bookmark_state = bookmarks_.state();
-    const bool global_favorite =
-        active_bookmark.has_value() &&
-        std::find(bookmark_state.global_favorite_ids.begin(),
-                  bookmark_state.global_favorite_ids.end(),
-                  *active_bookmark) != bookmark_state.global_favorite_ids.end();
-    const auto favorites = bookmark_state.space_favorite_ids.find(active_space().id().value);
-    const bool space_favorite =
-        active_bookmark.has_value() && favorites != bookmark_state.space_favorite_ids.end() &&
-        std::find(favorites->second.begin(), favorites->second.end(), *active_bookmark) !=
-            favorites->second.end();
-    std::vector<PaletteCommandEntry> commands =
-        PaletteCommands(active_space().name(), global_favorite, space_favorite);
+    std::vector<PaletteCommandEntry> commands = PaletteCommands(CurrentBookmarkCommandState());
     for (PaletteCommandEntry& command : commands) {
         const std::optional<KeyAction> action = KeyActionFromId(command.shortcut_action_id);
         const std::optional<KeyBinding> binding =
@@ -6438,42 +6527,95 @@ void BrowserWindow::ShowCommandPalette() {
                            std::move(commands), std::move(reports), std::move(tab_visuals));
 }
 
-std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands(std::string_view active_space_name,
-                                                                bool global_favorite,
-                                                                bool space_favorite) {
-    const std::string space =
-        active_space_name.empty() ? "current-space" : std::string(active_space_name);
-    return {
-        {.id = "open_bookmarks", .title = "Open Bookmarks", .icon = PaletteRowIcon::kBookmark},
-        {.id = "add_bookmark", .title = "Add bookmark", .icon = PaletteRowIcon::kBookmark},
-        {.id = "toggle_global_favorite",
-         .title = global_favorite ? "Remove global favorite" : "Add global favorite",
-         .icon = PaletteRowIcon::kBookmark},
-        {.id = "toggle_space_favorite",
-         .title = (space_favorite ? "Remove " : "Add ") + space + " favorite",
-         .icon = PaletteRowIcon::kBookmark},
-        {.id = "new_bookmark_folder", .title = "New folder", .icon = PaletteRowIcon::kBookmark},
-        {.id = "import_bookmarks", .title = "Import bookmarks", .icon = PaletteRowIcon::kBookmark},
-        {.id = "show_global_favorites",
-         .title = "Show all global favorites",
-         .icon = PaletteRowIcon::kBookmark},
-        {.id = "sleep_inactive_tabs",
-         .title = "Sleep inactive tabs now",
-         .icon = PaletteRowIcon::kMoon},
-        {.id = std::string(kChangeSpaceIconCommandId),
-         .title = "Change space icon\xE2\x80\xA6",
-         .icon = PaletteRowIcon::kPalette},
-        {.id = "agent_tasks",
-         .title = "Agent tasks",
-         .icon = PaletteRowIcon::kSparkles,
-         .shortcut_action_id = "toggle_agent"},
-        {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles},
-        {.id = "ask_about_page",
-         .title = "Ask about page\xE2\x80\xA6",
-         .icon = PaletteRowIcon::kSparkles},
-        {.id = "collect_from_tabs",
-         .title = "Collect from tabs\xE2\x80\xA6",
-         .icon = PaletteRowIcon::kTable}};
+void BrowserWindow::ShowCommandPaletteWithQueryForDev(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    ShowCommandPalette();
+    if (command_palette_ != nullptr) {
+        command_palette_->SetQueryForDev(query);
+    }
+}
+
+std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands(
+    const BookmarkCommandState& bookmarks) {
+    const std::string space = bookmarks.space_name.empty() ? "current-space" : bookmarks.space_name;
+    std::vector<PaletteCommandEntry> commands;
+    commands.push_back({.id = "open_bookmarks",
+                        .title = "Open Bookmarks",
+                        .icon = PaletteRowIcon::kBookmark,
+                        .bookmark_group = true});
+    // The page-changing bookmark rows exist only when the page on screen can be bookmarked.
+    if (bookmarks.page_bookmarkable) {
+        commands.push_back({.id = "add_bookmark",
+                            .title = "Add bookmark",
+                            .icon = PaletteRowIcon::kBookmark,
+                            .bookmark_group = true});
+        commands.push_back({.id = "toggle_global_favorite",
+                            .title = bookmarks.global_favorite() ? "Remove global favorite"
+                                                                 : "Add global favorite",
+                            .icon = PaletteRowIcon::kBookmark,
+                            .bookmark_group = true});
+        commands.push_back(
+            {.id = "toggle_space_favorite",
+             .title = (bookmarks.space_favorite() ? "Remove " : "Add ") + space + " favorite",
+             .icon = PaletteRowIcon::kBookmark,
+             .bookmark_group = true});
+    }
+    commands.push_back({.id = "new_bookmark_folder",
+                        .title = "New folder",
+                        .icon = PaletteRowIcon::kBookmark,
+                        .bookmark_group = true});
+    commands.push_back({.id = "import_bookmarks",
+                        .title = "Open Bookmarks to import\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kBookmark,
+                        .bookmark_group = true});
+    // Reorder rows: only for the page's own favorite, and never past either end of its list.
+    if (bookmarks.page_bookmarkable && bookmarks.global_favorite()) {
+        if (bookmarks.global_position > 0) {
+            commands.push_back({.id = "move_global_favorite_left",
+                                .title = "Move global favorite left",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+        if (bookmarks.global_position + 1 < bookmarks.global_count) {
+            commands.push_back({.id = "move_global_favorite_right",
+                                .title = "Move global favorite right",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+    }
+    if (bookmarks.page_bookmarkable && bookmarks.space_favorite()) {
+        if (bookmarks.space_position > 0) {
+            commands.push_back({.id = "move_space_favorite_up",
+                                .title = "Move " + space + " favorite up",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+        if (bookmarks.space_position + 1 < bookmarks.space_count) {
+            commands.push_back({.id = "move_space_favorite_down",
+                                .title = "Move " + space + " favorite down",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+    }
+    commands.push_back({.id = "sleep_inactive_tabs",
+                        .title = "Sleep inactive tabs now",
+                        .icon = PaletteRowIcon::kMoon});
+    commands.push_back({.id = std::string(kChangeSpaceIconCommandId),
+                        .title = "Change space icon\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kPalette});
+    commands.push_back({.id = "agent_tasks",
+                        .title = "Agent tasks",
+                        .icon = PaletteRowIcon::kSparkles,
+                        .shortcut_action_id = "toggle_agent"});
+    commands.push_back(
+        {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles});
+    commands.push_back({.id = "ask_about_page",
+                        .title = "Ask about page\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kSparkles});
+    commands.push_back({.id = "collect_from_tabs",
+                        .title = "Collect from tabs\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kTable});
+    return commands;
 }
 
 void BrowserWindow::ShowSpaceIconPicker() {
@@ -7121,7 +7263,8 @@ void BrowserWindow::OpenBookmark(const PaletteBookmarkEntry& bookmark) {
     CEF_REQUIRE_UI_THREAD();
     // The same validation seam the address bar uses: a stored URL the current
     // allow-list rejects is a no-op, never a force-load.
-    const ValidatedAddress address = ParseAndValidate(bookmark.url);
+    const ValidatedAddress address =
+        address_validator_ ? address_validator_(bookmark.url) : ParseAndValidate(bookmark.url);
     if (!address.is_valid()) {
         return;
     }

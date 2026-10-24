@@ -72,7 +72,7 @@ platform executable links.
 | `browser_window_research.cc`, `research_prompt.{h,cc}`, `report_store.{h,cc}` | Research mode in `BrowserWindow` (start, cancel and finish, the Plan hub, the Report tab with save/copy/continue/export); the CEF-free prompt, research space name and report extraction; and the Reports list persisted as `reports.json` (schema 2: each report has a `kind`, "research" or "collection"; version 1 loads as research) |
 | `collect_prompt.{h,cc}`, `table_export.{h,cc}` | "Collect from tabs": the CEF-free prompt that lists the chosen tabs as untrusted web content and asks for one table between the Research report markers; `FirstMarkdownTable` reads a report's table (link cells become URLs, with a title column when the texts differ) and `TableToCsv` / `TableToJson` export it. CSV cells that start with `= + - @` TAB or CR get a leading quote (formula neutralization); JSON keys de-duplicate with ` 2`, ` 3`. The sheet sends `{index, url}` per checked tab and `CollectFromTabs` takes a choice only while the active space still has its URL (`CollectChoice` in `collect_prompt.h`). Sent by `CollectFromTabs` as a `kCollect` task whose context is the prompt; `FinishCollectTurn` stores the table before the queue moves on. Panel state key `collect`, message `collect`; dev actions `agent_fixture:collect` and `report_fixture:collection` |
 | `plan_dev_fixture.h` | The developer capture's sample research plan (`--island-dev-actions=plan_fixture`), kept equal to the test fixture by a unit test |
-| `dev_capture.{h,cc}` (agent fixtures) | Developer capture fixtures for the agent panel, each a dev action: `agent_fixture:confirm` (a confirmation card), `agent_fixture:queue` (one running and two queued tasks), `agent_fixture:quote` (a page chip and a quote chip), `agent_fixture:collect` (the Collect sheet), `agent_fixture:thread` (a sample conversation: a user message with a page chip and long quote, three tool rows (two done, one failed, one long MCP-prefixed name), a Markdown reply, and one queued message; `ShowThreadFixtureForDev` feeds the session through `AgentSession::AddDevUserPrompt` / `ApplyDevEvent`, so no agent starts). `main_mac.mm` maps the names to `IslandApp::Show*Fixture` through the `kAgentFixtures` table; add a fixture there and to this list. Captures with a fresh HOME open on the Welcome sheet, which covers the page: write a valid `prefs.json` with `"onboarding_completed":true` and a `theme` string in the capture HOME (under `Library/Application Support/Island/`) before the run, or the sheet stays on top. The status pill can read "Not running" while a fixture task shows Running; the fixtures never start an agent. |
+| `dev_capture.{h,cc}` (agent fixtures) | Developer capture fixtures for the agent panel, each a dev action: `agent_fixture:confirm` (a confirmation card), `agent_fixture:queue` (one running and two queued tasks), `agent_fixture:quote` (a page chip and a quote chip), `agent_fixture:collect` (the Collect sheet), `agent_fixture:thread` (a sample conversation: a user message with a page chip and long quote, three tool rows (two done, one failed, one long MCP-prefixed name), a Markdown reply, and one queued message; `ShowThreadFixtureForDev` feeds the session through `AgentSession::AddDevUserPrompt` / `ApplyDevEvent`, so no agent starts). `main_mac.mm` maps the names to `IslandApp::Show*Fixture` through the `kAgentFixtures` table; add a fixture there and to this list. Captures with a fresh HOME open on the Welcome sheet, which covers the page: write a valid `prefs.json` with `"onboarding_completed":true` and a `theme` string in the capture HOME (under `Library/Application Support/Island/`) before the run, or the sheet stays on top. The status pill can read "Not running" while a fixture task shows Running; the fixtures never start an agent. The palette capture `palette_query:<text>` (`main_mac.mm` → `IslandApp::ShowCommandPaletteWithQueryForDev` → `CommandPaletteView::SetQueryForDev`) opens ⌘K with the text typed in; it is how the bookmark rows are captured with a matching query. |
 | `pages/plan.html`, `pages/report.html`, `pages/markdown.js` | The Plan tab's graph and list page, the Report tab page (its view drops a first H1 that repeats the report title; Copy and Export keep it), and the shared safe Markdown renderer both use (inlined where a page carries `// @@ISLAND_MARKDOWN@@`) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
@@ -369,18 +369,32 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
   switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
   none.
-- Palette commands: `BrowserWindow::PaletteCommands` is the registry for ordinary palette action
-  rows. It accepts the active space name and current favorite state so favorite labels can say Add
-  or Remove without creating another result kind. Add a `PaletteCommandEntry` there, route its
-  stable id in `RunPaletteCommand`, and add a window test; bookmark results remain `kBookmark`,
-  carrying folder path and optional scope metadata. Favorite reordering deliberately has no palette
-  commands until sidebar focus/selection exists.
+- Palette commands: `BrowserWindow::PaletteCommands(const BookmarkCommandState&)` is the registry for
+  ordinary palette action rows. `CurrentBookmarkCommandState()` supplies the space name, whether the
+  page on screen can be bookmarked, and the page's position in the global and space lists, so favorite
+  labels say Add or Remove and the reorder rows (`move_global_favorite_left/right`,
+  `move_space_favorite_up/down`) appear only for a favorite that can move that way. Add a
+  `PaletteCommandEntry` there, route its stable id in `RunPaletteCommand`, and add a window test.
+  Bookmark and favorite commands set `PaletteCommandEntry::bookmark_group`: they list under the
+  "Bookmarks" header (`PaletteGroupHeader`) just before the bookmark rows, not under "Commands".
+  Bookmark results remain `kBookmark`; `PaletteBookmarkEntries()` gives one row per library bookmark
+  in folder order, with its folder and every presented favorite scope joined into one label
+  ("Global, Work"; a removed space's list is skipped). The view prints folder and scope as muted
+  text after the title (`result_details_`).
+- Bookmark commands that change the page resolve it once through `CurrentBookmarkablePage()`: the
+  displayed favorite's virtual tab when one is shown, else the selected tab, and nothing while a local
+  page fills the slot or the URL is not http(s). Each runs inside `RunBookmarkMutation`, so a refusal
+  ("Only web pages can be favorites.") reaches the status. Known gap: the palette cannot announce a
+  successful move ("Moved … to position N of M"). The only status row is sidebar-owned and drawn in
+  warning colors, and a success needs an "ok" variant in `browser_chrome.*`, which this change left
+  alone.
 - Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
   (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
   the icon. Each command submit must reach the host after the palette released its overlay, so the
   picker is scheduled with `ScheduleSpaceIconPicker` (a posted task). To add another palette command,
-  append a `PaletteCommandEntry` to the command list in `BrowserWindow::ShowCommandPalette` and
-  handle its id in `OnCommandPaletteSubmitted`. Return re-applies the field's text through
+  append a `PaletteCommandEntry` to the list `BrowserWindow::PaletteCommands` returns and handle its
+  id in `BrowserWindow::RunPaletteCommand` (a command selection reaches it through
+  `OnCommandPaletteSubmitted`). Return re-applies the field's text through
   `CommandPaletteModel::SetQuery`, which is a no-op for an unchanged query: resetting the highlight
   there once made Return submit row 0 whatever the arrow keys chose (so the icon picker never
   opened).

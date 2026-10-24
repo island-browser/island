@@ -112,6 +112,13 @@ void IslandApp::ShowCommandPalette() {
     }
 }
 
+void IslandApp::ShowCommandPaletteWithQueryForDev(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCommandPaletteWithQueryForDev(query);
+    }
+}
+
 void IslandApp::BeginSpaceRenaming() {
     CEF_REQUIRE_UI_THREAD();
 
