@@ -237,6 +237,12 @@ class BrowserWindow : public CefClient,
     void SetAddressValidatorForTest(AddressValidator validator) {
         address_validator_ = std::move(validator);
     }
+    // Replaces the bookmark library the way the constructor loads it: its space IDs are reserved
+    // before any space can be created.
+    void ReplaceBookmarkLibraryForTest(BookmarkStore library);
+    // Starts a favicon download for |tab| as OnFaviconURLChange does, then delivers |image|.
+    void CompleteFaviconDownloadForTest(TabId tab, const std::string& icon_url,
+                                        CefRefPtr<CefImage> image);
 
     // What the address bar does with typed text: a search on the configured
     // engine when it is not a URL (address_input.h), else the validator's
@@ -652,7 +658,8 @@ class BrowserWindow : public CefClient,
     void DismissBookmarkStatus();
     // Shows the favorite's virtual tab in the focused content slot. The selected ordinary tab is
     // unchanged and returns when the virtual tab closes. False when the favorite is not in that
-    // list, or its space does not exist.
+    // list, or it is a scoped list of a space that is not the active one (global favorites are
+    // reachable from any space).
     bool ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
     // Closes the displayed virtual tab: its record returns to the favorite URL and the content slot
     // shows the selected ordinary tab again. Does nothing when no favorite is displayed.
@@ -660,6 +667,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] std::optional<FavoriteTabKey> displayed_favorite() const noexcept {
         return displayed_favorite_;
     }
+    // The tab the person sees and that page commands, the address field and the agent target: the
+    // displayed favorite's virtual tab, else the selected ordinary tab. Empty without a tab.
+    [[nodiscard]] std::optional<TabId> shown_tab_id() const noexcept;
     [[nodiscard]] const FavoriteTabRecord* FavoriteTabRecordFor(const FavoriteTabKey& key) const {
         return favorite_tabs_.Find(key);
     }
@@ -741,6 +751,13 @@ class BrowserWindow : public CefClient,
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
     void SetTabPinned(std::size_t index, bool pinned) override;
+    // Bookmarks 0.9 sidebar collection (BrowserChromeHost). OpenMoreGlobalFavorites is a stub until
+    // the Bookmarks page exists; it logs and does nothing.
+    void ActivateFavoriteFromSidebar(FavoriteScope scope, std::uint64_t bookmark_id) override;
+    void OpenMoreGlobalFavorites() override;
+    void AddCurrentPageToGlobalFavorites() override;
+    void RetryFailedBookmarkMutation() override;
+    void DismissFailedBookmarkStatus() override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
 
     [[nodiscard]] CefRefPtr<CefBrowser> ActiveBrowser() override;
@@ -889,6 +906,15 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] Tab* FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept;
     [[nodiscard]] Tab* active_tab() noexcept;
     [[nodiscard]] const Tab* active_tab() const noexcept;
+    // The displayed virtual tab when one is shown, else active_tab(). Page commands, find, the
+    // address field and the agent read this; tab selection, sessions and sleep keep active_tab().
+    [[nodiscard]] Tab* DisplayedTab() noexcept;
+    [[nodiscard]] const Tab* DisplayedTab() const noexcept;
+    // Clears the navigation observer of both candidate tabs, so only the tab on screen reports.
+    void ClearShownTabObservers();
+    // True when a favicon finished for |id| changes what the sidebar shows: an ordinary tab of the
+    // active space, or a virtual tab in global scope or the active space's scope.
+    [[nodiscard]] bool FaviconAffectsCollections(TabId id) const noexcept;
     // Creates the tab's CefBrowserView on first use (same creation path as
     // kNewTab: the active space's request context and the tab's startup URL).
     // False when headless; true when the tab already had a view. Only valid

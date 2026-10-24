@@ -50,6 +50,18 @@ static_assert(kCollapsedRailButtonDip + kCollapsedRailScrollbarAllowanceDip <=
            (children - 1) * kCollapsedRailButtonSpacingDip;
 }
 
+// Height of a rail list with `buttons` icon buttons and `separators` hairlines, gaps included.
+[[nodiscard]] constexpr int CollapsedRailListHeightDip(std::size_t buttons,
+                                                       std::size_t separators) {
+    const std::size_t children = buttons + separators;
+    if (children == 0) {
+        return 0;
+    }
+    return static_cast<int>(buttons) * kCollapsedRailButtonDip +
+           static_cast<int>(separators) * kCollapsedRailSeparatorHeightDip +
+           (static_cast<int>(children) - 1) * kCollapsedRailButtonSpacingDip;
+}
+
 // The pixel buffer of one space dot, premultiplied BGRA, row-major, `size_px` square.
 struct SpaceDotBitmap {
     int size_px = 0;

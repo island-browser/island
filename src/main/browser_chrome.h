@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "address_bar_model.h"
@@ -34,6 +35,7 @@
 #include "overlay_card.h"
 #include "page_card.h"
 #include "row_raster.h"
+#include "sidebar_collection.h"
 #include "sidebar_state.h"
 #include "tab_id.h"
 
@@ -120,7 +122,9 @@ enum class ChromeViewId : int {
     kCollapsedRailTabList = 1049,
     kCollapsedRailTab = 1050,
     kCollapsedRailSeparator = 1051,
-    kCollapsedRailNewTab = 1052,
+    // Retired 2026-10-24: the collapsed rail's "+" New Tab button is gone (no New Tab control
+    // anywhere in the sidebar). The id is never reused.
+    kCollapsedRailNewTabRetired = 1052,
     kCollapsedRailSpaceList = 1053,
     kCollapsedRailSpace = 1054,
     // The peek card (a floating page over the current one). Overlay-only, like the palettes,
@@ -162,6 +166,21 @@ enum class ChromeViewId : int {
     kRailAgentRow = 1078,
     kRailAgentMeta = 1079,
     kRailAgentKeycap = 1080,
+    // Bookmarks 0.9 sidebar collection (appended after 1080). The global strip, the current
+    // space's favorites and the failure status row. The space favorites header reuses
+    // kFavoritesSectionHeader (1072).
+    kGlobalFavoritesHeader = 1081,
+    kGlobalFavoritesStrip = 1082,
+    kGlobalFavoriteIcon = 1083,
+    kGlobalFavoritesMore = 1084,
+    kGlobalFavoritesAdd = 1085,
+    kSpaceFavoriteRow = 1086,
+    kBookmarkStatusRow = 1087,
+    kBookmarkStatusText = 1088,
+    kBookmarkStatusRetry = 1089,
+    kBookmarkStatusDismiss = 1090,
+    kCollapsedRailGlobalFavorite = 1091,
+    kCollapsedRailSpaceFavorite = 1092,
 };
 
 // What the Agent entry's status dot shows, from the agent state the window already tracks.
@@ -254,6 +273,8 @@ struct SidebarCollectionSnapshot {
     std::vector<FavoriteEntrySnapshot> space_favorites;
     std::vector<TabStripEntrySnapshot> tabs;
     std::optional<BookmarkStatusSnapshot> bookmark_status;
+    // The "+" add control is shown only when the active page has an acceptable URL.
+    bool add_current_page_available = false;
 
     bool operator==(const SidebarCollectionSnapshot&) const = default;
 };
@@ -297,6 +318,13 @@ enum class CollectionButtonAction : std::uint8_t {
     kCloseTab,
     kActivateSpace,
     kUnpinTab,
+    // Bookmarks 0.9 sidebar collection; the index is into the matching snapshot list.
+    kActivateGlobalFavorite,
+    kActivateSpaceFavorite,
+    kShowMoreGlobalFavorites,
+    kAddCurrentPageAsGlobalFavorite,
+    kRetryBookmarkStatus,
+    kDismissBookmarkStatus,
 };
 
 // What the collapsed rail draws for a tab projection: the tab order (source indices into
@@ -346,6 +374,12 @@ class BrowserChromeHost {
     virtual void ToggleSettings() = 0;
     // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
     virtual void OpenBlockerSettings() = 0;
+    // Bookmarks 0.9 sidebar collection. Favorites are addressed by scope and bookmark id.
+    virtual void ActivateFavoriteFromSidebar(FavoriteScope scope, std::uint64_t bookmark_id) = 0;
+    virtual void OpenMoreGlobalFavorites() = 0;
+    virtual void AddCurrentPageToGlobalFavorites() = 0;
+    virtual void RetryFailedBookmarkMutation() = 0;
+    virtual void DismissFailedBookmarkStatus() = 0;
 };
 
 // The Agent entry's label for the task queue: the live task's plan progress when it has one
@@ -1124,6 +1158,17 @@ class BrowserChrome final : public NavigationObserver {
     void HandleButtonPressed(ChromeViewId view_id);
     void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
     void UpdateTabStripPreferredSize();
+    // Bookmarks 0.9 collection builders. AddFavoriteSections appends the global strip and the
+    // current space's favorite rows to tab_strip_ ahead of the tabs; AddCollapsedFavorites does
+    // the same for the icon rail. Both read sidebar_collection_.
+    void AddFavoriteSections();
+    void AddCollapsedFavorites();
+    // Re-asserts the fill of every favorite plate and row (displayed, hovered, or neutral).
+    void ApplyFavoriteVisuals();
+    // Every favorite plate (strip icons, the "+N"/"+" controls, space rows, rail icons) with
+    // whether it is the displayed favorite.
+    [[nodiscard]] std::vector<std::pair<CefRefPtr<CefButton>, bool>> FavoriteSurfaces() const;
+    void UpdateBookmarkStatusRow();
     void RebuildCollapsedTabs();
     void RebuildCollapsedSpaces();
     void UpdateCollapsedTabListSize();
@@ -1238,6 +1283,23 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> tab_strip_;
     CefRefPtr<CefLabelButton> favorites_section_header_;
     CefRefPtr<CefLabelButton> tabs_section_header_;
+    // Bookmarks 0.9: the global strip's header and strip, and the failure status row above the
+    // fixed footer. favorites_section_header_ names the current space's favorites.
+    CefRefPtr<CefLabelButton> global_header_;
+    CefRefPtr<CefPanel> global_strip_;
+    // Height and child count the favorite block adds to tab_strip_ (strip plus space rows), so
+    // UpdateTabStripPreferredSize can size the scroll content.
+    int favorite_block_height_dip_ = 0;
+    int favorite_block_children_ = 0;
+    std::vector<CefRefPtr<CefLabelButton>> space_favorite_rows_;
+    std::vector<CefRefPtr<CefLabelButton>> collapsed_favorite_buttons_;
+    CefRefPtr<CefPanel> collapsed_favorite_separator_wrapper_;
+    CefRefPtr<CefPanel> collapsed_favorite_separator_;
+    CefRefPtr<CefPanel> bookmark_status_row_;
+    CefRefPtr<CefLabelButton> bookmark_status_text_;
+    CefRefPtr<CefLabelButton> bookmark_status_retry_;
+    CefRefPtr<CefLabelButton> bookmark_status_dismiss_;
+    std::vector<CefRefPtr<CollectionButtonDelegate>> status_button_delegates_;
     // Branch labels of grouped tab runs and their indent panels (rebuilt with the tab strip).
     std::vector<CefRefPtr<CefPanel>> group_kicker_panels_;
     std::vector<CefRefPtr<CefLabelButton>> group_kickers_;
@@ -1252,7 +1314,6 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> collapsed_bottom_group_;
     CefRefPtr<CefPanel> collapsed_divider_wrapper_;
     CefRefPtr<CefPanel> collapsed_divider_;
-    CefRefPtr<CefLabelButton> collapsed_new_tab_button_;
     CefRefPtr<CefPanel> collapsed_space_list_;
     CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
     CefRefPtr<CefView> tab_list_scroll_;
