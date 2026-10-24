@@ -5889,10 +5889,13 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
     }
     if (active != nullptr) {
         const NavigationSnapshot page = active->navigation_state().snapshot();
-        // The cheap http(s) check comes first: ParseAndValidate calls the CEF URL API, which a
-        // headless window has not initialized, so internal pages never reach it.
+        // The cheap http(s) check comes first, so internal pages never reach the validator. The
+        // injected validator (the same seam the other address paths use) keeps headless tests off
+        // the CEF URL API, which they have not initialized.
         snapshot.add_current_page_available =
-            IsWebTileUrl(page.url) && ParseAndValidate(page.url).is_valid();
+            IsWebTileUrl(page.url) &&
+            (address_validator_ ? address_validator_(page.url) : ParseAndValidate(page.url))
+                .is_valid();
     }
     if (failed_bookmark_mutation_.has_value()) {
         snapshot.bookmark_status =
