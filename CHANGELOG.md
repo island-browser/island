@@ -15,6 +15,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
+- Native chrome keeps Back and Forward clear of the macOS traffic lights in the collapsed rail,
+  makes the focused address field one flush plate, and renders the selected rail globe in white.
+- Arc and Graphite now keep idle address fields scrolled to the start of their URL; their address
+  focus ring also closes cleanly at the top-right corner.
+- The Native welcome appearance switcher uses 24 DIP plates without a square inner outline, and
+  the waiting Agent footer shows one readable amber status dot.
 - Agent confirmation cards during a research bind to the research page the action targets, not to
   the tab the person is viewing. Switching tabs or spaces keeps such a card; a reshuffled index or
   a navigation to another origin withdraws it.

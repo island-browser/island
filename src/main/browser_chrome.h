@@ -635,11 +635,10 @@ class BrowserChrome final : public NavigationObserver {
         }
         return kept + ellipsis;
     }
-    // The Agent button's badge while a confirmation waits: amber (`warning_border`, the token of
-    // Native's needs-you status dot). The accent is reserved for the active tab and the address
-    // ring, so the badge never reads as a selection.
+    // The legacy Agent button's badge while a confirmation waits: amber. Native uses its single
+    // footer status dot instead; `warning_text` keeps it readable on the light canvas.
     [[nodiscard]] static ArgbColor AgentNeedsYouBadgeColor(const ChromeTokens& tokens) {
-        return tokens.warning_border;
+        return tokens.warning_text;
     }
     [[nodiscard]] static ArgbColor AgentStatusDotColor(const ChromeTokens& tokens,
                                                        AgentActivity activity) {
@@ -647,7 +646,7 @@ class BrowserChrome final : public NavigationObserver {
             case AgentActivity::kWorking:
                 return tokens.accent;
             case AgentActivity::kNeedsYou:
-                return tokens.warning_border;
+                return tokens.warning_text;
             case AgentActivity::kIdle:
                 break;
         }

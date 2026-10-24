@@ -347,12 +347,12 @@ TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNoNewTabRow
     // Top to bottom: navigation, address, the tab list, then the bottom group (divider, space
     // bar, footer); the current-page card stays last and collapsed. The New Tab row is gone:
     // ⌘T (Ctrl+T), the Browser menu and the palette open tabs.
-    EXPECT_EQ(order, (std::vector<ChromeViewId>{
-                         ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
-                         ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
-                         ChromeViewId::kSpacer, ChromeViewId::kDivider,
-                         ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailFooter,
-                         ChromeViewId::kActivePage}));
+    EXPECT_EQ(order,
+              (std::vector<ChromeViewId>{ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
+                                         ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
+                                         ChromeViewId::kSpacer, ChromeViewId::kDivider,
+                                         ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailFooter,
+                                         ChromeViewId::kActivePage}));
     const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
     ASSERT_NE(footer, nullptr);
     ASSERT_EQ(footer->children.size(), 4U);
@@ -524,13 +524,12 @@ TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitial
     const SpaceSwitcherEntrySnapshot lower = {.name = "École supérieure", .active = false};
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 1, LookPreset::kNative), "Home");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 5, LookPreset::kNative), "H");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative),
-              "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative), "P");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 4, LookPreset::kNative), "P");
     for (std::size_t count = 1; count <= 8; ++count) {
         for (const SpaceSwitcherEntrySnapshot* entry : {&shorty, &longer, &lower}) {
-            const std::string label = BrowserChrome::SpaceSegmentLabel(*entry, count,
-                                                                       LookPreset::kNative);
+            const std::string label =
+                BrowserChrome::SpaceSegmentLabel(*entry, count, LookPreset::kNative);
             EXPECT_NE(label, "\xE2\x80\xA6");
             EXPECT_FALSE(label.empty());
         }
@@ -561,7 +560,7 @@ TEST(BrowserChromeContractTest, GivenAgentNeedsYouBadgeWhenColoredThenItIsAmberN
         for (const LookPreset look :
              {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
             const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
-            EXPECT_EQ(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.warning_border);
+            EXPECT_EQ(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.warning_text);
             EXPECT_NE(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.accent);
         }
     }

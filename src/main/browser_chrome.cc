@@ -405,10 +405,10 @@ CefRefPtr<CefImage> BuildBadgedImage(const CefRefPtr<CefImage>& base, ArgbColor 
         }
         RasterBitmap bitmap = NewRasterBitmap(pixels.width / scale, pixels.height / scale, scale);
         CompositePremultiplied(bitmap, pixels.data.data(), pixels.width, pixels.height, 0, 0);
-        FillRoundedRect(bitmap, bitmap.width_px / scale - kAgentBadgeDip, 0, kAgentBadgeDip,
-                        kAgentBadgeDip,
-                        {kAgentBadgeDip / 2, kAgentBadgeDip / 2, kAgentBadgeDip / 2, kAgentBadgeDip / 2},
-                        color);
+        FillRoundedRect(
+            bitmap, bitmap.width_px / scale - kAgentBadgeDip, 0, kAgentBadgeDip, kAgentBadgeDip,
+            {kAgentBadgeDip / 2, kAgentBadgeDip / 2, kAgentBadgeDip / 2, kAgentBadgeDip / 2},
+            color);
         image->AddBitmap(static_cast<float>(scale), bitmap.width_px, bitmap.height_px,
                          CEF_COLOR_TYPE_BGRA_8888, CEF_ALPHA_TYPE_PREMULTIPLIED, bitmap.bgra.data(),
                          bitmap.bgra.size());
@@ -1053,6 +1053,13 @@ class BrowserChrome::RootPanelDelegate final : public CefPanelDelegate {
                 }
             }
             toolbar_->Layout();
+            // CEF lays out the toolbar's direct child here, but does not always immediately
+            // relayout that child's new box layout after a rail-width change. In particular,
+            // Native's 52 DIP collapsed rail must move Back past the traffic lights now, not on
+            // a later resize.
+            if (toolbar_content_ != nullptr) {
+                toolbar_content_->Layout();
+            }
         }
         if (agent_panel_ != nullptr) {
             agent_panel_->Layout();
@@ -2011,8 +2018,9 @@ std::string BrowserChrome::SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& e
     constexpr int kTrackDip = 125;
     constexpr int kSegmentPaddingDip = 16;
     constexpr int kCharDip = 7;
-    const int fits = (kTrackDip / static_cast<int>(std::max<std::size_t>(space_count, 1)) -
-                      kSegmentPaddingDip) / kCharDip;
+    const int fits =
+        (kTrackDip / static_cast<int>(std::max<std::size_t>(space_count, 1)) - kSegmentPaddingDip) /
+        kCharDip;
     std::size_t characters = 0;
     for (std::size_t index = 0; index < entry.name.size();
          index = AdvanceUtf8Character(entry.name, index)) {
@@ -2363,8 +2371,7 @@ void BrowserChrome::SetSpaceSwitcherEntries(
         const SpaceSwitcherEntrySnapshot& entry = entries[index];
         const bool native_icon = native && !entry.icon_id.empty();
         SpaceEntryViews views;
-        views.row = CefPanel::CreatePanel(new PanelDelegate(
-            this, CefSize(0, pill_height)));
+        views.row = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, pill_height)));
         views.row->SetID(static_cast<int>(ChromeViewId::kSpaceSwitcherEntry));
         CefRefPtr<CefBoxLayout> outline_layout =
             views.row->SetToBoxLayout(OutlinedLayout(kHairlineDip));
@@ -2919,9 +2926,8 @@ void BrowserChrome::SetAgentButtonLabel(std::string label) {
         return;
     }
     agent_button_label_ = std::move(label);
-    const std::string& visible = tokens_.look == LookPreset::kNative
-                                     ? std::string("Agent")
-                                     : agent_button_label_;
+    const std::string& visible =
+        tokens_.look == LookPreset::kNative ? std::string("Agent") : agent_button_label_;
     agent_button_->SetText(visible);
     agent_button_->SetAccessibleName(agent_button_label_ == "Agent" ? "Agent panel"
                                                                     : agent_button_label_);
@@ -3243,6 +3249,9 @@ void BrowserChrome::HandleAddressFocus() {
         host_->SetAddressFocusRingSuppressed(true);
         host_->BeginAddressEditing();
         UpdateAddressFocusLeadingEdge();
+        // The focus-specific inner corner patch completes the ring at both ends. Push it in this
+        // event rather than waiting for an unrelated layout or theme-reset callback.
+        PushCornerPatches();
         ScheduleAddressSelection();
     }
 }
@@ -3253,6 +3262,7 @@ void BrowserChrome::HandleAddressBlur() {
         host_->SetAddressFocusRingSuppressed(false);
         host_->CancelAddressEditing();
         UpdateAddressFocusLeadingEdge();
+        PushCornerPatches();
     }
 }
 
@@ -3275,6 +3285,11 @@ void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     address_field_->SetReadOnly(!editing);
     if (address_field_->GetText().ToString() != text) {
         address_field_->SetText(text);
+    }
+    if (!editing && tokens_.look != LookPreset::kNative) {
+        // CEF leaves the caret at the end after SetText(), which horizontally scrolls an idle
+        // Arc/Graphite address field to its URL suffix. Keep the resting field at its start.
+        address_field_->SelectRange(CefRange(0, 0));
     }
     if (editing && !address_field_->HasFocus()) {
         address_field_->RequestFocus();
@@ -3471,10 +3486,10 @@ void BrowserChrome::ApplyRailButtonTheme() {
         new_space_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
     }
     if (sparkles.has_value()) {
-        // While a confirmation waits, the icon carries the accent dot (also when the panel is
-        // closed, so the person knows to open it).
+        // Legacy looks use an icon badge while their panel is closed. Native has a dedicated
+        // footer status dot, so adding a second badge there is redundant.
         agent_button_->SetImage(CEF_BUTTON_STATE_NORMAL,
-                                agent_needs_you_
+                                !native && agent_needs_you_
                                     ? BuildBadgedImage(*sparkles, AgentNeedsYouBadgeColor(tokens_))
                                     : *sparkles);
     }
@@ -3538,11 +3553,9 @@ void BrowserChrome::ApplyCollectionTheme() {
         if (!entry.icon_id.empty()) {
             const ArgbColor icon_color =
                 tokens_.look == LookPreset::kNative ? colors.title : entry.color;
-            const std::optional<CefRefPtr<CefImage>> icon =
-                icon_catalog_.LoadSpaceIcon(entry.icon_id, icon_color,
-                                            tokens_.look == LookPreset::kNative
-                                                ? ChromeIconSize::k16
-                                                : ChromeIconSize::k15);
+            const std::optional<CefRefPtr<CefImage>> icon = icon_catalog_.LoadSpaceIcon(
+                entry.icon_id, icon_color,
+                tokens_.look == LookPreset::kNative ? ChromeIconSize::k16 : ChromeIconSize::k15);
             SetAllStateImages(views.name, icon.has_value() ? *icon : nullptr);
         } else {
             SetAllStateImages(views.name, nullptr);
@@ -3635,9 +3648,13 @@ void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
              : (entry.sleeping ? SleepingTitleColor(colors.title, bg) : colors.title))
             .argb);
     if (views.favicon_source != nullptr) {
-        const CefRefPtr<CefImage> source =
-            entry.sleeping ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
-                           : views.favicon_source;
+        CefRefPtr<CefImage> source = entry.sleeping
+                                         ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
+                                         : views.favicon_source;
+        // Match the expanded selected row: the generic globe is white on Native's blue plate.
+        if (tokens_.look == LookPreset::kNative && entry.active && !views.favicon_is_page) {
+            source = WhiteGlyphImage(source, 1.0);
+        }
         SetAllStateImages(views.button,
                           BuildFaviconImage(source, views.favicon_is_page, tokens_.plate));
     }
@@ -3806,8 +3823,7 @@ int BrowserChrome::CornerPatchPollDelayMs(const CornerPatchPollState& state) {
 BrowserChrome::CornerPatchPollState BrowserChrome::AdvanceCornerPatchPoll(
     std::size_t unchanged_ticks, bool patches_changed) {
     const std::size_t next = patches_changed ? 0 : unchanged_ticks + 1;
-    return {.unchanged_ticks = next,
-            .continue_polling = next < CornerPatchPollUnchangedLimit()};
+    return {.unchanged_ticks = next, .continue_polling = next < CornerPatchPollUnchangedLimit()};
 }
 
 void BrowserChrome::SchedulePatchPoll(int delay_ms) {
@@ -3820,9 +3836,9 @@ void BrowserChrome::SchedulePatchPoll(int delay_ms) {
                            [](std::shared_ptr<BrowserChrome*> alive) {
                                if (BrowserChrome* chrome = *alive) {
                                    chrome->patch_poll_pending_ = false;
-                                   const CornerPatchPollState state = AdvanceCornerPatchPoll(
-                                       chrome->patch_poll_unchanged_ticks_,
-                                       chrome->RefreshCornerPatches());
+                                   const CornerPatchPollState state =
+                                       AdvanceCornerPatchPoll(chrome->patch_poll_unchanged_ticks_,
+                                                              chrome->RefreshCornerPatches());
                                    chrome->patch_poll_unchanged_ticks_ = state.unchanged_ticks;
                                    chrome->SchedulePatchPoll(CornerPatchPollDelayMs(state));
                                }

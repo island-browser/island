@@ -320,15 +320,16 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   same `canvas` surface, never hiding the tabs. One 32 DIP square button per tab of the
 active space (16 DIP favicon on its plate, globe fallback), pinned tabs first with a hairline
 between the groups; the active tab is the same soft `selected` fill as the selected row. A quiet "+" and the spaces (round dots; the active one wears a ring, so state is a
-  shape and never color alone) sit at the bottom. The tab title is the tooltip and the accessible
+  shape and never color alone) sit at the bottom. The selected generic globe is white on its blue
+  plate. The tab title is the tooltip and the accessible
   name, buttons are keyboard focusable, and the list scrolls vertically (buttons plus a classic
   scrollbar always fit the 52 DIP). There is no edge sliver or hover reveal. Cmd/Ctrl+L expands
   the sidebar for the length of the address edit. Every rail view re-asserts its colors through
   the same theme-reset delegates (`BrowserChrome::ApplyCollapsedRailTheme`).
 - **Welcome card (native overlay):** a radius-12 `--surface` card with a 1px `--border` outline,
   spacing_6 padding and system type. Appearance and Import are sentence-case 11/600 section
-  headers. The appearance control matches the sidebar switcher: a `fill` track with a 2 DIP inset,
-  24 DIP plates, and a `border_strong` hairline on the selected neutral `segment_selected` plate.
+  headers. The appearance control matches the sidebar switcher: a `fill` track with a 2 DIP inset
+  and 24 DIP neutral `segment_selected` plates, without a square inner hairline.
   Its focus ring is neutral and follows only the focused segment. A 20% black scrim fills the
   short-lived overlay; the page compositor is hidden while the Native welcome is shown so start-page
   controls cannot paint through it. Readable browsers remain outlined toggle rows, followed by a
@@ -361,7 +362,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   `accent` while the agent reads the tab and `warning_text` while it waits for the person; click
   opens the agent panel. The dot is never the only cue: each indicator has an accessible name and
   a tooltip with the full text ("14 trackers blocked"). A slept tab shows its state in its sidebar
-  row, not in the field (`address_indicators.h`, `BrowserChrome::SetAddressIndicators`).
+  row, not in the field (`address_indicators.h`, `BrowserChrome::SetAddressIndicators`). The field
+  fill is flush with its focus plate; Arc and Graphite idle fields begin at the URL start.
 - **Plan graph nodes (Native, `pages/plan.html`):** 148 × 92 DIP, radius 10, drawn as real
   buttons over an inline SVG of edges. Kinds: **Question** (`accent_soft` fill, the root),
   **Step** (`surface`, `border_strong` outline, 3 DIP stripe in its branch color), **Needs you**

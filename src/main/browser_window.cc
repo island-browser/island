@@ -931,8 +931,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
     if (!agent_tab_id_.has_value()) {
         return {.error = AgentTabError::kNoAgentPage};
     }
-    const std::optional<std::pair<std::size_t, std::size_t>> location =
-        TabLocation(*agent_tab_id_);
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*agent_tab_id_);
     if (!location.has_value() || location->first != space_index) {
         return {.error = AgentTabError::kAgentPageClosed};
     }
@@ -5032,9 +5031,10 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
             EnsureTabBrowserView(*second)) {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
-            SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
-                              AttachedView{.view = second->browser_view(), .tab = second->id(),
-                                           .second_slot = true}});
+            SetAttachedViews(
+                {AttachedView{.view = first->browser_view(), .tab = first->id()},
+                 AttachedView{
+                     .view = second->browser_view(), .tab = second->id(), .second_slot = true}});
             ApplyPageViewVisibility();
             return;
         }
@@ -5159,8 +5159,12 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     // Textfields (the address field and both palette query fields) read their colors from the
     // theme: the typed value in --text, the placeholder in --text-2, a selection in the accent
     // with the page background as its text, and the field's own outline as the hairline.
-    window->SetThemeColor(CEF_ColorTextfieldBackground, tokens.surface.argb);
-    window->SetThemeColor(CEF_ColorTextfieldBackgroundDisabled, tokens.surface.argb);
+    // Native's address field is flush with its fill plate. CEF textfields otherwise inherit the
+    // generic surface here, leaving a visible rounded inner step inside the address focus ring.
+    const ArgbColor textfield_background =
+        tokens.look == LookPreset::kNative ? tokens.fill : tokens.surface;
+    window->SetThemeColor(CEF_ColorTextfieldBackground, textfield_background.argb);
+    window->SetThemeColor(CEF_ColorTextfieldBackgroundDisabled, textfield_background.argb);
     window->SetThemeColor(CEF_ColorTextfieldForeground, tokens.text.argb);
     window->SetThemeColor(CEF_ColorTextfieldForegroundDisabled, tokens.text.argb);
     window->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder, tokens.text_secondary.argb);
@@ -5637,11 +5641,10 @@ void BrowserWindow::ScheduleSpaceIconPicker() {
         return;
     }
     // Runs after the palette's released overlay has been destroyed by its posted task (FIFO).
-    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
-                            [](CefRefPtr<BrowserWindow> window) {
-                                window->RunScheduledSpaceIconPicker();
-                            },
-                            CefRefPtr<BrowserWindow>(this))));
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(
+                    [](CefRefPtr<BrowserWindow> window) { window->RunScheduledSpaceIconPicker(); },
+                    CefRefPtr<BrowserWindow>(this))));
 }
 
 void BrowserWindow::RunScheduledSpaceIconPicker() {
@@ -5802,7 +5805,8 @@ std::chrono::steady_clock::time_point BrowserWindow::ConfirmationNow() const {
 
 namespace {
 
-// The origin a card is raised for: the page's committed URL, or its start URL before the first load.
+// The origin a card is raised for: the page's committed URL, or its start URL before the first
+// load.
 std::string AgentTabOrigin(const Tab& tab) {
     const std::string& url = tab.navigation_state().snapshot().url;
     return FaviconOrigin(url.empty() ? tab.startup_url() : url);
@@ -5901,7 +5905,8 @@ void BrowserWindow::CancelStaleConfirmations() {
 }
 
 void BrowserWindow::FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer) {
-    std::function<void(agent::ConfirmationAnswer)> done = std::move(pending_confirmations_[index].done);
+    std::function<void(agent::ConfirmationAnswer)> done =
+        std::move(pending_confirmations_[index].done);
     pending_confirmations_.erase(pending_confirmations_.begin() +
                                  static_cast<std::ptrdiff_t>(index));
     RefreshConfirmationUi();
@@ -6020,10 +6025,10 @@ void BrowserWindow::RefreshAgentEntry() {
         return;
     }
     AgentEntryStatus status;
-    const bool needs_you = !pending_confirmations_.empty() ||
-                           (research_.has_value() && research_->awaiting_approval) ||
-                           (agent_session_ != nullptr &&
-                            agent_session_->pending_permission_count() != 0);
+    const bool needs_you =
+        !pending_confirmations_.empty() ||
+        (research_.has_value() && research_->awaiting_approval) ||
+        (agent_session_ != nullptr && agent_session_->pending_permission_count() != 0);
     if (needs_you) {
         status.activity = AgentActivity::kNeedsYou;
     } else if (agent_session_ != nullptr && agent_session_->busy()) {
@@ -6038,8 +6043,7 @@ void BrowserWindow::RefreshAgentEntry() {
         status.queue_total = clamp_int(current->total);
     }
     status.queued_count = static_cast<int>(std::min<std::size_t>(
-        agent_queue_.queued_count(),
-        static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        agent_queue_.queued_count(), static_cast<std::size_t>(std::numeric_limits<int>::max())));
     if (const agent::AgentProvider* provider =
             agent::FindAgentProvider(ResolvedAgent().provider_id)) {
         status.provider_name = std::string(provider->name);
@@ -6211,8 +6215,8 @@ void BrowserWindow::ApplyPageViewVisibility() {
     // Chromium's browser compositor can sit above a CefWindow overlay on macOS, so Native hides the
     // attached page views behind the welcome scrim. The chrome and the welcome card stay laid out.
     const bool welcome_visible = welcome_ != nullptr && welcome_->visible();
-    const bool hidden = WelcomeHidesPageViews(ResolvedTokens(ResolvedChromeTheme()).look,
-                                              welcome_visible);
+    const bool hidden =
+        WelcomeHidesPageViews(ResolvedTokens(ResolvedChromeTheme()).look, welcome_visible);
     for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
         if (view != nullptr) {
             view->SetVisible(!hidden);

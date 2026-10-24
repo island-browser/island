@@ -247,8 +247,8 @@ TEST(BrowserWindowTest, GivenAddressFocusWhenTextfieldRingResolvedThenItIsThePla
 TEST(BrowserWindowTest, CornerPatchPollKeepsASlowTickAfterTheQuietBurst) {
     // Inside the burst the poll ticks quickly; after it, scrolling (which CEF does not report) is
     // still followed by one slow tick, so the poll is never left without a next tick.
-    const int quick = BrowserChrome::CornerPatchPollDelayMs(
-        {.unchanged_ticks = 0, .continue_polling = true});
+    const int quick =
+        BrowserChrome::CornerPatchPollDelayMs({.unchanged_ticks = 0, .continue_polling = true});
     const int slow = BrowserChrome::CornerPatchPollDelayMs(
         {.unchanged_ticks = BrowserChrome::CornerPatchPollUnchangedLimit(),
          .continue_polling = false});
@@ -266,10 +266,10 @@ TEST(BrowserWindowTest, CornerPatchPollingStopsAfterAQuietStreakAndResetsOnChang
                   tick + 1 < BrowserChrome::CornerPatchPollUnchangedLimit());
     }
 
-    EXPECT_EQ(BrowserChrome::AdvanceCornerPatchPoll(state.unchanged_ticks,
-                                                    /*patches_changed=*/true),
-              (BrowserChrome::CornerPatchPollState{.unchanged_ticks = 0,
-                                                   .continue_polling = true}));
+    EXPECT_EQ(
+        BrowserChrome::AdvanceCornerPatchPoll(state.unchanged_ticks,
+                                              /*patches_changed=*/true),
+        (BrowserChrome::CornerPatchPollState{.unchanged_ticks = 0, .continue_polling = true}));
 }
 
 TEST(BrowserWindowTest, GivenNativeTreeWhenInspectedThenToolbarAndAddressIdsMatchRuntime) {
@@ -408,6 +408,10 @@ TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThe
     EXPECT_EQ(collapsed.toolbar_bounds.x, kCollapsedRailWidthDip);
     EXPECT_EQ(collapsed.toolbar_leading_inset_dip,
               BrowserChrome::TrafficLightClearDip() - kCollapsedRailWidthDip);
+    // The first toolbar button starts after the leading inset, so it is never under a traffic
+    // light when the Native rail is collapsed.
+    EXPECT_GE(collapsed.toolbar_bounds.x + collapsed.toolbar_leading_inset_dip,
+              BrowserChrome::TrafficLightClearDip());
 }
 
 TEST(BrowserWindowTest, GivenSectionHeaderWhenFormattedThenItUsesTheParsedSemiBoldToken) {

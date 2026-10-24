@@ -391,7 +391,7 @@ void WelcomeFlow::BuildViews() {
         button->SetFocusable(true);
         button->SetInkDropEnabled(true);
         button->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_CENTER);
-        const int button_height = native ? kSegmentPlateDip - 2 * kHairlineDip : kControlHeightDip;
+        const int button_height = native ? kSegmentPlateDip : kControlHeightDip;
         button->SetMinimumSize(CefSize(150, button_height));
         if (native) {
             button->SetMaximumSize(CefSize(10000, button_height));
@@ -406,8 +406,10 @@ void WelcomeFlow::BuildViews() {
         } else {
             outline = MakePanel(SurfaceSlot::kOutline);
         }
-        CefRefPtr<CefBoxLayout> outline_layout =
-            outline->SetToBoxLayout(HorizontalLayout(0, Uniform(kHairlineDip)));
+        // The Native plate fills the 24 DIP slot. A square CEF hairline inside that slot looked
+        // like a second focus outline; the window supplies the single neutral focus ring.
+        CefRefPtr<CefBoxLayout> outline_layout = outline->SetToBoxLayout(
+            native ? HorizontalLayout(0) : HorizontalLayout(0, Uniform(kHairlineDip)));
         outline->AddChildView(button);
         outline_layout->SetFlexForView(button, 1);
         segments->AddChildView(outline);
@@ -746,10 +748,7 @@ void WelcomeFlow::ApplyColors() {
         const ButtonColors colors = SegmentColors(tokens_, selected);
         if (theme_outlines_[index] != nullptr) {
             theme_outlines_[index]->SetBackgroundColor(
-                (tokens_.look == LookPreset::kNative
-                     ? BrowserChrome::NativeSegmentColors(tokens_, selected).outline
-                     : tokens_.border)
-                    .argb);
+                (tokens_.look == LookPreset::kNative ? tokens_.fill : tokens_.border).argb);
         }
         theme_buttons_[index]->SetBackgroundColor(colors.fill.argb);
         theme_buttons_[index]->SetEnabledTextColors(colors.text.argb);
