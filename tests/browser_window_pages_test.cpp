@@ -3068,6 +3068,21 @@ TEST(BrowserWindowPagesTest, CollectTakesOnlyChoicesWhoseUrlIsStillThere) {
     EXPECT_FALSE(window.CollectFromTabs("price", {{0, "https://a.test/"}}));
 }
 
+// Reads a whole file and closes it before returning. Windows cannot remove or reliably rewrite a
+// file that a test still holds open, so the export test never keeps a stream alive across a
+// rewrite or a remove.
+std::string ReadWholeFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+// Deletes the file if present. Non-throwing, so a failed delete shows up as a failed assertion
+// instead of an exception that aborts the test.
+void RemoveIfPresent(const std::filesystem::path& path) {
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 TEST(BrowserWindowPagesTest, ExportMessageWritesTheChosenFormat) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetReportPageUrlForTest(std::string(kReportUrl));
@@ -3075,29 +3090,26 @@ TEST(BrowserWindowPagesTest, ExportMessageWritesTheChosenFormat) {
     const std::string id = window->reports().reports[0].id;
     const std::filesystem::path target =
         std::filesystem::temp_directory_path() / "island_export_test_table.csv";
-    std::filesystem::remove(target);
+    RemoveIfPresent(target);
     window->SetExportPathForTest(target);
 
     SendReport(*window, id, R"({"type":"export","format":"csv"})");
-    std::ifstream csv(target, std::ios::binary);
-    std::string written((std::istreambuf_iterator<char>(csv)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(written, "\xEF\xBB\xBFSource,Source title,Price\r\n"
-                       "https://a.test/one,Shop,189\r\n");
+    EXPECT_EQ(ReadWholeFile(target),
+              "\xEF\xBB\xBFSource,Source title,Price\r\n"
+              "https://a.test/one,Shop,189\r\n");
 
     SendReport(*window, id, R"({"type":"export","format":"json"})");
-    std::ifstream json_in(target, std::ios::binary);
-    written.assign((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(written,
+    EXPECT_EQ(ReadWholeFile(target),
               R"([{"Source":"https://a.test/one","Source title":"Shop","Price":"189"}])");
 
     // A report without a table has nothing to export: nothing is written.
-    std::filesystem::remove(target);
+    RemoveIfPresent(target);
     window->SetResearchTaskForTest("q");
     window->CompleteResearch(ReportOutcome("# No table\n\nJust prose."));
     const std::string prose_id = window->reports().reports[0].id;
     SendReport(*window, prose_id, R"({"type":"export","format":"csv"})");
     EXPECT_FALSE(std::filesystem::exists(target));
-    std::filesystem::remove(target);
+    RemoveIfPresent(target);
 }
 
 }  // namespace

@@ -13,9 +13,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
-### Changed
+## [0.8.1] - 2026-10-24
 
-- Versioned builds are published as the latest GitHub release (still unsigned); nightly stays a prerelease.
+### Fixed
+
+- The Windows build passes its tests again (an export test kept a file open while deleting it).
 
 ## [0.8.0] - 2026-10-24
 
@@ -564,7 +566,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/island-browser/island/releases/tag/v0.8.1
 [0.8.0]: https://github.com/island-browser/island/releases/tag/v0.8.0
 [0.7.3]: https://github.com/island-browser/island/releases/tag/v0.7.3
 [0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2
