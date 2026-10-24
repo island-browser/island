@@ -1,5 +1,6 @@
 #include "action_gate.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -175,6 +176,12 @@ std::string Clip(const std::string& text) {
     return text;
 }
 
+std::string CardText(std::string_view text) {
+    std::string safe = CollapseSpaces(text);
+    safe.erase(std::remove(safe.begin(), safe.end(), '"'), safe.end());
+    return Clip(safe);
+}
+
 bool IsPasswordField(const ElementFacts& facts) {
     const std::string type = Lowercase(facts.type);
     const std::string autocomplete = Lowercase(facts.autocomplete);
@@ -308,29 +315,29 @@ GateDecision Classify(const GateInput& input, const std::vector<std::string>& tr
         decision.action = ActionClass::kConfirm;
         decision.rule = GateRule::kBookmarkMutation;
         decision.host = HostOf(input.bookmark_url);
-        const std::string bookmark_host = decision.host.empty() ? "this page" : decision.host;
-        const std::string title = CollapseSpaces(input.bookmark_title).empty()
-                                      ? input.bookmark_url
-                                      : Clip(CollapseSpaces(input.bookmark_title));
+        const std::string bookmark_host =
+            decision.host.empty() ? CardText(input.bookmark_url) : CardText(decision.host);
+        const std::string requested_title = CardText(input.bookmark_title);
+        const std::string title =
+            requested_title.empty() ? CardText(input.bookmark_url) : requested_title;
+        const std::string folder = CardText(input.bookmark_folder_path);
+        const std::string scope = CardText(input.favorite_scope);
         if (input.tool == "browser_add_bookmark") {
             decision.summary = "Add bookmark \"" + title + "\" on " + bookmark_host +
-                               " to folder \"" + CollapseSpaces(input.bookmark_folder_path) + "\"";
+                               " to folder \"" + folder + "\"";
         } else if (input.tool == "browser_remove_bookmark") {
             decision.summary = "Remove bookmark \"" + title + "\" on " + bookmark_host +
-                               " from folder \"" + CollapseSpaces(input.bookmark_folder_path) +
-                               "\"";
+                               " from folder \"" + folder + "\"";
         } else if (input.tool == "browser_add_favorite") {
-            decision.summary =
-                "Add \"" + title + "\" on " + bookmark_host + " to " + input.favorite_scope;
+            decision.summary = "Add \"" + title + "\" on " + bookmark_host + " to " + scope;
         } else {
-            decision.summary =
-                "Remove \"" + title + "\" on " + bookmark_host + " from " + input.favorite_scope;
+            decision.summary = "Remove \"" + title + "\" on " + bookmark_host + " from " + scope;
         }
         decision.trusted_allowed = false;
         decision.task_grant_allowed = true;
-        // Keep an Allow-for-task grant narrowly bound to this persistent operation and object.
-        decision.scope = input.tool + "|" + input.bookmark_url + "|" + input.bookmark_folder_path +
-                         "|" + input.favorite_scope;
+        // Keep an Allow-for-task grant narrowly bound to this persistent operation and bookmark.
+        decision.scope = input.tool + "|" + std::to_string(input.bookmark_id) + "|" +
+                         input.bookmark_folder_path + "|" + input.favorite_scope;
         return decision;
     }
 

@@ -1184,7 +1184,6 @@ void BrowserToolbox::AddBookmark(const json::Value& args, ToolCallback done) {
         return;
     }
     AgentBookmarkDraft bookmark;
-    bookmark.url = url_value->string_val;
     if (const Value* title = args.FindMember("title")) {
         if (!title->IsString()) {
             done(ToolResult::Error("'title' must be a string."));
@@ -1200,6 +1199,13 @@ void BrowserToolbox::AddBookmark(const json::Value& args, ToolCallback done) {
         }
         if (!folder->string_val.empty()) bookmark.folder_path = folder->string_val;
     }
+    const std::optional<std::string> resolved_url =
+        host_.ResolveNavigationTarget(url_value->string_val);
+    if (!resolved_url) {
+        done(ToolResult::Error("'url' must be an allowed address."));
+        return;
+    }
+    bookmark.url = *resolved_url;
     const std::string title = bookmark.title.empty() ? bookmark.url : bookmark.title;
     Gate(
         {.tool = "browser_add_bookmark",
@@ -1221,34 +1227,25 @@ void BrowserToolbox::RemoveBookmark(const json::Value& args, ToolCallback done) 
         done(ToolResult::Error("'id' must be a positive bookmark id."));
         return;
     }
-    host_.ListBookmarks(std::nullopt, [this, id = *id, done = std::move(done)](
-                                          HostStatus status,
-                                          std::vector<AgentBookmarkInfo> bookmarks) mutable {
-        if (!status.ok) {
-            done(ToolResult::Error(status.error));
-            return;
-        }
-        const auto found =
-            std::find_if(bookmarks.begin(), bookmarks.end(),
-                         [id](const AgentBookmarkInfo& bookmark) { return bookmark.id == id; });
-        if (found == bookmarks.end()) {
-            done(ToolResult::Error("Unknown bookmark id: " + std::to_string(id)));
-            return;
-        }
-        const AgentBookmarkInfo bookmark = *found;
-        Gate(
-            {.tool = "browser_remove_bookmark",
-             .bookmark_title = bookmark.title,
-             .bookmark_url = bookmark.url,
-             .bookmark_folder_path = bookmark.folder_path},
-            std::nullopt,
-            [this, id](ToolCallback finish) {
-                host_.RemoveBookmark(id, [finish = std::move(finish)](HostStatus mutation_status) {
-                    finish(StatusResult(mutation_status, "Bookmark removed."));
-                });
-            },
-            std::move(done));
-    });
+    WithBookmark(
+        *id,
+        [this, id = *id](AgentBookmarkInfo bookmark, ToolCallback done) {
+            Gate(
+                {.tool = "browser_remove_bookmark",
+                 .bookmark_title = bookmark.title,
+                 .bookmark_id = id,
+                 .bookmark_url = bookmark.url,
+                 .bookmark_folder_path = bookmark.folder_path},
+                std::nullopt,
+                [this, id](ToolCallback finish) {
+                    host_.RemoveBookmark(
+                        id, [finish = std::move(finish)](HostStatus mutation_status) {
+                            finish(StatusResult(mutation_status, "Bookmark removed."));
+                        });
+                },
+                std::move(done));
+        },
+        std::move(done));
 }
 
 void BrowserToolbox::AddFavorite(const json::Value& args, ToolCallback done) {
@@ -1262,24 +1259,13 @@ void BrowserToolbox::AddFavorite(const json::Value& args, ToolCallback done) {
         done(ToolResult::Error("'scope' must be 'global' or a positive persisted space id."));
         return;
     }
-    host_.ListBookmarks(
-        std::nullopt, [this, id = *id, scope = *scope, done = std::move(done)](
-                          HostStatus status, std::vector<AgentBookmarkInfo> bookmarks) mutable {
-            if (!status.ok) {
-                done(ToolResult::Error(status.error));
-                return;
-            }
-            const auto found =
-                std::find_if(bookmarks.begin(), bookmarks.end(),
-                             [id](const AgentBookmarkInfo& bookmark) { return bookmark.id == id; });
-            if (found == bookmarks.end()) {
-                done(ToolResult::Error("Unknown bookmark id: " + std::to_string(id)));
-                return;
-            }
-            const AgentBookmarkInfo bookmark = *found;
+    WithBookmark(
+        *id,
+        [this, id = *id, scope = *scope](AgentBookmarkInfo bookmark, ToolCallback done) {
             Gate(
                 {.tool = "browser_add_favorite",
                  .bookmark_title = bookmark.title,
+                 .bookmark_id = id,
                  .bookmark_url = bookmark.url,
                  .favorite_scope = FavoriteScopeName(scope)},
                 std::nullopt,
@@ -1290,7 +1276,8 @@ void BrowserToolbox::AddFavorite(const json::Value& args, ToolCallback done) {
                                       });
                 },
                 std::move(done));
-        });
+        },
+        std::move(done));
 }
 
 void BrowserToolbox::RemoveFavorite(const json::Value& args, ToolCallback done) {
@@ -1304,8 +1291,42 @@ void BrowserToolbox::RemoveFavorite(const json::Value& args, ToolCallback done) 
         done(ToolResult::Error("'scope' must be 'global' or a positive persisted space id."));
         return;
     }
+    WithBookmark(
+        *id,
+        [this, id = *id, scope = *scope](AgentBookmarkInfo bookmark, ToolCallback done) {
+            const bool is_favorite =
+                std::any_of(bookmark.favorite_scopes.begin(), bookmark.favorite_scopes.end(),
+                            [&scope](const AgentFavoriteScope& favorite_scope) {
+                                return favorite_scope.space_id == scope.space_id;
+                            });
+            if (!is_favorite) {
+                done(ToolResult::Error("Bookmark id " + std::to_string(id) +
+                                       " is not a favorite in that scope."));
+                return;
+            }
+            Gate(
+                {.tool = "browser_remove_favorite",
+                 .bookmark_title = bookmark.title,
+                 .bookmark_id = id,
+                 .bookmark_url = bookmark.url,
+                 .favorite_scope = FavoriteScopeName(scope)},
+                std::nullopt,
+                [this, id, scope](ToolCallback finish) {
+                    host_.RemoveFavorite(
+                        id, scope, [finish = std::move(finish)](HostStatus mutation_status) {
+                            finish(StatusResult(mutation_status, "Favorite removed."));
+                        });
+                },
+                std::move(done));
+        },
+        std::move(done));
+}
+
+void BrowserToolbox::WithBookmark(std::uint64_t id,
+                                  std::function<void(AgentBookmarkInfo, ToolCallback)> run,
+                                  ToolCallback done) {
     host_.ListBookmarks(
-        std::nullopt, [this, id = *id, scope = *scope, done = std::move(done)](
+        std::nullopt, [id, run = std::move(run), done = std::move(done)](
                           HostStatus status, std::vector<AgentBookmarkInfo> bookmarks) mutable {
             if (!status.ok) {
                 done(ToolResult::Error(status.error));
@@ -1318,20 +1339,7 @@ void BrowserToolbox::RemoveFavorite(const json::Value& args, ToolCallback done) 
                 done(ToolResult::Error("Unknown bookmark id: " + std::to_string(id)));
                 return;
             }
-            const AgentBookmarkInfo bookmark = *found;
-            Gate(
-                {.tool = "browser_remove_favorite",
-                 .bookmark_title = bookmark.title,
-                 .bookmark_url = bookmark.url,
-                 .favorite_scope = FavoriteScopeName(scope)},
-                std::nullopt,
-                [this, id, scope](ToolCallback finish) {
-                    host_.RemoveFavorite(
-                        id, scope, [finish = std::move(finish)](HostStatus mutation_status) {
-                            finish(StatusResult(mutation_status, "Favorite removed."));
-                        });
-                },
-                std::move(done));
+            run(*found, std::move(done));
         });
 }
 
@@ -1391,6 +1399,7 @@ void BrowserToolbox::Gate(GateInput input, std::optional<std::size_t> tab,
     request.host = decision.host;
     request.tab = tab;
     request.trusted_allowed = decision.trusted_allowed;
+    request.task_grant_allowed = decision.task_grant_allowed;
     const bool grantable = decision.task_grant_allowed;
     host_.RequestConfirmation(
         std::move(request),

@@ -52,6 +52,7 @@ agent panel) lives in `src/main/`.
 
 The host seam is asynchronous and CEF-free. Its default implementation returns `bookmarks
 unavailable`; the window bridge is responsible for supplying a real store implementation.
+`ListFavorites(nullopt)` returns every favorite in display order, never non-favorites.
 
 ## For AI Agents
 
@@ -98,10 +99,12 @@ others become kFree on a trusted host. Summaries are what the card shows the per
 
 Not in the table: a Plan tab is refused before the gate asks anyone (`AgentTabInfo::refusal`), and a
 page with no host or origin is never trusted or granted. "Allow for this task" grants are keyed by
-(host, rule, scope) and cleared at each task start (`ResetTaskGrants`); a decision with
-`trusted_allowed == false` offers neither that grant nor "Trust this site", except
-`kBookmarkMutation`: it permits Allow for this task but never a trusted-site bypass, with a grant
-narrowly bound to the operation and saved bookmark. Cards time out after 120 s. Withdrawn cards
+(host, rule, scope) and cleared at each task start (`ResetTaskGrants`); `task_grant_allowed`
+controls whether a card offers that grant, while `trusted_allowed` controls only "Trust this site".
+`kBookmarkMutation` permits Allow for this task but never a trusted-site bypass, with a grant
+narrowly bound to the operation, saved bookmark id and scope. Cards render "Allow for this task"
+from `ConfirmationRequest::task_grant_allowed`, independently of `trusted_allowed`; the latter
+controls only "Trust this site". Cards time out after 120 s. Withdrawn cards
 answer `kWithdrawn` ("ask again"), not `kCancel` ("declined"). The host
 (`WindowAgentHost`) owns the card; the toolbox only sees `RequestConfirmation`.
 

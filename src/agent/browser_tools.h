@@ -117,6 +117,8 @@ struct ConfirmationRequest {
     std::string host;
     std::optional<std::size_t> tab;
     bool trusted_allowed = true;  // false: the prompt must not offer "Trust this site"
+    // false: the prompt must not offer "Allow for this task".
+    bool task_grant_allowed = true;
 };
 
 // Browser operations the tool layer needs. Tab indices are positions in the
@@ -155,6 +157,7 @@ class AgentBrowserHost {
         (void)folder_path;
         done(HostStatus::Error("bookmarks unavailable"), {});
     }
+    // With no scope, returns every bookmark that is a favorite in any scope, in display order.
     virtual void ListFavorites(std::optional<AgentFavoriteScope> scope,
                                AgentBookmarksCallback done) {
         (void)scope;
@@ -281,6 +284,8 @@ class BrowserToolbox {
     void RemoveBookmark(const json::Value& args, ToolCallback done);
     void AddFavorite(const json::Value& args, ToolCallback done);
     void RemoveFavorite(const json::Value& args, ToolCallback done);
+    void WithBookmark(std::uint64_t id, std::function<void(AgentBookmarkInfo, ToolCallback)> run,
+                      ToolCallback done);
 
     AgentBrowserHost& host_;
     std::vector<ToolDefinition> definitions_;

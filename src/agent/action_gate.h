@@ -52,6 +52,7 @@ struct GateInput {
     // Persistent bookmark-library action. These values are supplied by the tool layer, never by a
     // page, and let the confirmation card identify the exact local-state change.
     std::string bookmark_title;
+    std::uint64_t bookmark_id = 0;
     std::string bookmark_url;
     std::string bookmark_folder_path;
     std::string favorite_scope;

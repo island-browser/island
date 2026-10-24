@@ -31,6 +31,7 @@ class FakeBrowserHost : public AgentBrowserHost {
         {.index = 1, .title = "Docs", .url = "https://docs.test/", .loading = true},
     };
     std::vector<std::string> calls;
+    std::vector<std::string> resolved_targets;
     std::vector<DevToolsRecord> devtools;
     std::deque<DevToolsReply> replies;
     std::vector<std::string> trusted;
@@ -121,7 +122,9 @@ class FakeBrowserHost : public AgentBrowserHost {
         done(answer);
     }
     std::optional<std::string> ResolveNavigationTarget(std::string_view text) override {
+        resolved_targets.emplace_back(text);
         if (text.empty()) return std::nullopt;
+        if (text.starts_with("javascript:")) return std::nullopt;
         if (text.find("://") != std::string_view::npos) return std::string(text);
         return "https://" + std::string(text);
     }
@@ -148,11 +151,12 @@ class FakeBrowserHost : public AgentBrowserHost {
         std::vector<AgentBookmarkInfo> result;
         for (const AgentBookmarkInfo& bookmark : bookmarks) {
             const bool matches =
-                !scope ||
-                std::any_of(bookmark.favorite_scopes.begin(), bookmark.favorite_scopes.end(),
-                            [&scope](const AgentFavoriteScope& favorite_scope) {
-                                return favorite_scope.space_id == scope->space_id;
-                            });
+                !bookmark.favorite_scopes.empty() &&
+                (!scope ||
+                 std::any_of(bookmark.favorite_scopes.begin(), bookmark.favorite_scopes.end(),
+                             [&scope](const AgentFavoriteScope& favorite_scope) {
+                                 return favorite_scope.space_id == scope->space_id;
+                             }));
             if (matches) result.push_back(bookmark);
         }
         done(HostStatus::Ok(), std::move(result));
