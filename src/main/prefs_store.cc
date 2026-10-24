@@ -10,6 +10,7 @@
 #include <string_view>
 #include <system_error>
 
+#include "action_gate.h"
 #include "agent_providers.h"
 #include "json_util.h"
 #include "tab_sleep_policy.h"
@@ -21,6 +22,21 @@ static_assert(agent::kDefaultAgentProviderId == "claude",
               "PrefsState::agent_provider defaults to the default provider");
 
 PrefsLoadResult Fail(PrefsError error) { return {error, PrefsState{}}; }
+
+// A bare host ("Example.com") or a URL, with surrounding spaces ignored. HostOf needs a scheme,
+// so one is added to a bare host. A host without a dot ("com", "localhost") yields nothing: it
+// would otherwise trust every host under that label.
+std::string TrustedHostOf(const std::string& entry) {
+    constexpr std::string_view kSpaces = " \t\r\n";
+    const std::size_t first = entry.find_first_not_of(kSpaces);
+    if (first == std::string::npos) {
+        return {};
+    }
+    const std::string text = entry.substr(first, entry.find_last_not_of(kSpaces) - first + 1);
+    const std::string host =
+        agent::HostOf(text.find("://") == std::string::npos ? "https://" + text : text);
+    return host.find('.') == std::string::npos ? std::string() : host;
+}
 
 PrefsLoadResult ParsePrefsState(const json::Value& root) {
     if (!root.IsObject() || !root.HasRequiredInt("version") ||
@@ -168,6 +184,19 @@ PrefsLoadResult ParsePrefsState(const json::Value& root) {
             state.content_blocker_allowlist.push_back(site.string_val);
         }
     }
+    // Lenient, unlike the lists above: a value that is not an array is ignored and non-string
+    // entries are skipped. Fewer trusted sites only means more confirmations, and a damaged list
+    // must not cost the person the rest of their preferences.
+    if (const json::Value* trusted = root.FindMember("agent_trusted_sites");
+        trusted != nullptr && trusted->IsArray()) {
+        std::vector<std::string> sites;
+        for (const json::Value& site : trusted->array_val) {
+            if (site.IsString()) {
+                sites.push_back(site.string_val);
+            }
+        }
+        state.agent_trusted_sites = NormalizeTrustedSites(sites);
+    }
     return {PrefsError::kNone, state};
 }
 
@@ -252,6 +281,15 @@ std::string SerializeToJson(const PrefsState& state) {
     w.Key("full_bleed");
     w.BoolValue(a.full_bleed);
     w.EndObject();
+    if (!state.agent_trusted_sites.empty()) {
+        w.Key("agent_trusted_sites");
+        w.StartArray();
+        for (const std::string& site : state.agent_trusted_sites) {
+            w.ArrayElement();
+            w.StringValue(site);
+        }
+        w.EndArray();
+    }
     if (state.last_update_check != 0) {
         w.Key("last_update_check");
         w.IntValue(state.last_update_check);
@@ -262,6 +300,18 @@ std::string SerializeToJson(const PrefsState& state) {
 }
 
 }  // namespace
+
+std::vector<std::string> NormalizeTrustedSites(const std::vector<std::string>& sites) {
+    std::vector<std::string> normalized;
+    for (const std::string& site : sites) {
+        std::string host = TrustedHostOf(site);
+        if (!host.empty() &&
+            std::find(normalized.begin(), normalized.end(), host) == normalized.end()) {
+            normalized.push_back(std::move(host));
+        }
+    }
+    return normalized;
+}
 
 std::string ThemePreferenceToString(ThemePreference preference) {
     switch (preference) {

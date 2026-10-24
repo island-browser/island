@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace island {
@@ -100,6 +101,63 @@ TEST_F(ReportStoreTest, RemoveDropsOnlyThatReportAndIdsAreStrict) {
     for (const char* bad : {"", "r", "x1", "r1a", "r-1", "r1 ", "r12345678901234567890123"}) {
         EXPECT_FALSE(ReportStore::IsValidId(bad)) << bad;
     }
+}
+
+
+TEST_F(ReportStoreTest, KindRoundTripsAndV1LoadsAsResearch) {
+    ReportState state;
+    ResearchReport collected = Report("grinders", 2000);
+    collected.kind = std::string(kReportKindCollection);
+    ReportStore::Add(state, std::move(collected));
+    ReportStore::Add(state, Report("essay", 1000));
+    const std::filesystem::path path = dir_ / "reports.json";
+    ASSERT_EQ(ReportStore::Save(path, state), ReportError::kNone);
+    const ReportLoadResult loaded = ReportStore::Load(path);
+    ASSERT_EQ(loaded.error, ReportError::kNone);
+    ASSERT_EQ(loaded.state.reports.size(), 2U);
+    EXPECT_EQ(loaded.state.reports[0].kind, "research");  // newest first: "essay"
+    EXPECT_EQ(loaded.state.reports[1].kind, "collection");
+    EXPECT_EQ(loaded.state.version, 1);
+    EXPECT_EQ(ReportState::kCurrentSchemaVersion, 1);
+}
+
+TEST_F(ReportStoreTest, FileStaysVersionOneAndWritesKindOnlyForCollections) {
+    ReportState state;
+    ResearchReport collected = Report("grinders", 2000);
+    collected.kind = std::string(kReportKindCollection);
+    ReportStore::Add(state, std::move(collected));
+    ReportStore::Add(state, Report("essay", 1000));
+    const std::filesystem::path path = dir_ / "reports.json";
+    ASSERT_EQ(ReportStore::Save(path, state), ReportError::kNone);
+    std::ifstream in(path, std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXPECT_NE(text.find("\"version\":1,"), std::string::npos);
+    // One "kind" in the file: the collection. A research report looks exactly like version 1.
+    EXPECT_EQ(text.find("\"kind\""), text.rfind("\"kind\""));
+    EXPECT_NE(text.find("\"kind\":\"collection\""), std::string::npos);
+    EXPECT_EQ(text.find("\"kind\":\"research\""), std::string::npos);
+}
+
+TEST_F(ReportStoreTest, VersionOneFileWithoutKindLoadsAsResearch) {
+    std::filesystem::create_directories(dir_);
+    const std::filesystem::path path = dir_ / "reports.json";
+    std::ofstream(path) << R"({"version":1,"reports":[{"id":"r1","title":"Old","question":"q",)"
+                        << R"("markdown":"# Old","created_ms":5}]})";
+    const ReportLoadResult v1 = ReportStore::Load(path);
+    ASSERT_EQ(v1.error, ReportError::kNone);
+    ASSERT_EQ(v1.state.reports.size(), 1U);
+    EXPECT_EQ(v1.state.reports[0].kind, "research");
+}
+
+TEST_F(ReportStoreTest, UnknownKindLoadsAsResearch) {
+    std::filesystem::create_directories(dir_);
+    const std::filesystem::path path = dir_ / "reports.json";
+    std::ofstream(path) << R"({"version":1,"reports":[{"id":"r1","title":"T","question":"q",)"
+                        << R"("markdown":"# T","created_ms":5,"kind":"plan"}]})";
+    const ReportLoadResult loaded = ReportStore::Load(path);
+    ASSERT_EQ(loaded.error, ReportError::kNone);
+    ASSERT_EQ(loaded.state.reports.size(), 1U);
+    EXPECT_EQ(loaded.state.reports[0].kind, "research");
 }
 
 }  // namespace

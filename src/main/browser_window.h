@@ -21,6 +21,7 @@
 #include "agent_navigation.h"
 #include "agent_providers.h"
 #include "agent_session.h"
+#include "agent_task_queue.h"
 #include "bookmark_import.h"
 #include "bookmark_store.h"
 #include "browser_chrome.h"
@@ -31,6 +32,7 @@
 #include "cheatsheet_overlay.h"
 #include "chrome_snapshot.h"
 #include "clipboard.h"
+#include "collect_prompt.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
 #include "find_bar_model.h"
@@ -161,6 +163,29 @@ class BrowserWindow : public CefClient,
     // The MCP browser_open_tab path. During research it inserts the page below the Plan tab,
     // labels it with the running branch and remembers which plan node opened it.
     [[nodiscard]] bool OpenAgentTab(std::string_view text);
+    // Sites the agent may act on without asking. Normalized (see NormalizeTrustedSites) and saved
+    // with the prefs; adding a site twice or removing an unknown one changes nothing.
+    void AddTrustedSite(std::string host);
+    void RemoveTrustedSite(std::string_view host);
+    [[nodiscard]] const std::vector<std::string>& trusted_sites() const {
+        return prefs_.agent_trusted_sites;
+    }
+    // Agent confirmations: the card the person answers before a consequential page action. The
+    // window keeps each request until it is answered, times out after 120 s or the window closes,
+    // and calls `done` exactly once. The card lives in the window, not the panel, so it survives
+    // closing and reopening the panel; showing one opens the panel.
+    void ShowConfirmation(agent::ConfirmationRequest request,
+                          std::function<void(agent::ConfirmationAnswer)> done);
+    // Answers a pending confirmation (unknown ids are ignored). "Trust this site" saves the host
+    // when the card offered it; a trust or task answer to a card that did not offer them is
+    // treated as a cancel.
+    void AnswerConfirmation(std::string_view id, agent::ConfirmationAnswer answer);
+    // Shorter than the HTTP handler budget, so an external caller always gets the card's own
+    // timeout message rather than a 504.
+    static constexpr std::chrono::seconds kConfirmationTimeout{120};
+    [[nodiscard]] bool HasPendingConfirmation() const { return !pending_confirmations_.empty(); }
+    // Moves the confirmation clock forward and fires the timeouts that came due.
+    void AdvanceConfirmationClockForTest(std::chrono::seconds elapsed);
 
     // Agent tools (window_agent_host.cc). In ordinary chat the agent works with the window the
     // person sees: indices and calls without an index refer to the active space and tab. While a
@@ -189,6 +214,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool SetAgentTabPinned(std::size_t index, bool pinned);
     // Refuses (false) to navigate the Plan tab: it is Island's own page, not a web page.
     [[nodiscard]] bool NavigateTab(std::optional<std::size_t> index, std::string_view text);
+    // The URL NavigateTab would load for `text`, or nullopt when it resolves to no allowed one.
+    [[nodiscard]] std::optional<std::string> ResolveNavigationTarget(std::string_view text) const;
     // True when the tab of the active space (nullopt = the active tab) is the research Plan tab.
     [[nodiscard]] bool IsPlanTabIndex(std::optional<std::size_t> index) const;
     // The session as SaveSession would write it.
@@ -198,8 +225,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool RestoreSessionStateForTest(const SessionState& state);
     // The live CefBrowser of a tab of the active space, or nullptr.
     [[nodiscard]] CefRefPtr<CefBrowser> BrowserForTab(std::optional<std::size_t> index) const;
-    // kNewSpace plus an optional name.
-    [[nodiscard]] bool CreateSpace(std::string_view name);
+    // kNewSpace plus an optional name. `opened_by_agent` marks the space's start tab, which the
+    // agent creates through NewSpace (see Tab::opened_by_agent).
+    [[nodiscard]] bool CreateSpace(std::string_view name, bool opened_by_agent = false);
     // Pins/unpins a tab of the active space (Arc-style pinned group).
     [[nodiscard]] bool SetActiveSpaceTabPinned(std::size_t index, bool pinned);
     [[nodiscard]] const std::vector<Space>& spaces() const noexcept { return spaces_; }
@@ -251,7 +279,8 @@ class BrowserWindow : public CefClient,
     };
     enum class ResearchStart : std::uint8_t {
         kStarted,
-        kBusy,          // another research task or agent turn is running
+        kBusy,          // research cannot be queued now (the window is closing)
+        kQueued,        // another agent task is live; the research starts when it finishes
         kNotInstalled,  // the selected agent is not on PATH (status carries the message)
         kFailed,        // the agent refused or could not be launched
     };
@@ -308,6 +337,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] std::string PlanStateJson() const;
     // Developer capture: opens a Plan tab that shows the sample plan waiting for approval.
     void OpenPlanFixtureTab(bool include_child_tabs = false);
+    // Developer capture only (`agent_fixture:confirm`): a sample confirmation card in the panel.
+    void ShowConfirmationFixtureForDev();
     // Pushes the provider name, activity and shortcut keycap to the sidebar's Agent entry.
     void RefreshAgentEntry();
     // Opens `count` agent pages, one UI task each, as an agent calling browser_open_tab in a row
@@ -359,6 +390,60 @@ class BrowserWindow : public CefClient,
     void SetAgentSendForTest(std::function<bool(std::string)> send) {
         agent_send_for_test_ = std::move(send);
     }
+    // Ends the turn of the task the window started last, as the session would (chat tasks).
+    void FinishAgentTurnForTest(bool ok) { FinishInFlightTurn(ok); }
+    // Makes the session count as busy (or idle) for the queue; unset follows the real session.
+    void SetAgentBusyForTest(bool busy) { agent_busy_for_test_ = busy; }
+    void CheckInFlightTurnForTest() { CheckInFlightTurn(); }
+    bool SubmitAgentPromptForTest(std::string text) {
+        return SubmitAgentPrompt(std::move(text), /*include_context=*/false);
+    }
+    [[nodiscard]] const agent::AgentTaskQueue& agent_queue() const noexcept { return agent_queue_; }
+    // "Ask the agent from context": the page chip above the composer, optionally carrying the
+    // text that was selected. Cleared by the chip's ✕, a send, a new chat, a tab change or closing
+    // the panel.
+    struct AgentContextChip {
+        std::string title;
+        std::string url;
+        std::string selection;
+
+        bool operator==(const AgentContextChip&) const = default;
+    };
+    [[nodiscard]] const std::optional<AgentContextChip>& agent_context_chip() const noexcept {
+        return context_chip_;
+    }
+    // Queues an ask task with `context` (agent_context.h; empty for none). False when the agent
+    // could not take it.
+    bool AskAgent(std::string prompt, std::string context);
+    // A palette command by id (the palette view routes its selection here).
+    void RunPaletteCommand(std::string_view id);
+    // One of the context menu's agent items (offsets from agent_context.h) for the tab at
+    // `browser`'s page, `selection` and `link`. False when the item is not an agent item.
+    bool RunAgentMenuCommand(int offset, const AgentContextChip& page, std::string_view link);
+    // Dev capture (`agent_fixture:queue`): one running and two queued tasks, nothing sent.
+    void ShowQueueFixtureForDev();
+    // Dev capture (`agent_fixture:quote`): the panel with a page chip and a selection quote.
+    void ShowQuoteFixtureForDev();
+    // Dev capture (`agent_fixture:collect`): the Collect sheet open over the panel.
+    void ShowCollectFixtureForDev();
+    // Dev capture (`agent_fixture:thread`): a sample transcript (a user message, three tool rows,
+    // a Markdown reply) and one queued message, nothing sent.
+    void ShowThreadFixtureForDev();
+    // Dev capture (`report_fixture:collection`): a collection Report tab with its Export menu open.
+    void ShowCollectionReportFixtureForDev();
+    // Queues a collection of the web tabs the sheet showed, for `what` (blank or no web tab:
+    // refused). A choice is taken only when the active space still holds its URL, at its index or,
+    // if the tabs moved, at another index; a closed or changed tab is left out. False when the
+    // agent could not take it.
+    bool CollectFromTabs(std::string_view what, const std::vector<CollectChoice>& choices);
+    // Stores `markdown` as a collection report and opens its Report tab. False when it is blank.
+    bool CompleteCollect(std::string_view question, std::string_view markdown);
+    // Test seam: CSV and JSON exports are written to `path` instead of through the save dialog.
+    void SetExportPathForTest(std::filesystem::path path) {
+        export_path_for_test_ = std::move(path);
+    }
+    // The command palette's command list (the window's own commands).
+    [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands();
     void SetPlanCloseConfirmationForTest(
         std::function<bool(std::string_view, std::string_view, std::string_view)> confirm) {
         plan_close_confirmation_for_test_ = std::move(confirm);
@@ -609,6 +694,11 @@ class BrowserWindow : public CefClient,
         return address_focus_repaint_;
     }
     void ApplyAddressFocusColors(CefRefPtr<CefWindow> window, const ChromeTokens& tokens) const;
+    // True while the welcome or the command palette is shown (both paint the neutral ring).
+    [[nodiscard]] bool OverlayFocusRingShown() const;
+    // Hides or shows the attached page views for the welcome (Native only); called on every
+    // attach and on every overlay focus-ring transition.
+    void ApplyPageViewVisibility();
     void CancelAddressEditing() override;
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
@@ -638,6 +728,7 @@ class BrowserWindow : public CefClient,
 
     void OnWelcomeThemeChanged(ThemePreference preference) override;
     void OnWelcomeCompleted(const std::vector<ImportSource>& sources) override;
+    void OnOverlayFocusRingChanged() override;
 
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override;
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override;
@@ -787,6 +878,32 @@ class BrowserWindow : public CefClient,
     void DeliverAddressIndicators();
     [[nodiscard]] bool ReaderAvailableForActiveTab() const;
     [[nodiscard]] AgentTabState AgentStateForActiveTab() const;
+
+    struct PendingConfirmation {
+        agent::ConfirmationRequest request;
+        std::function<void(agent::ConfirmationAnswer)> done;
+        std::chrono::steady_clock::time_point deadline;
+        // The tab the card was raised for (identity, not position), its space, and its origin.
+        TabId tab_id;
+        SpaceId space_id;
+        std::string origin;
+    };
+    [[nodiscard]] std::chrono::steady_clock::time_point ConfirmationNow() const;
+    // Removes the entry at `index` and reports `answer` to its callback.
+    void FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer);
+    void CancelPendingConfirmations();
+    // Answers kWithdrawn to every card whose target is no longer the tab it was raised for: closed,
+    // moved to another index or space, or navigated to another origin.
+    void CancelStaleConfirmations();
+    [[nodiscard]] bool ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const;
+    void ExpireConfirmations();
+    void ArmConfirmationTimer();
+    void OnConfirmationTick();
+    // After the pending list changed: indicators, the Agent button dot, the panel's state.
+    void RefreshConfirmationUi();
+    [[nodiscard]] json::Value ConfirmationsStateJson() const;
+    [[nodiscard]] json::Value TrustedSitesJson() const;
+    void HandleConfirmMessage(const json::Value& message);
     // Navigates the active tab to a stored bookmark URL through the single
     // address-validation path; a URL the allow-list rejects is a no-op.
     void OpenBookmark(const PaletteBookmarkEntry& bookmark);
@@ -840,7 +957,8 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] static Space CreateDefaultSpace();
     // Appends a tab to the active space with `startup_url` (empty = the
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
-    void AppendTabToActiveSpace(std::string startup_url);
+    // `opened_by_agent` marks the tab as one the agent opened (see Tab::opened_by_agent).
+    void AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent = false);
     // Adds an empty space (next palette color) at the end and returns it; the caller gives it
     // a tab and makes it active.
     Space& AppendSpace(std::string name);
@@ -878,13 +996,51 @@ class BrowserWindow : public CefClient,
     // Shows Settings scrolled to `section` (e.g. "agent").
     void ShowSettingsSection(std::string section);
     [[nodiscard]] std::string ActiveTabAgentContext() const;
+    // The active tab as a chip (empty url when it is not a web page).
+    [[nodiscard]] AgentContextChip ActiveTabChip() const;
+    // Opens the panel with the chip set and the composer focused.
+    void ShowAgentContextChip(AgentContextChip chip);
     // Coalesces panel re-renders (streaming chunks arrive in bursts).
     void ScheduleLocalPagesRender();
     void FlushLocalPagesRender();
     void HandleAgentPageMessage(const json::Value& message);
     // The panel's "send" path, shared by the start page's Ask agent mode.
     // Returns false when the session refused the turn (it is busy with another one).
+    // Queues the prompt as a chat task (it starts at once when nothing else is live). Returns
+    // false when the prompt is blank or the agent could not take it.
     bool SubmitAgentPrompt(std::string text, bool include_context);
+    // Queue plumbing. StartQueuedTask is the queue's StartFn: it sends one task's prompt.
+    void StartQueuedTask(const agent::AgentTask& task);
+    // Stops the live task: cancels the turn, withdraws its confirmation cards and lets the
+    // queue move on (after the stopped turn's end when one is still in flight).
+    void StopAgentTask();
+    // Reports the end of the turn started for the live chat task (ok: it was not an error).
+    void FinishInFlightTurn(bool ok);
+    // Compares the session with the in-flight chat turn after a session change.
+    void CheckInFlightTurn();
+    void FinishPostedTurn();
+    // The body of a research task start (the queue's StartFn for kResearch).
+    bool StartResearchTask(const agent::AgentTask& queued);
+    void EndResearchTask(const std::string& task_id, bool ok);
+    // For paths that drop the live turn without an end event (new chat, agent switch, teardown):
+    // the live task is cancelled and the queue moves on at once.
+    // Drops the live task without a turn end; `reset_session` replaces the conversation first
+    // (while no turn is in flight, so its events report nothing), then the queue advances.
+    void AbandonInFlightTurn(const std::function<void()>& reset_session = {});
+    [[nodiscard]] bool AgentTurnOpen() const;
+    // Ends the research that runs as the live task. With `turn_open` the turn's end completes
+    // it; otherwise it is dropped now.
+    void EndLiveResearch(bool turn_open);
+    void StartDeferredTask();
+    void PostStartDeferredTask();
+    [[nodiscard]] bool OutsideResearchOwnsTurn() const;
+    [[nodiscard]] std::optional<agent::TaskKind> TaskKindOf(std::string_view id) const;
+    void ReportQueueProgress();
+    // Edge-triggered OnWaiting: a card is open or the research waits for approval.
+    void SyncQueueWaiting();
+    void HandleTaskMessage(std::string_view type, const json::Value& message);
+    [[nodiscard]] json::Value TasksStateJson() const;
+    void RefreshAgentButtonLabel();
     // Pushes StartPageStateJson to every tab currently showing the start page
     // (and each open report page its report and theme).
     void RenderStartPages();
@@ -909,10 +1065,12 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] TabId AppendPlanChildTab(std::string startup_url, std::string node_id,
                                            std::string label, bool activate);
     // The part of AppendPlanChildTab that needs the Plan's space: an activated child makes that
-    // space active and is selected with one attach, wherever the person was.
+    // space active and is selected with one attach, wherever the person was. `opened_by_agent`
+    // marks the child: true for a research page, false for the Report (the person's result).
     TabId AppendChildOfPlan(std::size_t space_index, std::string startup_url, std::string node_id,
-                            std::string label, bool activate);
-    // True while a research runs with its Plan tab in a space: the agent's space is then the Plan's.
+                            std::string label, bool activate, bool opened_by_agent);
+    // True while a research runs with its Plan tab in a space: the agent's space is then the
+    // Plan's.
     [[nodiscard]] bool ResearchOwnsAgent() const;
     [[nodiscard]] std::optional<agent::PlanNode> RunningPlanNode() const;
     // The address a new tab opens (empty text: the start page), or nullopt when the text is not
@@ -934,7 +1092,7 @@ class BrowserWindow : public CefClient,
     // Takes the newest plan from the agent transcript (when it has one) and keeps the edits.
     void RefreshPlanFromTranscript();
     // Sends one user turn to the research agent (through the test seam when set).
-    bool SendToAgent(std::string text);
+    bool SendToAgent(std::string text, std::string context = {});
     // Sends the plan turn of a Run, a branch, or an expand: only while the plan waits for
     // approval, and it becomes the turn the research classifies next. `approves_plan` is true
     // for a Run, whose turn may end with a plain report. `continues_run` (a failed-step retry)
@@ -951,6 +1109,13 @@ class BrowserWindow : public CefClient,
     // conversation does not hold the report yet, hands the report to the agent.
     void ContinueReportInAgent(const ResearchReport& report, CefRefPtr<CefBrowser> source);
     void SaveReportToFile(const ResearchReport& report, CefRefPtr<CefBrowser> source);
+    // The Export menu: "md" saves the Markdown, "csv" and "json" save the report's first table.
+    void ExportReport(const ResearchReport& report, std::string_view format,
+                      CefRefPtr<CefBrowser> source);
+    // The task the in-flight collect turn ended with: stores its table as a report when the turn
+    // produced one. Called before the queue moves on.
+    void FinishCollectTurn(std::string_view task_id);
+    [[nodiscard]] json::Value CollectSheetStateJson() const;
     void ReportPageResult(CefRefPtr<CefBrowser> source, std::string_view kind,
                           std::string_view text) const;
     [[nodiscard]] json::Value ReportsListJson() const;
@@ -1094,6 +1259,11 @@ class BrowserWindow : public CefClient,
         bool awaiting_approval = false;
         // The turn in flight is a Run of the approved plan (see SendPlanTurn).
         bool plan_approved = false;
+        // The queue task this research runs as ("" when none, as in tests that set it directly).
+        std::string task_id;
+        // Stop arrived while the turn was open: whatever that turn ends with is the end of
+        // the research (a cancel the agent did not honor in time must not wait for approval).
+        bool stopped = false;
     };
     std::optional<ResearchTask> research_;
     bool research_finish_posted_ = false;
@@ -1204,6 +1374,30 @@ class BrowserWindow : public CefClient,
     };
     std::optional<ShortcutConflict> shortcut_conflict_;
     std::unique_ptr<agent::AgentSession> agent_session_;
+    std::optional<AgentContextChip> context_chip_;
+    // Agent work runs one task at a time from this queue (see src/agent/agent_task_queue.h).
+    agent::AgentTaskQueue agent_queue_{
+        [this](const agent::AgentTask& task) { StartQueuedTask(task); }};
+    // The task whose prompt the session accepted; its turn end is reported with this id.
+    std::string in_flight_id_;
+    // The in-flight task is a chat turn (reported by the window); research reports itself. Kept
+    // beside the id because "Clear finished" can drop the task from the list.
+    bool in_flight_is_chat_ = false;
+    // A task the queue started while a turn ran outside it (plan continuation): it is sent when
+    // that turn ends.
+    std::optional<agent::AgentTask> deferred_task_;
+    std::optional<bool> agent_busy_for_test_;
+    bool turn_finish_posted_ = false;
+    bool queue_waiting_ = false;
+    std::string waiting_id_;   // the task OnWaiting(…, true) was last sent for
+    std::string start_error_;  // why the last StartQueuedTask failed
+    // Transcript items before the live task's prompt, so older plans are not its progress.
+    std::size_t task_items_base_ = 0;
+    std::size_t reported_done_ = 0, reported_total_ = 0;
+    bool queue_fixture_ = false;
+    std::vector<PendingConfirmation> pending_confirmations_;
+    std::chrono::seconds confirmation_clock_offset_{0};
+    bool confirmation_timer_armed_ = false;
     // Provider availability (see ProviderStatuses) and its test override.
     mutable std::optional<std::vector<agent::AgentProviderStatus>> provider_statuses_;
     mutable std::chrono::steady_clock::time_point provider_statuses_at_;
@@ -1217,6 +1411,13 @@ class BrowserWindow : public CefClient,
     // kClosedTabLimit.
     std::vector<std::string> closed_tab_urls_;
     ClipboardWriter clipboard_writer_ = CopyTextToClipboard;
+    std::optional<std::filesystem::path> export_path_for_test_;
+    // Bumped to open the Collect sheet (the page opens it when the number changes).
+    std::uint64_t collect_sheet_seq_ = 0;
+    // Turns the session had ended when the in-flight collect turn was sent.
+    std::uint64_t collect_turns_before_ = 0;
+    // Dev capture only: the report whose Export menu the collection fixture opens on load.
+    std::string report_fixture_menu_id_;
     bool agent_panel_render_scheduled_ = false;
     // The window's current width in DIP; the snapshot's rail/content split is
     // derived from it (the agent panel column is not part of either).

@@ -4,6 +4,7 @@ add_library(island_browser_core STATIC
     ${ISLAND_LOCAL_PAGE_SOURCES}
     address_bar_model.cc
     address_input.cc
+    agent_context.cc
     agent_navigation.cc
     local_page.cc
     address_policy.cc
@@ -37,8 +38,10 @@ add_library(island_browser_core STATIC
     browser_window_find_reader.cc
     navigation_state.cc
     prefs_store.cc
+    collect_prompt.cc
     report_store.cc
     research_prompt.cc
+    table_export.cc
     search_palette.cc
     search_palette_model.cc
     search_engine.cc

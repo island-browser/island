@@ -222,8 +222,11 @@ the `segment_selected` plate with `text`, not the blue `selection` fill (the pal
 is later work). The open Agent entry is the same plate with normal text. On the selected (blue)
 tab row, the close × is white at 70% and the generic globe is white. The address field's focus ring
 is one 2 DIP accent ring that follows the 8 pt radius: the controls sit in an inner panel whose
-corners take the 6 pt inner radius. The Plan's instruction field is 30 pt tall with radius 6 and
-`border_strong`. Web pages follow the Light or Dark theme's color mode; System follows the OS.
+corners take the 6 pt inner radius. Arc and Graphite draw one ring too (0.8.0): the pill's outer
+accent outline, with the textfield's own Chromium ring painted in the plate fill so it vanishes.
+The field sits 2 DIP inside the pill there, so that ring never covers the outline. The Plan's
+instruction field is 30 pt tall with radius 6 and `border_strong`. Web pages follow the Light or
+Dark theme's color mode; System follows the OS.
 
 Native's sidebar footer uses a 28 DIP control height on an 8 DIP row rhythm
 (`NativeSwitcherMetrics`). Its Agent row shows the provider name, a status dot (idle, working or
@@ -294,34 +297,52 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
 - **Sidebar (native):** one `canvas` surface (the space color, tinted by the intensity setting)
   shared with the window margin. Controls are ghost by default at one control height (32 DIP,
   26 compact) and 16px icons on a 4/8/12 DIP rhythm: back/forward, then the address as one soft
-  `well` pill (the outline turns `--accent` while the field has focus), then a quiet New Tab row,
-  then the tab list — rows on the canvas, the selected tab a soft `selected` fill, the hovered
-  one `hover`, no outline — and a footer with a quiet space chip and icon buttons. Favicons sit
-  on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on a dark
-  sidebar. Chrome text uses the interface font (Geist, the system font, or an installed family).
-  CEF `cef_views` has no corner-radius API and clips button images to the button's insets, so the
-  soft rounded fills are square fills whose four corners a native macOS overlay repaints in the
-  canvas color, or in the patch's own `outside` color (the Native toolbar around the address
+  `well` pill (the outline turns `--accent` while the field has focus), then the tab list — rows
+  on the canvas, the selected tab a soft `selected` fill, the hovered one `hover`, no outline — and
+  a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T
+  (Ctrl+T), the Browser menu on macOS and the command palette open tabs. In Arc and Graphite the
+  footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
+  centered with the icon buttons and spaced like them: `hover` on hover, `segment_selected` while
+  the panel is open, the label `text` and the sparkle `text_2`, never an accent fill or label.
+  Favicons sit on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on
+  a dark sidebar. Chrome text uses the interface font (Geist, the system font, or an installed
+  family). CEF `cef_views` has no corner-radius API and clips button images to the button's insets,
+  so the soft rounded fills are square fills whose four corners a native macOS overlay repaints in
+  the canvas color, or in the patch's own `outside` color (the Native toolbar around the address
   plate) (`CornerPatch` / `ApplyCornerPatches`, macos/page_card_mac.mm; the chrome pushes
   them on selection, hover, relayout and scroll). Elsewhere the fills stay square. CEF resets
   custom view colors on every theme change, so each chrome view reports the reset and the chrome
   repaints from the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`,
   `SpaceChipColors`).
+- **Collapsed rail, Arc and Graphite:** the rail shows only tabs and spaces (no Back, Forward or
+  address controls). This is the intended toolbar-less rail for those looks, not a defect.
 - **Collapsed icon rail (native):** Cmd/Ctrl+B swaps the 286 DIP sidebar for a 52 DIP rail on the
   same `canvas` surface, never hiding the tabs. One 32 DIP square button per tab of the
 active space (16 DIP favicon on its plate, globe fallback), pinned tabs first with a hairline
 between the groups; the active tab is the same soft `selected` fill as the selected row. A quiet "+" and the spaces (round dots; the active one wears a ring, so state is a
-  shape and never color alone) sit at the bottom. The tab title is the tooltip and the accessible
+  shape and never color alone) sit at the bottom. The selected generic globe is white on its blue
+  plate. The tab title is the tooltip and the accessible
   name, buttons are keyboard focusable, and the list scrolls vertically (buttons plus a classic
   scrollbar always fit the 52 DIP). There is no edge sliver or hover reveal. Cmd/Ctrl+L expands
   the sidebar for the length of the address edit. Every rail view re-asserts its colors through
   the same theme-reset delegates (`BrowserChrome::ApplyCollapsedRailTheme`).
-- **Welcome card (native overlay):** a `--surface` card with a 1px `--border` outline and
-  spacing_6 padding: Geist title and lede, mono uppercase section labels (APPEARANCE, IMPORT), a
-  three-segment appearance control (selected = `--surface-2` fill, `--accent` text), one outlined
-  toggle row per readable browser (checked state is a check mark as well as the fill), a wrapped
-  muted note for unreadable browsers, and a right-aligned footer with a secondary Import button
-  and the primary Start browsing button (`--text` fill, `--surface` text).
+- **Welcome card (native overlay):** a radius-12 `--surface` card with a 1px `--border` outline,
+  spacing_6 padding and system type. Appearance and Import are sentence-case 11/600 section
+  headers. The appearance control matches the sidebar switcher: a `fill` track with a 2 DIP inset
+  and 24 DIP neutral `segment_selected` plates, without a square inner hairline.
+  Its focus ring is neutral and follows only the focused segment. A 20% black scrim fills the
+  short-lived overlay; the page compositor is hidden while the Native welcome is shown so start-page
+  controls cannot paint through it. Readable browsers remain outlined toggle rows, followed by a
+  right-aligned secondary Import button and the black/white Start browsing primary button. Arc and
+  Graphite keep their original square hairline card and segmented control.
+- **Command palette (native overlay):** Cmd/Ctrl+K opens a 640 DIP card over a 20% black scrim.
+  Sentence-case group headers divide the results; each 36 DIP row has a 16 DIP favicon or a
+  meaning-specific Lucide icon, a sentence-case kind label, and a shortcut keycap resolved from the
+  current keymap. The keycap plate is a 20 DIP rounded plate at its natural width (caps plus label),
+  right-aligned in a fixed 104 DIP Native column so kind labels line up on every row. The selected
+  row is one radius-10 neutral `segment_selected` plate, never blue. The focused query field uses
+  the shared neutral overlay ring. Arc and Graphite keep the earlier card-sized overlay without a
+  full-window click blocker.
 - **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
   document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
   on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),
@@ -341,7 +362,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   `accent` while the agent reads the tab and `warning_text` while it waits for the person; click
   opens the agent panel. The dot is never the only cue: each indicator has an accessible name and
   a tooltip with the full text ("14 trackers blocked"). A slept tab shows its state in its sidebar
-  row, not in the field (`address_indicators.h`, `BrowserChrome::SetAddressIndicators`).
+  row, not in the field (`address_indicators.h`, `BrowserChrome::SetAddressIndicators`). The field
+  fill is flush with its focus plate; Arc and Graphite idle fields begin at the URL start.
 - **Plan graph nodes (Native, `pages/plan.html`):** 148 × 92 DIP, radius 10, drawn as real
   buttons over an inline SVG of edges. Kinds: **Question** (`accent_soft` fill, the root),
   **Step** (`surface`, `border_strong` outline, 3 DIP stripe in its branch color), **Needs you**
@@ -352,11 +374,67 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   kicker; waiting with one pulse of the `warning_border` outline; failed with a `danger` outline.
   The dashed "+ Add a branch" ghost hangs off a branching step. Edges are cubic Béziers in the
   branch color (trunk `text_tertiary`), dashed into skipped nodes. Branches stop at 3 levels.
-  Branch labels ("Branch A") always accompany the color.
+  Branch labels ("Branch A") always accompany the color. Node kickers and the legend use the
+  system font at 10/700 in sentence case; a join deduplicates its incoming branch letters and reads
+  "Joins A + B". Report pages use the same Native sentence-case treatment for their kicker and
+  table headers; Arc and Graphite retain their mono uppercase tone.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
-  buttons use `--text` as background with `--surface` foreground; the accent marks focus and the
-  active/selected state only.
+  buttons use `--text` as background with `--surface` foreground. The accent is used only for the
+  active tab, the address focus ring, the agent's own message bubble and its send button; selected
+  states (a selected row, segment, node, radio, swatch or "on" switch) are neutral: a `--text`
+  mark or a `--fill` plate, in every look. Settings' range slider takes `--text` too. The agent panel's focus ring is a neutral
+  2 px `--text-2` ring (see below), never the accent.
+- **Agent panel (native, `pages/agent.html`):**
+  - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
+    opens the provider menu; a status pill sits beside it. The pill reads "Waiting for approval"
+    (`--warn-bg` fill, `--warn-border` 1 px border, `--warn-text`) while a confirmation card is
+    pending, "Working" (neutral `--fill`, `--text-2`, a small pulsing dot) while a turn runs, "Idle"
+    (neutral, no dot) when the agent is running with nothing in flight, and otherwise keeps the
+    existing wording ("Not running", "Connecting...", "Stopped") as a neutral pill. New chat and
+    Hide are quiet icon buttons (`--text-2`, a `--fill` plate on hover).
+  - *Thread:* 14 px padding and a 10 px gap. Your messages are bubbles (`--accent-soft` fill,
+    `--accent-text` text, radius 8). Agent replies are plain `--text` with no bubble. A tool call is
+    one compact 12 px line in `--text-2`: a check in `--success` (a cross in `--danger` on failure,
+    a spinner while it runs), the tool name in mono 11.5 px `--text`, then the host or detail.
+    An MCP tool's `mcp__<server>__` prefix is dropped from the name; the full name is the row's
+    tooltip. Each row also speaks its status.
+  - *Composer:* one card with a 1 px `--border-2` outline, radius 10, `--surface`, and a 10 px
+    inset. The textarea sits above a bottom row: the page chip (22 px tall, radius 5, `--fill`,
+    `--text-2`, 11 px, ellipsis) and the quote chip on the left, and a round 24 px send button
+    (`--accent` fill, `#FFF` arrow; 40 % opacity when disabled) on the right. The placeholder is
+    "Ask about this tab or anything". The card's border shows focus; the textarea draws no ring.
+    Keyboard hints sit below in `--text-3`, 11 px.
+  - *Focus:* buttons take a neutral 2 px ring, `box-shadow: 0 0 0 2px var(--text-2)`, which follows
+    each element's radius. A Collect checkbox rings its whole row, because a native checkbox may not
+    paint the ring itself. There is no outline and no blue focus ring, and the ring never appears
+    on mouse focus. Selected and pressed states use neutral raised plates (`--fill`,
+    `--segment-selected`), never blue.
+  - *Confirmation card:* a `.card.confirm-card` on the composer's 12 px inset (the same left and
+    right edges as the composer, never clipped) on a `--surface` plate with a full 1 px
+    `--warn-border` hairline and a `--warn-text` kicker. In Native the kicker is sentence case
+    system text ("Allow this action?"), not mono capitals. It shows the host in mono `--text-2` and
+    the summary, and has buttons for Allow once (the primary), Allow for this task, Trust this site
+    and Cancel, on 26 px buttons with 6 px radius, in two even columns so Cancel is never alone. A card that
+    cannot be trusted (card fields, password and unclassified fields) offers
+    only Allow once and Cancel. Esc declines the oldest card. The card never takes focus.
+  - *Tasks strip:* a `--surface` block with a `--border` outline and `--radius` corners, above the
+    conversation, with a mono uppercase "Tasks" heading and a "Clear finished" link. Each row shows
+    its state as text in compact 12 px rows: "Running · 3/7", "Queued · #1", "Needs you" (with the
+    count when known), Done, Failed, Stopped.
+    A running or waiting row takes a neutral `--fill` plate, and "Needs you" is `--warn-text`.
+    Queued rows have Move up, Move down and Remove buttons; running ones have Stop. A queued chat
+    message sits under the conversation as a bubble with a 1 px dashed `--border-2` border at
+    65 % opacity and the tag "Queued · #n".
+  - *Chips in the composer's bottom row:* the page chip (one 22 px plate: the share toggle, with
+    the ✕ that removes the page context inside the same `--fill` plate) and, for a selection, a
+    quote chip. Both share the 22 px chip style and ellipsize on one line.
+  - *Collect sheet:* a 12 px-radius dialog over a 20 % scrim, with one text field labelled in
+    sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px
+    `--border-2` list) and a Collect button that is disabled until something is typed. Checkboxes
+    and buttons are neutral.
+- **Settings > Agent & tools > Trusted sites:** a `--surface` card listing each host with a Remove
+  button, which names the host in its accessible label; an empty state says how to add one.
 - **Keyboard keys:** Geist Mono 11–12px on `--surface` with a 1px border and a 2px bottom border.
 - **Status chips:** mono uppercase label plus a 6px dot; meaning is carried by the label, never by
   color alone.

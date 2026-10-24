@@ -36,6 +36,8 @@ struct TabState {
     // Research grouping is optional so older sessions remain valid.
     std::optional<TabId> group_parent;
     std::string group_label;
+    // Optional in the file (absent = false): the agent opened this tab itself.
+    bool opened_by_agent = false;
 
     bool operator==(const TabState&) const = default;
 };

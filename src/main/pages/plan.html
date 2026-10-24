@@ -76,7 +76,8 @@ button:disabled { cursor: default; opacity: .45; }
   text-align: left; border: 1px solid var(--border-2); background: var(--surface);
   display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
 .node:hover:not(:disabled) { border-color: var(--text-3); }
-.node[aria-selected="true"] { box-shadow: 0 0 0 2px var(--selection); }
+.node[aria-selected="true"] { background: var(--segment-selected);
+  box-shadow: 0 0 0 2px var(--text-3); }
 .node[data-kind="step"] { border-left: 3px solid var(--node-branch, var(--border-2)); }
 .node[data-kind="question"] { background: var(--accent-soft); color: var(--accent-text); border-color: transparent; }
 .node[data-kind="needs_you"] { background: var(--warn-bg); border-color: var(--warn-border); }
@@ -118,8 +119,8 @@ button:disabled { cursor: default; opacity: .45; }
 .row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0;
   background: transparent; padding: 6px 8px; border-radius: var(--radius-sm); }
 .row:hover { background: var(--surface-2); }
-.row[aria-selected="true"] { background: var(--selection); color: #FFFFFF; }
-.row[aria-selected="true"] .kicker { color: #FFFFFF; }
+.row[aria-selected="true"] { background: var(--segment-selected); color: var(--text); }
+.row[aria-selected="true"] .kicker { color: var(--text-2); }
 .row .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Inspector (316) */
@@ -175,6 +176,9 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     animation: none !important; transition: none !important;
   }
 }
+/* Native look (N2): sentence-case kickers and legend instead of the mono uppercase tone. */
+:root[data-look="native"] .kicker { font: 700 10px/1.3 var(--font); letter-spacing: 0; text-transform: none; }
+:root[data-look="native"] .legend { font: 700 10px/1.3 var(--font); }
 </style>
 </head>
 <body>
@@ -283,6 +287,7 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       if (value) root.style.setProperty(variable, value);
     });
     root.setAttribute("data-theme", theme.dark ? "dark" : "light");
+    root.setAttribute("data-look", theme.look || "");
   }
 
   // Branch letters in order of first appearance; each gets one --branch-* color.
@@ -293,6 +298,15 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
       if (node.branch && labels.indexOf(node.branch) < 0) labels.push(node.branch);
     });
     return labels.indexOf(label) % 4;
+  }
+  // The chip names branches by their letter ("Joins A + B"), so long branch titles never truncate.
+  function branchLetter(label) {
+    var labels = [];
+    state.graph.nodes.forEach(function (node) {
+      if (node.branch && labels.indexOf(node.branch) < 0) labels.push(node.branch);
+    });
+    var index = labels.indexOf(label);
+    return index < 0 ? label : String.fromCharCode(65 + index);
   }
   function branchVar(label) {
     var index = branchIndex(label);
@@ -588,10 +602,16 @@ label.field { display: block; font-size: 12px; color: var(--text-2); margin-bott
     if (node.site) chips.appendChild(el("span", "chip", node.site));
     if (nodeState === "skipped") chips.appendChild(el("span", "chip", "Skipped by you"));
     if (node.needs_you && nodeState !== "skipped") chips.appendChild(el("span", "chip warn", "Asks first"));
-    if (node.kind === "join") chips.appendChild(el("span", "chip", "Joins " + node.after.map(function (id) {
-      var parent = nodeById(id);
-      return parent && parent.branch ? "Branch " + parent.branch : id;
-    }).join(" + ")));
+    if (node.kind === "join") {
+      // One letter per branch, even when several parents share it ("Joins A + B").
+      var letters = [];
+      node.after.forEach(function (id) {
+        var parent = nodeById(id);
+        var letter = parent && parent.branch ? branchLetter(parent.branch) : id;
+        if (letters.indexOf(letter) < 0) letters.push(letter);
+      });
+      chips.appendChild(el("span", "chip", "Joins " + letters.join(" + ")));
+    }
     button.appendChild(chips);
     button.addEventListener("click", function () {
       if (suppressClickId === node.id) { suppressClickId = ""; return; }

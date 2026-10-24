@@ -16,7 +16,7 @@ The product site's CSS parity check lives in the site repository
 | File | Description |
 |------|-------------|
 | `test_token_contract.py` | Contract completeness plus native parity checks |
-| `test_local_pages.py` | Built-in pages (`src/main/pages/`): no external resources, shared bridge, start page and Settings contract, and the agent panel Markdown renderer's escaping (run through Node when installed) |
+| `test_local_pages.py` | Built-in pages (`src/main/pages/`): no external resources, shared bridge, start page and Settings contract, Native Plan/report sentence-case rules and join labels, the agent panel's look contract (`AgentPanelLook`: status pill tones, round send pinned to the right, neutral focus rings, no hex colours but `#FFF`, one-line tool rows with the MCP prefix stripped), the confirm card's composer inset, Native kicker and two-column answers, the task rows' status words, the page chip's plate, the Settings rule that selected and primary states never use the accent (`SettingsPage`), and the report view's dropped repeated H1 (`ReportPage`), and the agent panel Markdown renderer's escaping (run through Node when installed) |
 
 ## For AI Agents
 

@@ -55,6 +55,20 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenNewestReport();
     // Developer capture only: a Plan tab showing the sample plan waiting for approval.
     void OpenPlanFixture();
+    // Developer capture only: a sample agent confirmation card (`agent_fixture:confirm`).
+    void ShowConfirmationFixture();
+    // Developer capture only: one running and two queued agent tasks (`agent_fixture:queue`).
+    void ShowQueueFixture();
+    // Developer capture only: the panel with a page chip and a quote chip (`agent_fixture:quote`).
+    void ShowQuoteFixture();
+    // Developer capture only: the Collect sheet over the panel (`agent_fixture:collect`).
+    void ShowCollectFixture();
+    // Developer capture only: a sample conversation with tool rows, a Markdown reply and a queued
+    // message (`agent_fixture:thread`).
+    void ShowThreadFixture();
+    // Developer capture only: a collection report with its Export menu open
+    // (`report_fixture:collection`).
+    void ShowCollectionReportFixture();
     // Developer capture only: `count` agent pages opened back to back during the plan fixture.
     void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);

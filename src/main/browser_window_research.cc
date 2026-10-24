@@ -27,6 +27,7 @@
 #include "include/wrapper/cef_helpers.h"
 #include "plan_dev_fixture.h"
 #include "plan_graph.h"
+#include "table_export.h"
 
 namespace island {
 namespace {
@@ -98,10 +99,12 @@ std::string ResultScript(std::string_view kind, std::string_view text) {
 // the page how it went.
 class SaveReportCallback final : public CefRunFileDialogCallback {
   public:
-    SaveReportCallback(CefRefPtr<CefBrowser> browser, std::string markdown, std::string page_url)
+    SaveReportCallback(CefRefPtr<CefBrowser> browser, std::string markdown, std::string page_url,
+                       std::string extension)
         : browser_(std::move(browser)),
           markdown_(std::move(markdown)),
-          page_url_(std::move(page_url)) {}
+          page_url_(std::move(page_url)),
+          extension_(std::move(extension)) {}
 
     void OnFileDialogDismissed(const std::vector<CefString>& file_paths) override {
         CEF_REQUIRE_UI_THREAD();
@@ -111,7 +114,7 @@ class SaveReportCallback final : public CefRunFileDialogCallback {
         }
         std::filesystem::path path(file_paths.front().ToString());
         if (path.extension().empty()) {
-            path += ".md";
+            path += extension_;
         }
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         if (out.is_open()) {
@@ -130,6 +133,7 @@ class SaveReportCallback final : public CefRunFileDialogCallback {
     CefRefPtr<CefBrowser> browser_;
     std::string markdown_;
     std::string page_url_;
+    std::string extension_;  // added when the chosen name has none
 
     IMPLEMENT_REFCOUNTING(SaveReportCallback);
 };
@@ -156,12 +160,10 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
         return {ResearchStart::kFailed, "Ask a question to research."};
     }
     EnsureAgentSession();
-    if (research_.has_value()) {
+    // A research the queue does not know (a plan continuation outside it) blocks a new one;
+    // queued research waits behind the queue's own live task instead.
+    if (research_.has_value() && agent_queue_.current() == nullptr) {
         return {ResearchStart::kBusy, "A research task is already running."};
-    }
-    if (agent_session_->busy()) {
-        return {ResearchStart::kBusy,
-                "The agent is busy with another task. Try again when it finishes."};
     }
     // ISLAND_AGENT_COMMAND pins the command, so its availability is not ours to judge.
     const agent::ResolvedAgentCommand resolved = ResolvedAgent();
@@ -186,18 +188,36 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
         }
     }
 
+    // The question is the task's title and prompt; the research prompt is built when it starts.
+    const agent::AgentTask queued = agent_queue_.Enqueue(agent::TaskKind::kResearch, asked, asked,
+                                                         static_cast<std::int64_t>(NowMs()));
+    ScheduleLocalPagesRender();
+    switch (queued.state) {
+        case agent::TaskState::kQueued:
+            return {ResearchStart::kQueued, "Queued: it starts when the agent finishes its task."};
+        case agent::TaskState::kFailed:
+            return {ResearchStart::kFailed, start_error_};
+        default:
+            return {ResearchStart::kStarted, {}};
+    }
+}
+
+bool BrowserWindow::StartResearchTask(const agent::AgentTask& queued) {
+    const std::string& asked = queued.context;
     ResearchTask task;
     task.question = asked;
     task.space_name = ResearchSpaceName(asked);
     task.turns_ended_before = agent_session_->transcript().turns_ended();
+    task.task_id = queued.id;
     // The page context would only distract the researcher: it works from the question.
     if (!SendToAgent(BuildResearchPrompt(asked))) {
-        const std::string message = agent_session_->error().empty()
-                                        ? "The agent could not be started. Check Settings."
-                                        : agent_session_->error();
+        start_error_ = AgentTurnOpen() ? "The agent is busy. Try again when it finishes."
+                       : agent_session_->error().empty()
+                           ? "The agent could not be started. Check Settings."
+                           : agent_session_->error();
         research_status_.question = asked;
-        SetResearchStatus("failed", message);
-        return {ResearchStart::kFailed, message};
+        SetResearchStatus("failed", start_error_);
+        return false;
     }
     research_ = std::move(task);
     // The agent's page belongs to one research: a new one starts without the last run's page.
@@ -215,7 +235,7 @@ BrowserWindow::ResearchStartResult BrowserWindow::StartResearch(std::string_view
     OpenResearchSpace(research_->space_name);
     OpenPlanTab();
     SetAgentPanelOpen(true);
-    return {ResearchStart::kStarted, {}};
+    return true;
 }
 
 void BrowserWindow::OpenResearchSpace(const std::string& name) {
@@ -264,16 +284,35 @@ void BrowserWindow::CancelResearch() {
         return;
     }
     if (research_->awaiting_approval) {
-        // Nothing runs while the plan waits, so there is no turn to cancel.
+        // Nothing runs while the plan waits, so there is no turn to cancel: the queue moves on
+        // at once.
+        const std::string id = research_->task_id;
         research_.reset();
         agent_tab_id_.reset();
         SetResearchStatus("cancelled", "Research cancelled.");
+        const agent::AgentTask* live = agent_queue_.current();
+        if (!id.empty() && live != nullptr && live->id == id) {
+            StopAgentTask();
+        }
+        // Whatever the research held the queue for is released in every case.
+        SyncQueueWaiting();
         return;
     }
     if (agent_session_ == nullptr) {
         return;
     }
-    agent_session_->Cancel();
+    StopAgentTask();
+}
+
+void BrowserWindow::EndResearchTask(const std::string& task_id, bool ok) {
+    if (task_id.empty()) {
+        return;
+    }
+    if (in_flight_id_ == task_id) {
+        in_flight_id_.clear();
+    }
+    agent_queue_.OnTurnFinished(task_id, ok);
+    ScheduleLocalPagesRender();
 }
 
 void BrowserWindow::OnAgentSessionChanged() {
@@ -282,8 +321,10 @@ void BrowserWindow::OnAgentSessionChanged() {
     RefreshAddressIndicators();
     RefreshPlanFromTranscript();
     RenderPlanPages();
+    ReportQueueProgress();
+    CheckInFlightTurn();
     if (!research_.has_value() || research_->awaiting_approval || research_finish_posted_ ||
-        closing_ || agent_session_ == nullptr || agent_session_->busy()) {
+        closing_ || agent_session_ == nullptr || agent_session_->busy() || AgentTurnOpen()) {
         return;
     }
     if (chrome_ == nullptr) {
@@ -301,7 +342,7 @@ void BrowserWindow::OnAgentSessionChanged() {
 void BrowserWindow::FinishResearch() {
     research_finish_posted_ = false;
     if (closing_ || !research_.has_value() || research_->awaiting_approval ||
-        agent_session_ == nullptr || agent_session_->busy()) {
+        agent_session_ == nullptr || agent_session_->busy() || AgentTurnOpen()) {
         return;
     }
     CompleteResearch(ClassifyResearchTurn(agent_session_->transcript(),
@@ -314,6 +355,17 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     if (!research_.has_value()) {
         return;
     }
+    if (research_->stopped) {
+        // Stopped while its turn was open: whatever that turn ended with is the end.
+        const std::string task_id = research_->task_id;
+        research_.reset();
+        research_finish_posted_ = false;
+        SetResearchStatus("cancelled", "Research cancelled.");
+        RenderPlanPages();
+        EndResearchTask(task_id, false);
+        PostStartDeferredTask();
+        return;
+    }
     if (outcome.kind == ResearchOutcome::Kind::kAwaitingApproval) {
         // The research stays in flight: the plan is shown and the next turn, started by
         // Run, is the one that may report.
@@ -324,6 +376,10 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
         research_finish_posted_ = false;
         SetResearchStatus("awaiting_approval", outcome.message);
         RenderPlanPages();
+        // The task waits for the person (no turn end is reported: the Run that follows is the
+        // same task's turn).
+        SyncQueueWaiting();
+        PostStartDeferredTask();
         return;
     }
     const ResearchTask task = std::move(*research_);
@@ -334,9 +390,13 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     switch (outcome.kind) {
         case ResearchOutcome::Kind::kCancelled:
             SetResearchStatus("cancelled", outcome.message);
+            EndResearchTask(task.task_id, false);
+            PostStartDeferredTask();
             return;
         case ResearchOutcome::Kind::kFailed:
             SetResearchStatus("failed", outcome.message);
+            EndResearchTask(task.task_id, false);
+            PostStartDeferredTask();
             return;
         case ResearchOutcome::Kind::kAwaitingApproval:  // handled above
             return;
@@ -359,6 +419,8 @@ void BrowserWindow::CompleteResearch(const ResearchOutcome& outcome) {
     OpenReportTabImpl(id, task.space_name, /*group_with_plan=*/true);
     RenderStartPages();
     ScheduleLocalPagesRender();
+    EndResearchTask(task.task_id, true);
+    PostStartDeferredTask();
 }
 
 // --- Plan tab -------------------------------------------------------------------
@@ -367,11 +429,11 @@ namespace {
 constexpr std::size_t kMaxPlanInstructionBytes = 1000;
 }  // namespace
 
-bool BrowserWindow::SendToAgent(std::string text) {
+bool BrowserWindow::SendToAgent(std::string text, std::string context) {
     if (agent_send_for_test_) {
         return agent_send_for_test_(std::move(text));
     }
-    return agent_session_ != nullptr && agent_session_->Send(std::move(text), {});
+    return agent_session_ != nullptr && agent_session_->Send(std::move(text), std::move(context));
 }
 
 std::uint64_t BrowserWindow::TurnsEnded() const {
@@ -387,8 +449,16 @@ void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan, bool cont
         RenderPlanPages();
         return;
     }
-    if (!agent_send_for_test_ && (agent_session_ == nullptr || agent_session_->busy())) {
+    if ((!agent_send_for_test_ && (agent_session_ == nullptr || agent_session_->busy())) ||
+        AgentTurnOpen()) {
         plan_notice_ = "The agent is busy. Try again when it finishes.";
+        RenderPlanPages();
+        return;
+    }
+    // Sent outside the queue, so it waits for the queue to be empty as well as the session.
+    if (!research_.has_value() &&
+        (agent_queue_.current() != nullptr || agent_queue_.queued_count() > 0)) {
+        plan_notice_ = "The agent is working through its task queue. Try again when it is free.";
         RenderPlanPages();
         return;
     }
@@ -426,6 +496,7 @@ void BrowserWindow::SendPlanTurn(std::string text, bool approves_plan, bool cont
     if (!continues_run && approves_plan) {
         plan_unapproved_ = false;
     }
+    SyncQueueWaiting();  // the plan no longer waits: the task is running again
     SetResearchStatus("running", {});
     RenderPlanPages();
 }
@@ -531,7 +602,7 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
     const std::optional<std::pair<std::size_t, std::size_t>> location =
         plan_tab_.has_value() ? TabLocation(*plan_tab_) : std::nullopt;
     if (!location.has_value()) {
-        AppendTabToActiveSpace(std::move(startup_url));
+        AppendTabToActiveSpace(std::move(startup_url), /*opened_by_agent=*/true);
         return active_tab() != nullptr ? active_tab()->id() : TabId{};
     }
     // Do not pull the person away from another space. The page still belongs to the research,
@@ -539,18 +610,23 @@ TabId BrowserWindow::AppendPlanChildTab(std::string startup_url, std::string nod
     // space is already active and the caller needs the agent's page tools to address it.
     activate = activate && location->first == active_space_index_;
     const TabId id = AppendChildOfPlan(location->first, std::move(startup_url),
-                                       std::move(node_id), std::move(label), activate);
+                                       std::move(node_id), std::move(label), activate,
+                                       /*opened_by_agent=*/true);
     agent_tab_id_ = id;
     return id;
 }
 
 TabId BrowserWindow::AppendChildOfPlan(std::size_t space_index, std::string startup_url,
-                                       std::string node_id, std::string label, bool activate) {
+                                       std::string node_id, std::string label, bool activate,
+                                       bool opened_by_agent) {
     Space& space = spaces_[space_index];
     Tab tab{NextTabId()};
     const TabId id = tab.id();
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetGroupLabel(std::move(label));
+    // A research page is one the agent opened for the running plan. The Report is not: it is
+    // the person's result, so the agent may not navigate or close it without asking.
+    tab.SetOpenedByAgent(opened_by_agent);
     if (activate) {
         // The model changes first (space, then selection) and the view is attached once; the
         // browser view is created while the tab is attached (EnsureTabBrowserView).
@@ -580,8 +656,9 @@ bool BrowserWindow::OpenAgentTab(std::string_view text) {
         return false;
     }
     if (!ResearchOwnsAgent()) {
-        // Ordinary chat (or a plan waiting for approval): the page joins the person's space.
-        AppendTabToActiveSpace(std::move(*url));
+        // Ordinary chat (or a plan waiting for approval): the page joins the person's space but
+        // retains its agent-opened mark for the action gate.
+        AppendTabToActiveSpace(std::move(*url), /*opened_by_agent=*/true);
         return true;
     }
     const std::optional<agent::PlanNode> node = RunningPlanNode();
@@ -1028,7 +1105,8 @@ bool BrowserWindow::OpenReportTabImpl(std::string_view id, std::string_view spac
         // the view is attached once even when the person is in another space.
         static_cast<void>(AppendChildOfPlan(
             plan_location.has_value() ? plan_location->first : active_space_index_,
-            ReportPageUrlFor(id), std::move(result_node), "Result", /*activate=*/true));
+            ReportPageUrlFor(id), std::move(result_node), "Result", /*activate=*/true,
+            /*opened_by_agent=*/false));
     } else {
         AppendTabToActiveSpace(ReportPageUrlFor(id));
     }
@@ -1064,6 +1142,7 @@ json::Value BrowserWindow::ReportsListJson() const {
                       .Set("id", json::Value::String(report.id))
                       .Set("title", json::Value::String(report.title))
                       .Set("question", json::Value::String(report.question))
+                      .Set("kind", json::Value::String(report.kind))
                       .Set("created_ms", json::Value::Int(report.created_ms)));
     }
     return list;
@@ -1078,10 +1157,14 @@ std::string BrowserWindow::ReportPageStateJson(std::string_view id) const {
                      .Set("title", Value::String(found->title))
                      .Set("question", Value::String(found->question))
                      .Set("markdown", Value::String(found->markdown))
+                     .Set("kind", Value::String(found->kind))
+                     .Set("has_table", Value::Bool(FirstMarkdownTable(found->markdown).has_value()))
                      .Set("created_ms", Value::Int(found->created_ms));
     }
-    return json::Serialize(
-        Value::MakeObject().Set("theme", ThemeJson()).Set("report", std::move(report)));
+    return json::Serialize(Value::MakeObject()
+                               .Set("theme", ThemeJson())
+                               .Set("report", std::move(report))
+                               .Set("open_export", Value::Bool(id == report_fixture_menu_id_)));
 }
 
 void BrowserWindow::RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const {
@@ -1131,6 +1214,8 @@ void BrowserWindow::HandleReportPageMessage(const json::Value& message, std::str
         } else {
             ReportPageResult(source, "error", "The clipboard is not available.");
         }
+    } else if (type == "export") {
+        ExportReport(*report, message.StringOr("format", ""), source);
     } else if (type == "save_report") {
         SaveReportToFile(*report, source);
     } else if (type == "continue_in_agent") {
@@ -1148,7 +1233,109 @@ void BrowserWindow::SaveReportToFile(const ResearchReport& report, CefRefPtr<Cef
     source->GetHost()->RunFileDialog(
         FILE_DIALOG_SAVE, "Save report as Markdown", suggested.string(), {".md"},
         new SaveReportCallback(source, report.markdown,
-                               frame != nullptr ? frame->GetURL().ToString() : std::string()));
+                               frame != nullptr ? frame->GetURL().ToString() : std::string(),
+                               ".md"));
+}
+
+void BrowserWindow::ExportReport(const ResearchReport& report, std::string_view format,
+                                 CefRefPtr<CefBrowser> source) {
+    if (format == "md") {
+        SaveReportToFile(report, source);
+        return;
+    }
+    if (format != "csv" && format != "json") {
+        ReportPageResult(source, "error", "Unknown export format.");
+        return;
+    }
+    const std::optional<Table> table = FirstMarkdownTable(report.markdown);
+    if (!table.has_value()) {
+        ReportPageResult(source, "error", "No table in this report.");
+        return;
+    }
+    const std::string content = format == "csv" ? TableToCsv(*table) : TableToJson(*table);
+    if (export_path_for_test_.has_value()) {
+        std::ofstream out(*export_path_for_test_, std::ios::binary | std::ios::trunc);
+        out << content;
+        out.flush();
+        if (out) {
+            ReportPageResult(source, "saved", export_path_for_test_->string());
+        } else {
+            ReportPageResult(source, "error", "Could not write that file.");
+        }
+        return;
+    }
+    if (source == nullptr || source->GetHost() == nullptr) {
+        return;
+    }
+    const std::string extension = "." + std::string(format);
+    std::filesystem::path name = ReportFileName(report.title);
+    name.replace_extension(extension);
+    const CefRefPtr<CefFrame> frame = source->GetMainFrame();
+    source->GetHost()->RunFileDialog(
+        FILE_DIALOG_SAVE, "Export table", (DefaultDownloadsDirectory() / name).string(),
+        {extension},
+        new SaveReportCallback(source, content,
+                               frame != nullptr ? frame->GetURL().ToString() : std::string(),
+                               extension));
+}
+
+// --- Collect from tabs ----------------------------------------------------------
+
+void BrowserWindow::FinishCollectTurn(std::string_view task_id) {
+    if (agent_session_ == nullptr || TaskKindOf(task_id) != agent::TaskKind::kCollect) {
+        return;
+    }
+    std::string question;
+    for (const agent::AgentTask& task : agent_queue_.tasks()) {
+        if (task.id == task_id) {
+            question = task.prompt;
+        }
+    }
+    // The collect prompt asks for the marked table. An answer without a table (a refusal, say)
+    // is not stored as a collection: it stays in the agent panel's transcript.
+    const ResearchOutcome outcome = ClassifyResearchTurn(
+        agent_session_->transcript(), collect_turns_before_, agent_session_->error(),
+        /*plan_approved=*/true);
+    if (outcome.kind == ResearchOutcome::Kind::kReport &&
+        FirstMarkdownTable(outcome.markdown).has_value()) {
+        static_cast<void>(CompleteCollect(question, outcome.markdown));
+    }
+}
+
+bool BrowserWindow::CompleteCollect(std::string_view question, std::string_view markdown) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || Trimmed(markdown).empty()) {
+        return false;
+    }
+    ResearchReport report;
+    report.title = ReportTitle(markdown, question);
+    report.question = std::string(question);
+    report.markdown = std::string(markdown);
+    report.created_ms = NowMs();
+    report.kind = std::string(kReportKindCollection);
+    const std::string id = ReportStore::Add(reports_, std::move(report));
+    SaveReports();
+    return OpenReportTabImpl(id, {}, /*group_with_plan=*/false);
+}
+
+void BrowserWindow::ShowCollectionReportFixtureForDev() {
+    CEF_REQUIRE_UI_THREAD();
+    ResearchReport report;
+    report.title = "Espresso grinders";
+    report.question = "Price, rating and delivery time for each grinder";
+    report.kind = std::string(kReportKindCollection);
+    report.created_ms = NowMs();
+    report.markdown =
+        "# Espresso grinders\n\nCollected from 3 tabs.\n\n"
+        "| Source | Price | Rating | Delivery |\n"
+        "|---|---|---|---|\n"
+        "| [Grinder Shop](https://shop.example/a) | 189 EUR | 4.6 | 2 days |\n"
+        "| [Coffee Gear](https://gear.example/b) | 219 EUR | 4.8 | 1 day |\n"
+        "| [Bean House](https://beans.example/c) | 175 EUR | 4.4 | 5 days |\n";
+    // Dev capture only: kept in memory, so the person's Reports file is not touched.
+    const std::string id = ReportStore::Add(reports_, std::move(report));
+    report_fixture_menu_id_ = id;
+    static_cast<void>(OpenReportTabImpl(id, {}, /*group_with_plan=*/false));
 }
 
 void BrowserWindow::ContinueReportInAgent(const ResearchReport& report,
@@ -1160,7 +1347,9 @@ void BrowserWindow::ContinueReportInAgent(const ResearchReport& report,
     if (in_conversation) {
         return;
     }
-    if (agent_session_->busy()) {
+    // Sent outside the queue, so it waits for the queue to be empty as well as the session.
+    if (agent_session_->busy() || agent_queue_.current() != nullptr ||
+        agent_queue_.queued_count() > 0) {
         ReportPageResult(source, "error",
                          "The agent is busy. The panel is open; send the report once it is free.");
         return;

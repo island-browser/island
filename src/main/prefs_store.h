@@ -60,6 +60,10 @@ struct PrefsState {
     bool block_ads = true;
     bool block_trackers = true;
     std::vector<std::string> content_blocker_allowlist;
+    // Sites the agent may act on without asking (its "trust this site" choice), stored as
+    // NormalizeTrustedSites returns them. Optional key; absent means none, and a malformed value
+    // is ignored on load (see ParsePrefsState).
+    std::vector<std::string> agent_trusted_sites;
     // Minutes of inactivity before a background tab releases its browser (0 = never; see
     // tab_sleep_policy.h). Optional key; a value that is not one of 0/15/30/60 means the default.
     int tab_sleep_minutes = 30;
@@ -99,6 +103,10 @@ class PrefsStore {
     static PrefsError Save(const std::filesystem::path& path, const PrefsState& state);
     static std::filesystem::path DefaultPrefsFilePath();
 };
+
+// Trusted sites in storage form: each entry reduced to its lowercase host without "www." (the
+// rules of agent::HostOf), empty and duplicate entries dropped, first occurrence kept in order.
+[[nodiscard]] std::vector<std::string> NormalizeTrustedSites(const std::vector<std::string>& sites);
 
 [[nodiscard]] std::string ThemePreferenceToString(ThemePreference preference);
 // Strict parse: only the exact lowercase tokens; anything else returns false.

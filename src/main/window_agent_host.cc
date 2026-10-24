@@ -152,18 +152,40 @@ std::vector<agent::AgentSpaceInfo> WindowAgentHost::ListSpaces() {
 std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
     std::vector<agent::AgentTabInfo> tabs;
     // The agent's space (the Plan's while a research runs), never the space on screen.
-    const Space& space = window_->spaces()[window_->AgentSpaceIndex()];
+    const std::size_t space_index = window_->AgentSpaceIndex();
+    const Space& space = window_->spaces()[space_index];
+    const BrowserWindow::AgentTabLookup default_tab = window_->ResolveAgentTab(std::nullopt);
     for (std::size_t index = 0; index < space.tab_count(); ++index) {
         const Tab& tab = space.tabs()[index];
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
-        tabs.push_back({.index = index,
-                        .title = tab.DisplayTitle(),
-                        .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
-                        .active = space.has_active_tab() && index == space.active_tab_index(),
-                        .loading = nav.load_phase == LoadPhase::kLoading,
-                        .pinned = tab.pinned()});
+        tabs.push_back(
+            {.index = index,
+             .title = tab.DisplayTitle(),
+             .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
+             // During research the agent's page may be in a background space. Mark the logical
+             // default target, not the page visible to the person, so no-index tools and the
+             // action gate agree about which tab they address.
+             .active = default_tab.tab.has_value() && default_tab.tab->space == space_index &&
+                       default_tab.tab->tab == index,
+             .loading = nav.load_phase == LoadPhase::kLoading,
+             .pinned = tab.pinned(),
+             .opened_by_agent = tab.opened_by_agent(),
+             .refusal = window_->IsAgentPlanTab(index) ? PlanTabError(index) : std::string()});
     }
     return tabs;
+}
+
+std::vector<std::string> WindowAgentHost::TrustedSites() { return window_->trusted_sites(); }
+
+void WindowAgentHost::RequestConfirmation(agent::ConfirmationRequest request,
+                                          std::function<void(agent::ConfirmationAnswer)> done) {
+    // Tool calls already run on the UI thread (the endpoint hops them there), so the window takes
+    // the card directly; it owns the 120 s timeout and answers kWithdrawn when it closes.
+    window_->ShowConfirmation(std::move(request), std::move(done));
+}
+
+std::optional<std::string> WindowAgentHost::ResolveNavigationTarget(std::string_view text) {
+    return window_->ResolveNavigationTarget(text);
 }
 
 agent::HostStatus WindowAgentHost::OpenTab(std::string_view url) {
@@ -208,8 +230,7 @@ agent::HostStatus WindowAgentHost::PinTab(std::size_t tab, bool pinned) {
     if (!lookup.tab.has_value()) {
         return agent::HostStatus::Error(AgentTabErrorText(lookup.error, tab));
     }
-    return StatusFor(window_->SetAgentTabPinned(tab, pinned),
-                     "Could not pin that tab.");
+    return StatusFor(window_->SetAgentTabPinned(tab, pinned), "Could not pin that tab.");
 }
 
 agent::HostStatus WindowAgentHost::SwitchSpace(std::size_t space) {
@@ -218,7 +239,8 @@ agent::HostStatus WindowAgentHost::SwitchSpace(std::size_t space) {
 }
 
 agent::HostStatus WindowAgentHost::NewSpace(std::string_view name) {
-    return StatusFor(window_->CreateSpace(name), "Could not create a space.");
+    return StatusFor(window_->CreateSpace(name, /*opened_by_agent=*/true),
+                     "Could not create a space.");
 }
 
 agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
@@ -276,8 +298,8 @@ void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_v
     if (!lookup.tab.has_value() || window_->IsAgentPlanTab(tab)) {
         agent::DevToolsReply reply;
         reply.ok = false;
-        reply.error = lookup.tab.has_value() ? PlanTabError(tab)
-                                             : AgentTabErrorText(lookup.error, tab);
+        reply.error =
+            lookup.tab.has_value() ? PlanTabError(tab) : AgentTabErrorText(lookup.error, tab);
         done(std::move(reply));
         return;
     }

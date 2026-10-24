@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-08-28 | Updated: 2026-08-28 -->
+<!-- Generated: 2026-08-28 | Updated: 2026-10-18 -->
 
 # main
 
@@ -17,7 +17,7 @@ platform executable links.
 | `CMakeLists.txt` | Defines `island_browser_core` plus the macOS bundle / Windows / Linux executable wiring |
 | `island_app.{h,cc}` | `CefApp` + `CefBrowserProcessHandler`; owns `BrowserWindow`, dispatches `BrowserCommand`, holds navigation/chrome observers |
 | `browser_window.{h,cc}` | Top-level `CefWindow` host, owns the `Space` vector, creates the active tab's `CefBrowserView`, and drives the CEF close lifecycle |
-| `browser_chrome.{h,cc}` | Native chrome layout; declares the `ChromeViewId` enum (`kRoot = 1001` …). Native's sidebar bottom is a footer with a switcher row (segments, `+`, overview, settings; `kRailSwitcherRow`) above the full-width Agent entry (`kRailAgentButton`); the toolbar has no Agent button under Native |
+| `browser_chrome.{h,cc}` | Native chrome layout; declares the `ChromeViewId` enum (`kRoot = 1001` …). Native's sidebar bottom is a footer with a switcher row (segments, `+`, overview, settings; `kRailSwitcherRow`) above the full-width Agent entry (`kRailAgentButton`); the toolbar has no Agent button under Native, and a collapsed rail relayout lays its toolbar content immediately so Back/Forward clear the macOS traffic lights |
 | `chrome_snapshot.h` | Observable snapshot struct + `ChromeObserver` seam used by tests |
 | `browser_command.h` | The Back / Forward / Reload command enum |
 | `navigation_state.{h,cc}` | Back/forward/reload availability and navigation snapshot |
@@ -53,7 +53,10 @@ platform executable links.
 | `find_bar_model.{h,cc}`, `find_bar_overlay.{h,cc}` | CEF-free find-bar state (query, match case, "n of m", the `FindRequest` each gesture needs) and the overlay card shown only while the bar is open; `browser_window_find_reader.cc` wires both to `CefBrowserHost::Find` / `OnFindResult` |
 | `reader_mode.{h,cc}`, `reader/` | Reader view: `reader/reader_extract.js` (injected through DevTools `Runtime.evaluate`, returns a whitelist tree) and `reader/reader_page.html` (the document, embedded like `pages/`); `reader_mode.cc` builds the data: URL. Per-tab `ReaderSession`s record the origin page and the document's URL hash; its messages (`reader_settings`, `reader_exit`) are accepted only with that document's token |
 | `address_indicators.h` | CEF-free rules for the Native address-field indicators (`ComputeAddressIndicators`: shield count capped at "9999+", Reader, agent state). `BrowserWindow::RefreshAddressIndicators` recomputes them on tab/space switch, blocked request, Reader change and agent session change and calls `BrowserChrome::SetAddressIndicators`; the shield opens Settings > Privacy (no blocker popover exists), the dot toggles the agent panel. The agent state is window-wide because the agent drives the active tab |
-| `prefs_store.{h,cc}` | Preferences JSON (theme, history capture, agent provider + custom command with migration from the old single command, agent panel state, shortcut overrides, update checks) |
+| `browser_window.cc` (confirmations) | `ShowConfirmation`/`AnswerConfirmation` keep pending agent confirmation cards in the window (120 s timeout via a 1 s UI timer, cancelled on shutdown, Stop/new chat and when the card's tab closes, moves or its space is left; the card never opens the panel or takes focus; the HTTP handler budget `kHandlerTimeoutSeconds`=150 exceeds the card timeout); panel state key `confirmations`, panel message `confirm`, settings message `remove_trusted_site`; legacy Agent icons carry a 6 DIP `warning_text` amber badge while Native has its one readable footer status dot (`BrowserChrome::SetAgentNeedsYou`); dev action `agent_fixture:confirm` |
+| `browser_window.cc` (task queue) | `agent_queue_` (`src/agent/agent_task_queue.h`) runs agent work one task at a time: `SubmitAgentPrompt` and `StartResearch` enqueue, `StartQueuedTask` (the StartFn) sends and records `in_flight_id_`, `CheckInFlightTurn`/`FinishPostedTurn` report chat turn ends (posted, since the session is inside its handler), research reports from `CompleteResearch`, `SyncQueueWaiting` is the edge-triggered OnWaiting (cards or research awaiting approval; a research waiting for approval reports no turn end, Run is the same task), `StopAgentTask` cancels then `StopCurrent` (turn open) or `StopCurrentAndAdvanceNow`, `AbandonInFlightTurn` for new chat/agent switch/teardown; panel state key `tasks`, messages `task_move`/`task_remove`/`task_stop`/`tasks_clear_finished`; `AgentButtonLabel` (browser_chrome.cc); palette command `agent_tasks`; dev action `agent_fixture:queue` |
+| `agent_context.{h,cc}` | CEF-free "ask the agent about this": `BuildAgentContext` (page title, URL and selection in tags labelled as web content, selection clipped to 4096 bytes), `BuildLinkAgentContext` (a link the agent reads in its own background tab), `AgentContextMenuItems` (the page context menu's agent items and their `kAgentMenu*` offsets), `ClipUtf8` / `EscapeUntrusted` / `UntrustedTitle` |
+| `prefs_store.{h,cc}` | Preferences JSON (theme, history capture, agent provider + custom command with migration from the old single command, agent panel state, agent trusted sites, shortcut overrides, update checks) |
 | `updater.{h,cc}` | CEF-free updater core: SemVer precedence, GitHub releases parsing/selection (`kReleasesRepo`), per-target assets and `SHA256SUMS.txt`, URL/redirect allow-list, install detection, generated sh/cmd apply scripts, the `Updater` state machine behind the `UpdateFetcher` seam |
 | `sha256.{h,cc}` | Standard-library SHA-256 used to verify update downloads |
 | `cef_update_fetcher.{h,cc}` | `UpdateFetcher` over `CefURLRequest` (manual, allow-listed redirects; capped, hashed streaming) |
@@ -63,9 +66,11 @@ platform executable links.
 | `tab_sleep_policy.h`, `peek_state.h` | CEF-free models: tab sleep decisions (injected clock, per-tab last-active time, exclusions as inputs; `Expired` for the timed sweep, `AllEligible` for "Sleep inactive tabs now") and the peek card's state (open/replace/close/open-as-tab/Escape, generation counter for stale callbacks) |
 | `peek_overlay.{h,cc}` | The peek card: an overlay of the one `CefWindow`, created in `Open` and released in `Close` (see `overlay_lifetime.h`), covering only the card, holding a title bar and its own `CefBrowserView` with its own client (popups load in the card, Escape claimed in `OnPreKeyEvent`) |
 | `overlay_lifetime.h`, `overlay_card.h` | CEF-free overlay rule (an overlay exists only while its surface is shown, because a live `CefWindow` overlay blocks mouse input on macOS) and the solid-color `OverlayFillDelegate` that re-asserts its color on theme change |
-| `browser_window_research.cc`, `research_prompt.{h,cc}`, `report_store.{h,cc}` | Research mode in `BrowserWindow` (start, cancel and finish, the Plan hub, the Report tab with save/copy/continue); the CEF-free prompt, research space name and report extraction; and the Reports list persisted as `reports.json` |
+| `browser_window_research.cc`, `research_prompt.{h,cc}`, `report_store.{h,cc}` | Research mode in `BrowserWindow` (start, cancel and finish, the Plan hub, the Report tab with save/copy/continue/export); the CEF-free prompt, research space name and report extraction; and the Reports list persisted as `reports.json` (schema 2: each report has a `kind`, "research" or "collection"; version 1 loads as research) |
+| `collect_prompt.{h,cc}`, `table_export.{h,cc}` | "Collect from tabs": the CEF-free prompt that lists the chosen tabs as untrusted web content and asks for one table between the Research report markers; `FirstMarkdownTable` reads a report's table (link cells become URLs, with a title column when the texts differ) and `TableToCsv` / `TableToJson` export it. CSV cells that start with `= + - @` TAB or CR get a leading quote (formula neutralization); JSON keys de-duplicate with ` 2`, ` 3`. The sheet sends `{index, url}` per checked tab and `CollectFromTabs` takes a choice only while the active space still has its URL (`CollectChoice` in `collect_prompt.h`). Sent by `CollectFromTabs` as a `kCollect` task whose context is the prompt; `FinishCollectTurn` stores the table before the queue moves on. Panel state key `collect`, message `collect`; dev actions `agent_fixture:collect` and `report_fixture:collection` |
 | `plan_dev_fixture.h` | The developer capture's sample research plan (`--island-dev-actions=plan_fixture`), kept equal to the test fixture by a unit test |
-| `pages/plan.html`, `pages/report.html`, `pages/markdown.js` | The Plan tab's graph and list page, the Report tab page, and the shared safe Markdown renderer both use (inlined where a page carries `// @@ISLAND_MARKDOWN@@`) |
+| `dev_capture.{h,cc}` (agent fixtures) | Developer capture fixtures for the agent panel, each a dev action: `agent_fixture:confirm` (a confirmation card), `agent_fixture:queue` (one running and two queued tasks), `agent_fixture:quote` (a page chip and a quote chip), `agent_fixture:collect` (the Collect sheet), `agent_fixture:thread` (a sample conversation: a user message, three tool rows (two done, one failed, one long MCP-prefixed name), a Markdown reply, and one queued message; `ShowThreadFixtureForDev` feeds the session through `AgentSession::AddDevUserPrompt` / `ApplyDevEvent`, so no agent starts). `main_mac.mm` maps the names to `IslandApp::Show*Fixture` through the `kAgentFixtures` table; add a fixture there and to this list. Captures with a fresh HOME open on the Welcome sheet, which covers the page: write a valid `prefs.json` with `"onboarding_completed":true` and a `theme` string in the capture HOME (under `Library/Application Support/Island/`) before the run, or the sheet stays on top. The status pill can read "Not running" while a fixture task shows Running; the fixtures never start an agent. |
+| `pages/plan.html`, `pages/report.html`, `pages/markdown.js` | The Plan tab's graph and list page, the Report tab page (its view drops a first H1 that repeats the report title; Copy and Export keep it), and the shared safe Markdown renderer both use (inlined where a page carries `// @@ISLAND_MARKDOWN@@`) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
 
@@ -119,6 +124,42 @@ platform executable links.
 - Platform selection is `if(APPLE) / elseif(WIN32) / elseif(Linux)` with a `FATAL_ERROR` fallback;
   each branch adds its own `font_registry_*` source and platform link libraries.
 
+### Agent extension points (window side)
+
+The agent kernel's own extension points (gate rules, gated tools, task kinds) are in
+`src/agent/AGENTS.md`, "Extension points". The three below live in the window.
+
+**A new context-menu ask** (`agent_context.h`, `agent_context.cc`, `browser_window.cc`):
+1. Add `inline constexpr int kAgentMenu<Name> = N;` to `agent_context.h`. Start at 4: offset 0 is
+   "Open in peek" (`MENU_ID_USER_FIRST`), and every offset is added to `MENU_ID_USER_FIRST`.
+2. Add the item to `AgentContextMenuItems`, with its condition (`has_agent`, `has_selection`,
+   `has_link`). Selection items need a web page; `RunAgentMenuCommand` refuses the rest too.
+3. Handle the offset in the `switch` of `BrowserWindow::RunAgentMenuCommand`. Build the prompt, and
+   the context with `BuildAgentContext` or `BuildLinkAgentContext`, then call `AskAgent(prompt,
+   context)`, which opens the panel and enqueues a `kAsk` task. Page text reaches the prompt only
+   through `ClipUtf8`, `EscapeUntrusted` and `UntrustedTitle`.
+4. To offer it in the command palette too, add an entry to `PaletteCommands()` and a branch to
+   `BrowserWindow::RunPaletteCommand`.
+5. Tests: `tests/agent_context_test.cpp` for the items and the escaping; `BrowserWindowPages` tests
+   for the path. The CEF menu model (`OnBeforeContextMenu`, `OnContextMenuCommand`) has no unit
+   test, so click the item in a real window before release.
+
+**A new export format** (`table_export.h`, `table_export.cc`, `browser_window_research.cc`, `pages/report.html`):
+1. Add a pure converter `std::string TableTo<Format>(const Table&)` to `table_export.{h,cc}`. Follow
+   `TableToCsv`: RFC 4180 quoting, and formula neutralization for spreadsheet formats (`TableToJson`
+   does not neutralize).
+2. In `BrowserWindow::ExportReport`, accept the format name, call the converter, and use the
+   extension `"." + format`. `md` goes to `SaveReportToFile`; an unknown name is an error.
+3. In `pages/report.html`, add a `role="menuitem"` button with `data-format` to `export-menu`. If the
+   format needs a table, add its id to the list that disables the items when `has_table` is false.
+4. Tests: `tests/table_export_test.cpp` for the converter; `BrowserWindowPagesTest.ExportMessageWritesTheChosenFormat`
+   for the message path (it writes through `export_path_for_test_`).
+
+**A new task kind**: see `src/agent/AGENTS.md`. In this directory the window touches it in
+`BrowserWindow::StartQueuedTask` (send the prompt, set `in_flight_is_chat_`), in
+`FinishInFlightTurn` if the kind needs a turn-end hook (as `FinishCollectTurn` does), and in the
+kind switch of `BrowserWindow::TasksStateJson`.
+
 ### CEF ownership seams
 
 - **Per-space request context.** Each `Space` owns a `CefRequestContext`, created lazily by
@@ -167,6 +208,32 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
 - Observer seams (`NavigationObserver`, `ChromeObserver`) exist so tests can assert on snapshots
   without driving a real window.
 - Owning models are move-only when they own move-only members (see `Space`).
+
+### Command palette kinds (Native presentation)
+
+- `kPaletteKindStyles` in `command_palette.cc` is the one table for the palette's result kinds:
+  group header, sentence-case label, legacy uppercase label and row icon (`PaletteRowIcon`, mapped
+  to a Lucide `ChromeIcon` in `command_palette_view.cc`). To add a kind, add its enum value, one row
+  in that table, and the icon mapping; `CommandPaletteNativeStyleTest` checks each kind is listed once.
+- Shortcut keycaps come from `PaletteCommandEntry::shortcut_action_id`: `BrowserWindow` resolves the
+  current binding when the palette opens. Never hard-code a key in the view.
+- `BrowserChrome::NativeKeycapColors` supplies the keycap plate (border_strong in Native light).
+
+### Welcome and overlay focus
+
+- `WelcomeFlow` and `CommandPaletteView` both report show/hide through
+  `OnOverlayFocusRingChanged`; `BrowserWindow::ApplyAddressFocusColors` owns the single window
+  focus color, calls `ThemeChanged()` after each transition, and restores the address treatment
+  when the last overlay closes. Do not set `CEF_ColorFocusableBorderFocused` inside either view.
+- The Native welcome card's 12 DIP raster caps sit in exact-size `CefPanel` delegates. Their image
+  buttons must keep zero insets or CEF clips the cap into a detached strip. While welcome is shown,
+  `BrowserWindow` hides the attached `CefBrowserView`s because the macOS browser compositor can
+  otherwise paint start-page controls above the CEF overlay; hiding the welcome restores them.
+  This applies to Native only (`WelcomeHidesPageViews` in `overlay_lifetime.h`). The decision is
+  re-applied on every attach (`BrowserWindow::ApplyPageViewVisibility`, called from
+  `AttachActiveTabBrowserView`), so a view attached or re-attached during the welcome follows it.
+- Palette shortcut keycaps: Native keeps a fixed 104 DIP right column on every row (so kind labels
+  line up) and shows the keycap plate inside it at its natural width; other looks hide the column.
 
 ## Dependencies
 
@@ -225,7 +292,7 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `tools/icon_pipeline/icon_pipeline.cc`, so update the constant with the lock; (2) add its entry to
   `kSpaceIconChoices` in `space_icon.h` (the array size changes with it); (3) run
   `tools/icon_pipeline/run.sh generate` to regenerate the PNGs and `run.sh verify` to check them; (4) update the PNG count in the root
-  `CMakeLists.txt` (`816` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
+  `CMakeLists.txt` (`888` now), `resources/island/AGENTS.md` and `tools/icon_pipeline/AGENTS.md`.
   The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
   switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
   none.

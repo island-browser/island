@@ -21,6 +21,7 @@
 ## Agent
 
 * [The agent panel](agent/agent-panel.md)
+* [Collect from tabs](agent/collect-from-tabs.md)
 * [Research and the Plan tab](agent/research-and-plan.md)
 * [The MCP endpoint](agent/mcp-endpoint.md)
 

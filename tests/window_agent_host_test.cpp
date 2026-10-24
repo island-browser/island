@@ -95,11 +95,9 @@ TEST(WindowAgentHostTest, NavigateUpdatesTheTargetTab) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     WindowAgentHost host(*window);
     window->ExecuteCommand(BrowserCommand::kNewTab);
-    EXPECT_FALSE(Call(host, "browser_navigate",
-                      Value::MakeObject()
-                          .Set("url", Value::String("https://docs.test/"))
-                          .Set("tab", Value::Int(0)))
-                     .is_error);
+    // The gate asks before it navigates a tab the person owns (and the temporary host answers
+    // "cancel"), so the model update is exercised through the host.
+    EXPECT_TRUE(host.Navigate(0, "https://docs.test/").ok);
     EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "https://docs.test/");
     EXPECT_TRUE(Call(host, "browser_navigate",
                      Value::MakeObject()
@@ -133,10 +131,19 @@ TEST(WindowAgentHostTest, InChatPageToolsWithoutAnIndexActOnTheActiveTab) {
     const std::size_t agent_tab = ActiveSpace(*window).active_tab_index();
     ASSERT_TRUE(window->CreateSpace("Personal"));
 
-    // No research runs: a call without an index is about the tab the person is viewing.
-    EXPECT_FALSE(Call(host, "browser_navigate",
-                      Value::MakeObject().Set("url", Value::String("https://docs.test/next")))
-                     .is_error);
+    // No research runs: a call without an index is about the tab the person is viewing. The
+    // cross-origin navigation therefore asks before changing the person's tab.
+    std::optional<agent::ToolResult> navigated;
+    host.toolbox().Call("browser_navigate",
+                        Value::MakeObject().Set("url", Value::String("https://docs.test/next")),
+                        [&](agent::ToolResult result) { navigated = std::move(result); });
+    EXPECT_FALSE(navigated.has_value());
+    ASSERT_TRUE(window->HasPendingConfirmation());
+    const Value panel = *json::Parse(window->AgentPanelStateJson());
+    window->AnswerConfirmation(panel.FindMember("confirmations")->array_val[0].StringOr("id", ""),
+                               agent::ConfirmationAnswer::kAllowOnce);
+    ASSERT_TRUE(navigated.has_value());
+    EXPECT_FALSE(navigated->is_error);
     EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "https://docs.test/next");
     EXPECT_EQ(window->spaces()[agent_space].tabs()[agent_tab].startup_url(),
               "https://docs.test/agent");
@@ -247,6 +254,7 @@ TEST(WindowAgentHostTest, NavigationToolsRefuseThePlanTabWithAClearError) {
     const agent::ToolResult navigate =
         Call(host, "browser_navigate",
              Value::MakeObject().Set("url", Value::String("https://docs.test/")));
+    // Refused before the gate asks anyone.
     EXPECT_TRUE(navigate.is_error);
     EXPECT_NE(navigate.content[0].text.find("Plan tab"), std::string::npos);
     EXPECT_EQ(ActiveSpace(*window).tabs()[0].startup_url(), "data:text/html,plan");
@@ -272,7 +280,8 @@ TEST(WindowAgentHostTest, PageToolsRefuseThePlanTabEvenAfterItIsActivated) {
     const Value ref = Value::MakeObject().Set("ref", Value::Int(1));
     const std::vector<std::pair<const char*, Value>> calls = {
         {"page_click", ref},
-        {"page_type", Value::MakeObject().Set("ref", Value::Int(1)).Set("text", Value::String("x"))},
+        {"page_type",
+         Value::MakeObject().Set("ref", Value::Int(1)).Set("text", Value::String("x"))},
         {"page_evaluate", Value::MakeObject().Set("expression", Value::String("1"))},
         {"page_screenshot", Value::MakeObject()},
         {"page_read", Value::MakeObject()},
@@ -297,8 +306,20 @@ TEST(WindowAgentHostTest, TabAndSpaceToolsDriveTheModel) {
     EXPECT_FALSE(
         Call(host, "browser_activate_tab", Value::MakeObject().Set("tab", Value::Int(0))).is_error);
     EXPECT_EQ(ActiveSpace(*window).active_tab_index(), 0U);
-    EXPECT_FALSE(
-        Call(host, "browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1))).is_error);
+    // Closing a tab the person owns asks first: the call waits on a card, and cancelling it
+    // leaves the tab open. The model update itself goes through the host.
+    std::optional<agent::ToolResult> closed;
+    host.toolbox().Call("browser_close_tab", Value::MakeObject().Set("tab", Value::Int(1)),
+                        [&](agent::ToolResult r) { closed = std::move(r); });
+    EXPECT_FALSE(closed.has_value());
+    ASSERT_TRUE(window->HasPendingConfirmation());
+    const Value panel = *json::Parse(window->AgentPanelStateJson());
+    window->AnswerConfirmation(panel.FindMember("confirmations")->array_val[0].StringOr("id", ""),
+                               agent::ConfirmationAnswer::kCancel);
+    ASSERT_TRUE(closed.has_value());
+    EXPECT_TRUE(closed->is_error);
+    EXPECT_EQ(ActiveSpace(*window).tab_count(), 2U);
+    EXPECT_TRUE(host.CloseTab(1).ok);
     EXPECT_EQ(ActiveSpace(*window).tab_count(), 1U);
 
     EXPECT_FALSE(
@@ -359,6 +380,70 @@ TEST(WindowAgentHostTest, PinnedTabsGroupAtTheFront) {
     EXPECT_TRUE(ActiveSpace(*window).tabs()[0].pinned());
     window->ExecuteCommand(BrowserCommand::kTogglePinTab);
     EXPECT_EQ(ActiveSpace(*window).pinned_count(), 0U);
+}
+
+TEST(WindowAgentHostTest, OpenTabMarksTheTabAsOpenedByAgent) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(host.OpenTab("https://docs.test/a").ok);
+
+    const Space& space = ActiveSpace(*window);
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_FALSE(space.tabs()[0].opened_by_agent());
+    EXPECT_TRUE(space.tabs()[1].opened_by_agent());
+
+    const std::vector<agent::AgentTabInfo> listed = host.ListTabs();
+    ASSERT_EQ(listed.size(), 2U);
+    EXPECT_FALSE(listed[0].opened_by_agent);
+    EXPECT_TRUE(listed[1].opened_by_agent);
+}
+
+TEST(WindowAgentHostTest, NewSpaceStartTabIsOpenedByAgent) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(host.NewSpace("Trip").ok);
+
+    const Space& space = ActiveSpace(*window);
+    EXPECT_EQ(space.name(), "Trip");
+    ASSERT_EQ(space.tab_count(), 1U);
+    EXPECT_TRUE(space.tabs()[0].opened_by_agent());
+    // The person's own new space starts with a tab the person owns.
+    EXPECT_TRUE(window->CreateSpace("Mine"));
+    EXPECT_FALSE(ActiveSpace(*window).tabs()[0].opened_by_agent());
+}
+
+TEST(WindowAgentHostTest, TrustedSitesAddNormalizeAndRemoveIgnoringUnknownHosts) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_TRUE(window->trusted_sites().empty());
+
+    window->AddTrustedSite("WWW.Shop.test");
+    window->AddTrustedSite("https://shop.test/cart");  // same host: no duplicate
+    window->AddTrustedSite("  docs.test ");
+    window->AddTrustedSite("localhost");  // a bare label is refused
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"shop.test", "docs.test"}));
+
+    // The agent reads the same list through the host.
+    WindowAgentHost host(*window);
+    EXPECT_EQ(host.TrustedSites(), (std::vector<std::string>{"shop.test", "docs.test"}));
+
+    window->RemoveTrustedSite("WWW.SHOP.test");
+    window->RemoveTrustedSite("never-added.test");  // unknown: a no-op
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"docs.test"}));
+}
+
+TEST(WindowAgentHostTest, OpenedByAgentSurvivesASessionRoundTrip) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    WindowAgentHost host(*window);
+    ASSERT_TRUE(host.OpenTab("https://docs.test/a").ok);
+    const SessionState state = window->BuildSessionState();
+
+    CefRefPtr<BrowserWindow> restored = MakeWindow();
+    ASSERT_TRUE(restored->RestoreSessionStateForTest(state));
+    ASSERT_FALSE(restored->spaces().empty());
+    const Space& space = restored->spaces()[0];
+    ASSERT_EQ(space.tab_count(), 2U);
+    EXPECT_FALSE(space.tabs()[0].opened_by_agent());
+    EXPECT_TRUE(space.tabs()[1].opened_by_agent());
 }
 
 }  // namespace

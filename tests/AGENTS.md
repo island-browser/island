@@ -30,7 +30,7 @@ Two independent test systems live side by side here:
 | `tab_test.cpp` | Move-only `Tab` model |
 | `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
 | `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
-| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow` |
+| `browser_window_pages_test.cpp` | Headless Settings / All-tabs / import / shortcut / agent-provider seams of `BrowserWindow`; Native ThemeJson look and palette command icon contracts |
 | `history_recorder_test.cpp` | History URL/privacy filtering, deduplication and visit ranking, cap compaction, reopen rebuild, and clear |
 | `local_page_test.cpp` | Local page `data:` URLs and the console-message bridge |
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |
@@ -43,6 +43,7 @@ Two independent test systems live side by side here:
 | `overlay_lifetime_test.cpp`, `settings_focus_test.cpp`, `report_store_test.cpp`, `research_prompt_test.cpp` | Overlay create/destroy rules, repeated Settings section focus, the Reports list, and the research prompt, space name and report extraction |
 | `chrome/collapsed_rail_test.cpp` | Icon rail metrics: buttons and scrollbar fit 52 DIP, list height with gaps and separator |
 | `agent/plan_graph_test.cpp`, `agent/plan_edits_test.cpp` (fixture `agent/plan_fixture.h`) | Plan graph building and layout (branches, joins, depth), and the plan edit messages |
+| `agent/action_gate_test.cpp` | Action gate classification: password and card fields, consequential words, submits, Enter in forms, scripts, foreign navigation and tab close, host and origin matching |
 | `design/test_native_look_contract.py`, `design/test_reader_extract.py` | Native look color drift guard (pytest); Reader extraction heuristic run against `reader_extract.js` (pytest) |
 | `design/test_segment_outline.py` | Selected segments on Settings, Start and Plan pair the dark fill with an inset `--segment-outline` (pytest) |
 | `space_icon_cache_test.cpp` | `SpaceIconCache` keys (id, size, color), reuse, failed-load retry and `Clear()` |

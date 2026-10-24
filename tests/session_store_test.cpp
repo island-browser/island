@@ -533,5 +533,32 @@ TEST(SessionStore, SaveWritesReadableJsonWithExpectedKeys) {
     std::filesystem::remove(path);
 }
 
+TEST(SessionStore, OpenedByAgentRoundTripsAndOldFilesLoad) {
+    SessionState original = BuildSampleState();
+    original.spaces[0].tabs[1].opened_by_agent = true;
+    const auto path = std::filesystem::temp_directory_path() / "island_test_opened_by_agent.json";
+    ASSERT_EQ(SessionStore::Save(path, original), SessionError::kNone);
+    LoadResult result = SessionStore::Load(path);
+    EXPECT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state, original);
+    EXPECT_TRUE(result.state.spaces[0].tabs[1].opened_by_agent);
+    EXPECT_FALSE(result.state.spaces[0].tabs[0].opened_by_agent);
+
+    // Sessions written before the key existed load with every tab the person's own.
+    WriteFile(path,
+              R"({"version":1,"active_space_id":1,"spaces":[{"id":1,"name":"A","color_argb":1,)"
+              R"("tabs":[{"id":1,"url":"https://a.test/"}]}]})");
+    result = SessionStore::Load(path);
+    EXPECT_EQ(result.error, SessionError::kNone);
+    EXPECT_FALSE(result.state.spaces[0].tabs[0].opened_by_agent);
+
+    // A wrong type is a schema error, never a silent default.
+    WriteFile(path,
+              R"({"version":1,"active_space_id":1,"spaces":[{"id":1,"name":"A","color_argb":1,)"
+              R"("tabs":[{"id":1,"url":"https://a.test/","opened_by_agent":"yes"}]}]})");
+    EXPECT_EQ(SessionStore::Load(path).error, SessionError::kSchemaError);
+    std::filesystem::remove(path);
+}
+
 }  // namespace
 }  // namespace island

@@ -50,6 +50,10 @@ ReportLoadResult ParseState(const json::Value& root) {
         report.question = value.FindMember("question")->string_val;
         report.markdown = value.FindMember("markdown")->string_val;
         report.created_ms = value.FindMember("created_ms")->int_val;
+        const json::Value* kind = value.FindMember("kind");
+        if (kind != nullptr && kind->IsString() && kind->string_val == kReportKindCollection) {
+            report.kind = std::string(kReportKindCollection);
+        }
         state.reports.push_back(std::move(report));
     }
     return {ReportError::kNone, std::move(state)};
@@ -76,6 +80,12 @@ std::string Serialize(const ReportState& state) {
         w.StringValue(report.markdown);
         w.Key("created_ms");
         w.IntValue(report.created_ms);
+        // Only collections carry "kind". Research reports are written exactly as version 1 always
+        // wrote them, so an older build reads this file unchanged; it ignores unknown members.
+        if (report.kind != kReportKindResearch) {
+            w.Key("kind");
+            w.StringValue(report.kind);
+        }
         w.EndObject();
     }
     w.EndArray();

@@ -8,6 +8,9 @@ Under **Appearance**, pick **System**, **Light** or **Dark**. System follows you
 
 The default look is **Native**: a macOS-style source-list sidebar with the system font and one blue accent. You can switch to the Arc or Graphite look later in [Appearance](../settings/appearance.md).
 
+Native shows the welcome as a rounded card over a dimmed page. Its theme choices use the same
+neutral segmented control as the sidebar.
+
 ## Import bookmarks
 
 Under **Import**, Island lists the browsers it found on this computer. It can read bookmarks from Chrome-family browsers, Safari and Firefox, and the spaces and pinned tabs of Arc.

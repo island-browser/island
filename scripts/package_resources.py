@@ -22,7 +22,7 @@ ICON_LICENSE: Final = "LICENSE-LUCIDE-ISC-AND-FEATHER-MIT.txt"
 ICON_MANIFEST: Final = "manifest.json"
 # Must equal the icon gate in the root CMakeLists.txt (`_island_icon_output_count EQUAL ...`);
 # tests/package/test_package_resources.py checks that they agree. Update both when icons are added.
-EXPECTED_ICON_OUTPUTS: Final = 816
+EXPECTED_ICON_OUTPUTS: Final = 888
 ICON_OUTPUT_PREFIX: Final = "resources/island/icons/"
 
 

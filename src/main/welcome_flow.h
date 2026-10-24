@@ -10,11 +10,12 @@
 #include "bookmark_import.h"
 #include "browser_chrome.h"
 #include "design_tokens.h"
-#include "overlay_lifetime.h"
 #include "overlay_card.h"
+#include "overlay_lifetime.h"
 #include "prefs_store.h"
 
 class CefLabelButton;
+class CefImage;
 class CefPanel;
 class CefWindow;
 
@@ -31,6 +32,9 @@ class WelcomeFlowHost {
 
     virtual void OnWelcomeThemeChanged(ThemePreference preference) = 0;
     virtual void OnWelcomeCompleted(const std::vector<ImportSource>& sources) = 0;
+    // The welcome showed or hid: the host repaints the window's focus ring for the overlay state
+    // (see BrowserWindow::ApplyAddressFocusColors).
+    virtual void OnOverlayFocusRingChanged() = 0;
 };
 
 // The first-run welcome flow: one cef_views overlay on the one existing
@@ -40,11 +44,11 @@ class WelcomeFlowHost {
 // Escape dismisses through the window accelerator, which treats it as
 // "just start browsing".
 //
-// Structure (DESIGN.md §5): a hairline-outlined card (`--surface`, 1px `--border`,
-// spacing_6 padding) holding a title and lede, an APPEARANCE section with a
-// three-segment control, an IMPORT section with one toggle row per readable
-// browser plus a wrapped note for unreadable ones, and a right-aligned footer
-// with a secondary Import button and the primary "Start browsing" button.
+// Structure (DESIGN.md §5): a `--surface` card holding a title and lede, an appearance
+// control, an import section with one toggle row per readable browser plus a wrapped note for
+// unreadable ones, and a right-aligned footer with a secondary Import button and the primary
+// "Start browsing" button. Native uses radius-12 caps, sentence-case labels and the sidebar's
+// compact segment shape; Arc and Graphite retain their square hairline card and uppercase labels.
 class WelcomeFlow final {
   public:
     WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens,
@@ -87,7 +91,7 @@ class WelcomeFlow final {
     [[nodiscard]] static ButtonColors PrimaryButtonColors(const ChromeTokens& tokens);
 
   private:
-    enum class SurfaceSlot : std::uint8_t { kOutline, kCard };
+    enum class SurfaceSlot : std::uint8_t { kTransparent, kTrack, kOutline, kCard };
     enum class TextRole : std::uint8_t { kTitle, kLede, kSectionLabel, kNote };
     // Element ids offset from the panel's ChromeViewId so the button delegate
     // can route presses by view id.
@@ -104,6 +108,7 @@ class WelcomeFlow final {
     struct StaticText {
         CefRefPtr<CefLabelButton> view;
         TextRole role;
+        std::string text;
     };
     struct SourceRow {
         CefRefPtr<CefPanel> outline;
@@ -124,9 +129,11 @@ class WelcomeFlow final {
     void HandleViewThemeReset();
     void ReapplyColors();
     void ApplyColors();
+    void NotifyFocusRingChanged();
     void UpdateImportButtonState();
     [[nodiscard]] bool AnyCheckedAvailableSource() const;
     [[nodiscard]] ArgbColor ResolveColor(SurfaceSlot slot) const;
+    [[nodiscard]] CefRefPtr<CefImage> CardCap(bool top) const;
 
     WelcomeFlowHost* host_;
     CefRefPtr<CefWindow> window_;
@@ -142,10 +149,16 @@ class WelcomeFlow final {
     std::shared_ptr<WelcomeFlow*> alive_;
 
     CefRefPtr<CefPanel> panel_;
+    CefRefPtr<CefPanel> card_top_cap_;
+    CefRefPtr<CefLabelButton> card_top_cap_image_;
+    CefRefPtr<CefPanel> card_bottom_cap_;
+    CefRefPtr<CefLabelButton> card_bottom_cap_image_;
+    CefRefPtr<CefPanel> card_body_outline_;
     CefRefPtr<CefPanel> card_;
     std::vector<std::pair<CefRefPtr<CefPanel>, SurfaceSlot>> panels_;
     std::vector<StaticText> texts_;
     CefRefPtr<CefLabelButton> theme_buttons_[3];
+    CefRefPtr<CefPanel> theme_outlines_[3];
     std::vector<SourceRow> source_rows_;
     CefRefPtr<CefPanel> import_outline_;
     CefRefPtr<CefLabelButton> import_button_;

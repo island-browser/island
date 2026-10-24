@@ -13,6 +13,90 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-24
+
+### Added
+
+- Collect from tabs: the command palette's "Collect from tabs…" opens a Collect sheet in the agent
+  panel. Pick the tabs (pinned tabs start unchecked) and say what to collect; the agent reads each
+  tab and answers with one table, stored as a collection report (a Report tab, shown as TABLE in
+  the palette). The Export menu on a report saves its first table as CSV or JSON (UTF-8 with a
+  byte order mark and CRLF line ends), or the report as Markdown; CSV and JSON are disabled when
+  the report has no table. Reports carry a kind; reports saved by earlier versions load as research.
+- Ask the agent from context: the page context chip above the composer now has a ✕ to clear it,
+  and a selection shows as a quote chip. The page context menu adds "Ask agent about selection"
+  and "Explain" for a selection, and "Summarize linked page" for a link (the link opens in a peek
+  card). The command palette has "Summarize page" and "Ask about page…". Each sends one ask task
+  through the agent task queue. The prompt labels the page title, URL and selection as web content
+  (data, not instructions) and carries the selection clipped to 4096 bytes; a link is read in the
+  agent's own background tab. Selection items appear only on web pages, and the items appear only
+  when an agent is configured. The chip is cleared by a tab change, a new chat or closing the panel.
+- Agent work runs from a visible task queue: prompts sent while a task runs (chat, Ask agent,
+  Research) are queued instead of refused, shown in a Tasks strip at the top of the agent panel
+  (move up/down, remove, Stop, Clear finished) and as "Queued · #n" under the message. A task that
+  waits for a confirmation card or a research plan approval holds the queue; Stop withdraws its
+  card and starts the next task. The Agent button reads `Agent · 3/7` (plan progress) or
+  `Agent · 2 queued`, and the command palette has "Agent tasks". Closing the panel keeps the task
+  running; each task start clears "Allow for this task" grants.
+- The agent asks before consequential page actions: a confirmation card in the agent panel
+  (Allow once, Allow for this task, Trust this site, Cancel; Esc cancels) that waits 120 s, marks
+  the tab and the Agent button with an amber dot (it never opens the panel or takes focus), survives
+  closing the panel, and is withdrawn when its tab closes or moves, its space is left, or Stop is
+  pressed. Settings > Agent & tools lists the trusted sites with Remove buttons.
+- Tabs the agent opens (`browser_open_tab`, and the pages of a research plan) are remembered as
+  agent-opened and keep that mark across a restart. The sites you trust for the agent are saved
+  in prefs (`agent_trusted_sites`, normalized to bare lowercase hosts).
+
+### Changed
+
+- Native look (command palette): a 20% scrim behind the ⌘K palette, sentence-case group headers
+  (Tabs, Spaces, Commands, Go to, Bookmarks, History, Reports), distinct row icons, rounded neutral
+  selection and keycap plates, right-aligned shortcuts read from the current keymap, and a neutral
+  query focus ring.
+- Native look (welcome): a radius-12 card, sentence-case Appearance and Import headers, the space
+  switcher's segmented control, a neutral focus ring, and a 20% scrim that fully hides the page.
+- Native look (segments): the selected segment plate has a 1 px `border_strong` hairline in light.
+- Native look (Plan and report): sentence-case kickers and legend on the Plan tab (join chips read
+  "Joins A + B"), and sentence-case kicker and table headers on report pages.
+- The sidebar's "New Tab" row is gone in every look. ⌘T (Ctrl+T), the Browser menu on macOS and
+  the command palette open tabs; ChromeViewId 1042 is retired, not reused.
+- The Agent button in Arc and Graphite is a neutral plate: rounded like the tab rows, the height of
+  the footer buttons, centered with them, `segment_selected` while the panel is open, with normal
+  text (no accent fill or label).
+- The agent panel has a new look: a status pill, your messages as bubbles, compact tool rows and a
+  composer card with the tab chip and a round send button.
+
+### Fixed
+
+- Native chrome keeps Back and Forward clear of the macOS traffic lights in the collapsed rail,
+  makes the focused address field one flush plate, and renders the selected rail globe in white.
+- Arc and Graphite now keep idle address fields scrolled to the start of their URL; their address
+  focus ring also closes cleanly at the top-right corner.
+- The Native welcome appearance switcher uses 24 DIP plates without a square inner outline, and
+  the waiting Agent footer shows one readable amber status dot.
+- Settings: primary buttons, the selected provider radio, "on" switches, the range slider and the
+  selected colour swatch use the text colour (or a neutral plate) in every look, not the blue
+  selection accent. A design test keeps the accent out of those states.
+- Agent panel: the confirmation card sits on the composer's inset with its full 1 px amber hairline
+  and is no longer clipped; its four answers form two even rows (Cancel is never alone), and its
+  kicker is sentence case in Native.
+- Agent panel: tool rows drop the `mcp__<server>__` prefix (the full name is the tooltip), and the
+  Tasks strip states each status in words: "Running · 3/7", "Queued · #1", "Needs you".
+- Agent panel: the page chip's ✕ sits inside the chip's plate instead of floating beside it.
+- Research reports: a first heading that repeats the report title is not shown twice; Copy and
+  Export keep the full Markdown.
+- Agent confirmation cards during a research bind to the research page the action targets, not to
+  the tab the person is viewing. Switching tabs or spaces keeps such a card; a reshuffled index or
+  a navigation to another origin withdraws it.
+- The live-label rule no longer treats "５0:42" and "５9:42" as the same label: a time run touching
+  a non-ASCII digit is compared exactly.
+- `page_type` returns an error instead of "Typed." when the target does not take focus.
+- The address field in Arc and Graphite shows one focus ring (the pill's outline) instead of an
+  inner blue ring inside it, like Native.
+- The agent can press buttons with a live countdown (a timer such as "0:42") or a trailing count
+  in parentheses after you confirm. Other numbers, prices and currency labels must still match: if
+  one changes while the card is open, the action is dropped.
+
 ## [0.7.3] - 2026-10-23
 
 ### Fixed
@@ -476,7 +560,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/island-browser/island/releases/tag/v0.8.0
 [0.7.3]: https://github.com/island-browser/island/releases/tag/v0.7.3
 [0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2
 [0.7.1]: https://github.com/island-browser/island/releases/tag/v0.7.1

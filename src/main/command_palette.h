@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -64,11 +65,34 @@ struct PaletteHistoryEntry {
     bool operator==(const PaletteHistoryEntry&) const = default;
 };
 
+// Native palette presentation is a single table keyed by result kind. Adding a result kind means
+// adding one row here, rather than scattering headers and icons through the view code.
+enum class PaletteRowIcon : std::uint8_t {
+    kKind,  // use the result kind's icon (see kPaletteKindStyles)
+    kGlobe,
+    kSpaces,
+    kBookmark,
+    kHistory,
+    kCommand,
+    kReport,
+    kSparkles,
+    kMoon,
+    kTable,
+    kPalette,
+};
+
 // A palette command: an action of the browser rather than a destination. `id` is the stable
 // routing key the window switches on; `title` is what the row shows and what a query matches.
 struct PaletteCommandEntry {
     std::string id;
     std::string title;
+    // The row icon for this command; kKind keeps the icon of the result kind (the gear for
+    // commands).
+    PaletteRowIcon icon = PaletteRowIcon::kKind;
+    // Stable KeyAction id from keymap.cc when the command has a direct shortcut. The window
+    // resolves the person's current binding at palette-open time; the view never hard-codes keys.
+    std::string shortcut_action_id;
+    std::string shortcut;
 
     bool operator==(const PaletteCommandEntry&) const = default;
 };
@@ -91,6 +115,8 @@ struct PaletteReportEntry {
     std::string id;
     std::string title;
     std::string question;
+    // "research" or "collection" (a table collected from tabs; shown as TABLE).
+    std::string kind = "research";
 
     bool operator==(const PaletteReportEntry&) const = default;
 };
@@ -107,6 +133,19 @@ enum class PaletteEntryKind : std::uint8_t {
     kCommand,   // run a browser command (e.g. "Sleep inactive tabs now")
     kReport,    // open the research report in a new Report tab
 };
+
+struct PaletteKindStyle {
+    PaletteEntryKind kind;
+    std::string_view group_header;
+    std::string_view sentence_label;
+    std::string_view legacy_label;
+    PaletteRowIcon icon;
+};
+
+struct PaletteEntry;
+[[nodiscard]] std::span<const PaletteKindStyle> PaletteKindStyles() noexcept;
+[[nodiscard]] const PaletteKindStyle& PaletteKindStyleFor(PaletteEntryKind kind) noexcept;
+[[nodiscard]] std::string PaletteKindLabel(const PaletteEntry& entry, bool sentence_case);
 
 // One row of palette results. `tab`, `space`, `url_query`, and `bookmark` are
 // meaningful for their kind only; the unused members stay defaulted so rows

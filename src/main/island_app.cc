@@ -245,6 +245,48 @@ void IslandApp::OpenPlanFixture() {
     }
 }
 
+void IslandApp::ShowConfirmationFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowConfirmationFixtureForDev();
+    }
+}
+
+void IslandApp::ShowQueueFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowQueueFixtureForDev();
+    }
+}
+
+void IslandApp::ShowQuoteFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowQuoteFixtureForDev();
+    }
+}
+
+void IslandApp::ShowCollectFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCollectFixtureForDev();
+    }
+}
+
+void IslandApp::ShowThreadFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowThreadFixtureForDev();
+    }
+}
+
+void IslandApp::ShowCollectionReportFixture() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCollectionReportFixtureForDev();
+    }
+}
+
 void IslandApp::OpenAgentPagesForDev(int count, int gap_ms) {
     CEF_REQUIRE_UI_THREAD();
     if (browser_window_ != nullptr) {

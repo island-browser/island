@@ -54,6 +54,11 @@ class WindowAgentHost final : public agent::AgentBrowserHost {
     agent::HostStatus RunAction(agent::AgentBrowserAction action) override;
     void DevToolsCall(std::optional<std::size_t> tab, std::string_view method, json::Value params,
                       agent::DevToolsCallback done) override;
+    // The saved trusted sites. Confirmations show as a card in the agent panel (BrowserWindow).
+    std::vector<std::string> TrustedSites() override;
+    void RequestConfirmation(agent::ConfirmationRequest request,
+                             std::function<void(agent::ConfirmationAnswer)> done) override;
+    std::optional<std::string> ResolveNavigationTarget(std::string_view text) override;
 
     // Shared with posted tasks: cleared on Shutdown so a task that arrives
     // after the window started closing does nothing.

@@ -14,10 +14,14 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
+#include "action_gate.h"
 #include "json_util.h"
 
 namespace island::agent {
@@ -29,6 +33,10 @@ struct AgentTabInfo {
     bool active = false;
     bool loading = false;
     bool pinned = false;
+    bool opened_by_agent = false;  // the agent opened this tab, so it may navigate it freely
+    // Non-empty: Island's own page (the research Plan tab). Page tools and navigation refuse the
+    // tab with this message before the action gate asks anyone.
+    std::string refusal;
 };
 
 struct AgentSpaceInfo {
@@ -66,6 +74,28 @@ struct DevToolsReply {
 };
 using DevToolsCallback = std::function<void(DevToolsReply)>;
 
+// The person's answer to a ConfirmationRequest.
+enum class ConfirmationAnswer : std::uint8_t {
+    kAllowOnce,
+    kAllowForTask,
+    kTrustSite,
+    kCancel,
+    kTimeout,
+    // The card was withdrawn without an answer: the tab changed, the task stopped, or the window
+    // closed. Not a refusal, so the caller is told to ask again.
+    kWithdrawn,
+};
+
+// A page action the gate wants the person to approve before it runs.
+struct ConfirmationRequest {
+    std::string id;  // "c1", "c2", ... unique per toolbox
+    std::string tool;
+    std::string summary;
+    std::string host;
+    std::optional<std::size_t> tab;
+    bool trusted_allowed = true;  // false: the prompt must not offer "Trust this site"
+};
+
 // Browser operations the tool layer needs. Tab indices are positions in the
 // active space's tab list; std::nullopt means "the active tab".
 class AgentBrowserHost {
@@ -86,6 +116,15 @@ class AgentBrowserHost {
     // reply exactly once (possibly synchronously).
     virtual void DevToolsCall(std::optional<std::size_t> tab, std::string_view method,
                               json::Value params, DevToolsCallback done) = 0;
+    // Sites the person trusts for agent actions (lowercase, no "www.").
+    virtual std::vector<std::string> TrustedSites() = 0;
+    // Asks the person to approve an action and reports the answer exactly once, possibly
+    // synchronously. The host owns timeouts and reports kTimeout.
+    virtual void RequestConfirmation(ConfirmationRequest request,
+                                     std::function<void(ConfirmationAnswer)> done) = 0;
+    // The URL browser_navigate would load for `text` (search text becomes a search URL), or
+    // nullopt when it resolves to no allowed address.
+    virtual std::optional<std::string> ResolveNavigationTarget(std::string_view text) = 0;
 };
 
 // One MCP content block of a tool result.
@@ -116,6 +155,18 @@ struct ToolDefinition {
     bool read_only = false;
 };
 
+// The normalized form of a label for the post-card re-check. Two forms are normalized: a time-like
+// run (minutes and seconds 00-59: "0:42", "1:02:03") becomes "#", and a trailing parenthesized
+// counter ("Like (12)") becomes "(#)" when no digit comes before it. A label with a currency mark
+// (see kCurrencyMarks in browser_tools.cc) or a '#' is returned unchanged. Every other digit stays
+// exact.
+std::string NormalizeLiveCounters(std::string_view text);
+
+// True when two labels may be treated as the same after a card: identical, or both free of the
+// unsafe marks above and equal once normalized. A '#' or currency label never matches a different
+// label, so the placeholder cannot collide with a literal '#'.
+bool LiveLabelsMatch(std::string_view a, std::string_view b);
+
 class BrowserToolbox {
   public:
     explicit BrowserToolbox(AgentBrowserHost& host);
@@ -127,6 +178,9 @@ class BrowserToolbox {
     // arguments report an error result rather than failing the call.
     void Call(std::string_view name, const json::Value& arguments, ToolCallback done);
 
+    // Forgets the "Allow for this task" grants; the task queue calls it when a task starts.
+    void ResetTaskGrants();
+
     // Page text is clipped to this many bytes unless the caller asks for less.
     static constexpr std::size_t kDefaultMaxPageChars = 20000;
     static constexpr std::size_t kMaxPageChars = 200000;
@@ -137,6 +191,29 @@ class BrowserToolbox {
 
     void ReadPage(const json::Value& args, ToolCallback done);
     void Snapshot(const json::Value& args, ToolCallback done);
+    // Classifies `input` and runs `run` when allowed, asking the person first when the gate says
+    // so. `done` receives the error result when the action is blocked, declined or times out.
+    // `run` receives `done` and finishes the action.
+    // `after_wait`, when set, replaces `run` once the person was asked: the page may have changed
+    // during the wait, so it re-reads the target, compares it with what was approved and acts on
+    // the fresh state.
+    void Gate(GateInput input, std::optional<std::size_t> tab,
+              std::function<void(ToolCallback)> run, ToolCallback done,
+              std::function<void(ToolCallback)> after_wait = nullptr);
+    // The gate's decision for `input`, with the page origin the page reports winning over the tab
+    // URL.
+    [[nodiscard]] GateDecision Decide(GateInput input);
+    // After a card: `fresh` must be free now, or need the same action and rule the person saw
+    // (`approved`). A blocked element, or a new rule, fails the action.
+    [[nodiscard]] bool StillApproved(GateInput approved, GateInput fresh);
+    // The info of `tab` (the active tab when nullopt); nullopt for an unknown tab.
+    [[nodiscard]] std::optional<AgentTabInfo> FindTab(std::optional<std::size_t> tab);
+    // The error for a tab the agent must not act on (the Plan tab); nullopt when it may.
+    [[nodiscard]] std::optional<ToolResult> Refusal(std::optional<std::size_t> tab);
+    // Reads the focused element's facts with one evaluation; nullopt when the evaluation failed
+    // or nothing is focused.
+    void ReadFocusedFacts(std::optional<std::size_t> tab,
+                          std::function<void(std::optional<ElementFacts>)> done);
     void Click(const json::Value& args, ToolCallback done);
     void TypeText(const json::Value& args, ToolCallback done);
     void PressKey(const json::Value& args, ToolCallback done);
@@ -146,6 +223,9 @@ class BrowserToolbox {
 
     AgentBrowserHost& host_;
     std::vector<ToolDefinition> definitions_;
+    // (host, rule, scope): scope is the target origin for a foreign navigation, else empty.
+    std::set<std::tuple<std::string, GateRule, std::string>> task_grants_;
+    std::uint64_t next_confirmation_ = 1;
 };
 
 // Builds the JS expression that resolves an element from a snapshot ref or a

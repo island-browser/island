@@ -1,6 +1,7 @@
 #include "command_palette.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <utility>
@@ -9,6 +10,16 @@
 
 namespace island {
 namespace {
+
+constexpr std::array<PaletteKindStyle, 7> kPaletteKindStyles = {{
+    {PaletteEntryKind::kTab, "Tabs", "Tab", "TAB", PaletteRowIcon::kGlobe},
+    {PaletteEntryKind::kSpace, "Spaces", "Space", "SPACE", PaletteRowIcon::kSpaces},
+    {PaletteEntryKind::kUrl, "Go to", "Go to", "GO TO", PaletteRowIcon::kGlobe},
+    {PaletteEntryKind::kBookmark, "Bookmarks", "Bookmark", "BOOKMARK", PaletteRowIcon::kBookmark},
+    {PaletteEntryKind::kHistory, "History", "History", "HISTORY", PaletteRowIcon::kHistory},
+    {PaletteEntryKind::kCommand, "Commands", "Command", "COMMAND", PaletteRowIcon::kCommand},
+    {PaletteEntryKind::kReport, "Reports", "Report", "REPORT", PaletteRowIcon::kReport},
+}};
 
 // ASCII-only case folding so ranking is deterministic regardless of locale.
 std::string FoldAscii(std::string_view text) {
@@ -72,6 +83,25 @@ PaletteMatchRank RankReportEntry(const PaletteReportEntry& report, std::string_v
 }
 
 }  // namespace
+
+std::span<const PaletteKindStyle> PaletteKindStyles() noexcept { return kPaletteKindStyles; }
+
+const PaletteKindStyle& PaletteKindStyleFor(PaletteEntryKind kind) noexcept {
+    for (const PaletteKindStyle& style : kPaletteKindStyles) {
+        if (style.kind == kind) {
+            return style;
+        }
+    }
+    return kPaletteKindStyles.front();
+}
+
+std::string PaletteKindLabel(const PaletteEntry& entry, bool sentence_case) {
+    if (entry.kind == PaletteEntryKind::kReport && entry.report.kind == "collection") {
+        return sentence_case ? "Table" : "TABLE";
+    }
+    const PaletteKindStyle& style = PaletteKindStyleFor(entry.kind);
+    return std::string(sentence_case ? style.sentence_label : style.legacy_label);
+}
 
 PaletteMatchRank ClassifyPaletteMatch(std::string_view candidate, std::string_view query) {
     const std::string_view trimmed_query = TrimAsciiWhitespace(query);

@@ -8,7 +8,18 @@
 #include "include/views/cef_overlay_controller.h"
 #include "include/wrapper/cef_closure_task.h"
 
+#include "design_tokens.h"
+
 namespace island {
+
+// Whether the first-run welcome hides the page views behind its scrim. Only Native does: its
+// card sits over a 20% scrim, and the start page's mode control and search field must not show
+// through. Arc and Graphite keep the page visible behind their own card. Browser views are
+// hidden while the welcome is shown and shown again when it closes, and every attach re-applies
+// this decision, so a view attached or re-attached during the welcome follows the same rule.
+[[nodiscard]] inline bool WelcomeHidesPageViews(LookPreset look, bool welcome_visible) noexcept {
+    return look == LookPreset::kNative && welcome_visible;
+}
 
 // Why overlays only exist while they are shown.
 //

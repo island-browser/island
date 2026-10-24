@@ -2,6 +2,7 @@
 // BrowserWindow. The CEF view types must be complete before browser_window.h.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -13,7 +14,9 @@
 #include <string_view>
 #include <system_error>
 
+#include "agent/http_server.h"
 #include "agent/plan_fixture.h"
+#include "agent_context.h"
 #include "browser_window.h"
 #include "window_agent_host.h"
 #include "include/views/cef_overlay_controller.h"
@@ -27,6 +30,7 @@
 #include "research_prompt.h"
 #include "session_store.h"
 #include "sha256.h"
+#include "table_export.h"
 #include "start_tiles.h"
 #include "updater.h"
 
@@ -146,6 +150,7 @@ TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
     }
+    EXPECT_EQ(theme->StringOr("look", ""), "native");
     EXPECT_EQ(theme->StringOr("font", ""),
               "ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif");
     EXPECT_FALSE(theme->BoolOr("dark", true));
@@ -880,6 +885,7 @@ TEST(BrowserWindowPagesTest, ResearchExplainsAMissingOrBlankCustomAgent) {
 TEST(BrowserWindowPagesTest, ASecondResearchOrAnAgentTurnInFlightIsRefusedNotQueued) {
     const ScopedNoAgentEnv no_env;
     CefRefPtr<BrowserWindow> window = MakeWindow();
+    // A research task the queue does not know (a continuation outside it) still blocks a new one.
     window->SetResearchTaskForTest("first question");
     const BrowserWindow::ResearchStartResult result = window->StartResearch("second question");
     EXPECT_EQ(result.code, BrowserWindow::ResearchStart::kBusy);
@@ -946,6 +952,48 @@ TEST(BrowserWindowPagesTest, ACompletedResearchStoresTheReportAndOpensItInTheRes
     other->SetReportsFileForTest(file);
     ASSERT_EQ(other->reports().reports.size(), 1U);
     EXPECT_EQ(other->reports().reports[0].markdown, report.markdown);
+    std::filesystem::remove_all(file.parent_path());
+}
+
+TEST(BrowserWindowPagesTest, ResearchPagesUnderThePlanAreAgentTabsAndTheReportIsNot) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest("data:text/html,plan");
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() /
+        ("island_reports_marks_" + std::to_string(update::CurrentProcessId())) / "reports.json";
+    std::filesystem::remove_all(file.parent_path());
+    window->SetReportsFileForTest(file);
+
+    // The start tab and the Plan tab are not agent tabs; two background research pages below
+    // the Plan are.
+    window->OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    const Space& space = SpaceAt(*window, 0);
+    ASSERT_EQ(space.tab_count(), 4U);
+    int research_pages = 0;
+    for (const Tab& tab : space.tabs()) {
+        if (tab.group_parent().has_value()) {
+            EXPECT_TRUE(tab.opened_by_agent());
+            ++research_pages;
+        } else {
+            EXPECT_FALSE(tab.opened_by_agent());
+        }
+    }
+    EXPECT_EQ(research_pages, 2);
+
+    // Finishing the research opens the Report below the Plan. It is the person's result: grouped,
+    // but not marked, so the agent must ask before it navigates or closes it.
+    window->CompleteResearch(ReportOutcome("# Marks\n\nBody."));
+    ASSERT_EQ(space.tab_count(), 5U);
+    int reports = 0;
+    for (const Tab& tab : space.tabs()) {
+        if (window->ReportIdForUrl(tab.startup_url()).has_value()) {
+            ++reports;
+            EXPECT_TRUE(tab.group_parent().has_value());
+            EXPECT_FALSE(tab.opened_by_agent());
+        }
+    }
+    EXPECT_EQ(reports, 1);
     std::filesystem::remove_all(file.parent_path());
 }
 
@@ -2053,6 +2101,1003 @@ TEST(BrowserWindowPagesTest, PlanTabNavigatedAwayIsLeftAlone) {
 
 TEST(BrowserWindowPagesTest, PlanDevFixtureIsTheSpecPlan) {
     EXPECT_EQ(DevPlanFixture(), agent::SpecPlan());
+}
+
+agent::ConfirmationRequest MakeConfirmation(std::string id, bool trusted_allowed = true) {
+    return {.id = std::move(id),
+            .tool = "browser_click",
+            .summary = "Submit the checkout form",
+            .host = "shop.test",
+            .tab = std::nullopt,
+            .trusted_allowed = trusted_allowed};
+}
+
+std::vector<std::string> ListedConfirmationIds(const BrowserWindow& window) {
+    std::vector<std::string> ids;
+    const std::optional<Value> state = json::Parse(window.AgentPanelStateJson());
+    const Value* list = state ? state->FindMember("confirmations") : nullptr;
+    if (list != nullptr) {
+        for (const Value& item : list->array_val) {
+            ids.emplace_back(item.StringOr("id", ""));
+        }
+    }
+    return ids;
+}
+
+TEST(BrowserWindowPagesTest, ConfirmationShowsInPanelStateAndMarksTheTabWaiting) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+
+    EXPECT_TRUE(window->HasPendingConfirmation());
+    EXPECT_TRUE(answers.empty());
+    const std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    const Value* list = state->FindMember("confirmations");
+    ASSERT_NE(list, nullptr);
+    ASSERT_EQ(list->array_val.size(), 1U);
+    EXPECT_EQ(list->array_val[0].StringOr("id", ""), "c1");
+    EXPECT_EQ(list->array_val[0].StringOr("summary", ""), "Submit the checkout form");
+    EXPECT_EQ(list->array_val[0].StringOr("host", ""), "shop.test");
+    EXPECT_TRUE(list->array_val[0].BoolOr("trusted_allowed", false));
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_TRUE(ListedConfirmationIds(*window).empty());
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
+
+    // An answer for an unknown id changes nothing and calls nothing.
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, AnsweringTrustAddsTheSiteAndAllows) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::optional<agent::ConfirmationAnswer> answer;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answer = a; });
+    SendAgent(*window, R"({"type":"confirm","id":"c1","answer":"trust"})");
+    EXPECT_EQ(answer, agent::ConfirmationAnswer::kTrustSite);
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"shop.test"}));
+}
+
+TEST(BrowserWindowPagesTest, TrustAndTaskAnswersAreCancelWhenTheCardDidNotOfferThem) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<agent::ConfirmationAnswer> answers;
+    for (const char* id : {"c1", "c2"}) {
+        window->ShowConfirmation(MakeConfirmation(id, false),
+                                 [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    }
+    SendAgent(*window, R"({"type":"confirm","id":"c1","answer":"trust"})");
+    SendAgent(*window, R"({"type":"confirm","id":"c2","answer":"task"})");
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
+                                                              agent::ConfirmationAnswer::kCancel}));
+    EXPECT_TRUE(window->trusted_sites().empty());
+    SendAgent(*window, R"({"type":"confirm","id":"nope","answer":"once"})");
+    SendAgent(*window, R"({"type":"confirm","answer":"once"})");
+    EXPECT_EQ(answers.size(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, ConfirmationTimesOutAndWithdrawsTheCard) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    window->AdvanceConfirmationClockForTest(std::chrono::seconds(119));
+    EXPECT_TRUE(answers.empty());
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+
+    window->AdvanceConfirmationClockForTest(std::chrono::seconds(1));
+    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kTimeout}));
+    EXPECT_TRUE(ListedConfirmationIds(*window).empty());
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
+
+    // A late answer is ignored: the callback already ran.
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, CardSurvivesClosingAndReopeningThePanel) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_FALSE(window->agent_panel_open());
+    window->ShowConfirmation(MakeConfirmation("c1"), [](agent::ConfirmationAnswer) {});
+    // A card never opens the panel: the agent dot and the Agent button dot tell the person.
+    EXPECT_FALSE(window->agent_panel_open());
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    window->SetAgentPanelOpen(true);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    window->SetAgentPanelOpen(false);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    EXPECT_TRUE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, CardTimeoutIsShorterThanTheHttpHandlerBudget) {
+    // The external caller must see "No one confirmed this action in time.", not a 504.
+    EXPECT_LE(BrowserWindow::kConfirmationTimeout.count() + 15,
+              agent::LoopbackHttpServer::kHandlerTimeoutSeconds);
+    // The stdio bridge gives up after the server's handler budget, never before it.
+    EXPECT_GE(agent::LoopbackHttpServer::kClientTimeoutSeconds,
+              agent::LoopbackHttpServer::kHandlerTimeoutSeconds + 10);
+}
+
+TEST(BrowserWindowPagesTest, ClosingTheCardsTabWithdrawsTheCard) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->OpenNewTab("https://a.test/"));
+    ASSERT_TRUE(window->OpenNewTab("https://b.test/"));
+    std::vector<agent::ConfirmationAnswer> answers;
+    agent::ConfirmationRequest request = MakeConfirmation("c1");
+    request.tab = 2;
+    window->ShowConfirmation(std::move(request),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    // Closing an earlier tab shifts the index: the card must not act on the tab now at 2.
+    window->CloseTab(0);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers.size(), 1U);
+}
+
+TEST(BrowserWindowPagesTest, SwitchingTabsOrSpacesWithdrawsTheCard) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->OpenNewTab("https://a.test/"));
+    std::vector<agent::ConfirmationAnswer> answers;
+    // No tab named: the card targets the active tab, so leaving it withdraws the card.
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    window->SelectTab(0);
+    EXPECT_EQ(answers.size(), 1U);
+
+    window->ShowConfirmation(MakeConfirmation("c2"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    ASSERT_TRUE(window->CreateSpace("Other"));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn,
+                                                      agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+
+    // c3 names no tab, so it targets the active tab. Opening a new tab activates it, which
+    // withdraws c3.
+    window->ShowConfirmation(MakeConfirmation("c3"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    ASSERT_TRUE(window->OpenNewTab("https://c.test/"));
+    ASSERT_EQ(answers.size(), 3U);
+    EXPECT_EQ(answers.back(), agent::ConfirmationAnswer::kWithdrawn);
+    EXPECT_FALSE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, NamedBackgroundTabCardSurvivesTabSwitches) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    // Tab 1 is active; the card names tab 0, which stays in the background.
+    ASSERT_TRUE(window->OpenNewTab("https://a.test/"));
+    std::vector<agent::ConfirmationAnswer> answers;
+    agent::ConfirmationRequest request = MakeConfirmation("c1");
+    request.tab = 0;
+    window->ShowConfirmation(std::move(request),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    window->SelectTab(0);
+    window->SelectTab(1);
+    EXPECT_TRUE(answers.empty());
+    EXPECT_TRUE(window->HasPendingConfirmation());
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+}
+
+// A research owns the agent: its page sits in the Plan's space while the person works in another.
+// Returns the research page's location.
+BrowserWindow::AgentTabRef StartResearchWithPersonElsewhere(BrowserWindow& window) {
+    window.SetPlanPageUrlForTest("data:text/html,plan");
+    window.SetResearchTaskForTest("q");
+    window.OpenPlanFixtureTab(/*include_child_tabs=*/true);
+    const BrowserWindow::AgentTabLookup research = window.ResolveAgentTab(std::nullopt);
+    EXPECT_TRUE(research.tab.has_value());
+    const BrowserWindow::AgentTabRef page = research.tab.value_or(BrowserWindow::AgentTabRef{});
+    EXPECT_TRUE(window.CreateSpace("Mine"));
+    EXPECT_TRUE(window.OpenNewTab("https://mine.test/"));
+    EXPECT_NE(window.active_space_index(), page.space);
+    return page;
+}
+
+TEST(BrowserWindowPagesTest, ResearchCardStaysOnTheResearchPageWhenThePersonLooksElsewhere) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BrowserWindow::AgentTabRef page = StartResearchWithPersonElsewhere(*window);
+    std::vector<agent::ConfirmationAnswer> answers;
+    // No tab named: the card targets the research page, not the tab the person is viewing.
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
+
+    // Activating another tab, and switching back to the research space, does not withdraw it.
+    window->SelectTab(0);
+    EXPECT_TRUE(window->SelectSpaceIndex(page.space));
+    EXPECT_TRUE(answers.empty());
+    EXPECT_TRUE(window->HasPendingConfirmation());
+
+    // On the research page the mark shows; the card then answers normally.
+    window->SelectTab(page.tab);
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kAllowOnce}));
+}
+
+TEST(BrowserWindowPagesTest, ResearchCardWithAnIndexIsWithdrawnWhenThatIndexMoves) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BrowserWindow::AgentTabRef page = StartResearchWithPersonElsewhere(*window);
+    std::vector<agent::ConfirmationAnswer> answers;
+    agent::ConfirmationRequest request = MakeConfirmation("c1");
+    request.tab = page.tab;
+    window->ShowConfirmation(std::move(request),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    EXPECT_TRUE(answers.empty());
+
+    // Pinning the research page moves it to the front of the Plan's space: the index the card
+    // names now holds another tab, so the card must not act on it.
+    const TabId research_id = window->spaces()[page.space].tabs()[page.tab].id();
+    ASSERT_TRUE(window->SetAgentTabPinned(page.tab, true));
+    ASSERT_NE(window->spaces()[page.space].tabs()[page.tab].id(), research_id);
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, ResearchCardIsWithdrawnWhenItsPageLeavesTheOrigin) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    StartResearchWithPersonElsewhere(*window);
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    // The agent's page moves to another origin (headless: its start URL changes).
+    ASSERT_TRUE(window->NavigateAgentTab(std::nullopt, "https://other.test/"));
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kAllowOnce);
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+}
+
+TEST(BrowserWindowPagesTest, StopAndNewChatWithdrawOpenCards) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    SendSettings(*window, R"({"type":"set_agent_command","command":"\"unbalanced"})");
+    SendSettings(*window, R"({"type":"set_agent_provider","id":"custom"})");
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    SendAgent(*window, R"({"type":"cancel"})");
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+
+    window->ShowConfirmation(MakeConfirmation("c2"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    SendAgent(*window, R"({"type":"new_chat"})");
+    EXPECT_EQ(answers.size(), 2U);
+    EXPECT_FALSE(window->HasPendingConfirmation());
+}
+
+TEST(BrowserWindowPagesTest, RemoveTrustedSiteMessagePersists) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->AddTrustedSite("shop.test");
+    window->AddTrustedSite("docs.test");
+    window->OnLocalPageMessage(
+        LocalPageKind::kSettings,
+        *json::Parse(R"({"type":"remove_trusted_site","host":"WWW.Shop.test"})"));
+    EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"docs.test"}));
+    const std::optional<Value> state = json::Parse(window->SettingsStateJson());
+    const Value* settings = state->FindMember("settings");
+    ASSERT_NE(settings, nullptr);
+    const Value* sites = settings->FindMember("trusted_sites");
+    ASSERT_NE(sites, nullptr);
+    ASSERT_EQ(sites->array_val.size(), 1U);
+    EXPECT_EQ(sites->array_val[0].string_val, "docs.test");
+}
+
+TEST(BrowserWindowPagesTest, ConfirmationsCoexistAndAnswerIndependently) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> log;
+    for (const char* id : {"c1", "c2"}) {
+        window->ShowConfirmation(MakeConfirmation(id), [&log, id](agent::ConfirmationAnswer a) {
+            log.push_back(std::string(id) + ":" + std::to_string(static_cast<int>(a)));
+        });
+    }
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1", "c2"}));
+    window->AnswerConfirmation("c2", agent::ConfirmationAnswer::kCancel);
+    EXPECT_EQ(ListedConfirmationIds(*window), (std::vector<std::string>{"c1"}));
+    EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
+    EXPECT_EQ(log, (std::vector<std::string>{"c2:3"}));
+}
+
+// --- Agent task queue ---------------------------------------------------------------------
+
+std::vector<std::string> TaskStates(const BrowserWindow& window) {
+    std::vector<std::string> states;
+    const std::optional<Value> state = json::Parse(window.AgentPanelStateJson());
+    const Value* tasks = state ? state->FindMember("tasks") : nullptr;
+    if (tasks != nullptr) {
+        for (const Value& task : tasks->array_val) {
+            states.push_back(std::string(task.StringOr("title", "")) + ":" +
+                             std::string(task.StringOr("state", "")));
+        }
+    }
+    return states;
+}
+
+TEST(BrowserWindowPagesTest, ChatWhileATaskRunsIsQueued) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    SendAgent(*window, R"({"type":"send","text":"first","include_context":false})");
+    SendAgent(*window, R"({"type":"send","text":"second","include_context":false})");
+    EXPECT_EQ(sent, (std::vector<std::string>{"first"}));
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"first:running", "second:queued"}));
+    const std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    const Value& queued = state->FindMember("tasks")->array_val[1];
+    EXPECT_EQ(queued.IntOr("position", 0), 1);
+    EXPECT_EQ(queued.StringOr("prompt", ""), "second");
+
+    // The turn end starts the next task; a failed turn does not stop the queue.
+    window->FinishAgentTurnForTest(false);
+    EXPECT_EQ(sent, (std::vector<std::string>{"first", "second"}));
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"second:running", "first:failed"}));
+
+    SendAgent(*window, R"({"type":"tasks_clear_finished"})");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"second:running"}));
+}
+
+TEST(BrowserWindowPagesTest, QueuedTasksMoveAndAreRemovedFromThePanel) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    for (const char* text : {"a", "b", "c", "d"}) {
+        window->SubmitAgentPromptForTest(text);
+    }
+    SendAgent(*window, R"({"type":"task_move","id":"t4","dir":"up"})");
+    SendAgent(*window, R"({"type":"task_remove","id":"t2"})");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"a:running", "d:queued", "c:queued"}));
+    // The live task cannot be removed.
+    SendAgent(*window, R"({"type":"task_remove","id":"t1"})");
+    EXPECT_EQ(TaskStates(*window).size(), 3U);
+}
+
+TEST(BrowserWindowPagesTest, ResearchEntersTheQueue) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SubmitAgentPromptForTest("chat first");
+    const BrowserWindow::ResearchStartResult queued = window->StartResearch("why is the sky blue");
+    EXPECT_EQ(queued.code, BrowserWindow::ResearchStart::kQueued);
+    EXPECT_EQ(sent, (std::vector<std::string>{"chat first"}));
+    EXPECT_FALSE(window->research_running());
+    EXPECT_EQ(window->agent_queue().tasks()[1].kind, agent::TaskKind::kResearch);
+
+    window->FinishAgentTurnForTest(true);
+    ASSERT_EQ(sent.size(), 2U);
+    EXPECT_NE(sent[1].find("why is the sky blue"), std::string::npos);
+    EXPECT_TRUE(window->research_running());
+    EXPECT_EQ(window->research_status().state, "running");
+
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "no";
+    window->CompleteResearch(failed);
+    EXPECT_EQ(window->agent_queue().tasks().front().state, agent::TaskState::kFailed);
+    EXPECT_EQ(window->agent_queue().current(), nullptr);
+}
+
+TEST(BrowserWindowPagesTest, AResearchWaitingForApprovalHoldsTheQueueUntilRun) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    ASSERT_EQ(window->StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window->SubmitAgentPromptForTest("later");
+    window->SetPlanEntriesForTest(agent::SpecPlan());
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    window->CompleteResearch(waiting);
+    EXPECT_EQ(window->agent_queue().current()->state, agent::TaskState::kWaitingForYou);
+    EXPECT_EQ(sent.size(), 1U);  // "later" has not started
+
+    SendPlanMessage(*window, R"({"type":"run"})");
+    ASSERT_EQ(sent.size(), 2U);  // the Run turn; the queued chat still waits
+    EXPECT_EQ(window->agent_queue().current()->state, agent::TaskState::kRunning);
+    EXPECT_EQ(window->agent_queue().queued_count(), 1U);
+
+    ResearchOutcome failed;  // (a report needs real tabs to open)
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "stopped";
+    window->CompleteResearch(failed);
+    EXPECT_EQ(sent.size(), 3U);
+    EXPECT_EQ(sent[2], "later");
+}
+
+TEST(BrowserWindowPagesTest, StoppingAWaitingTaskDeclinesItsCardAndAdvances) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&sent](std::string text) {
+        sent.push_back(std::move(text));
+        return true;
+    });
+    window->SubmitAgentPromptForTest("buy it");
+    window->SubmitAgentPromptForTest("next");
+    std::vector<agent::ConfirmationAnswer> answers;
+    window->ShowConfirmation(MakeConfirmation("c1"),
+                             [&](agent::ConfirmationAnswer a) { answers.push_back(a); });
+    EXPECT_EQ(window->agent_queue().current()->state, agent::TaskState::kWaitingForYou);
+
+    SendAgent(*window, R"({"type":"task_stop"})");
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kWithdrawn}));
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_EQ(sent, (std::vector<std::string>{"buy it", "next"}));
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"next:running", "buy it:cancelled"}));
+}
+
+TEST(BrowserWindowPagesTest, TheQueueWaitsUntilTheLastCardOfATaskCloses) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    window->SubmitAgentPromptForTest("one");
+    window->SubmitAgentPromptForTest("two");
+    for (const char* id : {"c1", "c2"}) {
+        window->ShowConfirmation(MakeConfirmation(id), [](agent::ConfirmationAnswer) {});
+    }
+    // The turn ends while cards are open: recorded, applied when the last card closes.
+    window->FinishAgentTurnForTest(true);
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"one:waiting", "two:queued"}));
+    window->AnswerConfirmation("c1", agent::ConfirmationAnswer::kCancel);
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"one:waiting", "two:queued"}));
+    window->AnswerConfirmation("c2", agent::ConfirmationAnswer::kCancel);
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"two:running", "one:done"}));
+}
+
+TEST(BrowserWindowPagesTest, ClosingThePanelKeepsTheTaskRunning) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    window->SubmitAgentPromptForTest("long job");
+    window->SubmitAgentPromptForTest("after");
+    SendAgent(*window, R"({"type":"close_panel"})");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"long job:running", "after:queued"}));
+}
+
+// Review round 1 (Task 6): research and queue handover.
+
+struct QueueWindow {
+    CefRefPtr<BrowserWindow> window;
+    std::vector<std::string> sent;
+};
+
+QueueWindow MakeQueueWindow() {
+    QueueWindow qw;
+    qw.window = MakeWindow();
+    qw.window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    qw.window->SetAgentSendForTest([sent = &qw.sent](std::string text) {
+        sent->push_back(std::move(text));
+        return true;
+    });
+    return qw;
+}
+
+ResearchOutcome AwaitingOutcome() {
+    ResearchOutcome waiting;
+    waiting.kind = ResearchOutcome::Kind::kAwaitingApproval;
+    waiting.message = "Waiting for approval";
+    return waiting;
+}
+
+TEST(BrowserWindowPagesTest, StoppingAResearchThatAwaitsApprovalEndsItAndTheNextTaskRuns) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+    window.SubmitAgentPromptForTest("c");
+    window.SetPlanEntriesForTest(agent::SpecPlan());
+    window.CompleteResearch(AwaitingOutcome());
+    ASSERT_EQ(window.agent_queue().current()->state, agent::TaskState::kWaitingForYou);
+
+    SendAgent(window, R"({"type":"task_stop"})");
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "cancelled");
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+    EXPECT_EQ(window.agent_queue().current()->state, agent::TaskState::kRunning);
+    window.FinishAgentTurnForTest(true);
+    ASSERT_EQ(qw.sent.size(), 3U);
+    EXPECT_EQ(qw.sent[2], "c");
+}
+
+TEST(BrowserWindowPagesTest, NewChatWhileAResearchAwaitsApprovalEndsTheResearch) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("\"unbalanced");  // Start fails without a process
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+    window.SetPlanEntriesForTest(agent::SpecPlan());
+    window.CompleteResearch(AwaitingOutcome());
+
+    SendAgent(window, R"({"type":"new_chat"})");
+
+    EXPECT_FALSE(window.research_running());
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+    EXPECT_EQ(window.agent_queue().current()->state, agent::TaskState::kRunning);
+}
+
+TEST(BrowserWindowPagesTest, NewChatWhileAResearchRunsDoesNotLetTheNextChatBecomeItsReport) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("\"unbalanced");  // Start fails without a process
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+
+    SendAgent(window, R"({"type":"new_chat"})");
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "cancelled");
+    ASSERT_EQ(qw.sent.size(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, AStoppedResearchWhoseTurnStillEndsWithAPlanIsNotLeftWaiting) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_EQ(window.StartResearch("q").code, BrowserWindow::ResearchStart::kStarted);
+    window.SubmitAgentPromptForTest("b");
+    window.SetAgentBusyForTest(true);  // the turn is open when Stop arrives
+    SendAgent(window, R"({"type":"task_stop"})");
+    EXPECT_EQ(qw.sent.size(), 1U);  // the next task waits for the stopped turn's end
+
+    window.SetAgentBusyForTest(false);
+    window.SetPlanEntriesForTest(agent::SpecPlan());
+    window.CompleteResearch(AwaitingOutcome());  // the cancel lost the race
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "cancelled");
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+}
+
+TEST(BrowserWindowPagesTest, ClearingFinishedWhileAStoppedChatTurnIsOpenStillReportsItsEnd) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SubmitAgentPromptForTest("a");
+    window.SubmitAgentPromptForTest("b");
+    window.SetAgentBusyForTest(true);
+    SendAgent(window, R"({"type":"task_stop"})");
+    SendAgent(window, R"({"type":"tasks_clear_finished"})");
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();  // the cancelled turn ends
+
+    ASSERT_EQ(qw.sent.size(), 2U);
+    EXPECT_EQ(qw.sent[1], "b");
+}
+
+TEST(BrowserWindowPagesTest, ARetryOutsideTheQueueIsRefusedWhileTheQueueHasWork) {
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetResearchTaskForTest("q");
+    std::vector<agent::AcpPlanEntry> plan = agent::SpecPlan();
+    plan[2].status = "failed";
+    window.SetPlanEntriesForTest(std::move(plan));
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "A step failed";
+    window.CompleteResearch(failed);
+    window.SubmitAgentPromptForTest("chat");
+    ASSERT_EQ(qw.sent.size(), 1U);
+
+    SendPlanMessage(window, R"({"type":"retry","id":"a"})");
+
+    EXPECT_EQ(qw.sent.size(), 1U);
+    EXPECT_FALSE(window.research_running());
+}
+
+TEST(BrowserWindowPagesTest, ATaskStartedWhileATurnRunsOutsideTheQueueWaitsForThatTurn) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetAgentBusyForTest(true);  // a plan continuation holds the session
+    window.SubmitAgentPromptForTest("a");
+    window.SubmitAgentPromptForTest("b");
+    EXPECT_TRUE(qw.sent.empty());
+    EXPECT_EQ(window.agent_queue().current()->state, agent::TaskState::kRunning);
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();
+
+    EXPECT_EQ(qw.sent, (std::vector<std::string>{"a"}));
+    window.FinishAgentTurnForTest(true);
+    EXPECT_EQ(qw.sent, (std::vector<std::string>{"a", "b"}));
+}
+
+TEST(BrowserWindowPagesTest, ATaskDeferredBehindAnOutsideContinuationStartsAfterItIsClassified) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetResearchTaskForTest("q");  // a plan continuation outside the queue
+    window.SetAgentBusyForTest(true);
+    window.SubmitAgentPromptForTest("chat");
+    ASSERT_TRUE(qw.sent.empty());
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();  // the continuation's turn ended
+    EXPECT_TRUE(qw.sent.empty());       // the chat must not take it over
+    EXPECT_TRUE(window.research_running());
+
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "A step failed";
+    window.CompleteResearch(failed);  // the continuation is classified on its own turn
+
+    EXPECT_FALSE(window.research_running());
+    EXPECT_EQ(window.research_status().state, "failed");
+    EXPECT_EQ(qw.sent, (std::vector<std::string>{"chat"}));
+}
+
+TEST(BrowserWindowPagesTest, AResearchDeferredBehindAnOutsideContinuationDoesNotReplaceIt) {
+    const ScopedNoAgentEnv no_env;
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetAgentBusyForTest(true);
+    ASSERT_EQ(window.StartResearch("new").code, BrowserWindow::ResearchStart::kStarted);
+    window.SetResearchTaskForTest("old");  // the outside continuation, as the session reports it
+
+    window.SetAgentBusyForTest(false);
+    window.CheckInFlightTurnForTest();
+    EXPECT_TRUE(qw.sent.empty());
+    EXPECT_EQ(window.research_status().question, "old");
+
+    ResearchOutcome failed;
+    failed.kind = ResearchOutcome::Kind::kFailed;
+    failed.message = "A step failed";
+    window.CompleteResearch(failed);
+
+    ASSERT_EQ(qw.sent.size(), 1U);  // the old run ended first, then the new research started
+    EXPECT_TRUE(window.research_running());
+    EXPECT_EQ(window.research_status().question, "new");
+}
+
+TEST(BrowserWindowPagesTest, StoppingADeferredTaskLeavesTheOutsideTurnRunning) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetResearchTaskForTest("q");
+    window.SetAgentBusyForTest(true);
+    window.SubmitAgentPromptForTest("chat");
+
+    SendAgent(window, R"({"type":"task_stop"})");
+
+    EXPECT_EQ(window.agent_queue().current(), nullptr);
+    EXPECT_TRUE(window.research_running());  // the continuation was not cancelled
+    EXPECT_TRUE(qw.sent.empty());
+}
+
+TEST(BrowserWindowPagesTest, AResearchRefusedBecauseTheSessionIsBusySaysSo) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetPlanPageUrlForTest(std::string(kPlanUrl));
+    window->SetAgentSendForTest([&window](std::string) {
+        window->SetAgentBusyForTest(true);  // the session took a turn in the meantime
+        return false;
+    });
+    const BrowserWindow::ResearchStartResult result = window->StartResearch("q");
+    EXPECT_EQ(result.code, BrowserWindow::ResearchStart::kFailed);
+    EXPECT_NE(result.message.find("busy"), std::string::npos) << result.message;
+}
+
+TEST(BrowserWindowPagesTest, AChatThatCannotBeSentEndsFailedAndTheQueueMovesOn) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    bool accept = false;
+    std::vector<std::string> sent;
+    window->SetAgentSendForTest([&](std::string text) {
+        sent.push_back(std::move(text));
+        return accept;
+    });
+    window->SubmitAgentPromptForTest("refused");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"refused:failed"}));
+    accept = true;
+    window->SubmitAgentPromptForTest("taken");
+    EXPECT_EQ(TaskStates(*window), (std::vector<std::string>{"taken:running", "refused:failed"}));
+}
+
+TEST(BrowserWindowPagesTest, AgentButtonLabel) {
+    agent::AgentTaskQueue queue([](const agent::AgentTask&) {});
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent");
+    queue.Enqueue(agent::TaskKind::kChat, "a", {}, 0);
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent");  // running, no plan
+    queue.OnProgress("t1", 3, 7);
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent \xC2\xB7 3/7");
+    queue.OnProgress("t1", 0, 0);
+    queue.Enqueue(agent::TaskKind::kChat, "b", {}, 0);
+    queue.Enqueue(agent::TaskKind::kChat, "c", {}, 0);
+    EXPECT_EQ(AgentButtonLabel(queue), "Agent \xC2\xB7 2 queued");
+}
+
+TEST(BrowserWindowPagesTest, PaletteListsAgentTasks) {
+    const std::vector<PaletteCommandEntry> commands = BrowserWindow::PaletteCommands();
+    const auto found = std::find_if(commands.begin(), commands.end(), [](const auto& command) {
+        return command.id == "agent_tasks";
+    });
+    ASSERT_NE(found, commands.end());
+    EXPECT_EQ(found->title, "Agent tasks");
+}
+
+TEST(BrowserWindowPagesTest, PaletteCommandsCarryDistinctMeaningfulIcons) {
+    const std::vector<PaletteCommandEntry> commands = BrowserWindow::PaletteCommands();
+    const std::pair<std::string_view, PaletteRowIcon> expected[] = {
+        {"sleep_inactive_tabs", PaletteRowIcon::kMoon},
+        {kChangeSpaceIconCommandId, PaletteRowIcon::kPalette},
+        {"agent_tasks", PaletteRowIcon::kSparkles},
+        {"summarize_page", PaletteRowIcon::kSparkles},
+        {"ask_about_page", PaletteRowIcon::kSparkles},
+        {"collect_from_tabs", PaletteRowIcon::kTable},
+    };
+    for (const auto& [id, icon] : expected) {
+        const auto found = std::find_if(commands.begin(), commands.end(),
+                                        [&](const auto& command) { return command.id == id; });
+        ASSERT_NE(found, commands.end()) << id;
+        EXPECT_EQ(found->icon, icon) << id;
+        EXPECT_NE(found->icon, PaletteRowIcon::kKind) << id;
+    }
+}
+
+TEST(BrowserWindowPagesTest, TheQueueFixtureShowsOneRunningAndTwoQueuedTasks) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ShowQueueFixtureForDev();
+    EXPECT_EQ(window->agent_queue().current()->done, 3U);
+    EXPECT_EQ(window->agent_queue().queued_count(), 2U);
+}
+
+TEST(BrowserWindowPagesTest, ExplainEnqueuesAnAskWithTheSelection) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    EXPECT_TRUE(window->RunAgentMenuCommand(
+        kAgentMenuExplain, {.title = "T", .url = "https://a.test/", .selection = "quoted"}, ""));
+    const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
+    EXPECT_EQ(task.prompt, "Explain this in plain words.");
+    EXPECT_NE(task.context.find("<page_url>https://a.test/</page_url>"), std::string::npos);
+    EXPECT_NE(task.context.find("<selection>quoted</selection>"), std::string::npos);
+}
+
+TEST(BrowserWindowPagesTest, SelectionItemsRefuseNonWebPages) {
+    // A Report tab is a data: document: its text is not quoted, and no chip is made from it.
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    const BrowserWindow::AgentContextChip report = {
+        .title = "Report", .url = "data:text/html,<p>long</p>", .selection = "q"};
+    EXPECT_FALSE(window->RunAgentMenuCommand(kAgentMenuExplain, report, ""));
+    EXPECT_FALSE(window->RunAgentMenuCommand(kAgentMenuAsk, report, ""));
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    EXPECT_TRUE(window->agent_queue().tasks().empty());
+    EXPECT_FALSE(window->RunAgentMenuCommand(kAgentMenuSummarizeLink, {}, "javascript:alert(1)"));
+}
+
+TEST(BrowserWindowPagesTest, SummarizeLinkOpensPeekAndEnqueues) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    EXPECT_TRUE(window->RunAgentMenuCommand(
+        kAgentMenuSummarizeLink, {.title = "T", .url = "https://a.test/"}, "https://b.test/page"));
+    const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
+    EXPECT_EQ(task.prompt, "Summarize this page.");
+    EXPECT_NE(task.context.find("<page_url>https://b.test/page</page_url>"), std::string::npos);
+    EXPECT_NE(task.context.find("browser_open_tab"), std::string::npos);
+    EXPECT_FALSE(window->RunAgentMenuCommand(99, {}, ""));
+}
+
+TEST(BrowserWindowPagesTest, AskAboutSelectionSetsTheChipAndSendConsumesIt) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    window->RunAgentMenuCommand(kAgentMenuAsk,
+                                {.title = "T", .url = "https://a.test/", .selection = "q"}, "");
+    ASSERT_TRUE(window->agent_context_chip().has_value());
+    const std::optional<Value> state = json::Parse(window->AgentPanelStateJson());
+    EXPECT_EQ(state->FindMember("context_chip")->StringOr("selection", ""), "q");
+    SendAgent(*window, R"({"type":"clear_context"})");
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    window->RunAgentMenuCommand(kAgentMenuAsk,
+                                {.title = "T", .url = "https://a.test/", .selection = "q"}, "");
+    SendAgent(*window, R"({"type":"send","text":"why","include_context":true})");
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    EXPECT_EQ(window->agent_queue().tasks()[0].kind, agent::TaskKind::kAsk);
+    EXPECT_NE(window->agent_queue().tasks()[0].context.find("<selection>q</selection>"),
+              std::string::npos);
+}
+
+TEST(BrowserWindowPagesTest, AChipIsClearedByATabChangeNewChatOrClosingThePanel) {
+    const ScopedAgentCommand command("\"unbalanced");  // Start fails without a process
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    const BrowserWindow::AgentContextChip quote = {
+        .title = "T", .url = "https://a.test/", .selection = "q"};
+    ASSERT_TRUE(window->OpenNewTab("https://b.test/"));
+    ASSERT_TRUE(window->ActivateTabAt(0, 0));
+    window->RunAgentMenuCommand(kAgentMenuAsk, quote, "");
+    ASSERT_TRUE(window->agent_context_chip().has_value());
+    // The same tab keeps its chip; another tab does not inherit it.
+    ASSERT_TRUE(window->ActivateTabAt(0, 0));
+    EXPECT_TRUE(window->agent_context_chip().has_value());
+    ASSERT_TRUE(window->ActivateTabAt(0, 1));
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    window->RunAgentMenuCommand(kAgentMenuAsk, quote, "");
+    SendAgent(*window, R"({"type":"new_chat"})");
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+    window->RunAgentMenuCommand(kAgentMenuAsk, quote, "");
+    window->SetAgentPanelOpen(false);
+    EXPECT_FALSE(window->agent_context_chip().has_value());
+}
+
+TEST(BrowserWindowPagesTest, AChipStoresAClippedTitleAndSelection) {
+    const ScopedNoAgentEnv no_env;
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->RunAgentMenuCommand(kAgentMenuAsk,
+                                {.title = std::string(400, 't'),
+                                 .url = "https://a.test/",
+                                 .selection = std::string(20000, 's')},
+                                "");
+    ASSERT_TRUE(window->agent_context_chip().has_value());
+    EXPECT_EQ(window->agent_context_chip()->title.size(), kAgentTitleLimit);
+    EXPECT_EQ(window->agent_context_chip()->selection.size(), kAgentSelectionLimit);
+}
+
+TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetAgentSendForTest([](std::string) { return true; });
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://a.test/"));
+    window->RunPaletteCommand("summarize_page");
+    ASSERT_EQ(window->agent_queue().tasks().size(), 1U);
+    const agent::AgentTask& task = window->agent_queue().tasks()[0];
+    EXPECT_EQ(task.kind, agent::TaskKind::kAsk);
+    EXPECT_EQ(task.prompt, "Summarize this page.");
+    EXPECT_NE(task.context.find("<page_url>https://a.test/</page_url>"), std::string::npos);
+    const auto commands = BrowserWindow::PaletteCommands();
+    EXPECT_TRUE(std::any_of(commands.begin(), commands.end(),
+                            [](const auto& c) { return c.id == "ask_about_page"; }));
+}
+
+
+constexpr std::string_view kCollectTable =
+    "# Grinders\n\n| Source | Price |\n|---|---|\n| [Shop](https://a.test/one) | 189 |\n";
+
+TEST(BrowserWindowPagesTest, CollectTaskOpensACollectionReport) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    window.SetReportPageUrlForTest(std::string(kReportUrl));
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/one"));
+    EXPECT_FALSE(window.CollectFromTabs("price", {}));  // nothing to collect
+    EXPECT_FALSE(window.CollectFromTabs("  ", {{0, "https://a.test/one"}}));  // no question
+
+    ASSERT_TRUE(window.CollectFromTabs("price", {{0, "https://a.test/one"}}));
+    ASSERT_EQ(qw.sent.size(), 1U);
+    EXPECT_NE(qw.sent[0].find("What to collect: price"), std::string::npos);
+    EXPECT_NE(qw.sent[0].find("<page_url>https://a.test/one</page_url>"), std::string::npos);
+    ASSERT_EQ(window.agent_queue().tasks().size(), 1U);
+    EXPECT_EQ(window.agent_queue().tasks()[0].kind, agent::TaskKind::kCollect);
+
+    EXPECT_FALSE(window.CompleteCollect("price", "  \n"));
+    ASSERT_TRUE(window.CompleteCollect("price", kCollectTable));
+    ASSERT_EQ(window.reports().reports.size(), 1U);
+    const ResearchReport& report = window.reports().reports[0];
+    EXPECT_EQ(report.kind, "collection");
+    EXPECT_EQ(report.question, "price");
+    EXPECT_EQ(report.title, "Grinders");
+    const Space& space = SpaceAt(window, window.active_space_index());
+    EXPECT_EQ(space.tabs().back().startup_url(), std::string(kReportUrl) + "#" + report.id);
+}
+
+TEST(BrowserWindowPagesTest, CollectTakesOnlyChoicesWhoseUrlIsStillThere) {
+    const ScopedNoAgentEnv no_env;
+    const ScopedAgentCommand command("true");
+    QueueWindow qw = MakeQueueWindow();
+    BrowserWindow& window = *qw.window;
+    ASSERT_TRUE(window.OpenNewTab("https://x.test/"));
+    ASSERT_TRUE(window.OpenNewTab("https://y.test/"));
+    ASSERT_TRUE(window.OpenNewTab("https://z.test/"));
+    // The sheet showed a, b and c at indices 0, 1 and 2 (the first tab is a). Then a closes, so
+    // b and c move up.
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/"));
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 1, "https://b.test/"));
+    ASSERT_TRUE(window.SetTabAddressForTest(0, 2, "https://c.test/"));
+    ASSERT_TRUE(window.CloseTabAt(0, 0));
+    ASSERT_TRUE(window.CollectFromTabs(
+        "price", {{0, "https://a.test/"}, {1, "https://b.test/"}, {2, "https://c.test/"}}));
+    ASSERT_EQ(window.agent_queue().tasks().size(), 1U);
+    const std::string& context = window.agent_queue().tasks()[0].context;
+    EXPECT_NE(context.find("https://b.test/"), std::string::npos);
+    EXPECT_NE(context.find("https://c.test/"), std::string::npos);
+    EXPECT_EQ(context.find("https://a.test/"), std::string::npos);
+
+    // A choice whose tab is gone, with nothing else queued, is refused outright.
+    EXPECT_FALSE(window.CollectFromTabs("price", {{0, "https://a.test/"}}));
+}
+
+TEST(BrowserWindowPagesTest, ExportMessageWritesTheChosenFormat) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetReportPageUrlForTest(std::string(kReportUrl));
+    ASSERT_TRUE(window->CompleteCollect("price", kCollectTable));
+    const std::string id = window->reports().reports[0].id;
+    const std::filesystem::path target =
+        std::filesystem::temp_directory_path() / "island_export_test_table.csv";
+    std::filesystem::remove(target);
+    window->SetExportPathForTest(target);
+
+    SendReport(*window, id, R"({"type":"export","format":"csv"})");
+    std::ifstream csv(target, std::ios::binary);
+    std::string written((std::istreambuf_iterator<char>(csv)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(written, "\xEF\xBB\xBFSource,Source title,Price\r\n"
+                       "https://a.test/one,Shop,189\r\n");
+
+    SendReport(*window, id, R"({"type":"export","format":"json"})");
+    std::ifstream json_in(target, std::ios::binary);
+    written.assign((std::istreambuf_iterator<char>(json_in)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(written,
+              R"([{"Source":"https://a.test/one","Source title":"Shop","Price":"189"}])");
+
+    // A report without a table has nothing to export: nothing is written.
+    std::filesystem::remove(target);
+    window->SetResearchTaskForTest("q");
+    window->CompleteResearch(ReportOutcome("# No table\n\nJust prose."));
+    const std::string prose_id = window->reports().reports[0].id;
+    SendReport(*window, prose_id, R"({"type":"export","format":"csv"})");
+    EXPECT_FALSE(std::filesystem::exists(target));
+    std::filesystem::remove(target);
 }
 
 }  // namespace

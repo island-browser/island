@@ -95,6 +95,14 @@ std::string_view DevSettingsSectionName(std::string_view action) {
     return action.substr(kPrefix.size());
 }
 
+std::string_view DevAgentFixtureName(std::string_view action) {
+    constexpr std::string_view kPrefix = "agent_fixture:";
+    if (!action.starts_with(kPrefix)) {
+        return {};
+    }
+    return action.substr(kPrefix.size());
+}
+
 std::optional<DevSpaceIconAction> ParseDevSpaceIconAction(std::string_view action) {
     constexpr std::string_view kPrefix = "space_icon:";
     if (!action.starts_with(kPrefix)) {

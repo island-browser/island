@@ -15,11 +15,18 @@
 //       report in a new tab, `plan_fixture` opens a Plan tab with the sample research plan
 //       waiting for approval, `agent_pages:<count>[:<gap>]` opens that many agent pages through
 //       the agent's open-tab path (after `plan_fixture`; gap `serial` or milliseconds), and
-//       `cheatsheet` opens the shortcut cheatsheet. `settings:<section>` opens Settings on one
-//       section (appearance, shortcuts, ...). `appearance:<key>=<value>` (sidebar_tint,
-//       sidebar_side, card_radius, density, font, card_shadow, full_bleed, reset) and
-//       `space_color:<index>=#RRGGBB` run the Settings > Appearance path. `space_icon:<index>=<id>`
-//       chooses a space icon.
+//       `cheatsheet` opens the shortcut cheatsheet. `agent_fixture:confirm` shows a sample agent
+//       confirmation card in the panel. `agent_fixture:queue` shows one running and two queued
+//       agent tasks in the panel. `agent_fixture:quote` shows a page chip with a quote chip.
+//       `agent_fixture:collect` opens the Collect sheet. `agent_fixture:thread` fills the panel
+//       with a sample conversation (a user message, three tool rows, a Markdown reply) and one
+//       queued message. `report_fixture:collection` opens a collection report with its Export
+//       menu open.
+//       `settings:<section>` opens Settings on one section (appearance,
+//       shortcuts, ...). `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
+//       density, font,
+//       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the
+//       Settings > Appearance path. `space_icon:<index>=<id>` chooses a space icon.
 //   --island-dev-capture=/tmp/shot.png
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4
@@ -58,6 +65,10 @@ struct DevCaptureOptions {
 // The Settings section a `settings:<section>` action opens ("settings:shortcuts" -> "shortcuts"),
 // or "" when the action is not one.
 [[nodiscard]] std::string_view DevSettingsSectionName(std::string_view action);
+
+// The fixture a `agent_fixture:<name>` action shows ("agent_fixture:confirm" -> "confirm"), or ""
+// when the action is not one. `confirm` opens the agent panel with a sample confirmation card.
+[[nodiscard]] std::string_view DevAgentFixtureName(std::string_view action);
 
 struct DevSpaceIconAction {
     std::size_t index = 0;

@@ -336,7 +336,7 @@ TEST(BrowserChromeContractTest, GivenTheOverlayIdsWhenTheTreeIsInspectedThenNone
     ASSERT_EQ(tree.children.size(), 3U);
 }
 
-TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNewTabAndAFooter) {
+TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNoNewTabRowAndAFooter) {
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract();
     const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
     ASSERT_NE(rail, nullptr);
@@ -344,15 +344,15 @@ TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNewTabAndAF
     for (const ChromeViewTreeNode& child : rail->children) {
         order.push_back(child.id);
     }
-    // Top to bottom: navigation, address, New Tab, the tab list, then the
-    // bottom group (divider, space bar, footer); the current-page card stays
-    // last and collapsed.
-    EXPECT_EQ(order, (std::vector<ChromeViewId>{
-                         ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
-                         ChromeViewId::kValidationMessage, ChromeViewId::kRailNewTab,
-                         ChromeViewId::kTabStrip, ChromeViewId::kSpacer, ChromeViewId::kDivider,
-                         ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailFooter,
-                         ChromeViewId::kActivePage}));
+    // Top to bottom: navigation, address, the tab list, then the bottom group (divider, space
+    // bar, footer); the current-page card stays last and collapsed. The New Tab row is gone:
+    // ⌘T (Ctrl+T), the Browser menu and the palette open tabs.
+    EXPECT_EQ(order,
+              (std::vector<ChromeViewId>{ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
+                                         ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
+                                         ChromeViewId::kSpacer, ChromeViewId::kDivider,
+                                         ChromeViewId::kSpaceSwitcher, ChromeViewId::kRailFooter,
+                                         ChromeViewId::kActivePage}));
     const ChromeViewTreeNode* footer = FindChild(*rail, ChromeViewId::kRailFooter);
     ASSERT_NE(footer, nullptr);
     ASSERT_EQ(footer->children.size(), 4U);
@@ -360,7 +360,6 @@ TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNewTabAndAF
     EXPECT_EQ(footer->children[1].id, ChromeViewId::kRailTabsButton);
     EXPECT_EQ(footer->children[2].id, ChromeViewId::kRailSettingsButton);
     EXPECT_EQ(footer->children[3].id, ChromeViewId::kRailNewSpaceButton);
-    EXPECT_EQ(static_cast<int>(ChromeViewId::kRailNewTab), 1042);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailNewSpaceButton), 1045);
 }
 
@@ -403,7 +402,7 @@ TEST(BrowserChromeContractTest,
 }
 
 // Native (2026-10-16 owner request): one Agent entry at the sidebar bottom, no toolbar Agent,
-// New Tab as the last row of the tab list, and a switcher row with the space segments.
+// no New Tab row, and a switcher row with the space segments.
 std::vector<ChromeViewId> ChildIds(const ChromeViewTreeNode& node) {
     std::vector<ChromeViewId> ids;
     for (const ChromeViewTreeNode& child : node.children) {
@@ -426,7 +425,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
     const ChromeViewTreeNode tree = BrowserChrome::ViewTreeContract(LookPreset::kNative);
     const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
     ASSERT_NE(rail, nullptr);
-    // New Tab is no longer a rail row above the list; it lives in the tab list (below).
+    // There is no New Tab row: the rail holds the tab list and no row above it.
     EXPECT_EQ(ChildIds(*rail),
               (std::vector<ChromeViewId>{ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
                                          ChromeViewId::kSpacer, ChromeViewId::kDivider,
@@ -451,7 +450,7 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailSwitcherRow), 1076);
 }
 
-TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFollowsTheLastTab) {
+TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenTheListHasNoNewTabRow) {
     const std::vector<SpaceSwitcherEntrySnapshot> spaces = {{.name = "Default", .active = true}};
     for (const std::size_t count : {std::size_t{0}, std::size_t{1}, std::size_t{3}}) {
         std::vector<TabStripEntrySnapshot> tabs(count, TabStripEntrySnapshot{.title = "Island"});
@@ -459,21 +458,13 @@ TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenNewTabFoll
             BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
         const ChromeViewTreeNode* tab_strip = FindChild(tree, ChromeViewId::kTabStrip);
         ASSERT_NE(tab_strip, nullptr);
-        ASSERT_FALSE(tab_strip->children.empty());
-        EXPECT_EQ(tab_strip->children.back().id, ChromeViewId::kRailNewTab);
-        // Exactly one New Tab row, and it is never a rail child in Native.
-        std::size_t new_tab_rows = 0;
+        // The list holds only tab rows and its section headers and kickers.
         for (const ChromeViewTreeNode& child : tab_strip->children) {
-            new_tab_rows += child.id == ChromeViewId::kRailNewTab ? 1 : 0;
+            EXPECT_TRUE(child.id == ChromeViewId::kTabStripEntry ||
+                        child.id == ChromeViewId::kTabsSectionHeader ||
+                        child.id == ChromeViewId::kFavoritesSectionHeader ||
+                        child.id == ChromeViewId::kTabGroupKicker);
         }
-        EXPECT_EQ(new_tab_rows, 1U);
-        const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
-        ASSERT_NE(rail, nullptr);
-        EXPECT_EQ(std::count_if(rail->children.begin(), rail->children.end(),
-                                [](const ChromeViewTreeNode& child) {
-                                    return child.id == ChromeViewId::kRailNewTab;
-                                }),
-                  0);
     }
 }
 
@@ -533,13 +524,12 @@ TEST(BrowserChromeNativeContractTest, GivenSegmentsWithoutIconsThenNameOrInitial
     const SpaceSwitcherEntrySnapshot lower = {.name = "École supérieure", .active = false};
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 1, LookPreset::kNative), "Home");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(shorty, 5, LookPreset::kNative), "H");
-    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative),
-              "P");
+    EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 2, LookPreset::kNative), "P");
     EXPECT_EQ(BrowserChrome::SpaceSegmentLabel(longer, 4, LookPreset::kNative), "P");
     for (std::size_t count = 1; count <= 8; ++count) {
         for (const SpaceSwitcherEntrySnapshot* entry : {&shorty, &longer, &lower}) {
-            const std::string label = BrowserChrome::SpaceSegmentLabel(*entry, count,
-                                                                       LookPreset::kNative);
+            const std::string label =
+                BrowserChrome::SpaceSegmentLabel(*entry, count, LookPreset::kNative);
             EXPECT_NE(label, "\xE2\x80\xA6");
             EXPECT_FALSE(label.empty());
         }
@@ -563,6 +553,35 @@ TEST(BrowserChromeNativeContractTest, GivenNativeAgentEntryWhenPaintedThenOpenAn
     EXPECT_EQ(hover.fill, dark.hover);
 }
 
+// Arc and Graphite (owner request, 0.8.0): the Agent plate is neutral in every state, so no
+// accent fill or label is ever painted behind or on it.
+TEST(BrowserChromeContractTest, GivenAgentNeedsYouBadgeWhenColoredThenItIsAmberNotAccent) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        for (const LookPreset look :
+             {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+            const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
+            EXPECT_EQ(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.warning_text);
+            EXPECT_NE(BrowserChrome::AgentNeedsYouBadgeColor(tokens), tokens.accent);
+        }
+    }
+}
+
+TEST(BrowserChromeContractTest, GivenFooterAgentPlateWhenStatedThenItIsNeutralInEveryState) {
+    const ArgbColor rail{.argb = 0xFF123456U};
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        for (const LookPreset look : {LookPreset::kArc, LookPreset::kGraphite}) {
+            const ChromeTokens tokens = ChromeTokens::ForLook(look, theme);
+            EXPECT_EQ(BrowserChrome::FooterAgentPlate(tokens, false, false, rail), rail);
+            EXPECT_EQ(BrowserChrome::FooterAgentPlate(tokens, false, true, rail), tokens.hover);
+            EXPECT_EQ(BrowserChrome::FooterAgentPlate(tokens, true, false, rail),
+                      tokens.segment_selected);
+            EXPECT_EQ(BrowserChrome::FooterAgentPlate(tokens, true, true, rail),
+                      tokens.segment_selected);
+            EXPECT_NE(BrowserChrome::FooterAgentPlate(tokens, true, false, rail), tokens.accent);
+        }
+    }
+}
+
 TEST(BrowserChromeNativeContractTest, GivenNativeSwitcherWhenSizedThenSegmentsFitTheTrack) {
     const BrowserChrome::NativeSwitcherMetrics sizes = BrowserChrome::NativeSwitcherSizes();
     // Footer polish: same-height controls on an 8 DIP rhythm; segments inset in the track.
@@ -579,7 +598,8 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
     const auto active = BrowserChrome::NativeSegmentColors(light, /*active=*/true);
     EXPECT_EQ(active.fill.argb, 0xFFE3E3E8U);
-    EXPECT_EQ(active.outline, active.fill);
+    // Light gets the same 1 DIP hairline as dark so the raised plate reads on the track.
+    EXPECT_EQ(active.outline, light.border_strong);
     EXPECT_EQ(active.title, light.text);
     const auto idle = BrowserChrome::NativeSegmentColors(light, /*active=*/false);
     EXPECT_EQ(idle.fill, light.fill);
@@ -591,6 +611,19 @@ TEST(BrowserChromeNativeContractTest, GivenNativeSegmentsWhenPaintedThenSelected
     EXPECT_EQ(dark_active.fill.argb, 0xFF3A3A3DU);
     EXPECT_EQ(dark_active.outline, dark.border_strong);
     EXPECT_NE(dark_active.fill, dark.accent);
+}
+
+TEST(BrowserChromeNativeContractTest, GivenNativeKeycapsThenLightPlateIsStrongerThanTheFill) {
+    const ChromeTokens light = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const auto light_keycap = BrowserChrome::NativeKeycapColors(light);
+    EXPECT_EQ(light_keycap.fill, light.border_strong);
+    EXPECT_NE(light_keycap.fill, light.fill);
+    EXPECT_EQ(light_keycap.text, light.text);
+
+    const ChromeTokens dark = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kDark);
+    const auto dark_keycap = BrowserChrome::NativeKeycapColors(dark);
+    EXPECT_EQ(dark_keycap.fill, dark.fill);
+    EXPECT_EQ(dark_keycap.text, dark.text_secondary);
 }
 
 TEST(BrowserChromeNativeContractTest, GivenNavigationButtonsThenTheirRowSharesTheirSurface) {
@@ -633,6 +666,10 @@ TEST(BrowserChromeNativeContractTest, GivenAgentStatusWhenLabeledThenQueueProgre
     status.queue_done = 9;  // never "9/7"
     EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "7/7");
     EXPECT_EQ(BrowserChrome::AgentEntryDescription(status), "Claude Code, working, task 7/7");
+    status.queue_total = 0;
+    status.queued_count = 2;
+    EXPECT_EQ(BrowserChrome::AgentEntryMetaText(status), "2 queued");
+    EXPECT_EQ(BrowserChrome::AgentEntryDescription(status), "Claude Code, working, 2 queued");
     const AgentEntryStatus longer{.provider_name = "A very long provider name"};
     // The full name; the view fits it to the measured room (see FitAgentEntryText).
     EXPECT_EQ(BrowserChrome::AgentEntryMetaText(longer), "A very long provider name");

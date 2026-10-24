@@ -13,6 +13,9 @@
 
 namespace island {
 
+inline constexpr std::string_view kReportKindResearch = "research";
+inline constexpr std::string_view kReportKindCollection = "collection";
+
 struct ResearchReport {
     // "r" followed by decimal digits: safe in a URL fragment and in JavaScript.
     std::string id;
@@ -20,6 +23,9 @@ struct ResearchReport {
     std::string question;
     std::string markdown;
     std::int64_t created_ms = 0;  // Unix time, milliseconds
+    // "research" for a Research answer, "collection" for a table collected from tabs. The file
+    // writes "kind" only for collections; a report without it loads as "research".
+    std::string kind = std::string(kReportKindResearch);
 
     bool operator==(const ResearchReport&) const = default;
 };

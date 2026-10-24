@@ -22,6 +22,7 @@
 
 #include "address_bar_model.h"
 #include "address_indicators.h"
+#include "agent_task_queue.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "collapsed_rail.h"
@@ -29,6 +30,7 @@
 #include "icon_catalog.h"
 #include "include/cef_image.h"
 #include "navigation_state.h"
+#include "overlay_card.h"
 #include "page_card.h"
 #include "row_raster.h"
 #include "sidebar_state.h"
@@ -101,9 +103,10 @@ enum class ChromeViewId : int {
     // a contract node with zero width while the panel is closed; the panel's
     // own CefBrowserView inside it is not a contract node.
     kAgentPanel = 1041,
-    // Arc-style rail regions: the "New Tab" row above the tab list, and the
-    // footer under the space bar holding the agent toggle and New Space.
-    kRailNewTab = 1042,
+    // Arc-style rail regions: the footer under the space bar holding the agent toggle and
+    // New Space. 1042 was the "New Tab" row above the tab list; it was retired in 0.8.0 (the
+    // row is gone in every look; ⌘T (Ctrl+T), the Browser menu on macOS and the command palette
+    // open tabs) and is not reused.
     kRailFooter = 1043,
     kRailAgentButton = 1044,
     kRailNewSpaceButton = 1045,
@@ -171,6 +174,7 @@ struct AgentEntryStatus {
     // Task-queue progress; queue_total == 0 means no queue is running.
     int queue_done = 0;
     int queue_total = 0;
+    int queued_count = 0;
 
     bool operator==(const AgentEntryStatus&) const = default;
 };
@@ -307,6 +311,10 @@ class BrowserChromeHost {
     // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
     virtual void OpenBlockerSettings() = 0;
 };
+
+// The Agent entry's label for the task queue: the live task's plan progress when it has one
+// ("Agent · 3/7"), else the number of queued tasks ("Agent · 2 queued"), else "Agent".
+[[nodiscard]] std::string AgentButtonLabel(const agent::AgentTaskQueue& queue);
 
 class BrowserChrome final : public NavigationObserver {
   public:
@@ -554,12 +562,37 @@ class BrowserChrome final : public NavigationObserver {
             open ? tokens.segment_selected : (hovered ? tokens.hover : tokens.canvas);
         return {.fill = fill, .text = tokens.text, .sparkle = tokens.accent};
     }
+    struct KeycapColors {
+        ArgbColor fill;
+        ArgbColor text;
+    };
+    // Keycap plates for Native rows (⌘J, palette shortcuts). Native light needs the stronger
+    // border_strong plate: `fill` is too close to the source-list canvas to read. Dark keeps the
+    // fill/text_secondary pairing.
+    [[nodiscard]] static KeycapColors NativeKeycapColors(const ChromeTokens& tokens) {
+        return ThemeOfTokens(tokens) == ChromeTheme::kLight
+                   ? KeycapColors{tokens.border_strong, tokens.text}
+                   : KeycapColors{tokens.fill, tokens.text_secondary};
+    }
+    // Arc and Graphite's Agent plate (Native uses NativeAgentEntryColors): hover paints `hover`,
+    // an open panel the raised `segment_selected` plate, and at rest the rail shows through. The
+    // label stays `text` and the icon `text_2`; no accent fill or label (owner request, 0.8.0).
+    [[nodiscard]] static ArgbColor FooterAgentPlate(const ChromeTokens& tokens, bool open,
+                                                    bool hovered, ArgbColor rail) {
+        if (open) {
+            return tokens.segment_selected;
+        }
+        return hovered ? tokens.hover : rail;
+    }
     // The label next to the status dot: queue progress "3/7" while a queue runs, otherwise the
     // provider name. (The view elides a long name with an ellipsis before the keycap.)
     [[nodiscard]] static std::string AgentEntryMetaText(const AgentEntryStatus& status) {
         if (status.queue_total > 0) {
             return std::to_string(std::min(status.queue_done, status.queue_total)) + "/" +
                    std::to_string(status.queue_total);
+        }
+        if (status.queued_count > 0) {
+            return std::to_string(status.queued_count) + " queued";
         }
         // Truncated here rather than by the label button, which elides too early; the cap keeps
         // the name clear of the keycap in the 286 DIP sidebar.
@@ -602,13 +635,18 @@ class BrowserChrome final : public NavigationObserver {
         }
         return kept + ellipsis;
     }
+    // The legacy Agent button's badge while a confirmation waits: amber. Native uses its single
+    // footer status dot instead; `warning_text` keeps it readable on the light canvas.
+    [[nodiscard]] static ArgbColor AgentNeedsYouBadgeColor(const ChromeTokens& tokens) {
+        return tokens.warning_text;
+    }
     [[nodiscard]] static ArgbColor AgentStatusDotColor(const ChromeTokens& tokens,
                                                        AgentActivity activity) {
         switch (activity) {
             case AgentActivity::kWorking:
                 return tokens.accent;
             case AgentActivity::kNeedsYou:
-                return tokens.warning_border;
+                return tokens.warning_text;
             case AgentActivity::kIdle:
                 break;
         }
@@ -624,6 +662,8 @@ class BrowserChrome final : public NavigationObserver {
         text += state;
         if (status.queue_total > 0) {
             text += ", task " + AgentEntryMetaText(status);
+        } else if (status.queued_count > 0) {
+            text += ", " + AgentEntryMetaText(status);
         }
         return text;
     }
@@ -638,14 +678,8 @@ class BrowserChrome final : public NavigationObserver {
     };
     [[nodiscard]] static SegmentPalette NativeSegmentColors(const ChromeTokens& tokens,
                                                             bool active) {
-        const std::uint32_t surface = tokens.surface.argb;
-        const int brightness = static_cast<int>((surface >> 16U) & 0xFFU) * 299 +
-                               static_cast<int>((surface >> 8U) & 0xFFU) * 587 +
-                               static_cast<int>(surface & 0xFFU) * 114;
-        const bool dark = brightness < 128000;
         return {.track = tokens.fill,
-                .outline = active && dark ? tokens.border_strong
-                                          : (active ? tokens.segment_selected : tokens.fill),
+                .outline = active ? tokens.border_strong : tokens.fill,
                 .fill = active ? tokens.segment_selected : tokens.fill,
                 .title = active ? tokens.text : tokens.text_secondary};
     }
@@ -798,10 +832,6 @@ class BrowserChrome final : public NavigationObserver {
             rail_children.push_back(address);
         }
         rail_children.push_back({ChromeViewId::kValidationMessage, {}});
-        // Arc and Graphite list New Tab above the tabs; Native moves it to the list's end.
-        if (!native) {
-            rail_children.push_back({ChromeViewId::kRailNewTab, {}});
-        }
         rail_children.insert(rail_children.end(), {{ChromeViewId::kTabStrip, {}},
                                                    {ChromeViewId::kSpacer, {}},
                                                    {ChromeViewId::kDivider, {}}});
@@ -893,10 +923,6 @@ class BrowserChrome final : public NavigationObserver {
             }
             if (native && !tabs_header_added) {
                 tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-            }
-            // Native's New Tab row is the list's last row, after the last tab.
-            if (native) {
-                tab_strip->children.push_back({ChromeViewId::kRailNewTab, {}});
             }
         }
         if (ChromeViewTreeNode* switcher = find(tree, ChromeViewId::kSpaceSwitcher, find);
@@ -1002,8 +1028,14 @@ class BrowserChrome final : public NavigationObserver {
     // or closes the column.
     void SetAgentPanelView(CefRefPtr<CefView> view);
     void SetAgentPanelOpen(bool open);
-    // Native's Agent entry: provider name, status dot. Arc and Graphite ignore it. Queue progress
-    // and the "needs you" state are inert on this branch (no task queue here).
+    // Marks the Agent entry with a 6 DIP amber dot while a confirmation waits for the person (the
+    // panel may be closed). The dot sits on the entry's icon, the one place a label button can
+    // draw a mark.
+    void SetAgentNeedsYou(bool needs_you);
+    // The Agent entry's text: "Agent", "Agent · 3/7" or "Agent · 2 queued" (AgentButtonLabel).
+    // Native keeps "Agent" on the leading button and puts progress in the row's meta label.
+    void SetAgentButtonLabel(std::string label);
+    // Native's Agent entry: provider/task label and status dot. Arc and Graphite ignore it.
     void SetAgentEntryStatus(AgentEntryStatus status);
     // The keycap text from the keymap (the macOS command glyph plus J, or "Ctrl+J"); "" hides the
     // keycap.
@@ -1127,6 +1159,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<PanelDelegate> agent_panel_delegate_;
     CefRefPtr<CefView> agent_panel_view_;
     bool agent_panel_open_ = false;
+    bool agent_needs_you_ = false;
+    std::string agent_button_label_ = "Agent";
     std::string update_notice_;
     CefRefPtr<CefBrowserView> browser_view_;
     // U6 split view state; both stay null while a single view is attached.
@@ -1181,7 +1215,6 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
     CefRefPtr<CefView> tab_list_scroll_;
     CefRefPtr<CefPanel> space_switcher_;
-    CefRefPtr<CefLabelButton> new_tab_button_;
     CefRefPtr<CefPanel> rail_footer_;
     CefRefPtr<SurfacePanelDelegate> rail_footer_delegate_;
     CefRefPtr<CefLabelButton> agent_button_;
@@ -1199,8 +1232,8 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefLabelButton> agent_keycap_;
     AgentEntryStatus agent_status_;
     std::string agent_shortcut_label_;
-    // Native's Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
-    bool native_agent_hovered_ = false;
+    // The Agent entry is hovered (its fill follows the hover token; see RefreshRowHover).
+    bool agent_hovered_ = false;
     CefRefPtr<CefLabelButton> new_space_button_;
     CefRefPtr<CefLabelButton> tabs_button_;
     CefRefPtr<CefLabelButton> settings_button_;

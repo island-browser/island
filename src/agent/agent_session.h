@@ -59,6 +59,10 @@ class AgentSession {
     // text is blank or a turn is already running.
     bool Send(std::string text, std::string context = {});
     void Cancel();
+    // Developer capture only (`agent_fixture:thread`): records a user turn and agent events in the
+    // transcript as if the agent had answered. Nothing is sent and no agent is started.
+    void AddDevUserPrompt(std::string text);
+    void ApplyDevEvent(const AcpEvent& event);
     void ResolvePermission(std::int64_t request_id, std::optional<std::string> option_id);
     // Stops the agent, clears the conversation, and starts a fresh session.
     void NewChat();

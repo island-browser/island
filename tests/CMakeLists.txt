@@ -38,6 +38,7 @@ add_executable(island_tests
     favicon_policy_test.cpp
     history_recorder_test.cpp
     find_bar_model_test.cpp
+    agent_context_test.cpp
     keymap_test.cpp
     lifecycle_config_test.cpp
     navigation_state_test.cpp
@@ -46,8 +47,10 @@ add_executable(island_tests
     prefs_store_test.cpp
     reader_mode_test.cpp
     settings_focus_test.cpp
+    collect_prompt_test.cpp
     report_store_test.cpp
     research_prompt_test.cpp
+    table_export_test.cpp
     search_engine_test.cpp
     search_palette_test.cpp
     search_provider_test.cpp
@@ -67,6 +70,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_input.cc"
     "${CMAKE_SOURCE_DIR}/src/main/address_policy.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/agent_context.cc"
     "${CMAKE_SOURCE_DIR}/src/main/agent_navigation.cc"
     "${CMAKE_SOURCE_DIR}/src/main/local_page.cc"
     ${ISLAND_LOCAL_PAGE_SOURCES}
@@ -99,8 +103,10 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/collect_prompt.cc"
     "${CMAKE_SOURCE_DIR}/src/main/report_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/research_prompt.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/table_export.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_palette_model.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"

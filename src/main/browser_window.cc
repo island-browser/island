@@ -15,11 +15,13 @@
 #include <system_error>
 #include <utility>
 
+#include "agent_context.h"
 #include "app_resources.h"
 #include "browser_import.h"
 #include "cef_address_parser.h"
 #include "cef_update_fetcher.h"
 #include "clipboard.h"
+#include "collect_prompt.h"
 #include "content_blocker_policy.h"
 #include "design_tokens.h"
 #include "download_path.h"
@@ -394,6 +396,7 @@ bool BrowserWindow::RestoreSessionState(const SessionState& state) {
                 tab.SetStartupUrl(address.url);
             }
             tab.SetPinned(tab_state.pinned && !stale_parents.contains(tab_state.id));
+            tab.SetOpenedByAgent(tab_state.opened_by_agent);
             if (tab_state.group_parent.has_value() &&
                 restored_ids.contains(*tab_state.group_parent) &&
                 !stale_parents.contains(*tab_state.group_parent)) {
@@ -454,9 +457,9 @@ SessionState BrowserWindow::BuildSessionState() const {
                 tab.group_parent().has_value() && saved_ids.contains(*tab.group_parent())
                     ? tab.group_parent()
                     : std::nullopt;
-            space_state.tabs.push_back(TabState{tab.id(), EffectiveUrl(tab), tab.pinned(),
-                                                group_parent,
-                                                group_parent.has_value() ? tab.group_label() : ""});
+            space_state.tabs.push_back(
+                TabState{tab.id(), EffectiveUrl(tab), tab.pinned(), group_parent,
+                         group_parent.has_value() ? tab.group_label() : "", tab.opened_by_agent()});
         }
         if (space_state.tabs.empty()) {
             continue;
@@ -744,11 +747,13 @@ Space& BrowserWindow::AppendSpace(std::string name) {
     return created;
 }
 
-void BrowserWindow::AppendTabToActiveSpace(std::string startup_url) {
+void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
     Space& space = active_space();
+    context_chip_.reset();  // the new tab is a new page context
     DetachActiveTabObservers();
     Tab tab{NextTabId()};
     tab.SetStartupUrl(std::move(startup_url));
+    tab.SetOpenedByAgent(opened_by_agent);
     space.AppendTab(std::move(tab));
     Tab* appended = active_tab();
     if (chrome_ != nullptr && appended != nullptr) {
@@ -821,6 +826,10 @@ bool BrowserWindow::NavigateTab(std::optional<std::size_t> index, std::string_vi
     return true;
 }
 
+std::optional<std::string> BrowserWindow::ResolveNavigationTarget(std::string_view text) const {
+    return ResolveAgentNavigation(text, address_validator_);
+}
+
 bool BrowserWindow::IsPlanTabIndex(std::optional<std::size_t> index) const {
     const Space& space = active_space();
     if (!index.has_value() && !space.has_active_tab()) {
@@ -849,12 +858,18 @@ CefRefPtr<CefBrowser> BrowserWindow::BrowserForTab(std::optional<std::size_t> in
     return tab != nullptr ? tab->browser() : nullptr;
 }
 
-bool BrowserWindow::CreateSpace(std::string_view name) {
+bool BrowserWindow::CreateSpace(std::string_view name, bool opened_by_agent) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return false;
     }
     ExecuteCommand(BrowserCommand::kNewSpace);
+    if (opened_by_agent) {
+        // kNewSpace makes the new space active and gives it its start tab.
+        if (Tab* start = active_tab(); start != nullptr) {
+            start->SetOpenedByAgent(true);
+        }
+    }
     if (!name.empty()) {
         static_cast<void>(RenameSpace(active_space_index_, std::string(name)));
     }
@@ -916,8 +931,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
     if (!agent_tab_id_.has_value()) {
         return {.error = AgentTabError::kNoAgentPage};
     }
-    const std::optional<std::pair<std::size_t, std::size_t>> location =
-        TabLocation(*agent_tab_id_);
+    const std::optional<std::pair<std::size_t, std::size_t>> location = TabLocation(*agent_tab_id_);
     if (!location.has_value() || location->first != space_index) {
         return {.error = AgentTabError::kAgentPageClosed};
     }
@@ -1076,7 +1090,10 @@ bool BrowserWindow::SetAgentProvider(std::string_view id) {
             // ISLAND_AGENT_COMMAND pins the command: nothing to restart.
             agent_session_->Configure(std::move(config));
         } else {
-            static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
+            // The old agent's turn end never arrives.
+            AbandonInFlightTurn([this, &config] {
+                static_cast<void>(agent_session_->SwitchAgent(std::move(config)));
+            });
         }
     }
     RefreshAgentEntry();
@@ -1120,6 +1137,10 @@ void BrowserWindow::ToggleAgentPanel() { SetAgentPanelOpen(!agent_panel_open());
 
 void BrowserWindow::SetAgentPanelOpen(bool open) {
     CEF_REQUIRE_UI_THREAD();
+    if (!open) {
+        // A chip left unsent when the panel closes is stale by the time the panel opens again.
+        context_chip_.reset();
+    }
     if (closing_ || chrome_ == nullptr) {
         return;
     }
@@ -1155,9 +1176,172 @@ std::string BrowserWindow::ActiveTabAgentContext() const {
     if (!IsWebUrl(nav.url)) {
         return {};
     }
-    return "The user is looking at the tab \"" + nav.page_title + "\" (" + nav.url +
-           ") in the Island browser. Use the island-browser tools (page_read, page_snapshot, "
-           "page_click, page_type, browser_*) to see and act on the browser.";
+    return BuildAgentContext(nav.url, nav.page_title, {});
+}
+
+BrowserWindow::AgentContextChip BrowserWindow::ActiveTabChip() const {
+    const Tab* tab = active_tab();
+    if (tab == nullptr) {
+        return {};
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    if (!IsWebUrl(nav.url)) {
+        return {};
+    }
+    return {.title = nav.page_title, .url = nav.url, .selection = {}};
+}
+
+void BrowserWindow::ShowAgentContextChip(AgentContextChip chip) {
+    // The chip holds what a send would use, clipped: never a whole page or selection.
+    chip.title = std::string(ClipUtf8(chip.title, kAgentTitleLimit));
+    chip.selection = std::string(ClipUtf8(chip.selection, kAgentSelectionLimit));
+    context_chip_ = std::move(chip);
+    SetAgentPanelOpen(true);
+    ScheduleLocalPagesRender();
+}
+
+bool BrowserWindow::AskAgent(std::string prompt, std::string context) {
+    if (closing_ || TrimmedCopy(prompt).empty()) {
+        return false;
+    }
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    const agent::AgentTask task =
+        agent_queue_.Enqueue(agent::TaskKind::kAsk, std::move(prompt), std::move(context),
+                             static_cast<std::int64_t>(UnixNowMs()));
+    ScheduleLocalPagesRender();
+    return task.state != agent::TaskState::kFailed;
+}
+
+bool BrowserWindow::CollectFromTabs(std::string_view what,
+                                    const std::vector<CollectChoice>& choices) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::string asked = std::string(ClipUtf8(TrimmedCopy(what), kMaxCollectWhatBytes));
+    if (closing_ || asked.empty()) {
+        return false;
+    }
+    // Web pages only: a Report, the start page or a settings page has nothing to collect. The
+    // sheet can be open while tabs close or the space changes, so a choice must still match its
+    // URL; the index is only a hint for finding it.
+    const std::vector<Tab>& space_tabs = active_space().tabs();
+    const auto has_url = [&space_tabs](std::size_t index, std::string_view url) {
+        const NavigationSnapshot& nav = space_tabs[index].navigation_state().snapshot();
+        return nav.url == url && IsWebUrl(nav.url);
+    };
+    std::vector<CollectTab> tabs;
+    std::vector<std::size_t> taken;
+    for (const CollectChoice& choice : choices) {
+        if (tabs.size() >= kMaxCollectTabs) {
+            break;
+        }
+        std::optional<std::size_t> found;
+        if (choice.index < space_tabs.size() && has_url(choice.index, choice.url)) {
+            found = choice.index;
+        } else {
+            for (std::size_t index = 0; index < space_tabs.size() && !found; ++index) {
+                if (has_url(index, choice.url)) {
+                    found = index;
+                }
+            }
+        }
+        if (!found.has_value() || std::find(taken.begin(), taken.end(), *found) != taken.end()) {
+            continue;
+        }
+        taken.push_back(*found);
+        const NavigationSnapshot& nav = space_tabs[*found].navigation_state().snapshot();
+        tabs.push_back({.index = *found, .title = nav.page_title, .url = nav.url});
+    }
+    if (tabs.empty()) {
+        return false;
+    }
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    const agent::AgentTask task =
+        agent_queue_.Enqueue(agent::TaskKind::kCollect, asked, BuildCollectPrompt(asked, tabs),
+                             static_cast<std::int64_t>(UnixNowMs()));
+    ScheduleLocalPagesRender();
+    return task.state != agent::TaskState::kFailed;
+}
+
+json::Value BrowserWindow::CollectSheetStateJson() const {
+    json::Value tabs = json::Value::MakeArray();
+    const std::vector<Tab>& space_tabs = spaces_[active_space_index_].tabs();
+    for (std::size_t index = 0; index < space_tabs.size(); ++index) {
+        const Tab& tab = space_tabs[index];
+        const NavigationSnapshot& nav = tab.navigation_state().snapshot();
+        if (!IsWebUrl(nav.url)) {
+            continue;
+        }
+        tabs.Push(json::Value::MakeObject()
+                      .Set("index", json::Value::Int(static_cast<std::int64_t>(index)))
+                      .Set("title", json::Value::String(nav.page_title))
+                      .Set("url", json::Value::String(nav.url))
+                      .Set("pinned", json::Value::Bool(tab.pinned())));
+    }
+    return json::Value::MakeObject()
+        .Set("seq", json::Value::Int(static_cast<std::int64_t>(collect_sheet_seq_)))
+        .Set("tabs", std::move(tabs));
+}
+
+bool BrowserWindow::RunAgentMenuCommand(int offset, const AgentContextChip& page,
+                                        std::string_view link) {
+    // Selections come from web pages only: a Report or the start page is not a page to quote.
+    switch (offset) {
+        case kAgentMenuAsk:
+            if (!IsWebUrl(page.url)) {
+                return false;
+            }
+            ShowAgentContextChip(page);
+            return true;
+        case kAgentMenuExplain:
+            if (!IsWebUrl(page.url)) {
+                return false;
+            }
+            static_cast<void>(AskAgent("Explain this in plain words.",
+                                       BuildAgentContext(page.url, page.title, page.selection)));
+            return true;
+        case kAgentMenuSummarizeLink:
+            if (!IsWebUrl(link)) {
+                return false;
+            }
+            // The linked page opens in a peek card for the person; the agent reads it in its own
+            // background tab.
+            if (window_ != nullptr) {
+                DeferPeek(std::string(link));
+            }
+            static_cast<void>(AskAgent("Summarize this page.", BuildLinkAgentContext(link)));
+            return true;
+        default:
+            return false;
+    }
+}
+
+void BrowserWindow::RunPaletteCommand(std::string_view id) {
+    if (id == "sleep_inactive_tabs") {
+        static_cast<void>(SleepInactiveTabsNow());
+    } else if (id == "agent_tasks") {
+        // The Tasks strip sits on top of the panel.
+        SetAgentPanelOpen(true);
+    } else if (id == "collect_from_tabs") {
+        // The Collect sheet lives in the panel; without an agent the panel explains the setup.
+        EnsureAgentSession();
+        SetAgentPanelOpen(true);
+        if (!ResolvedAgentCommand().empty()) {
+            ++collect_sheet_seq_;
+            ScheduleLocalPagesRender();
+        }
+    } else if (id == "summarize_page" || id == "ask_about_page") {
+        const AgentContextChip page = ActiveTabChip();
+        if (page.url.empty() || ResolvedAgentCommand().empty()) {
+            // Nothing to ask about, or no agent yet: the panel explains how to set one up.
+            SetAgentPanelOpen(true);
+        } else if (id == "summarize_page") {
+            static_cast<void>(
+                AskAgent("Summarize this page.", BuildAgentContext(page.url, page.title, {})));
+        } else {
+            ShowAgentContextChip(page);
+        }
+    }
 }
 
 std::string BrowserWindow::AgentPanelStateJson() const {
@@ -1171,15 +1355,26 @@ std::string BrowserWindow::AgentPanelStateJson() const {
                           .Set("url", json::Value::String(nav.url));
         }
     }
+    json::Value context_chip = json::Value::Null();
+    if (context_chip_.has_value()) {
+        context_chip = json::Value::MakeObject()
+                           .Set("title", json::Value::String(context_chip_->title))
+                           .Set("url", json::Value::String(context_chip_->url))
+                           .Set("selection", json::Value::String(context_chip_->selection));
+    }
     const agent::AgentEndpoint* endpoint =
         agent_host_ != nullptr ? agent_host_->endpoint() : nullptr;
     json::Value state =
         json::Value::MakeObject()
             .Set("theme", std::move(theme))
             .Set("context", std::move(context))
+            .Set("context_chip", std::move(context_chip))
             .Set("endpoint",
                  json::Value::String(endpoint != nullptr && endpoint->running() ? endpoint->url()
-                                                                                : std::string()));
+                                                                                : std::string()))
+            .Set("confirmations", ConfirmationsStateJson())
+            .Set("tasks", TasksStateJson())
+            .Set("collect", CollectSheetStateJson());
     json::Value providers = AgentProvidersStateJson();
     for (auto& [key, value] : providers.object_val) {
         if (key == "provider" || key == "providers" || key == "env_override" ||
@@ -1197,6 +1392,7 @@ std::string BrowserWindow::AgentPanelStateJson() const {
 }
 
 void BrowserWindow::ScheduleLocalPagesRender() {
+    RefreshAgentButtonLabel();
     if ((agent_panel_ == nullptr && !internal_page_.has_value()) || agent_panel_render_scheduled_ ||
         closing_) {
         return;
@@ -1293,6 +1489,7 @@ json::Value BrowserWindow::ThemeJson() const {
         .Set("branch", std::move(branch))
         .Set("canvas", json::Value::String(CssColor(tokens.canvas)))
         .Set("font", json::Value::String(CssFontStack(tokens)))
+        .Set("look", json::Value::String(std::string(LookName(tokens.look))))
         .Set("dark", json::Value::Bool(chrome_snapshot_.theme == ChromeTheme::kDark));
 }
 
@@ -1489,6 +1686,7 @@ std::string BrowserWindow::SettingsStateJson() const {
                                .Set("theme", Value::String(reader.theme)))
             .Set("platform", Value::String(platform))
             .Set("agent", std::move(agent))
+            .Set("trusted_sites", TrustedSitesJson())
             .Set("endpoint", std::move(endpoint))
             .Set("shortcuts", std::move(shortcuts))
             .Set("reports", ReportsListJson())
@@ -1777,6 +1975,8 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
             prefs_.reader_theme = settings.theme;
             SavePrefs();
         }
+    } else if (type == "remove_trusted_site") {
+        RemoveTrustedSite(message.StringOr("host", ""));
     } else if (type == "set_agent_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "set_agent_command") {
@@ -2146,6 +2346,8 @@ bool BrowserWindow::MoveTabToSpace(std::size_t from_space, std::size_t tab, std:
         moved.SetStartupUrl(address.url);
     }
     moved.SetPinned(pinned);
+    // The mark is not carried over: moving a tab is the person's act, so the tab is theirs now
+    // and the agent must ask before it navigates or closes it.
     for (std::size_t index = 0; index < spaces_.size(); ++index) {
         if (spaces_[index].id() != target_id) {
             continue;
@@ -2327,12 +2529,35 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
         ShowSettingsSection("agent");
         return;
     }
+    if (type == "confirm") {
+        HandleConfirmMessage(message);
+        return;
+    }
     EnsureAgentSession();
     if (type == "send") {
         SubmitAgentPrompt(std::string(message.StringOr("text", "")),
                           message.BoolOr("include_context", true));
-    } else if (type == "cancel") {
-        agent_session_->Cancel();
+    } else if (type == "clear_context") {
+        context_chip_.reset();
+    } else if (type == "collect") {
+        std::vector<CollectChoice> choices;
+        if (const json::Value* list = message.FindMember("tabs");
+            list != nullptr && list->IsArray()) {
+            for (const json::Value& item : list->array_val) {
+                const json::Value* index = item.IsObject() ? item.FindMember("index") : nullptr;
+                if (index != nullptr && index->IsInt() && index->int_val >= 0) {
+                    choices.push_back({.index = static_cast<std::size_t>(index->int_val),
+                                       .url = std::string(item.StringOr("url", ""))});
+                }
+            }
+        }
+        static_cast<void>(CollectFromTabs(message.StringOr("what", ""), choices));
+    } else if (type == "cancel" || type == "task_stop") {
+        // Cards carry no origin, so Stop withdraws every open card; a stopped turn's action
+        // must not run later.
+        StopAgentTask();
+    } else if (type == "task_move" || type == "task_remove" || type == "tasks_clear_finished") {
+        HandleTaskMessage(type, message);
     } else if (type == "permission") {
         const json::Value* option = message.FindMember("option_id");
         agent_session_->ResolvePermission(message.IntOr("request_id", -1),
@@ -2341,7 +2566,10 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
                                               : std::nullopt);
         RefreshAddressIndicators();
     } else if (type == "new_chat") {
-        agent_session_->NewChat();
+        // The new conversation drops the live turn without an end event.
+        AbandonInFlightTurn([this] { agent_session_->NewChat(); });
+        CancelPendingConfirmations();
+        context_chip_.reset();
     } else if (type == "set_provider") {
         static_cast<void>(SetAgentProvider(message.StringOr("id", "")));
     } else if (type == "start") {
@@ -2359,11 +2587,437 @@ void BrowserWindow::HandleAgentPageMessage(const json::Value& message) {
 }
 
 bool BrowserWindow::SubmitAgentPrompt(std::string text, bool include_context) {
+    if (closing_ || TrimmedCopy(text).empty()) {
+        return false;
+    }
     EnsureAgentSession();
-    const std::string context = include_context ? ActiveTabAgentContext() : std::string();
-    const bool sent = agent_session_->Send(std::move(text), context);
+    std::string context;
+    if (include_context) {
+        context = context_chip_.has_value()
+                      ? BuildAgentContext(context_chip_->url, context_chip_->title,
+                                          context_chip_->selection)
+                      : ActiveTabAgentContext();
+    }
+    // A question sent with a chip is an ask about that chip; the chip is for one question.
+    const agent::TaskKind kind = include_context && context_chip_.has_value()
+                                     ? agent::TaskKind::kAsk
+                                     : agent::TaskKind::kChat;
+    context_chip_.reset();
+    const agent::AgentTask task = agent_queue_.Enqueue(kind, std::move(text), std::move(context),
+                                                       static_cast<std::int64_t>(UnixNowMs()));
     ScheduleLocalPagesRender();
-    return sent;
+    return task.state != agent::TaskState::kFailed;
+}
+
+void BrowserWindow::StartQueuedTask(const agent::AgentTask& task) {
+    in_flight_id_.clear();
+    queue_waiting_ = false;
+    waiting_id_.clear();
+    reported_done_ = 0;
+    reported_total_ = 0;
+    start_error_.clear();
+    bool started = false;
+    if (closing_) {
+        start_error_ = "The window is closing.";
+    } else {
+        EnsureAgentSession();
+        // A grant ("allow for this task") never outlives the task that earned it.
+        if (agent_host_ != nullptr) {
+            agent_host_->toolbox().ResetTaskGrants();
+        }
+        if (!queue_fixture_ && AgentTurnOpen()) {
+            // A turn runs outside the queue (plan continuation): the task is live and sent when
+            // that turn ends.
+            deferred_task_ = task;
+            in_flight_id_ = task.id;
+            in_flight_is_chat_ = false;
+            return;
+        }
+        task_items_base_ = agent_session_->transcript().items().size();
+        if (queue_fixture_) {
+            started = true;  // dev capture: the task is live, nothing is sent
+        } else if (task.kind == agent::TaskKind::kResearch) {
+            started = StartResearchTask(task);
+        } else if (task.kind == agent::TaskKind::kCollect) {
+            // The collect prompt (the context) names the tabs; the page context does not apply.
+            collect_turns_before_ = TurnsEnded();
+            started = SendToAgent(task.context);
+            if (!started) {
+                start_error_ = agent_session_->error().empty() ? "The agent could not be started."
+                                                               : agent_session_->error();
+            }
+        } else {
+            started = SendToAgent(task.prompt, task.context);
+            if (!started) {
+                start_error_ = agent_session_->error().empty() ? "The agent could not be started."
+                                                               : agent_session_->error();
+            }
+        }
+    }
+    if (!started) {
+        // Reported after the failed start, so the queue moves on to the next task.
+        agent_queue_.OnTurnFinished(task.id, false);
+        return;
+    }
+    in_flight_id_ = task.id;
+    in_flight_is_chat_ = task.kind != agent::TaskKind::kResearch;
+    SyncQueueWaiting();
+}
+
+bool BrowserWindow::AgentTurnOpen() const {
+    if (agent_busy_for_test_.has_value()) {
+        return *agent_busy_for_test_;
+    }
+    return !agent_send_for_test_ && agent_session_ != nullptr && agent_session_->busy();
+}
+
+bool BrowserWindow::OutsideResearchOwnsTurn() const {
+    return research_.has_value() && !research_->awaiting_approval && research_->task_id.empty();
+}
+
+void BrowserWindow::PostStartDeferredTask() {
+    if (!deferred_task_.has_value()) {
+        return;
+    }
+    if (chrome_ == nullptr) {
+        StartDeferredTask();
+        return;
+    }
+    // The session is inside its own event handler: send from a posted task.
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::StartDeferredTask,
+                                                            CefRefPtr<BrowserWindow>(this))));
+}
+
+void BrowserWindow::StartDeferredTask() {
+    if (!deferred_task_.has_value() || closing_ || AgentTurnOpen()) {
+        return;
+    }
+    const agent::AgentTask task = std::move(*deferred_task_);
+    deferred_task_.reset();
+    StartQueuedTask(task);
+}
+
+std::optional<agent::TaskKind> BrowserWindow::TaskKindOf(std::string_view id) const {
+    for (const agent::AgentTask& task : agent_queue_.tasks()) {
+        if (task.id == id) {
+            return task.kind;
+        }
+    }
+    return std::nullopt;
+}
+
+void BrowserWindow::FinishInFlightTurn(bool ok) {
+    if (in_flight_id_.empty()) {
+        return;
+    }
+    // Cleared first: the queue starts the next task from inside this call.
+    const std::string id = std::move(in_flight_id_);
+    in_flight_id_.clear();
+    if (ok) {
+        // Before the queue moves on: the next task's prompt would replace this turn's answer.
+        FinishCollectTurn(id);
+    }
+    agent_queue_.OnTurnFinished(id, ok);
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::CheckInFlightTurn() {
+    if (deferred_task_.has_value()) {
+        // An outside research owns the turn that just ended: it is classified first, and
+        // CompleteResearch starts the deferred task afterwards.
+        if (closing_ || AgentTurnOpen() || (agent_send_for_test_ && !agent_busy_for_test_) ||
+            OutsideResearchOwnsTurn()) {
+            return;
+        }
+        PostStartDeferredTask();
+        return;
+    }
+    // Research reports its own end (CompleteResearch); the test seam never touches the session.
+    if (in_flight_id_.empty() || turn_finish_posted_ ||
+        (agent_send_for_test_ && !agent_busy_for_test_) || closing_ || agent_session_ == nullptr ||
+        AgentTurnOpen() || !in_flight_is_chat_) {
+        return;
+    }
+    if (chrome_ == nullptr) {
+        FinishPostedTurn();
+        return;
+    }
+    // The session is inside its own event handler here, and the next task sends from the queue:
+    // finish from a posted task.
+    turn_finish_posted_ = true;
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(&BrowserWindow::FinishPostedTurn,
+                                                            CefRefPtr<BrowserWindow>(this))));
+}
+
+void BrowserWindow::FinishPostedTurn() {
+    turn_finish_posted_ = false;
+    if (in_flight_id_.empty() || closing_ || agent_session_ == nullptr || AgentTurnOpen() ||
+        !in_flight_is_chat_) {
+        return;
+    }
+    // A dead agent reports no turn end; the failed state is the end.
+    FinishInFlightTurn(agent_session_->state() != agent::AcpState::kFailed);
+}
+
+void BrowserWindow::ReportQueueProgress() {
+    // A deferred task has not reached the agent: the progress on screen is the outside turn's.
+    if (in_flight_id_.empty() || agent_session_ == nullptr || deferred_task_.has_value()) {
+        return;
+    }
+    const std::vector<agent::TranscriptItem>& items = agent_session_->transcript().items();
+    for (std::size_t index = items.size(); index > task_items_base_; --index) {
+        const agent::TranscriptItem& item = items[index - 1];
+        if (item.kind != agent::TranscriptItem::Kind::kPlan) {
+            continue;
+        }
+        const std::size_t total = item.plan.size();
+        const std::size_t done = static_cast<std::size_t>(
+            std::count_if(item.plan.begin(), item.plan.end(),
+                          [](const agent::AcpPlanEntry& e) { return e.status == "completed"; }));
+        if (done != reported_done_ || total != reported_total_) {
+            reported_done_ = done;
+            reported_total_ = total;
+            agent_queue_.OnProgress(in_flight_id_, done, total);
+        }
+        return;
+    }
+}
+
+void BrowserWindow::SyncQueueWaiting() {
+    // Waiting is a boolean for the queue: it ends only when the last card closes and the
+    // research no longer waits for approval.
+    const bool want =
+        !pending_confirmations_.empty() || (research_.has_value() && research_->awaiting_approval);
+    if (want == queue_waiting_) {
+        return;
+    }
+    if (want) {
+        if (in_flight_id_.empty() || deferred_task_.has_value()) {
+            return;  // an external agent's card, or the outside turn's: no running task waits
+        }
+        waiting_id_ = in_flight_id_;
+        queue_waiting_ = true;
+        agent_queue_.OnWaiting(waiting_id_, true);
+    } else {
+        queue_waiting_ = false;
+        const std::string id = std::move(waiting_id_);
+        waiting_id_.clear();
+        agent_queue_.OnWaiting(id, false);
+    }
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::StopAgentTask() {
+    if (agent_queue_.current() == nullptr) {
+        // Nothing of ours is live (an external agent's cards may be): just withdraw the cards.
+        CancelPendingConfirmations();
+        if (agent_session_ != nullptr) {
+            agent_session_->Cancel();
+        }
+        return;
+    }
+    // A deferred task never reached the agent: the outside turn is not the person's target.
+    const bool deferred = deferred_task_.has_value();
+    deferred_task_.reset();
+    if (!deferred && agent_session_ != nullptr) {
+        agent_session_->Cancel();
+    }
+    const bool turn_open = !deferred && !in_flight_id_.empty() && AgentTurnOpen();
+    EndLiveResearch(turn_open);
+    // The queue stops first: withdrawing a card can lift "waiting", and a task that no longer
+    // is live ignores it.
+    queue_waiting_ = false;
+    waiting_id_.clear();
+    if (turn_open) {
+        agent_queue_.StopCurrent();  // the next task starts at the stopped turn's end
+    } else {
+        in_flight_id_.clear();
+        agent_queue_.StopCurrentAndAdvanceNow();
+    }
+    CancelPendingConfirmations();
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::AbandonInFlightTurn(const std::function<void()>& reset_session) {
+    // Cleared before the session is replaced: its events must not report the old turn.
+    in_flight_id_.clear();
+    deferred_task_.reset();
+    queue_waiting_ = false;
+    waiting_id_.clear();
+    EndLiveResearch(/*turn_open=*/false);
+    if (reset_session) {
+        reset_session();
+    }
+    agent_queue_.StopCurrentAndAdvanceNow();
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::EndLiveResearch(bool turn_open) {
+    const agent::AgentTask* live = agent_queue_.current();
+    if (!research_.has_value() || live == nullptr || research_->task_id != live->id) {
+        return;
+    }
+    if (turn_open) {
+        research_->stopped = true;
+        return;
+    }
+    research_.reset();
+    research_finish_posted_ = false;
+    SetResearchStatus("cancelled", "Research cancelled.");
+    RenderPlanPages();
+}
+
+void BrowserWindow::HandleTaskMessage(std::string_view type, const json::Value& message) {
+    const std::string_view id = message.StringOr("id", "");
+    if (type == "task_move") {
+        if (message.StringOr("dir", "") == "up") {
+            agent_queue_.MoveUp(id);
+        } else if (message.StringOr("dir", "") == "down") {
+            agent_queue_.MoveDown(id);
+        }
+    } else if (type == "task_remove") {
+        agent_queue_.Remove(id);
+    } else if (type == "tasks_clear_finished") {
+        agent_queue_.ClearFinished();
+    }
+    ScheduleLocalPagesRender();
+}
+
+json::Value BrowserWindow::TasksStateJson() const {
+    json::Value list = json::Value::MakeArray();
+    std::size_t queued_position = 0;
+    for (const agent::AgentTask& task : agent_queue_.tasks()) {
+        const char* state = "queued";
+        switch (task.state) {
+            case agent::TaskState::kQueued:
+                state = "queued";
+                break;
+            case agent::TaskState::kRunning:
+                state = "running";
+                break;
+            case agent::TaskState::kWaitingForYou:
+                state = "waiting";
+                break;
+            case agent::TaskState::kDone:
+                state = "done";
+                break;
+            case agent::TaskState::kFailed:
+                state = "failed";
+                break;
+            case agent::TaskState::kCancelled:
+                state = "cancelled";
+                break;
+        }
+        const char* kind = "chat";
+        switch (task.kind) {
+            case agent::TaskKind::kChat:
+                kind = "chat";
+                break;
+            case agent::TaskKind::kResearch:
+                kind = "research";
+                break;
+            case agent::TaskKind::kCollect:
+                kind = "collect";
+                break;
+            case agent::TaskKind::kAsk:
+                kind = "ask";
+                break;
+        }
+        json::Value entry =
+            json::Value::MakeObject()
+                .Set("id", json::Value::String(task.id))
+                .Set("kind", json::Value::String(kind))
+                .Set("title", json::Value::String(task.title))
+                .Set("state", json::Value::String(state))
+                .Set("done", json::Value::Int(static_cast<std::int64_t>(task.done)))
+                .Set("total", json::Value::Int(static_cast<std::int64_t>(task.total)));
+        if (task.state == agent::TaskState::kQueued) {
+            ++queued_position;
+            entry.Set("position", json::Value::Int(static_cast<std::int64_t>(queued_position)));
+            if (task.kind == agent::TaskKind::kChat || task.kind == agent::TaskKind::kAsk) {
+                entry.Set("prompt", json::Value::String(task.prompt));
+            }
+        }
+        list.Push(std::move(entry));
+    }
+    return list;
+}
+
+void BrowserWindow::RefreshAgentButtonLabel() {
+    if (chrome_ != nullptr && !closing_) {
+        chrome_->SetAgentButtonLabel(AgentButtonLabel(agent_queue_));
+        RefreshAgentEntry();
+    }
+}
+
+void BrowserWindow::ShowQueueFixtureForDev() {
+    queue_fixture_ = true;
+    EnsureAgentSession();
+    for (const char* prompt : {"Summarize the open tabs about the espresso machine",
+                               "Find the cheapest flight from Berlin to Lisbon in May",
+                               "Draft a reply to the landlord about the lease"}) {
+        agent_queue_.Enqueue(agent::TaskKind::kChat, prompt, {},
+                             static_cast<std::int64_t>(UnixNowMs()));
+    }
+    agent_queue_.OnProgress("t1", 3, 7);
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::ShowCollectFixtureForDev() {
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    ++collect_sheet_seq_;
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::ShowThreadFixtureForDev() {
+    // queue_fixture_ keeps the tasks live without sending them: the first is running, the second
+    // waits in the queue and shows as a queued message under the conversation.
+    queue_fixture_ = true;
+    EnsureAgentSession();
+    SetAgentPanelOpen(true);
+    const auto now = static_cast<std::int64_t>(UnixNowMs());
+    // The transcript goes first: each session change re-checks the in-flight turn, and a turn that
+    // was enqueued before its transcript looks finished.
+    agent_session_->AddDevUserPrompt("Compare the espresso grinders on my list");
+    using agent::AcpEvent;
+    const auto tool = [](std::string id, std::string title, std::string status) {
+        AcpEvent event;
+        event.type = AcpEvent::Type::kToolCall;
+        event.tool_call_id = std::move(id);
+        event.title = std::move(title);
+        event.kind = "read";
+        event.status = std::move(status);
+        return event;
+    };
+    agent_session_->ApplyDevEvent(
+        tool("t1", "mcp__island-browser__page_read_text example.org", "completed"));
+    agent_session_->ApplyDevEvent(
+        tool("t2", "mcp__island-browser__page_snapshot shop.example.com", "completed"));
+    agent_session_->ApplyDevEvent(
+        tool("t3", "mcp__island-browser__page_click Place order", "failed"));
+    AcpEvent reply;
+    reply.type = AcpEvent::Type::kAgentMessageChunk;
+    reply.text =
+        "**Short answer:** the Hario Mini fits a small kitchen best.\n\n"
+        "What to weigh:\n\n"
+        "- Footprint: under 20 cm tall\n"
+        "- Grind: set `medium-fine` for espresso\n\n"
+        "The shop page did not accept the order, so nothing was bought.";
+    agent_session_->ApplyDevEvent(reply);
+    agent_queue_.Enqueue(agent::TaskKind::kChat, "Compare the espresso grinders on my list", {},
+                         now);
+    agent_queue_.Enqueue(agent::TaskKind::kChat, "Check the price on the second grinder", {}, now);
+    ScheduleLocalPagesRender();
+}
+
+void BrowserWindow::ShowQuoteFixtureForDev() {
+    ShowAgentContextChip(
+        {.title = "Example Domain",
+         .url = "https://example.com/",
+         .selection = "This domain is for use in illustrative examples in documents. You may use "
+                      "this domain in literature without prior coordination or asking for "
+                      "permission."});
 }
 
 std::string BrowserWindow::StartPageStateJson() const {
@@ -2580,8 +3234,11 @@ void BrowserWindow::CloseAgentPanelAndSession() {
         }
     }
     research_.reset();
+    CancelPendingConfirmations();
     agent_tab_id_.reset();
     agent_session_.reset();
+    // Teardown: the session is gone, so its turn end never comes. closing_ fails the rest.
+    AbandonInFlightTurn();
 }
 
 void BrowserWindow::SetTabPinned(std::size_t index, bool pinned) {
@@ -2598,6 +3255,9 @@ ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
 }
 
 void BrowserWindow::ShutdownAgentHost() {
+    // Every open card is answered "cancel" first, so a tool call waiting on one finishes while
+    // the endpoint can still reply.
+    CancelPendingConfirmations();
     if (agent_host_ != nullptr) {
         agent_host_->Shutdown();
     }
@@ -2628,6 +3288,8 @@ void BrowserWindow::SelectTabWithOneAttach(std::size_t space, std::size_t tab) {
         target.active_tab_index() == tab) {
         return;
     }
+    // A chip describes the tab it was made from; another tab's question starts clean.
+    context_chip_.reset();
     DetachActiveTabObservers();
     active_space_index_ = space;
     target.SelectTabIndex(tab);
@@ -2868,8 +3530,8 @@ void BrowserWindow::ApplyAddressFocusColors(CefRefPtr<CefWindow> window,
     // CEF installs its own two-DIP FocusRing inside every textfield, drawn in
     // CEF_ColorFocusableBorderFocused and clamped to a minimum contrast against
     // CEF_ColorWindowBackground (a ring darker than that clamp is lifted to a grey 94,94,94). While
-    // the Native address field is focused, paint that ring as the plate fill so Island's outer
-    // accent ring is the sole focus indicator. Restore the accent as soon as focus leaves the
+    // the address field is focused (every look), paint that ring as the plate fill so Island's
+    // outer accent ring is the sole focus indicator. Restore the accent as soon as focus leaves the
     // address field so palette textfields keep their normal focus treatment.
     window->SetThemeColor(
         CEF_ColorWindowBackground,
@@ -2877,6 +3539,13 @@ void BrowserWindow::ApplyAddressFocusColors(CefRefPtr<CefWindow> window,
     window->SetThemeColor(
         CEF_ColorFocusableBorderFocused,
         BrowserChrome::TextfieldFocusRingColor(tokens, address_focus_ring_suppressed_).argb);
+    if (OverlayFocusRingShown()) {
+        // A shown overlay (welcome or palette) owns the one neutral ring: no accent anywhere.
+        window->SetThemeColor(
+            CEF_ColorWindowBackground,
+            BrowserChrome::TextfieldFocusRingBackdrop(tokens, /*address_focused=*/true).argb);
+        window->SetThemeColor(CEF_ColorFocusableBorderFocused, tokens.border_strong.argb);
+    }
 }
 
 void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
@@ -2885,13 +3554,9 @@ void BrowserWindow::SetAddressFocusRingSuppressed(bool suppressed) {
         return;
     }
     address_focus_ring_suppressed_ = suppressed;
-    // Only the Native look paints these colors (the helpers gate on it). Other looks keep their
-    // colors, so focus changes repaint nothing for them.
+    // All looks paint the same single address ring (the helpers in BrowserChrome), so every look
+    // takes the color-only repaint below.
     const ChromeTokens tokens = ResolvedTokens(ResolvedChromeTheme());
-    if (tokens.look != LookPreset::kNative) {
-        address_focus_repaint_ = AddressFocusRepaint::kNone;
-        return;
-    }
     // A full ApplyTheme here re-themed every view, page and start page on each focus change.
     // Only the three colors change; ThemeChanged then repaints the views that read them.
     address_focus_repaint_ = AddressFocusRepaint::kColorsOnly;
@@ -3188,12 +3853,30 @@ bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<Ce
     return false;
 }
 
-void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                         CefRefPtr<CefContextMenuParams> params,
                                         CefRefPtr<CefMenuModel> model) {
     CEF_REQUIRE_UI_THREAD();
-    if (params != nullptr && model != nullptr && IsWebUrl(params->GetLinkUrl().ToString())) {
+    if (params == nullptr || model == nullptr) {
+        return;
+    }
+    const bool has_link = IsWebUrl(params->GetLinkUrl().ToString());
+    if (has_link) {
         model->AddItem(MENU_ID_USER_FIRST, "Open in peek");
+    }
+    const Tab* tab = FindTabByBrowser(browser);
+    const bool on_web_page = tab != nullptr && IsWebUrl(tab->navigation_state().snapshot().url);
+    const bool has_selection =
+        on_web_page && !TrimmedCopy(params->GetSelectionText().ToString()).empty();
+    const std::vector<AgentMenuItem> items =
+        AgentContextMenuItems(!ResolvedAgentCommand().empty(), has_selection, has_link);
+    if (!items.empty()) {
+        if (model->GetCount() > 0) {
+            model->AddSeparator();
+        }
+        for (const AgentMenuItem& item : items) {
+            model->AddItem(MENU_ID_USER_FIRST + item.offset, std::string(item.label));
+        }
     }
 }
 
@@ -3201,11 +3884,23 @@ bool BrowserWindow::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPt
                                          CefRefPtr<CefContextMenuParams> params, int command_id,
                                          EventFlags) {
     CEF_REQUIRE_UI_THREAD();
-    if (command_id != MENU_ID_USER_FIRST || params == nullptr || !IsPeekLinkSource(browser)) {
+    if (params == nullptr || !IsPeekLinkSource(browser)) {
         return false;
     }
-    DeferPeek(params->GetLinkUrl().ToString());
-    return true;
+    if (command_id == MENU_ID_USER_FIRST) {
+        DeferPeek(params->GetLinkUrl().ToString());
+        return true;
+    }
+    const Tab* tab = FindTabByBrowser(browser);
+    if (tab == nullptr) {
+        return false;
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    return RunAgentMenuCommand(command_id - MENU_ID_USER_FIRST,
+                               {.title = nav.page_title,
+                                .url = nav.url,
+                                .selection = params->GetSelectionText().ToString()},
+                               params->GetLinkUrl().ToString());
 }
 
 bool BrowserWindow::IsPeekLinkSource(CefRefPtr<CefBrowser> browser) const {
@@ -3977,6 +4672,7 @@ void BrowserWindow::AttachActiveTabObservers() {
         return;
     }
     ++attach_count_;
+    CancelStaleConfirmations();
     // A peek floats over one page; changing the selection dismisses it.
     ClosePeek();
     TouchActiveTabs();
@@ -4319,6 +5015,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (show_internal_page_ && page != nullptr) {
             chrome_->AttachBrowserView(page->view());
             SetAttachedViews({AttachedView{.view = page->view(), .local_page = page}});
+            ApplyPageViewVisibility();
             return;
         }
         internal_page_.reset();
@@ -4334,9 +5031,11 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
             EnsureTabBrowserView(*second)) {
             chrome_->AttachSplitBrowserViews(first->browser_view(), second->browser_view());
-            SetAttachedViews({AttachedView{.view = first->browser_view(), .tab = first->id()},
-                              AttachedView{.view = second->browser_view(), .tab = second->id(),
-                                           .second_slot = true}});
+            SetAttachedViews(
+                {AttachedView{.view = first->browser_view(), .tab = first->id()},
+                 AttachedView{
+                     .view = second->browser_view(), .tab = second->id(), .second_slot = true}});
+            ApplyPageViewVisibility();
             return;
         }
     }
@@ -4346,6 +5045,7 @@ void BrowserWindow::AttachActiveTabBrowserView() {
     }
     chrome_->AttachBrowserView(tab->browser_view());
     SetAttachedViews({AttachedView{.view = tab->browser_view(), .tab = tab->id()}});
+    ApplyPageViewVisibility();
 }
 
 bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
@@ -4374,6 +5074,7 @@ bool BrowserWindow::EnsureTabBrowserView(Tab& tab) {
 
 void BrowserWindow::UpdateChromeCollections() {
     CEF_REQUIRE_UI_THREAD();
+    CancelStaleConfirmations();
     if (chrome_ == nullptr || closing_) {
         return;
     }
@@ -4458,8 +5159,12 @@ void BrowserWindow::ApplyTheme(CefRefPtr<CefWindow> window, ChromeTheme theme, b
     // Textfields (the address field and both palette query fields) read their colors from the
     // theme: the typed value in --text, the placeholder in --text-2, a selection in the accent
     // with the page background as its text, and the field's own outline as the hairline.
-    window->SetThemeColor(CEF_ColorTextfieldBackground, tokens.surface.argb);
-    window->SetThemeColor(CEF_ColorTextfieldBackgroundDisabled, tokens.surface.argb);
+    // Native's address field is flush with its fill plate. CEF textfields otherwise inherit the
+    // generic surface here, leaving a visible rounded inner step inside the address focus ring.
+    const ArgbColor textfield_background =
+        tokens.look == LookPreset::kNative ? tokens.fill : tokens.surface;
+    window->SetThemeColor(CEF_ColorTextfieldBackground, textfield_background.argb);
+    window->SetThemeColor(CEF_ColorTextfieldBackgroundDisabled, textfield_background.argb);
     window->SetThemeColor(CEF_ColorTextfieldForeground, tokens.text.argb);
     window->SetThemeColor(CEF_ColorTextfieldForegroundDisabled, tokens.text.argb);
     window->SetThemeColor(CEF_ColorTextfieldForegroundPlaceholder, tokens.text_secondary.argb);
@@ -4843,17 +5548,21 @@ void BrowserWindow::ShowCommandPalette() {
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
-            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate);
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate,
+            icon_resource_root_);
     }
     // Read-only snapshots taken at open time: the open tabs of the active space
     // (title/URL for matching, TabId for routing) and the whole space list.
     std::vector<PaletteTabEntry> tabs;
+    std::vector<PaletteTabVisual> tab_visuals;
     tabs.reserve(active_space().tab_count());
+    tab_visuals.reserve(active_space().tab_count());
     for (const Tab& tab : active_space().tabs()) {
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
         tabs.push_back({.id = tab.id(),
                         .title = nav.page_title.empty() ? "Island" : nav.page_title,
                         .url = nav.url});
+        tab_visuals.push_back({.id = tab.id(), .favicon = tab.favicon()});
     }
     std::vector<PaletteSpaceEntry> spaces;
     spaces.reserve(spaces_.size());
@@ -4869,14 +5578,46 @@ void BrowserWindow::ShowCommandPalette() {
     std::vector<PaletteReportEntry> reports;
     reports.reserve(reports_.reports.size());
     for (const ResearchReport& report : reports_.reports) {
-        reports.push_back({.id = report.id, .title = report.title, .question = report.question});
+        reports.push_back({.id = report.id,
+                           .title = report.title,
+                           .question = report.question,
+                           .kind = report.kind});
     }
-    std::vector<PaletteCommandEntry> commands;
-    commands.push_back({.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"});
-    commands.push_back(
-        {.id = std::string(kChangeSpaceIconCommandId), .title = "Change space icon\xE2\x80\xA6"});
+    std::vector<PaletteCommandEntry> commands = PaletteCommands();
+    for (PaletteCommandEntry& command : commands) {
+        const std::optional<KeyAction> action = KeyActionFromId(command.shortcut_action_id);
+        const std::optional<KeyBinding> binding =
+            action.has_value() ? keymap_.Binding(*action) : std::nullopt;
+        if (binding.has_value()) {
+#if defined(__APPLE__)
+            command.shortcut = FormatKeyGlyphs(*binding, /*mac=*/true);
+#else
+            command.shortcut = FormatKeyGlyphs(*binding, /*mac=*/false);
+#endif
+        }
+    }
     command_palette_->Show(std::move(tabs), std::move(spaces), std::move(bookmarks),
-                           std::move(commands), std::move(reports));
+                           std::move(commands), std::move(reports), std::move(tab_visuals));
+}
+
+std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
+    return {{.id = "sleep_inactive_tabs",
+             .title = "Sleep inactive tabs now",
+             .icon = PaletteRowIcon::kMoon},
+            {.id = std::string(kChangeSpaceIconCommandId),
+             .title = "Change space icon\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kPalette},
+            {.id = "agent_tasks",
+             .title = "Agent tasks",
+             .icon = PaletteRowIcon::kSparkles,
+             .shortcut_action_id = "toggle_agent"},
+            {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles},
+            {.id = "ask_about_page",
+             .title = "Ask about page\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kSparkles},
+            {.id = "collect_from_tabs",
+             .title = "Collect from tabs\xE2\x80\xA6",
+             .icon = PaletteRowIcon::kTable}};
 }
 
 void BrowserWindow::ShowSpaceIconPicker() {
@@ -4900,11 +5641,10 @@ void BrowserWindow::ScheduleSpaceIconPicker() {
         return;
     }
     // Runs after the palette's released overlay has been destroyed by its posted task (FIFO).
-    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
-                            [](CefRefPtr<BrowserWindow> window) {
-                                window->RunScheduledSpaceIconPicker();
-                            },
-                            CefRefPtr<BrowserWindow>(this))));
+    CefPostTask(TID_UI,
+                CefCreateClosureTask(base::BindOnce(
+                    [](CefRefPtr<BrowserWindow> window) { window->RunScheduledSpaceIconPicker(); },
+                    CefRefPtr<BrowserWindow>(this))));
 }
 
 void BrowserWindow::RunScheduledSpaceIconPicker() {
@@ -5002,11 +5742,11 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
             OpenHistory(selection.history);
             break;
         case PaletteEntryKind::kCommand:
-            if (selection.command.id == "sleep_inactive_tabs") {
-                static_cast<void>(SleepInactiveTabsNow());
-            } else if (selection.command.id == kChangeSpaceIconCommandId) {
+            if (selection.command.id == kChangeSpaceIconCommandId) {
                 ScheduleSpaceIconPicker();
                 return;  // the picker keeps the focus
+            } else {
+                RunPaletteCommand(selection.command.id);
             }
             break;
         case PaletteEntryKind::kReport:
@@ -5047,17 +5787,263 @@ void BrowserWindow::SavePrefs() const {
     static_cast<void>(PrefsStore::Save(PrefsStore::DefaultPrefsFilePath(), prefs_));
 }
 
-// Pushes the provider name, the activity and the shortcut keycap to Native's Agent entry. Queue
-// progress and the "needs you" state are not produced on this branch.
+void BrowserWindow::AddTrustedSite(std::string host) {
+    const std::vector<std::string> normalized = NormalizeTrustedSites({std::move(host)});
+    if (normalized.empty() ||
+        std::find(prefs_.agent_trusted_sites.begin(), prefs_.agent_trusted_sites.end(),
+                  normalized.front()) != prefs_.agent_trusted_sites.end()) {
+        return;
+    }
+    prefs_.agent_trusted_sites.push_back(normalized.front());
+    SavePrefs();
+    ScheduleLocalPagesRender();
+}
+
+std::chrono::steady_clock::time_point BrowserWindow::ConfirmationNow() const {
+    return std::chrono::steady_clock::now() + confirmation_clock_offset_;
+}
+
+namespace {
+
+// The origin a card is raised for: the page's committed URL, or its start URL before the first
+// load.
+std::string AgentTabOrigin(const Tab& tab) {
+    const std::string& url = tab.navigation_state().snapshot().url;
+    return FaviconOrigin(url.empty() ? tab.startup_url() : url);
+}
+
+}  // namespace
+
+void BrowserWindow::ShowConfirmation(agent::ConfirmationRequest request,
+                                     std::function<void(agent::ConfirmationAnswer)> done) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        done(agent::ConfirmationAnswer::kWithdrawn);
+        return;
+    }
+    // The card belongs to the tab the action targets: the one ResolveAgentTab names now, which is
+    // the Plan's agent page during a research and the active tab otherwise. The card keeps that
+    // tab's identity, not its position, and is marked "waiting for you" there.
+    const AgentTabLookup lookup = ResolveAgentTab(request.tab);
+    if (!lookup.tab.has_value()) {
+        done(agent::ConfirmationAnswer::kWithdrawn);
+        return;
+    }
+    const Space& space = spaces_[lookup.tab->space];
+    const Tab& tab = space.tabs()[lookup.tab->tab];
+    pending_confirmations_.push_back({.request = std::move(request),
+                                      .done = std::move(done),
+                                      .deadline = ConfirmationNow() + kConfirmationTimeout,
+                                      .tab_id = tab.id(),
+                                      .space_id = space.id(),
+                                      .origin = AgentTabOrigin(tab)});
+    // The panel is not opened: the agent dot and the Agent button dot tell the person.
+    ArmConfirmationTimer();
+    RefreshConfirmationUi();
+}
+
+void BrowserWindow::ShowConfirmationFixtureForDev() {
+    ShowConfirmation({.id = "dev1",
+                      .tool = "browser_click",
+                      .summary = "Click \"Place order\" and submit the checkout form",
+                      .host = "shop.example",
+                      .tab = std::nullopt,
+                      .trusted_allowed = true},
+                     [](agent::ConfirmationAnswer answer) {
+                         fprintf(stderr, "island-dev: confirmation answered %d\n",
+                                 static_cast<int>(answer));
+                     });
+}
+
+void BrowserWindow::AnswerConfirmation(std::string_view id, agent::ConfirmationAnswer answer) {
+    CEF_REQUIRE_UI_THREAD();
+    for (std::size_t index = 0; index < pending_confirmations_.size(); ++index) {
+        const agent::ConfirmationRequest& request = pending_confirmations_[index].request;
+        if (request.id != id) {
+            continue;
+        }
+        // The action runs with the tab index the request named, so a card whose tab moved is
+        // withdrawn instead of acting on whatever sits at that index now. This check comes first:
+        // a withdrawn card must not save a trusted site either.
+        const bool grants = answer == agent::ConfirmationAnswer::kTrustSite ||
+                            answer == agent::ConfirmationAnswer::kAllowForTask;
+        if (answer != agent::ConfirmationAnswer::kCancel &&
+            !ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
+            answer = agent::ConfirmationAnswer::kWithdrawn;
+        } else if (grants && !request.trusted_allowed) {
+            answer = agent::ConfirmationAnswer::kCancel;
+        } else if (answer == agent::ConfirmationAnswer::kTrustSite) {
+            AddTrustedSite(request.host);
+        }
+        FinishConfirmation(index, answer);
+        return;
+    }
+}
+
+bool BrowserWindow::ConfirmationTargetIsCurrent(const PendingConfirmation& pending) const {
+    // The action re-resolves the card's tab when it runs, so the card is current only while that
+    // same resolution still names the tab it was raised for. Viewing another tab or space does not
+    // change the resolution of a card for the research page; a reshuffled index does.
+    const AgentTabLookup lookup = ResolveAgentTab(pending.request.tab);
+    if (!lookup.tab.has_value()) {
+        return false;
+    }
+    const Space& space = spaces_[lookup.tab->space];
+    const Tab& tab = space.tabs()[lookup.tab->tab];
+    return space.id() == pending.space_id && tab.id() == pending.tab_id &&
+           AgentTabOrigin(tab) == pending.origin;
+}
+
+void BrowserWindow::CancelStaleConfirmations() {
+    for (std::size_t index = 0; index < pending_confirmations_.size();) {
+        if (ConfirmationTargetIsCurrent(pending_confirmations_[index])) {
+            ++index;
+        } else {
+            FinishConfirmation(index, agent::ConfirmationAnswer::kWithdrawn);
+        }
+    }
+}
+
+void BrowserWindow::FinishConfirmation(std::size_t index, agent::ConfirmationAnswer answer) {
+    std::function<void(agent::ConfirmationAnswer)> done =
+        std::move(pending_confirmations_[index].done);
+    pending_confirmations_.erase(pending_confirmations_.begin() +
+                                 static_cast<std::ptrdiff_t>(index));
+    RefreshConfirmationUi();
+    if (done) {
+        done(answer);
+    }
+}
+
+void BrowserWindow::CancelPendingConfirmations() {
+    while (!pending_confirmations_.empty()) {
+        FinishConfirmation(pending_confirmations_.size() - 1,
+                           agent::ConfirmationAnswer::kWithdrawn);
+    }
+}
+
+void BrowserWindow::ExpireConfirmations() {
+    const std::chrono::steady_clock::time_point now = ConfirmationNow();
+    for (std::size_t index = 0; index < pending_confirmations_.size();) {
+        if (pending_confirmations_[index].deadline <= now) {
+            FinishConfirmation(index, agent::ConfirmationAnswer::kTimeout);
+        } else {
+            ++index;
+        }
+    }
+}
+
+void BrowserWindow::AdvanceConfirmationClockForTest(std::chrono::seconds elapsed) {
+    confirmation_clock_offset_ += elapsed;
+    ExpireConfirmations();
+}
+
+void BrowserWindow::ArmConfirmationTimer() {
+    // Without a chrome there is no running message loop (headless tests drive the clock by hand).
+    if (confirmation_timer_armed_ || pending_confirmations_.empty() || closing_ ||
+        chrome_ == nullptr) {
+        return;
+    }
+    confirmation_timer_armed_ = true;
+    CefPostDelayedTask(TID_UI,
+                       CefCreateClosureTask(base::BindOnce(&BrowserWindow::OnConfirmationTick,
+                                                           CefRefPtr<BrowserWindow>(this))),
+                       1000);
+}
+
+void BrowserWindow::OnConfirmationTick() {
+    confirmation_timer_armed_ = false;
+    if (closing_) {
+        return;
+    }
+    ExpireConfirmations();
+    ArmConfirmationTimer();
+}
+
+void BrowserWindow::RefreshConfirmationUi() {
+    if (closing_) {
+        return;
+    }
+    RefreshAddressIndicators();
+    if (chrome_ != nullptr) {
+        chrome_->SetAgentNeedsYou(!pending_confirmations_.empty());
+    }
+    SyncQueueWaiting();
+    ScheduleLocalPagesRender();
+}
+
+json::Value BrowserWindow::ConfirmationsStateJson() const {
+    json::Value list = json::Value::MakeArray();
+    for (const PendingConfirmation& pending : pending_confirmations_) {
+        list.Push(json::Value::MakeObject()
+                      .Set("id", json::Value::String(pending.request.id))
+                      .Set("summary", json::Value::String(pending.request.summary))
+                      .Set("host", json::Value::String(pending.request.host))
+                      .Set("trusted_allowed", json::Value::Bool(pending.request.trusted_allowed)));
+    }
+    return list;
+}
+
+json::Value BrowserWindow::TrustedSitesJson() const {
+    json::Value list = json::Value::MakeArray();
+    for (const std::string& host : prefs_.agent_trusted_sites) {
+        list.Push(json::Value::String(host));
+    }
+    return list;
+}
+
+void BrowserWindow::HandleConfirmMessage(const json::Value& message) {
+    const std::string_view answer = message.StringOr("answer", "");
+    std::optional<agent::ConfirmationAnswer> parsed;
+    if (answer == "once") {
+        parsed = agent::ConfirmationAnswer::kAllowOnce;
+    } else if (answer == "task") {
+        parsed = agent::ConfirmationAnswer::kAllowForTask;
+    } else if (answer == "trust") {
+        parsed = agent::ConfirmationAnswer::kTrustSite;
+    } else if (answer == "cancel") {
+        parsed = agent::ConfirmationAnswer::kCancel;
+    }
+    if (parsed.has_value()) {
+        AnswerConfirmation(message.StringOr("id", ""), *parsed);
+    }
+}
+
+void BrowserWindow::RemoveTrustedSite(std::string_view host) {
+    const std::vector<std::string> normalized = NormalizeTrustedSites({std::string(host)});
+    if (normalized.empty() || std::erase(prefs_.agent_trusted_sites, normalized.front()) == 0) {
+        return;
+    }
+    SavePrefs();
+    ScheduleLocalPagesRender();
+}
+
+// Pushes the provider, task progress, activity and shortcut keycap to Native's Agent entry.
 void BrowserWindow::RefreshAgentEntry() {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr) {
         return;
     }
     AgentEntryStatus status;
-    if (agent_session_ != nullptr && agent_session_->busy()) {
+    const bool needs_you =
+        !pending_confirmations_.empty() ||
+        (research_.has_value() && research_->awaiting_approval) ||
+        (agent_session_ != nullptr && agent_session_->pending_permission_count() != 0);
+    if (needs_you) {
+        status.activity = AgentActivity::kNeedsYou;
+    } else if (agent_session_ != nullptr && agent_session_->busy()) {
         status.activity = AgentActivity::kWorking;
     }
+    if (const agent::AgentTask* current = agent_queue_.current(); current != nullptr) {
+        const auto clamp_int = [](std::size_t value) {
+            return static_cast<int>(std::min<std::size_t>(
+                value, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+        };
+        status.queue_done = clamp_int(current->done);
+        status.queue_total = clamp_int(current->total);
+    }
+    status.queued_count = static_cast<int>(std::min<std::size_t>(
+        agent_queue_.queued_count(), static_cast<std::size_t>(std::numeric_limits<int>::max())));
     if (const agent::AgentProvider* provider =
             agent::FindAgentProvider(ResolvedAgent().provider_id)) {
         status.provider_name = std::string(provider->name);
@@ -5148,6 +6134,15 @@ bool BrowserWindow::ReaderAvailableForActiveTab() const {
 // The agent works on the active tab (the tools default to it), so its state is the window's
 // agent state: a prompt waiting for an answer beats a running turn.
 AgentTabState BrowserWindow::AgentStateForActiveTab() const {
+    // A confirmation card waiting on the active tab beats everything else, even without a session
+    // (an external MCP agent has none).
+    if (const Tab* active = active_tab(); active != nullptr) {
+        for (const PendingConfirmation& pending : pending_confirmations_) {
+            if (pending.tab_id == active->id()) {
+                return AgentTabState::kWaitingForYou;
+            }
+        }
+    }
     if (agent_session_ == nullptr || active_tab() == nullptr || !agent_session_->busy()) {
         return AgentTabState::kIdle;
     }
@@ -5193,6 +6188,39 @@ void BrowserWindow::OnWelcomeThemeChanged(ThemePreference preference) {
     static_cast<void>(SetThemePreference(preference));
     if (welcome_ != nullptr) {
         welcome_->ApplyTheme(ResolvedTokens(ResolvedChromeTheme()));
+    }
+}
+
+void BrowserWindow::OnOverlayFocusRingChanged() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    // The welcome and the palette share one neutral ring while shown; hiding either hands the
+    // window's ring back to the address field (ApplyAddressFocusColors decides which).
+    ApplyAddressFocusColors(window_, ResolvedTokens(ResolvedChromeTheme()));
+    window_->ThemeChanged();
+    ApplyPageViewVisibility();
+}
+
+bool BrowserWindow::OverlayFocusRingShown() const {
+    return (welcome_ != nullptr && welcome_->visible()) ||
+           (command_palette_ != nullptr && command_palette_->visible());
+}
+
+void BrowserWindow::ApplyPageViewVisibility() {
+    if (chrome_ == nullptr) {
+        return;
+    }
+    // Chromium's browser compositor can sit above a CefWindow overlay on macOS, so Native hides the
+    // attached page views behind the welcome scrim. The chrome and the welcome card stay laid out.
+    const bool welcome_visible = welcome_ != nullptr && welcome_->visible();
+    const bool hidden =
+        WelcomeHidesPageViews(ResolvedTokens(ResolvedChromeTheme()).look, welcome_visible);
+    for (const CefRefPtr<CefBrowserView>& view : chrome_->visible_browser_views()) {
+        if (view != nullptr) {
+            view->SetVisible(!hidden);
+        }
     }
 }
 

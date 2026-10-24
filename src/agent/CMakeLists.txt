@@ -58,10 +58,12 @@ island_add_version_target("${ISLAND_AGENT_REPO_ROOT}")
 
 add_library(island_agent STATIC
     acp_client.cc
+    action_gate.cc
     agent_endpoint.cc
     agent_process.cc
     agent_providers.cc
     agent_session.cc
+    agent_task_queue.cc
     agent_transcript.cc
     browser_tools.cc
     http_client.cc
@@ -80,7 +82,7 @@ target_include_directories(island_agent PUBLIC
 )
 target_link_libraries(island_agent PUBLIC Threads::Threads island_version)
 if(MSVC)
-    target_compile_options(island_agent PRIVATE /W4)
+    target_compile_options(island_agent PRIVATE /W4 /utf-8)
 else()
     # Designated initializers leave members defaulted on purpose.
     target_compile_options(island_agent PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
@@ -95,10 +97,12 @@ if(TARGET GTest::gtest_main)
     include(GoogleTest)
     add_executable(island_agent_tests
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/acp_client_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/action_gate_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_endpoint_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_process_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_providers_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_session_test.cpp"
+        "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_task_queue_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/agent_transcript_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/browser_tools_test.cpp"
         "${ISLAND_AGENT_REPO_ROOT}/tests/agent/json_util_test.cpp"
@@ -119,4 +123,16 @@ if(TARGET GTest::gtest_main)
     endif()
     add_dependencies(island_agent_tests island_mcp_bridge)
     gtest_discover_tests(island_agent_tests)
+    # Runs the gate's page helpers on DOM stand-ins. The test is always registered; the launcher
+    # reports SKIP when node is missing or older than 18, so ctest shows Skipped (not Not Run) and
+    # a real probe failure still fails.
+    find_program(ISLAND_NODE node)
+    add_test(NAME BrowserToolsFactsProbe
+             COMMAND "${CMAKE_COMMAND}"
+                     "-DNODE=${ISLAND_NODE}"
+                     "-DPROBE=${ISLAND_AGENT_REPO_ROOT}/tests/agent/facts_probe.cjs"
+                     "-DSOURCE=${ISLAND_AGENT_REPO_ROOT}/src/agent/browser_tools.cc"
+                     -P "${ISLAND_AGENT_REPO_ROOT}/tests/agent/run_facts_probe.cmake")
+    set_tests_properties(BrowserToolsFactsProbe PROPERTIES
+                         SKIP_REGULAR_EXPRESSION "FACTS_PROBE_SKIP")
 endif()

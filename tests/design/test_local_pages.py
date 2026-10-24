@@ -309,12 +309,45 @@ class ReportPage(unittest.TestCase):
         self.html = page("report.html")
         self.built = built_page("report.html")
 
+    def test_native_labels_are_sentence_case_system_text(self) -> None:
+        self.assertIn('root.setAttribute("data-look", theme.look || "")', self.html)
+        native = re.search(
+            r':root\[data-look="native"\] \.label,\s*'
+            r':root\[data-look="native"\] \.doc thead th\s*\{([^}]*)\}',
+            self.html,
+        )
+        self.assertIsNotNone(native)
+        self.assertIn("font: 600 11px/1.4 var(--font)", native.group(1))
+        self.assertIn("text-transform: none", native.group(1))
+
     def test_has_the_three_actions(self) -> None:
         self.assertIn(">Copy Markdown</button>", self.html)
-        self.assertIn(">Save as .md...</button>", self.html)
+        self.assertIn(">Export</button>", self.html)
         self.assertIn(">Continue in agent panel</button>", self.html)
-        for message in ("copy_report", "save_report", "continue_in_agent", '"open_url"'):
+        for message in ("copy_report", "export", "continue_in_agent", '"open_url"'):
             self.assertIn(message, self.html)
+
+    def test_export_menu_offers_csv_json_and_markdown(self) -> None:
+        self.assertIn('id="export-menu"', self.html)
+        for label in (">CSV (.csv)</button>", ">JSON (.json)</button>", ">Markdown (.md)</button>"):
+            self.assertIn(label, self.html)
+        for format_name in ("csv", "json", "md"):
+            self.assertIn(f'data-format="{format_name}"', self.html)
+        # CSV and JSON need a table: they are disabled, with the reason, when there is none.
+        self.assertIn("report.has_table", self.html)
+        self.assertIn("No table in this report", self.html)
+        self.assertIn('id="export-csv"', self.html)
+        self.assertIn('id="export-json"', self.html)
+        # The menu is neutral: no accent fill on hover or focus.
+        menu_css = self.html[self.html.index(".menu button:hover"):]
+        self.assertNotIn("var(--accent)", menu_css[:200])
+
+    def test_a_collection_shows_a_table_icon(self) -> None:
+        self.assertIn('report.kind === "collection"', self.html)
+        self.assertIn('id="kind-icon"', self.html)
+        # <svg> has no `hidden` IDL property: assigning it would leave the icon visible.
+        self.assertIn('toggleAttribute("hidden", !collection)', self.html)
+        self.assertNotIn("kind-icon\").hidden", self.html)
 
     def test_never_navigates_by_itself(self) -> None:
         for fragment in ("location", "window.open", "target=", "<form", "href=\""):
@@ -322,6 +355,16 @@ class ReportPage(unittest.TestCase):
         # Links go to native, which opens them in new tabs; only http(s) is forwarded.
         self.assertIn("event.preventDefault()", self.html)
         self.assertIn('/^https?:\\/\\//i.test(href)', self.html)
+
+    def test_a_first_h1_that_repeats_the_title_is_dropped_from_the_view_only(self) -> None:
+        self.assertIn("dropRepeatedTitle(report.title)", self.html)
+        drop = self.html[self.html.index("function dropRepeatedTitle") :][:420]
+        self.assertIn('doc.querySelector("h1")', drop)
+        self.assertIn("heading.remove()", drop)
+        self.assertIn("clean(heading.textContent) === clean(title)", drop)
+        # Copy and Export read the report's Markdown, not the rendered view, so they keep the H1.
+        self.assertIn('act("copy_report")', self.html)
+        self.assertNotIn("heading", self.html[self.html.index("function act(") :][:200])
 
     def test_report_text_only_reaches_the_dom_through_the_safe_renderer(self) -> None:
         self.assertIn("doc.innerHTML = islandMarkdown(report.markdown", self.html)
@@ -369,6 +412,41 @@ class PlanPage(unittest.TestCase):
         self.assertIn("PITCH_Y = 112", self.html)
         self.assertIn("PAD = 16", self.html)
         self.assertIn("radial-gradient(circle, var(--border-2) 1px", self.html)
+
+    def test_native_kickers_and_legend_are_sentence_case_system_text(self) -> None:
+        self.assertIn('root.setAttribute("data-look", theme.look || "")', self.html)
+        kicker = re.search(
+            r':root\[data-look="native"\] \.kicker\s*\{([^}]*)\}', self.html
+        )
+        legend = re.search(
+            r':root\[data-look="native"\] \.legend\s*\{([^}]*)\}', self.html
+        )
+        self.assertIsNotNone(kicker)
+        self.assertIsNotNone(legend)
+        self.assertIn("font: 700 10px/1.3 var(--font)", kicker.group(1))
+        self.assertIn("text-transform: none", kicker.group(1))
+        self.assertIn("font: 700 10px/1.3 var(--font)", legend.group(1))
+
+    def test_selected_node_and_row_use_a_neutral_plate_not_the_accent(self) -> None:
+        # Selection is a neutral plate (the owner's rule: accent only marks the active tab, the
+        # address focus ring, the agent's bubble and send button), so no blue ring or fill.
+        node = re.search(r'\.node\[aria-selected="true"\]\s*\{([^}]*)\}', self.html)
+        row = re.search(r'\.row\[aria-selected="true"\]\s*\{([^}]*)\}', self.html)
+        self.assertIsNotNone(node)
+        self.assertIsNotNone(row)
+        for rule in (node.group(1), row.group(1)):
+            with self.subTest(rule=rule):
+                self.assertIn("var(--segment-selected)", rule)
+                self.assertNotIn("--selection", rule)
+                self.assertNotIn("--accent", rule)
+        self.assertNotIn("#FFFFFF", row.group(1))
+
+    def test_join_chip_deduplicates_branch_letters(self) -> None:
+        join = self.html[self.html.index('if (node.kind === "join")') :]
+        join = join[: join.index('button.appendChild(chips)')]
+        self.assertIn("var letters = []", join)
+        self.assertIn("if (letters.indexOf(letter) < 0) letters.push(letter)", join)
+        self.assertIn('"Joins " + letters.join(" + ")', join)
 
     def test_branch_from_is_limited_by_the_depth_the_native_side_sends(self) -> None:
         self.assertIn("node.depth >= state.depth_limit", self.html)
@@ -614,6 +692,328 @@ class SettingsPage(unittest.TestCase):
         self.assertIn("min-width: 24px", keycap.group(0))
         self.assertIn("border-radius: 5px", keycap.group(0))
         self.assertIn("var(--border-2", keycap.group(0))
+
+    def test_primary_and_selected_states_are_neutral_not_the_accent(self) -> None:
+        # Owner rule: accent marks only the active tab, the address focus ring, the agent's bubble
+        # and the send button. Primary buttons, the selected radio, "on" switches, the range
+        # thumb and the selected swatch use the text colour (or a neutral plate), in every look.
+        html = page("settings.html")
+        css = html[html.index("<style>") : html.index("</style>")]
+        selected = re.compile(
+            r'\.primary|:checked|\[aria-pressed="true"\]|\.selected|\[aria-current|type="range"'
+        )
+        checked = 0
+        for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+            selector, body = match.group(1).strip(), match.group(2)
+            if not selected.search(selector):
+                continue
+            checked += 1
+            with self.subTest(selector=selector):
+                self.assertNotIn("var(--accent", body)
+                self.assertNotIn("var(--selection", body)
+        self.assertGreaterEqual(checked, 5)
+        self.assertIn(".btn.primary { background: var(--text); border-color: var(--text);", html)
+        self.assertIn('input[type="range"] { width: 180px; accent-color: var(--text); }', html)
+
+
+class AgentTasksStrip(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_renders_the_strip_with_move_remove_and_stop_controls(self) -> None:
+        self.assertIn('id="tasks"', self.html)
+        for glyph in ("\\u2191", "\\u2193", "\\u2715"):
+            with self.subTest(glyph=glyph):
+                self.assertIn(glyph, self.html)
+        self.assertIn('"Stop"', self.html)
+        self.assertIn('"Clear finished"', self.html)
+
+    def test_posts_the_documented_task_messages(self) -> None:
+        self.assertRegex(self.html, r'type: "task_move", id: task\.id, dir: "up"')
+        self.assertRegex(self.html, r'type: "task_move", id: task\.id, dir: "down"')
+        self.assertIn('type: "task_remove", id: task.id', self.html)
+        self.assertIn('type: "task_stop"', self.html)
+        self.assertIn('type: "tasks_clear_finished"', self.html)
+
+    def test_every_task_row_states_its_status_in_words(self) -> None:
+        # "Running · 3/7", "Queued · #1", "Needs you": colour is never the only cue.
+        self.assertIn('meta = "Running \\u00b7 " + task.done + "/" + task.total', self.html)
+        self.assertIn('meta = "Needs you \\u00b7 " + task.done + "/" + task.total', self.html)
+        self.assertIn('meta = "Queued \\u00b7 #" + task.position', self.html)
+        self.assertIn('waiting: "Needs you"', self.html)
+
+    def test_a_queued_message_shows_its_place_in_the_queue(self) -> None:
+        self.assertIn('"Queued \\u00b7 #"', self.html)
+
+    def test_the_composer_queues_instead_of_blocking_while_a_task_runs(self) -> None:
+        self.assertNotIn("if (!(state.session && state.session.busy)) submit", self.html)
+        self.assertIn('"Queue (Enter)"', self.html)
+
+    def test_strip_text_is_set_as_text_and_uses_theme_variables_only(self) -> None:
+        node = self.html[self.html.index("function taskNode") :][:1800]
+        self.assertNotIn("innerHTML", node)
+        css = self.html[self.html.index("/* Tasks strip") :][:2400]
+        css = css[: css.index("/* Composer */")]
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(css, r"rgba?\(")
+
+
+class AgentContextChip(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_the_page_chip_has_a_clear_button_and_a_quote_chip(self) -> None:
+        for fragment in ('id="context-clear"', 'id="quote-chip"', "state.context_chip"):
+            self.assertIn(fragment, self.html)
+
+    def test_clear_posts_clear_context(self) -> None:
+        clear = self.html[self.html.index('getElementById("context-clear").addEventListener') :]
+        clear = clear[: clear.index("});")]
+        self.assertIn('type: "clear_context"', clear)
+
+    def test_the_composer_focus_is_the_border_not_an_accent_ring(self) -> None:
+        self.assertRegex(self.html, r"textarea:focus-visible\s*\{\s*outline:\s*none")
+        self.assertRegex(self.html, r"\.composer:focus-within\s*\{\s*border-color:\s*var\(--text-2\)")
+        # Buttons take a neutral 2 px ring (a box-shadow that follows the radius), never blue.
+        focus = re.search(r"button:focus-visible, a:focus-visible, input:focus-visible\s*\{([^}]*)\}",
+                          self.html)
+        self.assertIsNotNone(focus)
+        self.assertIn("outline: none", focus.group(1))
+        self.assertIn("box-shadow: 0 0 0 2px var(--text-2)", focus.group(1))
+        self.assertNotIn("var(--accent)", focus.group(1))
+
+    def test_the_clear_button_sits_inside_the_page_chip_plate(self) -> None:
+        # The ✕ belongs to the page chip: one plate holds the share toggle and the clear button,
+        # and the clear button is never nested inside the toggle (that would be invalid HTML).
+        start = self.html.index('class="context-plate"')
+        plate = self.html[start : self.html.index("</div>", start)]
+        self.assertIn('id="context"', plate)
+        self.assertIn('id="context-clear"', plate)
+        toggle = plate[plate.index('id="context"') : plate.index("</button>", plate.index('id="context"'))]
+        self.assertNotIn('id="context-clear"', toggle)
+        self.assertRegex(self.html, r"\.context-plate \{[^}]*background: var\(--fill\)")
+        self.assertRegex(self.html, r"\.context \{[^}]*background: transparent")
+
+    def test_the_quote_is_set_as_text(self) -> None:
+        self.assertIn('getElementById("quote-text").textContent = quote', self.html)
+
+
+def agent_component_css(html: str) -> str:
+    """The agent page's CSS without its two pre-theme :root fallback blocks."""
+    css = html[html.index("<style>") : html.index("</style>")]
+    return re.sub(r":root[^{]*\{[^}]*\}", "", css)
+
+
+class AgentPanelLook(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_the_header_pill_has_amber_working_idle_and_plain_tones(self) -> None:
+        self.assertIn('class="status-pill" id="status-pill" data-tone="plain"', self.html)
+        self.assertRegex(self.html, r"\.status-pill\[data-tone=\"warn\"\][^{]*\{[^}]*var\(--warn-bg\)")
+        self.assertIn('"Waiting for approval"', self.html)
+        self.assertIn('"Working"', self.html)
+        self.assertIn('"Idle"', self.html)
+        self.assertIn('pills.setAttribute("data-tone", pill.tone)', self.html)
+        # The existing wording of the error and not-running states is kept.
+        self.assertIn("pill = { tone: \"plain\", text: session.status || \"\" }", self.html)
+
+    def test_the_send_button_is_round_and_takes_the_accent(self) -> None:
+        rule = re.search(r"\n\.send \{([^}]*)\}", self.html)
+        self.assertIsNotNone(rule)
+        self.assertIn("border-radius: 50%", rule.group(1))
+        self.assertIn("background: var(--accent)", rule.group(1))
+        self.assertIn("color: #FFF", rule.group(1))
+        self.assertRegex(self.html, r"\.send:disabled \{ opacity: \.4;")
+
+    def test_the_composer_placeholder_names_the_tab(self) -> None:
+        self.assertIn('placeholder="Ask about this tab or anything"', self.html)
+        self.assertNotIn("Ask anything, or tell it what to do", self.html)
+
+    def test_the_tab_chip_and_quote_chip_share_the_chip_style(self) -> None:
+        self.assertRegex(self.html, r"\.context-plate \{[^}]*height: 22px")
+        self.assertRegex(self.html, r"\.context-plate \{[^}]*border-radius: 5px")
+        self.assertRegex(self.html, r"\.quote-chip \{[^}]*height: 22px")
+        self.assertRegex(self.html, r"\.quote-chip \{[^}]*border-radius: 5px")
+
+    def test_only_neutral_focus_rules_exist(self) -> None:
+        css = agent_component_css(self.html)
+        for match in re.finditer(r"([^{}]*:focus[^{}]*)\{([^}]*)\}", css):
+            for outline in re.findall(r"outline:\s*([^;]+);", match.group(2)):
+                with self.subTest(selector=match.group(1).strip()):
+                    self.assertEqual(outline.strip(), "none")
+            self.assertNotIn("var(--accent)", match.group(2))
+
+    def test_component_css_uses_theme_variables_and_no_hex_but_white(self) -> None:
+        css = agent_component_css(self.html)
+        for match in re.finditer(r"(?<![\w-])#[0-9a-fA-F]{3,8}\b", css):
+            with self.subTest(color=match.group(0)):
+                self.assertIn(match.group(0).upper(), ("#FFF", "#FFFFFF"))
+
+    def test_the_send_button_stays_on_the_right_when_the_chip_row_is_hidden(self) -> None:
+        # With #chiprow hidden, the send button is the row's only child: it must still sit right.
+        rule = re.search(r"\n\.send \{([^}]*)\}", self.html)
+        self.assertIsNotNone(rule)
+        self.assertIn("margin-left: auto", rule.group(1))
+        self.assertIn('id="chiprow" hidden', self.html)
+
+    def test_a_queued_bubble_has_a_one_pixel_dashed_neutral_border(self) -> None:
+        self.assertIn(".user.queued .bubble { opacity: .65; border: 1px dashed var(--border-2); }", self.html)
+        self.assertNotIn("border-style: dashed", self.html)
+
+    def test_every_working_pill_pulses_whatever_the_session_state(self) -> None:
+        self.assertRegex(
+            self.html,
+            r'\.status-pill\[data-tone="busy"\] \.dot, [^{]*\{\s*animation: pulse',
+        )
+
+    def test_a_long_tool_name_ellipsizes_and_the_host_takes_the_rest(self) -> None:
+        name = re.search(r"\.tool \.name \{([^}]*)\}", self.html)
+        self.assertIsNotNone(name)
+        for fragment in ("overflow: hidden", "text-overflow: ellipsis", "min-width: 0", "max-width: 70%"):
+            self.assertIn(fragment, name.group(1))
+        self.assertRegex(self.html, r"\.tool \.host \{[^}]*flex: 1 1 0")
+
+    def test_a_collect_checkbox_rings_its_row_on_keyboard_focus(self) -> None:
+        self.assertIn(".collect-row:has(input:focus-visible) { box-shadow: 0 0 0 2px var(--text-2); }", self.html)
+
+    def test_an_mcp_tool_row_shows_the_tool_name_and_keeps_the_full_name_in_the_tooltip(self) -> None:
+        node = self.html[self.html.index("function toolNode") :][:1000]
+        self.assertIn('full.replace(/^mcp__\\S+?__(?=\\S)/, "")', node)
+        self.assertIn("node.title = title", node)
+        # The prefix regex strips the server only: a hyphenated server name still goes.
+        pattern = re.compile(r"^mcp__\S+?__(?=\S)")
+        self.assertEqual(pattern.sub("", "mcp__island-browser__page_read_text"), "page_read_text")
+        self.assertEqual(pattern.sub("", "page_snapshot"), "page_snapshot")
+
+    def test_the_tool_row_is_one_line_with_a_spoken_status(self) -> None:
+        node = self.html[self.html.index("function toolNode") :][:900]
+        self.assertIn('el("span", "name"', node)
+        self.assertIn('el("span", "host"', node)
+        self.assertIn('"visually-hidden"', node)
+        self.assertNotIn("innerHTML", node)
+
+
+class AgentConfirmationCard(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_the_card_sits_on_the_composer_inset_with_a_full_hairline(self) -> None:
+        self.assertIn("#confirmations { margin: 12px 12px 0; }", self.html)
+        card = re.search(r"\.card\.confirm-card \{([^}]*)\}", self.html)
+        self.assertIsNotNone(card)
+        self.assertIn("margin: 0", card.group(1))
+        self.assertIn("border: 1px solid var(--warn-border)", card.group(1))
+        self.assertRegex(self.html, r"\.composer \{ margin: 12px;")
+
+    def test_native_kicker_is_sentence_case_and_the_four_answers_form_even_rows(self) -> None:
+        self.assertIn('root.setAttribute("data-look", theme.look || "")', self.html)
+        kicker = re.search(r':root\[data-look="native"\] \.card\.confirm-card h4 \{([^}]*)\}', self.html)
+        self.assertIsNotNone(kicker)
+        self.assertIn("text-transform: none", kicker.group(1))
+        self.assertIn("var(--font)", kicker.group(1))
+        grid = re.search(r"\.confirm-card \.actions \{([^}]*)\}", self.html)
+        self.assertIsNotNone(grid)
+        self.assertIn("grid-template-columns: 1fr 1fr", grid.group(1))
+
+    def test_renders_the_confirm_card_with_its_four_buttons(self) -> None:
+        self.assertIn("confirm-card", self.html)
+        for label in ("Allow once", "Allow for this task", "Trust this site", "Cancel"):
+            with self.subTest(label=label):
+                self.assertIn('"' + label + '"', self.html)
+
+    def test_trust_and_task_are_offered_only_when_trusted_is_allowed(self) -> None:
+        self.assertIn("trusted_allowed", self.html)
+        self.assertRegex(self.html, r"if \(item\.trusted_allowed[^)]*\)")
+
+    def test_posts_the_documented_confirm_message(self) -> None:
+        self.assertIn('type: "confirm"', self.html)
+        for answer in ("once", "task", "trust", "cancel"):
+            with self.subTest(answer=answer):
+                self.assertIn('"' + answer + '"', self.html)
+
+    def test_escape_cancels_the_card_before_stopping_the_turn(self) -> None:
+        self.assertRegex(
+            self.html, r'post\(\{ type: "confirm", id: pending\[0\]\.id, answer: "cancel" \}\)'
+        )
+        self.assertRegex(
+            self.html,
+            r'event\.key === "Escape" && menu\.hidden && !event\.isComposing'
+            r' && cancelFirstConfirmation\(\)[\s\S]{0,120}\}, true\)',
+        )
+
+    def test_card_is_titled_per_spec_and_never_takes_focus(self) -> None:
+        self.assertIn('"Allow this action?"', self.html)
+        render = self.html[self.html.index("confirmSignature !== confirmRendered") :][:700]
+        self.assertNotIn(".focus()", render)
+
+    def test_card_text_is_set_as_text_and_uses_theme_variables_only(self) -> None:
+        node = self.html[self.html.index("function confirmationNode") :][:1200]
+        self.assertNotIn("innerHTML", node)
+        css = self.html[self.html.index(".confirm-card") :][:700]
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(css, r"rgba?\(")
+
+
+class AgentCollectSheet(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("agent.html")
+
+    def test_sheet_asks_what_to_collect_with_the_example_placeholder(self) -> None:
+        self.assertIn('id="collect-what"', self.html)
+        self.assertIn('placeholder="price, rating and delivery time for each product"', self.html)
+        self.assertIn('id="collect-scrim"', self.html)
+        self.assertIn('role="dialog"', self.html)
+
+    def test_tab_checklist_leaves_pinned_tabs_unchecked(self) -> None:
+        self.assertIn('box.checked = !tab.pinned', self.html)
+        self.assertIn('type: "collect"', self.html)
+        self.assertIn('"collect" in next', self.html)
+        self.assertIn("collect.seq === collectSeq", self.html)
+
+    def test_submit_needs_a_question_and_a_tab(self) -> None:
+        self.assertIn("!collectWhat.value.trim() || !collectChecked().length", self.html)
+        self.assertIn('id="collect-submit" type="submit" disabled', self.html)
+
+    def test_checkboxes_and_focus_are_neutral_not_blue(self) -> None:
+        self.assertIn("accent-color: var(--text)", self.html)
+        sheet_css = self.html[self.html.index(".collect-scrim {"):self.html.index("</style>")]
+        self.assertNotIn("var(--accent", sheet_css)
+        self.assertNotIn("var(--selection", sheet_css)
+
+    def test_tab_titles_are_text_nodes(self) -> None:
+        self.assertIn("title.textContent = tab.title || tab.url", self.html)
+        self.assertIn("url.textContent = tab.url", self.html)
+
+    def test_uppercase_label_rule_does_not_reach_the_tab_rows(self) -> None:
+        # The tab rows are <label> elements too: URLs must keep their case.
+        self.assertIn('.collect-sheet label[for="collect-what"]', self.html)
+        self.assertNotIn(".collect-sheet label,", self.html)
+        self.assertNotIn(".collect-sheet label {", self.html)
+
+    def test_each_checked_tab_is_sent_with_the_url_the_sheet_showed(self) -> None:
+        self.assertIn("box.dataset.url = tab.url", self.html)
+        self.assertIn('return { index: Number(box.value), url: box.dataset.url || "" };', self.html)
+        self.assertIn('post({ type: "collect", what: what, tabs: tabs });', self.html)
+
+
+class SettingsTrustedSites(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("settings.html")
+
+    def test_lists_trusted_sites_with_remove_buttons_and_the_documented_copy(self) -> None:
+        self.assertIn("Trusted sites", self.html)
+        self.assertIn(
+            "The agent can submit forms and run scripts on these sites without asking. "
+            "It never types passwords.",
+            self.html,
+        )
+        self.assertIn('type: "remove_trusted_site"', self.html)
+        self.assertIn("trusted_sites", self.html)
+
+    def test_remove_buttons_have_accessible_names(self) -> None:
+        window = self.html[self.html.index("renderTrustedSites") :][:1200]
+        self.assertIn("aria-label", window)
 
 
 class AgentMarkdownStatic(unittest.TestCase):

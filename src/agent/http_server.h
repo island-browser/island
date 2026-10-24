@@ -77,8 +77,14 @@ class LoopbackHttpServer {
     // Each connection gets a thread before it authenticates; beyond this many
     // open connections new ones are answered 503 and closed.
     static constexpr std::size_t kMaxConnections = 32;
-    // How long a connection waits for the handler before answering 504.
-    static constexpr int kHandlerTimeoutSeconds = 120;
+    // How long a connection waits for the handler before answering 504. A tool call may wait on
+    // a confirmation card (120 s), so the budget exceeds that by a margin: the caller gets the
+    // card's own timeout message, never a 504 while the card can still be approved.
+    static constexpr int kHandlerTimeoutSeconds = 150;
+    // How long a loopback client (the stdio MCP bridge) waits for a response. It must exceed the
+    // handler budget, or the client gives up while a card can still be approved and the action
+    // then runs after the caller was told the call failed.
+    static constexpr int kClientTimeoutSeconds = kHandlerTimeoutSeconds + 10;
 
   private:
     struct Shared;
