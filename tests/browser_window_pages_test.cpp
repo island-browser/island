@@ -54,6 +54,47 @@ CefRefPtr<BrowserWindow> MakeWindow() {
     return window;
 }
 
+class ScopedHome {
+  public:
+    explicit ScopedHome(const std::filesystem::path& home) {
+#if defined(_WIN32)
+        static_cast<void>(home);
+#else
+        const char* const saved = std::getenv("HOME");
+        if (saved != nullptr) saved_ = saved;
+        setenv("HOME", home.string().c_str(), 1);
+#endif
+    }
+
+    ~ScopedHome() {
+#if !defined(_WIN32)
+        if (saved_.has_value()) {
+            setenv("HOME", saved_->c_str(), 1);
+        } else {
+            unsetenv("HOME");
+        }
+#endif
+    }
+
+  private:
+    std::optional<std::string> saved_;
+};
+
+std::filesystem::path ChromeBookmarksPath() {
+#if defined(_WIN32)
+    return "AppData/Local/Google/Chrome/User Data/Default/Bookmarks";
+#elif defined(__APPLE__)
+    return "Library/Application Support/Google/Chrome/Default/Bookmarks";
+#else
+    return ".config/google-chrome/Default/Bookmarks";
+#endif
+}
+
+void WriteFile(const std::filesystem::path& path, std::string_view content) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << content;
+}
+
 const Space& SpaceAt(const BrowserWindow& window, std::size_t index) {
     return window.spaces()[index];
 }
@@ -552,6 +593,30 @@ TEST(BrowserWindowPagesTest, ArcSpacesImportAsPinnedSpaces) {
     EXPECT_TRUE(work.tabs()[0].pinned());
     EXPECT_EQ(window->active_space_index(), 0U);  // importing never steals focus
     EXPECT_EQ(window->ImportFromBrowser("netscape"), "Unknown import source.");
+}
+
+TEST(BrowserWindowPagesTest, ChromeImportReportsUnreadableProfileAfterPartialSuccess) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "This fixture changes HOME, which Windows import does not use.";
+#else
+    const std::filesystem::path home =
+        std::filesystem::temp_directory_path() / "island_chrome_partial_import";
+    std::error_code error;
+    std::filesystem::remove_all(home, error);
+    const std::filesystem::path user_data =
+        (home / ChromeBookmarksPath()).parent_path().parent_path();
+    WriteFile(
+        user_data / "Default/Bookmarks",
+        R"({"roots":{"bookmark_bar":{"children":[{"type":"url","url":"https://good.test/"}]}}})");
+    WriteFile(user_data / "Profile 1/Bookmarks", "not a Bookmarks file");
+
+    const ScopedHome scoped_home(home);
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_EQ(window->ImportFromBrowser("chrome"),
+              "Imported 1 bookmarks from Google Chrome. Find them in the command palette. "
+              "1 Chrome profile could not be read.");
+    std::filesystem::remove_all(home, error);
+#endif
 }
 
 // Answers updater requests from canned bodies keyed by a URL substring.

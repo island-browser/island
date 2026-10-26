@@ -252,8 +252,12 @@ std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path
     return sources;
 }
 
-std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
-                                                          const std::filesystem::path& base_home) {
+std::optional<std::vector<BookmarkItem>> ImportFromSource(
+    ImportSource source, const std::filesystem::path& base_home,
+    std::size_t* unreadable_chromium_profiles) {
+    if (unreadable_chromium_profiles != nullptr) {
+        *unreadable_chromium_profiles = 0;
+    }
     if (source == ImportSource::kFirefox) {
         return ImportFirefoxBookmarks(base_home);
     }
@@ -286,14 +290,21 @@ std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
         SourceBookmarksPaths(kChromiumSources[index], base_home);
     std::vector<BookmarkItem> items;
     bool parsed_any = false;
+    std::size_t unreadable_profiles = 0;
     for (const std::filesystem::path& path : paths) {
         const std::optional<std::vector<BookmarkItem>> profile_items = ReadAndParse(path);
-        if (!profile_items.has_value()) continue;
+        if (!profile_items.has_value()) {
+            ++unreadable_profiles;
+            continue;
+        }
         parsed_any = true;
         const std::size_t remaining = kMaxImportedBookmarks - items.size();
         const std::size_t count = std::min(remaining, profile_items->size());
         items.insert(items.end(), profile_items->begin(), profile_items->begin() + count);
         if (items.size() == kMaxImportedBookmarks) break;
+    }
+    if (unreadable_chromium_profiles != nullptr) {
+        *unreadable_chromium_profiles = unreadable_profiles;
     }
     return parsed_any ? std::optional<std::vector<BookmarkItem>>(std::move(items)) : std::nullopt;
 }

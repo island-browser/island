@@ -5,6 +5,7 @@
 #include <sqlite3.h>
 #endif
 
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -330,6 +331,44 @@ TEST(BrowserImportTest, FirefoxPlacesPrefersProfilesIniDefaultThenNewestDatabase
     ASSERT_EQ(imported->size(), 1U);
     EXPECT_EQ((*imported)[0].url, "https://alternate.test/");
     std::filesystem::remove_all(home);
+#endif
+}
+
+TEST(BrowserImportTest, FirefoxPlacesPrefersInstallDefaultOverProfileDefaultInEitherOrder) {
+#if !defined(ISLAND_HAS_SQLITE3)
+    GTEST_SKIP() << "SQLite is unavailable in this toolchain.";
+#else
+    const std::array<std::string, 2> ini_files{
+        "[Profile0]\nPath=Profiles/a.profile-default\nIsRelative=1\nDefault=1\n\n"
+        "[InstallABC]\nDefault=Profiles/b.install-default\n",
+        "[InstallABC]\nDefault=Profiles/b.install-default\n\n"
+        "[Profile0]\nPath=Profiles/a.profile-default\nIsRelative=1\nDefault=1\n"};
+    for (std::size_t index = 0; index < ini_files.size(); ++index) {
+        const std::filesystem::path home =
+            TempHome("firefox_install_choice_" + std::to_string(index));
+#if defined(_WIN32)
+        const std::filesystem::path root = home / "AppData/Roaming/Mozilla/Firefox";
+#elif defined(__APPLE__)
+        const std::filesystem::path root = home / "Library/Application Support/Firefox";
+#else
+        const std::filesystem::path root = home / ".mozilla/firefox";
+#endif
+        const std::filesystem::path profile_default =
+            root / "Profiles/a.profile-default/places.sqlite";
+        const std::filesystem::path install_default =
+            root / "Profiles/b.install-default/places.sqlite";
+        WriteFirefoxPlaces(profile_default);
+        WriteFirefoxPlaces(install_default, "https://alternate.test/");
+        WriteFile(root / "profiles.ini", ini_files[index]);
+
+        SCOPED_TRACE(index);
+        EXPECT_EQ(FindFirefoxPlacesDatabase(home), install_default);
+        const auto imported = ImportFromSource(ImportSource::kFirefox, home);
+        ASSERT_TRUE(imported.has_value());
+        ASSERT_EQ(imported->size(), 1U);
+        EXPECT_EQ((*imported)[0].url, "https://alternate.test/");
+        std::filesystem::remove_all(home);
+    }
 #endif
 }
 

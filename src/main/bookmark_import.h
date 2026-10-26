@@ -63,9 +63,12 @@ std::optional<std::vector<BookmarkItem>> ParseChromiumBookmarks(std::string_view
 
 // Reads and parses one source. nullopt when the file is missing, unreadable,
 // unrecognized, or the platform seam cannot read this source (Safari off
-// macOS). Never throws.
-std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
-                                                          const std::filesystem::path& base_home);
+// macOS). When supplied, |unreadable_chromium_profiles| receives the number
+// of Chrome-family profile files that existed but could not be read or parsed.
+// Never throws.
+std::optional<std::vector<BookmarkItem>> ImportFromSource(
+    ImportSource source, const std::filesystem::path& base_home,
+    std::size_t* unreadable_chromium_profiles = nullptr);
 
 // Platform seam, mirroring the sidebar-hover seam: a macOS implementation in
 // src/main/macos/bookmark_import_mac.mm reads the Safari bookmarks plist via

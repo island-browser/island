@@ -2813,8 +2813,9 @@ BrowserWindow::BookmarkImportResult BrowserWindow::ImportBookmarksFromBrowser(
             break;
         }
     }
+    std::size_t unreadable_chromium_profiles = 0;
     const std::optional<std::vector<BookmarkItem>> items =
-        ImportFromSource(*source, UserBaseHome());
+        ImportFromSource(*source, UserBaseHome(), &unreadable_chromium_profiles);
     if (!items.has_value()) {
         return {.ok = false, .text = "Could not read " + name + " bookmarks."};
     }
@@ -2826,10 +2827,15 @@ BrowserWindow::BookmarkImportResult BrowserWindow::ImportBookmarksFromBrowser(
         return {.ok = false, .durable_failure = true, .text = merged.message};
     }
     const std::size_t added = merged.added;
-    return {.ok = true,
-            .text = added == 0 ? "No new bookmarks in " + name + "."
-                               : "Imported " + std::to_string(added) + " bookmarks from " + name +
-                                     ". Find them in the command palette."};
+    std::string text = added == 0 ? "No new bookmarks in " + name + "."
+                                  : "Imported " + std::to_string(added) + " bookmarks from " +
+                                        name + ". Find them in the command palette.";
+    if (unreadable_chromium_profiles != 0) {
+        const std::string source_name = *source == ImportSource::kChrome ? "Chrome" : name;
+        text += " " + std::to_string(unreadable_chromium_profiles) + " " + source_name +
+                " profile" + (unreadable_chromium_profiles == 1 ? "" : "s") + " could not be read.";
+    }
+    return {.ok = true, .text = std::move(text)};
 }
 
 bool BrowserWindow::ReopenClosedTab() {

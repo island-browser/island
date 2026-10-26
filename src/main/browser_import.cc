@@ -73,7 +73,11 @@ bool IsMacOrWindowsFirefox() {
 
 struct FirefoxProfile {
     std::filesystem::path path;
-    bool preferred = false;
+    enum class Priority {
+        kNone,
+        kProfileDefault,
+        kInstallDefault,
+    } priority = Priority::kNone;
 };
 
 std::vector<FirefoxProfile> FirefoxProfileDirectories(const std::filesystem::path& home) {
@@ -98,7 +102,7 @@ std::vector<FirefoxProfile> FirefoxProfileDirectories(const std::filesystem::pat
                               std::istreambuf_iterator<char>());
         std::string section;
         bool relative = true;
-        bool preferred = false;
+        FirefoxProfile::Priority priority = FirefoxProfile::Priority::kNone;
         std::string path;
         const auto add_profile = [&] {
             if (path.empty()) return;
@@ -109,9 +113,9 @@ std::vector<FirefoxProfile> FirefoxProfileDirectories(const std::filesystem::pat
                 profiles.begin(), profiles.end(),
                 [&candidate](const FirefoxProfile& profile) { return profile.path == candidate; });
             if (found == profiles.end()) {
-                profiles.push_back({.path = candidate, .preferred = preferred});
-            } else if (preferred) {
-                found->preferred = true;
+                profiles.push_back({.path = candidate, .priority = priority});
+            } else if (priority > found->priority) {
+                found->priority = priority;
             }
         };
         std::size_t start = 0;
@@ -125,7 +129,7 @@ std::vector<FirefoxProfile> FirefoxProfileDirectories(const std::filesystem::pat
                 section = std::string(line);
                 path.clear();
                 relative = true;
-                preferred = false;
+                priority = FirefoxProfile::Priority::kNone;
             } else if (line.rfind("Path=", 0) == 0) {
                 path = std::string(line.substr(5));
             } else if (line.rfind("Default=", 0) == 0) {
@@ -133,9 +137,9 @@ std::vector<FirefoxProfile> FirefoxProfileDirectories(const std::filesystem::pat
                 if (section.rfind("[Install", 0) == 0) {
                     path = std::string(value);
                     relative = true;
-                    preferred = true;
+                    priority = FirefoxProfile::Priority::kInstallDefault;
                 } else if (value == "1") {
-                    preferred = true;
+                    priority = FirefoxProfile::Priority::kProfileDefault;
                 }
             } else if (line == "IsRelative=0") {
                 relative = false;
@@ -393,20 +397,25 @@ std::filesystem::path FindFirefoxBookmarksBackup(const std::filesystem::path& ba
 }
 
 std::filesystem::path FindFirefoxPlacesDatabase(const std::filesystem::path& base_home) {
+    FirefoxProfile::Priority selected_priority = FirefoxProfile::Priority::kNone;
+    std::filesystem::path selected;
     std::filesystem::path newest;
     std::filesystem::file_time_type newest_time{};
     for (const FirefoxProfile& profile : FirefoxProfileDirectories(base_home)) {
         const std::filesystem::path database = profile.path / "places.sqlite";
         std::error_code ec;
         if (!std::filesystem::is_regular_file(database, ec)) continue;
-        if (profile.preferred) return database;
+        if (profile.priority > selected_priority) {
+            selected = database;
+            selected_priority = profile.priority;
+        }
         const auto time = std::filesystem::last_write_time(database, ec);
         if (newest.empty() || (!ec && time > newest_time)) {
             newest = database;
             newest_time = time;
         }
     }
-    return newest;
+    return selected_priority == FirefoxProfile::Priority::kNone ? newest : selected;
 }
 
 std::optional<std::vector<BookmarkItem>> ImportFirefoxBookmarks(
