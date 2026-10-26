@@ -3,10 +3,12 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 
+#include "address_input.h"
 #include "search_provider.h"
 
 namespace island {
@@ -15,7 +17,11 @@ namespace {
 constexpr std::array<SearchEngine, 3> kSearchEngines = {{
     {SearchEngineId::kGoogle, "google", "Google", "https://www.google.com/search?q="},
     {SearchEngineId::kDuckDuckGo, "duckduckgo", "DuckDuckGo", "https://duckduckgo.com/?q="},
-    {SearchEngineId::kYandex, "yandex", "Yandex", "https://yandex.com/search/?text="},
+    {SearchEngineId::kYandex,
+     "yandex",
+     "Yandex",
+     "https://yandex.com/search/?text=",
+     {"yandex.ru", "ya.ru"}},
 }};
 
 [[nodiscard]] constexpr bool IsEdgeWhitespace(char character) noexcept {
@@ -72,6 +78,59 @@ constexpr int kFirstHexLetterValue = 10;
     return decoded;
 }
 
+// Code points that must not reach a single-line address field: C0 and C1 controls (DEL included),
+// LRM and RLM, the embedding and override controls U+202A..U+202E and the isolates U+2066..U+2069.
+// The last groups reorder text on screen, which can disguise the rest of an address.
+[[nodiscard]] constexpr bool IsDisplayHostile(std::uint32_t code_point) noexcept {
+    return code_point < 0x20 || (code_point >= 0x7F && code_point <= 0x9F) ||
+           code_point == 0x200E || code_point == 0x200F ||
+           (code_point >= 0x202A && code_point <= 0x202E) ||
+           (code_point >= 0x2066 && code_point <= 0x2069);
+}
+
+// True when `text` is well-formed UTF-8 (no overlong forms, surrogates or values past U+10FFFF)
+// and has no display-hostile code point.
+[[nodiscard]] bool IsShowableQuery(std::string_view text) noexcept {
+    std::size_t index = 0;
+    while (index < text.size()) {
+        const auto lead = static_cast<std::uint8_t>(text[index]);
+        std::size_t length = 1;
+        std::uint32_t code_point = lead;
+        if (lead >= 0x80) {
+            if (lead >= 0xC2 && lead <= 0xDF) {
+                length = 2;
+                code_point = lead & 0x1FU;
+            } else if (lead >= 0xE0 && lead <= 0xEF) {
+                length = 3;
+                code_point = lead & 0x0FU;
+            } else if (lead >= 0xF0 && lead <= 0xF4) {
+                length = 4;
+                code_point = lead & 0x07U;
+            } else {
+                return false;
+            }
+        }
+        if (index + length > text.size()) {
+            return false;
+        }
+        for (std::size_t offset = 1; offset < length; ++offset) {
+            const auto continuation = static_cast<std::uint8_t>(text[index + offset]);
+            if ((continuation & 0xC0U) != 0x80U) {
+                return false;
+            }
+            code_point = (code_point << 6U) | (continuation & 0x3FU);
+        }
+        const bool overlong =
+            (length == 3 && code_point < 0x800) || (length == 4 && code_point < 0x10000);
+        const bool surrogate = code_point >= 0xD800 && code_point <= 0xDFFF;
+        if (overlong || surrogate || code_point > 0x10FFFF || IsDisplayHostile(code_point)) {
+            return false;
+        }
+        index += length;
+    }
+    return true;
+}
+
 [[nodiscard]] bool IsBlank(std::string_view text) noexcept {
     for (const char character : text) {
         if (!IsEdgeWhitespace(character)) {
@@ -101,6 +160,19 @@ struct ResultsPageShape {
         // Drop the '?' and the trailing '='.
         .param = tail.substr(question + 1, tail.size() - question - 2),
     };
+}
+
+// The engine's own host or one of its regional results hosts, ASCII case ignored.
+[[nodiscard]] bool HostMatches(const SearchEngine& engine, std::string_view authority) noexcept {
+    if (EqualsAsciiIgnoreCase(authority, ShapeOf(engine).host)) {
+        return true;
+    }
+    for (const std::string_view host : engine.extra_results_hosts) {
+        if (!host.empty() && EqualsAsciiIgnoreCase(authority, host)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 }  // namespace
@@ -156,7 +228,7 @@ std::optional<std::string> SearchQueryFromResultsUrl(std::string_view url) {
 
     for (const SearchEngine& engine : kSearchEngines) {
         const ResultsPageShape shape = ShapeOf(engine);
-        if (!EqualsAsciiIgnoreCase(authority, shape.host) || path != shape.path) {
+        if (!HostMatches(engine, authority) || path != shape.path) {
             continue;
         }
         std::string_view remaining = query;
@@ -170,7 +242,10 @@ std::optional<std::string> SearchQueryFromResultsUrl(std::string_view url) {
                 continue;
             }
             std::string decoded = DecodeQueryValue(pair.substr(equals + 1));
-            if (IsBlank(decoded)) {
+            // The field shows the query as text, so a query that would read as an address (or
+            // that reorders or hides characters) is not shown; the URL is.
+            if (IsBlank(decoded) || !IsShowableQuery(decoded) ||
+                ClassifyAddressInput(decoded).kind != AddressInputKind::kSearch) {
                 return std::nullopt;
             }
             return decoded;

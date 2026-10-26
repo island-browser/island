@@ -18,9 +18,9 @@ Click a mode in the segmented control, or press Tab (Shift+Tab goes back) while 
 2. Type what you want, or paste an address.
 3. Press Enter.
 
-To change the engine (Google, DuckDuckGo or Yandex), go to **Settings > General > Search**. The address field uses the same engine.
+To change the engine (Google, DuckDuckGo or Yandex), go to **Settings > General > Search**. The address field uses the same engine. Enter always searches with the engine set in Settings, even on a results page from another engine.
 
-While the page is the results page of a search engine, the address field shows your search query instead of the long results address. Click the field to edit the query and press Enter to search again. Copy URL still copies the full results address. Once you open a result, the field shows that page's address again.
+While the page is the results page of a search engine, the address field shows your search query instead of the long results address. Click the field to edit the query and press Enter to search again. If the query would look like a web address, or contains hidden characters, the field shows the full results address instead. Copy URL still copies the full results address. Once you open a result, the field shows that page's address again.
 
 An empty address field shows "Search or enter address" as a grey hint. The hint is not text: you cannot copy it.
 

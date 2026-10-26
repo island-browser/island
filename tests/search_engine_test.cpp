@@ -2,8 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace island {
 namespace {
@@ -120,6 +122,91 @@ TEST(SearchEngineTest, GivenAQueryWhenBuiltThenReadingTheUrlBackGivesTheQuery) {
         EXPECT_EQ(SearchQueryFromResultsUrl(BuildSearchUrl(engine, "a&b=c+d #e/\xC3\xA9 100%")),
                   "a&b=c+d #e/\xC3\xA9 100%")
             << engine.key;
+    }
+}
+
+TEST(SearchEngineTest, GivenAQueryThatReadsAsAnAddressWhenReadThenTheUrlIsShown) {
+    // A link to a results page must not make the address field show another origin.
+    EXPECT_EQ(SearchQueryFromResultsUrl(
+                  "https://www.google.com/search?q=https%3A%2F%2Fbank.example%2Flogin"),
+              std::nullopt);
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=bank.example%2Flogin"),
+              std::nullopt);
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=javascript%3Aalert(1)"),
+              std::nullopt);
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://duckduckgo.com/?q=localhost%3A3000"),
+              std::nullopt);
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=google.com"),
+              std::nullopt);
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island"), "island");
+}
+
+TEST(SearchEngineTest, GivenAControlCharacterInTheQueryWhenReadThenTheUrlIsShown) {
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%0Abrowser"),
+              std::nullopt);  // LF
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%00browser"),
+              std::nullopt);  // NUL
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%09browser"),
+              std::nullopt);  // TAB
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%7Fbrowser"),
+              std::nullopt);  // DEL
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%C2%85browser"),
+              std::nullopt);  // U+0085, C1
+}
+
+TEST(SearchEngineTest, GivenABidiOrFormatControlInTheQueryWhenReadThenTheUrlIsShown) {
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%8Ebrowser"),
+              std::nullopt);  // U+200E LRM
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%8Fbrowser"),
+              std::nullopt);  // U+200F RLM
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%AAbrowser"),
+              std::nullopt);  // U+202A LRE
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%AEbrowser"),
+              std::nullopt);  // U+202E RLO
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%81%A6browser"),
+              std::nullopt);  // U+2066 LRI
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%81%A9browser"),
+              std::nullopt);  // U+2069 PDI
+}
+
+TEST(SearchEngineTest, GivenInvalidUtf8InTheQueryWhenReadThenTheUrlIsShown) {
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%FFbrowser"),
+              std::nullopt);  // lone continuation-invalid lead byte
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=caf%C3"),
+              std::nullopt);  // truncated sequence
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=a%C0%AFb"),
+              std::nullopt);  // overlong
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=a%ED%A0%80b"),
+              std::nullopt);  // UTF-16 surrogate
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=a%F4%90%80%80b"),
+              std::nullopt);  // above U+10FFFF
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=caf%C3%A9%20%F0%9F%8C%8A"),
+              "caf\xC3\xA9 \xF0\x9F\x8C\x8A");  // valid multi-byte text is still shown
+}
+
+TEST(SearchEngineTest, GivenYandexRegionalResultsUrlsWhenReadThenTheirQueryIsShown) {
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://yandex.ru/search/?text=island+browser"),
+              "island browser");
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://ya.ru/search/?text=island+browser&lr=213"),
+              "island browser");
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://YANDEX.RU/search/?text=island"), "island");
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://evil-yandex.ru/search/?text=x"), std::nullopt);
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://ya.ru/search?text=x"), std::nullopt);
+}
+
+TEST(SearchEngineTest, GivenEveryEngineRowWhenCheckedThenItsShapeIsOneTheReaderParses) {
+    for (const SearchEngine& engine : SearchEngines()) {
+        const std::string_view prefix = engine.url_prefix;
+        ASSERT_EQ(prefix.substr(0, 8), "https://") << engine.key;
+        const std::string_view rest = prefix.substr(8);
+        const std::size_t slash = rest.find('/');
+        const std::size_t question = rest.find('?');
+        ASSERT_NE(slash, std::string_view::npos) << engine.key;
+        ASSERT_NE(question, std::string_view::npos) << engine.key;
+        EXPECT_LT(slash, question) << engine.key;
+        // The parameter name sits between '?' and the trailing '='.
+        EXPECT_GT(prefix.size(), question + 2) << engine.key;
+        EXPECT_EQ(prefix.back(), '=') << engine.key;
     }
 }
 

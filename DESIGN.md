@@ -355,10 +355,13 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   macOS a mouse-transparent native frame view lays a canvas-colored ring (the hole carries the
   rounded corners) and the shadow over the card (`ApplyPageCardStyle`); other platforms keep a
   square card.
-- **Address-field placeholder:** an empty, resting address field shows "Search or enter address" in
-  `text_secondary` (Native draws it through its label; the other looks use the textfield's
-  placeholder). It is never the field's text. A search engine's results page shows its query at
-  rest instead of the URL; focusing the field keeps the query.
+- **Address-field placeholder:** an empty, resting address field shows "Search or enter address". In
+  Native it is drawn through the label in `text_secondary`. Arc and Graphite use the textfield's
+  placeholder in CEF's default colour: the pinned CEF has no placeholder colour setter
+  (`SetPlaceholderTextColor` is behind `CEF_API_REMOVED(15000)`), so this is an accepted limit. It
+  is never the field's text. A search engine's results page shows its query at rest instead of the
+  URL, unless the query would read as an address or hides characters (then the URL shows);
+  focusing the field keeps the query.
 - **Address-field indicators (Native):** 20 DIP glyph buttons inside the 30 DIP address field, at
   its edges, in `text_secondary`, each shown only when it has something to say (spec §3).
   Left: a shield with the count of blocked requests, hidden at 0 and capped at `9999+`; click opens

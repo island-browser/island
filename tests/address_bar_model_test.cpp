@@ -137,7 +137,10 @@ TEST(AddressBarModel, ASubmittedSearchReplacesTheQueryWithTheRealUrl) {
     EXPECT_EQ(model.snapshot().display_text, "https://www.google.com/search?q=island%20browser");
 }
 
-TEST(AddressBarModel, TheStartPagePlaceholderIsNeverTheFieldText) {
+// The placeholder is painted by BrowserChrome::ProjectAddress, which this unit test does not reach.
+// Here the model side is checked: an empty start page keeps an empty field, and focusing it does
+// not turn the placeholder into edit text.
+TEST(AddressBarModel, GivenAnEmptyStartPageWhenFocusedThenThePlaceholderIsNotTheFieldText) {
     EXPECT_EQ(kAddressPlaceholderText, "Search or enter address");
 
     AddressBarModel model;

@@ -37,6 +37,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 - After a search on Google, Yandex or DuckDuckGo the address field shows the query instead of the
   results URL. Focusing the field keeps the query, and Enter searches again. The real URL is still
   what Copy URL and the tab hold.
+- Results pages of Yandex's regional sites (yandex.ru, ya.ru) show their query too.
+- A search query that would read as an address (for example `q=https://bank.example/login`), that
+  holds a control or bidi/format character, or that is not valid UTF-8 is not shown in the address
+  field; the field keeps the real URL. A link to a results page cannot make the field show another
+  address.
+- The address field's placeholder keeps CEF's default colour in Arc and Graphite; the pinned CEF
+  has no placeholder colour setter (Native draws its placeholder in the secondary text token).
 
 ### Fixed
 
