@@ -12,18 +12,16 @@ struct DecisionCase {
     LinkOpenAction expected;
 };
 
-// Shift+click (NEW_WINDOW), plain target=_blank and Cmd/Ctrl/middle-click (new tabs), and
-// script-initiated opens without a gesture.
+// Cmd/Ctrl+click and middle-click arrive as the same disposition (NEW_BACKGROUND_TAB), so one
+// row covers both gestures. Shift+click (NEW_WINDOW) and plain target=_blank or window.open
+// with a gesture (NEW_FOREGROUND_TAB) both open a foreground tab. Script-initiated opens without
+// a gesture are rejected.
 constexpr DecisionCase kCases[] = {
-    {"ShiftClickPeeks", LinkDisposition::kNewWindow, true, LinkOpenAction::kPeek},
-    {"PlainTargetBlankOpensForegroundTab", LinkDisposition::kNewForegroundTab, true,
+    {"CmdCtrlOrMiddleClickPeeks", LinkDisposition::kNewBackgroundTab, true, LinkOpenAction::kPeek},
+    {"ShiftClickOpensForegroundTab", LinkDisposition::kNewWindow, true,
      LinkOpenAction::kForegroundTab},
-    {"WindowOpenWithGestureOpensForegroundTab", LinkDisposition::kNewForegroundTab, true,
-     LinkOpenAction::kForegroundTab},
-    {"CmdClickOpensBackgroundTab", LinkDisposition::kNewBackgroundTab, true,
-     LinkOpenAction::kBackgroundTab},
-    {"MiddleClickOpensBackgroundTab", LinkDisposition::kNewBackgroundTab, true,
-     LinkOpenAction::kBackgroundTab},
+    {"PlainClickOrWindowOpenWithGestureOpensForegroundTab", LinkDisposition::kNewForegroundTab,
+     true, LinkOpenAction::kForegroundTab},
     {"ScriptTargetBlankWithoutGestureIsRejected", LinkDisposition::kNewForegroundTab, false,
      LinkOpenAction::kReject},
     {"ScriptBackgroundTabWithoutGestureIsRejected", LinkDisposition::kNewBackgroundTab, false,

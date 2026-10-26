@@ -26,7 +26,6 @@
 #include "design_tokens.h"
 #include "download_path.h"
 #include "favicon_policy.h"
-#include "link_open_policy.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
 #include "include/base/cef_callback.h"
@@ -49,6 +48,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "link_open_policy.h"
 #include "native_handle.h"
 #include "page_card.h"
 #include "runtime_style.h"
@@ -750,13 +750,22 @@ Space& BrowserWindow::AppendSpace(std::string name) {
 }
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
+    AddTabToActiveSpace(std::move(startup_url), TabPlacement::kEnd, opened_by_agent);
+}
+
+void BrowserWindow::AddTabToActiveSpace(std::string startup_url, TabPlacement placement,
+                                        bool opened_by_agent) {
     Space& space = active_space();
     context_chip_.reset();  // the new tab is a new page context
     DetachActiveTabObservers();
     Tab tab{NextTabId()};
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetOpenedByAgent(opened_by_agent);
-    space.AppendTab(std::move(tab));
+    if (placement == TabPlacement::kAfterActive) {
+        static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/true));
+    } else {
+        space.AppendTab(std::move(tab));
+    }
     Tab* appended = active_tab();
     if (chrome_ != nullptr && appended != nullptr) {
         // Same creation path as OnWindowCreated's first view: the space's
@@ -3854,8 +3863,9 @@ bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
                                   CefRefPtr<CefDictionaryValue>&, bool*) {
     CEF_REQUIRE_UI_THREAD();
     // Popups stay rejected (Island is single-window), so the popup itself is always cancelled.
-    // What the person asked for is decided by link_open_policy.h: Shift+click peeks, plain and
-    // script-with-gesture new tabs open a foreground tab, Cmd/Ctrl/middle-click a background tab.
+    // What the person asked for is decided by link_open_policy.h: Cmd/Ctrl+click and middle-click
+    // peek (CEF reports both alike), Shift+click and plain or script-with-gesture new tabs open a
+    // foreground tab.
     HandleLinkOpen(browser, target_url.ToString(),
                    DecideLinkOpen(LinkDispositionFrom(target_disposition), user_gesture));
     return true;
@@ -3951,12 +3961,11 @@ void BrowserWindow::HandleLinkOpen(CefRefPtr<CefBrowser> browser, const std::str
         return;
     }
     // Like the peek, the tab opens on the next UI task, outside CEF's dispatch.
-    const bool activate = action == LinkOpenAction::kForegroundTab;
     CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
-                            [](CefRefPtr<BrowserWindow> window, std::string target, bool select) {
-                                static_cast<void>(window->OpenLinkTab(target, select));
+                            [](CefRefPtr<BrowserWindow> window, std::string target) {
+                                static_cast<void>(window->OpenLinkTab(target));
                             },
-                            CefRefPtr<BrowserWindow>(this), url, activate)));
+                            CefRefPtr<BrowserWindow>(this), url)));
 }
 
 PeekOverlay& BrowserWindow::EnsurePeek() {
@@ -3990,7 +3999,7 @@ void BrowserWindow::ClosePeek() {
     }
 }
 
-bool BrowserWindow::OpenLinkTab(std::string_view url, bool activate) {
+bool BrowserWindow::OpenLinkTab(std::string_view url) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || window_ == nullptr) {
         return false;
@@ -3999,29 +4008,7 @@ bool BrowserWindow::OpenLinkTab(std::string_view url, bool activate) {
     if (!address.is_valid() || !IsWebUrl(address.url)) {
         return false;
     }
-    Space& space = active_space();
-    Tab tab{NextTabId()};
-    tab.SetStartupUrl(address.url);
-    if (!activate) {
-        // A background tab keeps the selection and the content view; its browser is created
-        // when the tab is first shown (EnsureTabBrowserView), like a background plan child.
-        static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/false));
-        UpdateChromeCollections();
-        return true;
-    }
-    context_chip_.reset();  // the new tab is a new page context
-    DetachActiveTabObservers();
-    static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/true));
-    Tab* appended = active_tab();
-    if (chrome_ != nullptr && appended != nullptr) {
-        // Same creation path as AppendTabToActiveSpace: the space's request context and the
-        // tab's startup URL.
-        CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-            this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
-            space.request_context(), this);
-        appended->SetBrowserView(browser_view);
-    }
-    AttachActiveTabObservers();
+    AddTabToActiveSpace(address.url, TabPlacement::kAfterActive);
     return true;
 }
 
@@ -4030,9 +4017,9 @@ void BrowserWindow::OnPeekOpenAsTab(std::string url) {
     if (closing_) {
         return;
     }
-    // The card's page is reopened as a real tab of the active space; the card's browser (and its
-    // history and scroll state) is not transferred.
-    AppendTabToActiveSpace(std::move(url));
+    // The card's page is reopened as a real tab of the active space, right after the current tab
+    // like a link open; the card's browser (and its history and scroll state) is not transferred.
+    AddTabToActiveSpace(std::move(url), TabPlacement::kAfterActive);
 }
 
 void BrowserWindow::OnPeekClosed() {

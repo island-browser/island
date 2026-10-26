@@ -24,12 +24,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
-- Links from pages open the way you asked for them. Shift+click opens a link in the Peek card. A
-  plain click on a link that opens in a new tab (target=_blank, or a page's window.open after a
-  click), and Cmd/Ctrl+click or middle-click, open an ordinary tab: a plain click opens it in the
-  foreground next to the current tab, Cmd/Ctrl+click and middle-click in the background. Before
-  this, the Cmd/Ctrl+click and middle-click opens went to Peek, and plain new-tab links did too.
-  Script-initiated popups and tabs without a click stay rejected.
+- Links from pages open the way you asked for them. Cmd/Ctrl+click a link to open it in the Peek
+  card; the middle button also opens Peek, because the browser reports it the same way. A plain
+  click on a link that opens in a new tab (target=_blank, or a page's window.open after a click)
+  and Shift+click open an ordinary tab in front, next to the current tab, and "Open as tab" places
+  its tab there too. Before this, plain new-tab links opened Peek. Script-initiated popups and
+  tabs without a click stay rejected.
 - The Peek card is sized from the window: 80% of the content area's width and 85% of its height,
   centered, with minimums of 360 by 280 DIP, and it follows the window when the window resizes.
 - The Peek buttons are restyled as neutral toolbar-style controls: "Open as tab" with an icon and

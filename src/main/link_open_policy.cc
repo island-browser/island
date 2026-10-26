@@ -7,12 +7,11 @@ LinkOpenAction DecideLinkOpen(LinkDisposition disposition, bool user_gesture) no
         return LinkOpenAction::kReject;
     }
     switch (disposition) {
-        case LinkDisposition::kNewWindow:
+        case LinkDisposition::kNewBackgroundTab:
             return LinkOpenAction::kPeek;
+        case LinkDisposition::kNewWindow:
         case LinkDisposition::kNewForegroundTab:
             return LinkOpenAction::kForegroundTab;
-        case LinkDisposition::kNewBackgroundTab:
-            return LinkOpenAction::kBackgroundTab;
         case LinkDisposition::kCurrentTab:
         case LinkDisposition::kOther:
             return LinkOpenAction::kReject;

@@ -6,7 +6,8 @@
 
 Peek shows a link in a floating card over your page, so you can read it without leaving the page.
 
-* **Shift+click** a link to open it in Peek.
+* **Cmd/Ctrl+click** a link to open it in Peek. The middle button also opens Peek: the browser
+  reports a middle-click and a Cmd/Ctrl+click the same way, so Island cannot tell them apart.
 * **Right-click** a link and choose **Open in peek**.
 * A card that is open can be moved into the current space with **Open as tab** (the plus icon).
   The page is reopened as a new tab next to the current one. Its history and scroll position are
@@ -16,13 +17,9 @@ Peek shows a link in a floating card over your page, so you can read it without 
 The card covers most of the window: 80% of its width and 85% of its height, centered. It resizes
 with the window while it is open.
 
-Other clicks do not open Peek. Plain clicks on links that open in a new tab, and clicks with
-Cmd/Ctrl or the middle button, open ordinary tabs:
-
-* A plain click on such a link (and a site's window.open after a click) opens a tab in front, next
-  to the current tab.
-* Cmd/Ctrl+click or the middle button opens a tab in the background, so you stay on the current
-  page.
+Other clicks do not open Peek. A plain click on a link that opens in a new tab (target=_blank, or
+a site's window.open after a click) and a Shift+click open an ordinary tab in front, next to the
+current tab.
 
 Pop-ups that a page opens without a click are blocked.
 

@@ -486,7 +486,8 @@ the window margin on macOS, optional in Settings). No glass stacks, no glow, no 
 
 - The card is sized from the content area: 80% of its width and 85% of its height, centered, with
   minimums of 360 by 280 DIP (`peek_layout.h`), and it follows window resizes while open.
-- Its two title-bar buttons are ghost controls on `surface_secondary`, like the toolbar: "Open as
-  tab" carries a `plus` icon and label, and the close is an icon-only `×` named "Close Peek". They
-  use the native hover and pressed ink and a neutral focus ring (the overlay ring, never the accent).
-  No button in the card is filled with `text` or `accent`.
+- Its two title-bar buttons sit on neutral `fill` plates (one step off the `surface_secondary`
+  title bar, as the address well is): "Open as tab" carries a `plus` icon in the text tone with
+  its label, and the close is an icon-only `×` named "Close Peek". They use the native hover and
+  pressed ink and a neutral focus ring (the overlay ring, never the accent). No button in the card
+  is filled with `text` or `accent`. CEF buttons cannot round their plate, which is accepted debt.

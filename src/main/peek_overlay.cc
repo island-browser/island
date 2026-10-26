@@ -255,9 +255,10 @@ void PeekOverlay::BuildViews(const std::string& url, CefRefPtr<CefRequestContext
     title_bar_->AddChildView(address_);
     row_layout->SetFlexForView(address_, 1);
 
-    // Both buttons are ghost controls like the toolbar's: no fill of their own, the native
-    // hover and pressed ink, and a neutral focus ring (the window's overlay ring, see
-    // BrowserWindow::OverlayFocusRingShown). Their icons come from the shared catalog.
+    // Both buttons are neutral plates (the `fill` token, one step off the title bar, as the
+    // address well is) with the native hover and pressed ink and a neutral focus ring (the
+    // window's overlay ring, see BrowserWindow::OverlayFocusRingShown). Their icons come from the
+    // shared catalog.
     open_as_tab_ = CefLabelButton::CreateLabelButton(button_delegate_, "Open as tab");
     open_as_tab_->SetID(static_cast<int>(ChromeViewId::kPeekOpenAsTab));
     open_as_tab_->SetAccessibleName("Open as tab");
@@ -365,21 +366,21 @@ void PeekOverlay::ApplyColors() {
     address_->SetBackgroundColor(tokens_.surface_secondary.argb);
     address_->SetEnabledTextColors(tokens_.text_secondary.argb);
     address_->SetFontList("Geist Mono, 12px");
-    open_as_tab_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    open_as_tab_->SetBackgroundColor(tokens_.fill.argb);
     open_as_tab_->SetEnabledTextColors(tokens_.text.argb);
     open_as_tab_->SetFontList("Geist, Medium 13px");
-    close_->SetBackgroundColor(tokens_.surface_secondary.argb);
-    // The icon-only close keeps the same secondary tone as the find bar's close.
+    close_->SetBackgroundColor(tokens_.fill.argb);
+    // The icon matches its label's text tone; the icon-only close keeps the secondary tone of
+    // the find bar's close.
     const auto set_icon = [&](const CefRefPtr<CefLabelButton>& button, ChromeIcon icon,
-                              ChromeIconSize size) {
-        const std::optional<CefRefPtr<CefImage>> image =
-            icons_.Load(icon, ChromeIconTone::kSecondary, size);
+                              ChromeIconTone tone, ChromeIconSize size) {
+        const std::optional<CefRefPtr<CefImage>> image = icons_.Load(icon, tone, size);
         if (image.has_value()) {
             button->SetImage(CEF_BUTTON_STATE_NORMAL, *image);
         }
     };
-    set_icon(open_as_tab_, ChromeIcon::kPlus, ChromeIconSize::k13);
-    set_icon(close_, ChromeIcon::kClose, ChromeIconSize::k13);
+    set_icon(open_as_tab_, ChromeIcon::kPlus, ChromeIconTone::kText, ChromeIconSize::k13);
+    set_icon(close_, ChromeIcon::kClose, ChromeIconTone::kSecondary, ChromeIconSize::k13);
 }
 
 void PeekOverlay::RefreshAddress() {

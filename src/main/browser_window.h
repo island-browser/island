@@ -92,6 +92,12 @@ class WindowAgentHost;
     return luminance < kDarkThemeLuminance ? ChromeTheme::kDark : ChromeTheme::kLight;
 }
 
+// Where a new selected tab goes in its space: at the end, or right after the current tab's group.
+enum class TabPlacement {
+    kEnd,
+    kAfterActive,
+};
+
 class BrowserWindow : public CefClient,
                       public CefDisplayHandler,
                       public CefDownloadHandler,
@@ -604,10 +610,10 @@ class BrowserWindow : public CefClient,
     // OpenPeek validates |url| like any address and replaces an open peek's page.
     bool OpenPeek(std::string_view url);
     void ClosePeek();
-    // A page's link open (see link_open_policy.h) as a tab of the active space, placed after the
-    // current tab's group. `activate` selects it; otherwise the selection stays. `url` is
-    // validated like any address; false when closing or when it is not an allowed web URL.
-    bool OpenLinkTab(std::string_view url, bool activate);
+    // A page's foreground link open (see link_open_policy.h) as a tab of the active space, placed
+    // after the current tab's group and selected. `url` is validated like any address; false
+    // when closing or when it is not an allowed web URL.
+    bool OpenLinkTab(std::string_view url);
     [[nodiscard]] bool peek_open() const noexcept { return peek_ != nullptr && peek_->open(); }
     // The ⌘/ shortcut cheatsheet. While it is open it owns Escape, ahead of a peek and of
     // stop-loading.
@@ -964,6 +970,10 @@ class BrowserWindow : public CefClient,
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     // `opened_by_agent` marks the tab as one the agent opened (see Tab::opened_by_agent).
     void AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent = false);
+    // The one creation path for a new selected tab: places it, creates its browser view and
+    // moves the tab observers to it. AppendTabToActiveSpace and the link and Peek opens use it.
+    void AddTabToActiveSpace(std::string startup_url, TabPlacement placement,
+                             bool opened_by_agent = false);
     // Adds an empty space (next palette color) at the end and returns it; the caller gives it
     // a tab and makes it active.
     Space& AppendSpace(std::string name);
