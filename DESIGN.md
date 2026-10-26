@@ -101,8 +101,12 @@ values.
       "card_radius_dip": 10,
       "card_radius_choices": [0, 6, 10, 14],
       "card_inset_dip": 8,
-      "control_height_dip": 32,
-      "compact_control_height_dip": 26,
+      "control_height_dip": 36,
+      "compact_control_height_dip": 28,
+      "row_gap_dip": 6,
+      "compact_row_gap_dip": 2,
+      "sidebar_padding_dip": 16,
+      "compact_sidebar_padding_dip": 8,
       "collapsed_rail_width_dip": 52,
       "titlebar_band_dip": 40,
       "font": "geist",
@@ -394,13 +398,21 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   offers Move bookmarks to Unfiled and requires an in-page confirmation before permanent deletion.
   It uses ThemeJson tokens only: neutral raised hover, selection and non-address focus states, with
   the danger token reserved for destructive confirmation.
-- **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
+- **Internal surfaces (agent panel, Settings tab, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground. The accent is used only for the
   active tab, the address focus ring, the agent's own message bubble and its send button; selected
   states (a selected row, segment, node, radio, swatch or "on" switch) are neutral: a `--text`
   mark or a `--fill` plate, in every look. Settings' range slider takes `--text` too. The agent panel's focus ring is a neutral
   2 px `--text-2` ring (see below), never the accent.
+- **Settings tab:** Settings is one ordinary, closable and reorderable tab per window, opened in
+  the active space. Reopening it focuses that tab and routes the requested section through the
+  existing `focus_seq` contract. Its title and address label are `Settings`, its sidebar fallback
+  is the gear icon, and only the exact embedded Settings document may use its native message
+  bridge. The tab is omitted from session persistence and is not restored after restart.
+- **Sidebar density:** in every look, Comfortable uses 36 DIP rows, 6 DIP row gaps and 16 DIP rail
+  padding; Compact uses 28 DIP rows, 2 DIP gaps and 8 DIP rail padding. Density is structural, not
+  a color-preset detail, so the same metrics apply to Native, Arc and Graphite.
 - **Agent panel (native, `pages/agent.html`):**
   - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
     opens the provider menu; a status pill sits beside it. The pill reads "Waiting for approval"

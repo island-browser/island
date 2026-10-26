@@ -888,7 +888,7 @@ class SettingsPage(unittest.TestCase):
         self.assertIn(r"Press keys\u2026", html)
         self.assertIn('"Add shortcut"', html)
         self.assertIn(">Reset all<", html)
-        self.assertIn('id="mac-note"', html)
+        self.assertNotIn("after a restart", html)
         keycap = re.search(r"\.keycap \{[^}]*\}", html)
         self.assertIsNotNone(keycap)
         self.assertIn("min-width: 24px", keycap.group(0))
@@ -1220,6 +1220,10 @@ class SettingsTrustedSites(unittest.TestCase):
         )
         self.assertIn('type: "remove_trusted_site"', self.html)
         self.assertIn("trusted_sites", self.html)
+        self.assertIn('el("p", "empty-state", "No trusted sites yet.', self.html)
+        self.assertIn('el("p", "empty-state", "No reports yet.', self.html)
+        self.assertIn("align-items: center", self.html)
+        self.assertIn("padding: var(--space-3) 0", self.html)
 
     def test_remove_buttons_have_accessible_names(self) -> None:
         window = self.html[self.html.index("renderTrustedSites") :][:1200]

@@ -78,7 +78,12 @@ SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)
 
-    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm macos/clipboard_mac.mm macos/font_registry_mac.mm macos/mouse_down_mac.mm macos/page_card_mac.mm)
+    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm
+                                               macos/clipboard_mac.mm
+                                               macos/font_registry_mac.mm
+                                               macos/keymap_menu_mac.mm
+                                               macos/mouse_down_mac.mm
+                                               macos/page_card_mac.mm)
     set_source_files_properties(macos/mouse_down_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_source_files_properties(macos/page_card_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(island_browser_core PRIVATE "-framework CoreFoundation" "-framework CoreText"

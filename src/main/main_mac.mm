@@ -18,6 +18,7 @@
 #include "include/wrapper/cef_library_loader.h"
 #include "island_app.h"
 #include "keymap.h"
+#include "macos/keymap_menu_mac.h"
 #include "prefs_store.h"
 #include "space_icon.h"
 #include "startup_options.h"
@@ -673,33 +674,9 @@ NSMenuItem* AddBrowserMenuItem(NSMenu* menu, IslandMenuActions* menu_actions, NS
     return item;
 }
 
-// Applies the user's keymap (prefs overrides on the defaults) to a menu item:
-// NSMenu owns the command keys on macOS, so Settings edits land here on the
-// next launch. An unbound action keeps its menu entry without a key.
+// Applies the user's keymap to a menu item and registers it for live refreshes.
 void ApplyKeyBinding(NSMenuItem* item, island::KeyAction action, const island::Keymap& keymap) {
-    const std::optional<island::KeyBinding> binding = keymap.Binding(action);
-    const std::optional<island::MacKeyEquivalent> equivalent =
-        binding.has_value() ? island::ToMacKeyEquivalent(*binding) : std::nullopt;
-    if (!equivalent.has_value()) {
-        [item setKeyEquivalent:@""];
-        [item setKeyEquivalentModifierMask:0];
-        return;
-    }
-    NSEventModifierFlags mask = 0;
-    if (equivalent->command) {
-        mask |= NSEventModifierFlagCommand;
-    }
-    if (equivalent->control) {
-        mask |= NSEventModifierFlagControl;
-    }
-    if (equivalent->shift) {
-        mask |= NSEventModifierFlagShift;
-    }
-    if (equivalent->option) {
-        mask |= NSEventModifierFlagOption;
-    }
-    [item setKeyEquivalent:[NSString stringWithUTF8String:equivalent->key.c_str()]];
-    [item setKeyEquivalentModifierMask:mask];
+    island::ApplyMacMenuKeyBinding(item, action, keymap);
 }
 
 // Creates a Browser-menu item that runs |action| and takes its key equivalent

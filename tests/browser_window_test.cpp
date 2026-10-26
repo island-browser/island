@@ -160,7 +160,7 @@ TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAn
         BrowserChrome::LayoutForBounds({.x = 0, .y = 0, .width = 1440, .height = 900}, tokens);
 
     EXPECT_EQ(tokens.rail_width_dip, 248);
-    EXPECT_EQ(tokens.control_height_dip, 34);
+    EXPECT_EQ(tokens.control_height_dip, 36);
     EXPECT_EQ(BrowserChrome::NativeToolbarHeightDip(), 52);
     EXPECT_EQ(BrowserChrome::NativeToolbarButtonDip(), 28);
     EXPECT_EQ(BrowserChrome::NativeAddressHeightDip(), 30);

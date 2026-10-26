@@ -37,6 +37,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Settings now opens as one ordinary tab per window, with a Settings title and gear icon in the
+  sidebar. Opening a Settings command again focuses that tab and the requested section; it can be
+  reordered or closed with the normal tab controls, is not bookmarkable, and is not restored after
+  restart. Only the exact embedded Settings document may send Settings messages. Compact and
+  Comfortable now use visibly different row, gap and sidebar-padding tokens in every look, empty
+  lists are vertically centered, and shortcut changes update the macOS menu bar immediately.
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
   imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
   file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be

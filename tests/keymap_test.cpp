@@ -114,6 +114,16 @@ TEST(KeymapTest, MacKeyEquivalentsUseMenuConventions) {
     EXPECT_EQ(ToMacKeyEquivalent(*ParseKeyBinding("Alt+Left"))->key, "\xEF\x9C\x82");  // U+F702
 }
 
+TEST(KeymapTest, LiveOverridesResolveToMacMenuEquivalentsWithoutARestart) {
+    Keymap keymap = Keymap::Defaults();
+    keymap.SetBinding(KeyAction::kSettings, ParseKeyBinding("Mod+Shift+G"));
+    EXPECT_EQ(MacKeyEquivalentForAction(keymap, KeyAction::kSettings),
+              ToMacKeyEquivalent(*ParseKeyBinding("Mod+Shift+G")));
+
+    keymap.SetBinding(KeyAction::kSettings, std::nullopt);
+    EXPECT_EQ(MacKeyEquivalentForAction(keymap, KeyAction::kSettings), std::nullopt);
+}
+
 TEST(KeymapTest, ControlIsItsOwnModifierAndCtrlStillMeansMod) {
     EXPECT_EQ(ParseKeyBinding("Control+Tab"), (KeyBinding{.key_code = 0x09, .control = true}));
     EXPECT_EQ(ParseKeyBinding("Ctrl+Tab"), (KeyBinding{.key_code = 0x09, .primary = true}));

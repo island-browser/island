@@ -218,6 +218,8 @@ struct TabStripEntrySnapshot {
     bool pinned = false;
     // The page's favicon once downloaded; null shows the globe fallback.
     CefRefPtr<CefImage> favicon;
+    // Island-owned documents can supply a semantic fallback instead of the globe.
+    std::optional<ChromeIcon> fallback_icon;
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;

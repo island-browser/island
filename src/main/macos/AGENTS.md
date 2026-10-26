@@ -5,13 +5,14 @@
 
 ## Purpose
 
-macOS implementation of the `font_registry.h` seam.
+macOS implementations of native browser seams.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
 | `font_registry_mac.mm` | Registers the bundled Geist faces with CoreText at startup |
+| `keymap_menu_mac.{h,mm}` | Tags configurable `NSMenuItem`s by `KeyAction` and reapplies live key equivalents after a Settings shortcut change; the CEF-free action-to-equivalent mapping stays in `keymap.*` |
 
 ## For AI Agents
 
@@ -36,6 +37,6 @@ open build/src/main/island_browser.app --args --island-smoke-test
 
 ### External
 
-- CoreFoundation, CoreText
+- Cocoa, CoreFoundation, CoreText
 
 <!-- MANUAL: -->

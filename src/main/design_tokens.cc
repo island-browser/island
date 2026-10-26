@@ -390,9 +390,11 @@ ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
     tokens.card_shadow = !bleed && appearance.card_shadow;
     const bool compact = appearance.density == Density::kCompact;
     tokens.rail_width_dip = appearance.look == LookPreset::kNative ? (compact ? 200 : 248) : 286;
-    tokens.control_height_dip =
-        appearance.look == LookPreset::kNative ? (compact ? 28 : 34) : (compact ? 26 : 32);
-    tokens.row_gap_dip = compact ? 0 : 2;
+    // Density is structural and therefore identical in every look: changing it must be plainly
+    // visible in the rows, the rhythm between them, and the rail gutter.
+    tokens.control_height_dip = compact ? 28 : 36;
+    tokens.row_gap_dip = compact ? 2 : 6;
+    tokens.sidebar_padding_dip = compact ? 8 : 16;
     const std::string& family = appearance.font_family;
     if (family == "geist") {
         tokens.ui_font_family = "Geist";

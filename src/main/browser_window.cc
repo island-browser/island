@@ -48,6 +48,9 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#if defined(__APPLE__)
+#include "macos/keymap_menu_mac.h"
+#endif
 #include "native_handle.h"
 #include "page_card.h"
 #include "runtime_style.h"
@@ -246,8 +249,10 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url, bool per
 CefRefPtr<BrowserWindow> BrowserWindow::CreateHeadlessForTest(std::string initial_url) {
     CEF_REQUIRE_UI_THREAD();
 
-    return CefRefPtr<BrowserWindow>(
+    CefRefPtr<BrowserWindow> window(
         new BrowserWindow(std::move(initial_url), /*persist_session=*/false));
+    window->DisableUiTaskPostingForTest();
+    return window;
 }
 
 namespace {
@@ -353,6 +358,12 @@ bool BrowserWindow::RestoreSessionStateForTest(const SessionState& state) {
 }
 
 bool BrowserWindow::IsSessionInternalTabUrl(std::string_view url) const {
+    if (persist_session_ && settings_page_url_.empty()) {
+        static_cast<void>(SettingsPageUrl());
+    }
+    if (!settings_page_url_.empty() && IsSettingsPageUrl(url)) {
+        return true;
+    }
     if ((!plan_page_url_.empty() || persist_session_) && IsPlanPageUrl(url)) {
         return true;
     }
@@ -549,6 +560,17 @@ const std::string& BrowserWindow::StartPageUrl() const {
         start_page_url_ = LocalPage::PageUrl(LocalPageKind::kStart);
     }
     return start_page_url_;
+}
+
+const std::string& BrowserWindow::SettingsPageUrl() const {
+    if (settings_page_url_.empty()) {
+        settings_page_url_ = LocalPage::PageUrl(LocalPageKind::kSettings);
+    }
+    return settings_page_url_;
+}
+
+bool BrowserWindow::IsSettingsPageUrl(std::string_view url) const {
+    return !settings_page_url_.empty() && url == settings_page_url_;
 }
 
 ValidatedAddress BrowserWindow::ResolveAddressInput(std::string_view text) const {
@@ -1157,11 +1179,8 @@ void BrowserWindow::OpenSettingsSection(std::string section) {
 
 void BrowserWindow::ShowSettingsSection(std::string section) {
     settings_focus_.Request(std::move(section));
-    if (internal_page_ == LocalPageKind::kSettings) {
-        ScheduleLocalPagesRender();
-    } else {
-        ToggleInternalPage(LocalPageKind::kSettings);
-    }
+    OpenSettingsTab();
+    ScheduleLocalPagesRender();
 }
 
 void BrowserWindow::EnsureAgentSession() {
@@ -1467,11 +1486,14 @@ std::string BrowserWindow::AgentPanelStateJson() const {
 
 void BrowserWindow::ScheduleLocalPagesRender() {
     RefreshAgentButtonLabel();
-    if ((agent_panel_ == nullptr && !internal_page_.has_value()) || agent_panel_render_scheduled_ ||
-        closing_) {
+    if (closing_ || agent_panel_render_scheduled_ ||
+        (agent_panel_ == nullptr && !internal_page_.has_value() && !SettingsTabLocation())) {
         return;
     }
     agent_panel_render_scheduled_ = true;
+    if (!ui_tasks_enabled_for_test_) {
+        return;
+    }
     CefPostDelayedTask(TID_UI,
                        CefCreateClosureTask(base::BindOnce(&BrowserWindow::FlushLocalPagesRender,
                                                            CefRefPtr<BrowserWindow>(this))),
@@ -1486,14 +1508,9 @@ void BrowserWindow::FlushLocalPagesRender() {
     if (agent_panel_ != nullptr) {
         agent_panel_->Render(AgentPanelStateJson());
     }
-    if (internal_page_ == LocalPageKind::kSettings && settings_page_ != nullptr) {
-        settings_page_->Render(SettingsStateJson());
+    if (RenderSettingsPages()) {
         settings_message_.clear();
-        // A focus request waits until the page has loaded; a render queued before that
-        // would otherwise replace it with a state that has no focus.
-        if (settings_page_->loaded()) {
-            settings_focus_.Clear();
-        }
+        settings_focus_.Clear();
     } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
     } else if (internal_page_ == LocalPageKind::kBookmarks && bookmarks_page_ != nullptr) {
@@ -1514,6 +1531,8 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
             HandleStartPageMessage(message);
             return;
         case LocalPageKind::kSettings:
+            // Tab-hosted Settings messages normally arrive through OnConsoleMessage after its
+            // exact-document check. Keep the direct route as a headless handler seam.
             HandleSettingsMessage(message);
             return;
         case LocalPageKind::kTabOverview:
@@ -1575,7 +1594,7 @@ json::Value BrowserWindow::ThemeJson() const {
 LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
     switch (kind) {
         case LocalPageKind::kSettings:
-            return settings_page_.get();
+            return nullptr;
         case LocalPageKind::kTabOverview:
             return overview_page_.get();
         case LocalPageKind::kBookmarks:
@@ -1591,7 +1610,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
 
 void BrowserWindow::ToggleTabOverview() { ToggleInternalPage(LocalPageKind::kTabOverview); }
 
-void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettings); }
+void BrowserWindow::ToggleSettings() { OpenSettingsTab(); }
 
 void BrowserWindow::OpenBookmarksPage() {
     CEF_REQUIRE_UI_THREAD();
@@ -1607,11 +1626,45 @@ void BrowserWindow::OpenBookmarksPage() {
 
 void BrowserWindow::OpenBlockerSettings() { ShowSettingsSection("privacy"); }
 
+std::optional<std::pair<std::size_t, std::size_t>> BrowserWindow::SettingsTabLocation() const {
+    for (std::size_t space_index = 0; space_index < spaces_.size(); ++space_index) {
+        const Space& space = spaces_[space_index];
+        for (std::size_t tab_index = 0; tab_index < space.tab_count(); ++tab_index) {
+            if (IsSettingsPageUrl(EffectiveUrl(space.tabs()[tab_index]))) {
+                return std::pair{space_index, tab_index};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+void BrowserWindow::OpenSettingsTab() {
+    CEF_REQUIRE_UI_THREAD();
+    // Headless tests cannot ask CEF to build the data document. Tests of Settings tabs inject
+    // that exact URL through SetSettingsPageUrlForTest; other headless command tests keep the
+    // historical no-chrome no-op behavior.
+    if (closing_ || (chrome_ == nullptr && settings_page_url_.empty())) {
+        return;
+    }
+    provider_statuses_.reset();  // re-detect agents installed meanwhile
+    HideInternalPage();
+    if (const auto location = SettingsTabLocation()) {
+        SelectTabWithOneAttach(location->first, location->second);
+    } else {
+        AppendTabToActiveSpace(SettingsPageUrl());
+    }
+}
+
+bool BrowserWindow::CloseSettingsTab() {
+    const auto location = SettingsTabLocation();
+    return location.has_value() && CloseTabAt(location->first, location->second);
+}
+
 void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent ||
-        kind == LocalPageKind::kStart || kind == LocalPageKind::kReport ||
-        kind == LocalPageKind::kPlan) {
+        kind == LocalPageKind::kSettings || kind == LocalPageKind::kStart ||
+        kind == LocalPageKind::kReport || kind == LocalPageKind::kPlan) {
         return;
     }
     if (internal_page_ == kind) {
@@ -1619,9 +1672,7 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
         return;
     }
     std::unique_ptr<LocalPage>* page = nullptr;
-    if (kind == LocalPageKind::kSettings) {
-        page = &settings_page_;
-    } else if (kind == LocalPageKind::kTabOverview) {
+    if (kind == LocalPageKind::kTabOverview) {
         page = &overview_page_;
     } else if (kind == LocalPageKind::kBookmarks) {
         page = &bookmarks_page_;
@@ -1631,10 +1682,7 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     if (*page == nullptr) {
         *page = std::make_unique<LocalPage>(kind, *this);
     }
-    if (kind == LocalPageKind::kSettings) {
-        provider_statuses_.reset();  // re-detect agents installed meanwhile
-    }
-    // Settings and All tabs replace the page the find bar was searching.
+    // Local slot pages replace the page the find bar was searching.
     CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
     show_internal_page_ = true;
@@ -2275,7 +2323,7 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         return;
     }
     if (type == "close") {
-        HideInternalPage();
+        static_cast<void>(CloseSettingsTab());
         return;
     }
     if (HandleUpdateMessage(type, message)) {
@@ -3470,14 +3518,40 @@ void BrowserWindow::RenderStartPages() {
     }
 }
 
+void BrowserWindow::RenderSettingsFrame(CefRefPtr<CefFrame> frame) {
+    if (frame == nullptr || !IsSettingsPageUrl(frame->GetURL().ToString())) {
+        return;
+    }
+    frame->ExecuteJavaScript(LocalPage::RenderScript(SettingsStateJson()), SettingsPageUrl(), 0);
+}
+
+bool BrowserWindow::RenderSettingsPages() {
+    if (closing_) {
+        return false;
+    }
+    bool rendered = false;
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            const CefRefPtr<CefBrowser> browser = tab.browser();
+            const CefRefPtr<CefFrame> frame =
+                browser != nullptr ? browser->GetMainFrame() : nullptr;
+            if (frame != nullptr && IsSettingsPageUrl(frame->GetURL().ToString())) {
+                RenderSettingsFrame(frame);
+                rendered = true;
+            }
+        }
+    }
+    return rendered;
+}
+
 bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t,
                                      const CefString& message, const CefString&, int) {
     CEF_REQUIRE_UI_THREAD();
     // Tabs show arbitrary web pages, so this bridge is closed to everything but
-    // Island's own start and report pages: the message must carry the bridge
+    // Island's own start, Settings and report pages: the message must carry the bridge
     // prefix, come from a tab, and the tab's main frame must be exactly the
-    // start page document (or a report page document with a stored report id). Anything else logs
-    // as ordinary console output. (An ask_agent message from a site would otherwise be a
+    // start or Settings document (or a report document with a stored report id). Anything else
+    // logs as ordinary console output. (An ask_agent message from a site would otherwise be a
     // prompt-injection channel.)
     const std::string text = message.ToString();
     if (!closing_ && text.rfind(kSleepProbePrefix, 0) == 0) {
@@ -3495,8 +3569,9 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     }
     const std::string frame_url = frame->GetURL().ToString();
     const bool is_start_page = frame_url == StartPageUrl();
+    const bool is_settings_page = !is_start_page && IsSettingsPageUrl(frame_url);
     // The Plan tab is a page of its own: its messages edit the research plan.
-    const bool is_plan_page = !is_start_page && IsPlanPageUrl(frame_url);
+    const bool is_plan_page = !is_start_page && !is_settings_page && IsPlanPageUrl(frame_url);
     // The reader document is the other page this bridge serves: the tab must be showing exactly
     // the data: URL Island built for it (and the message must carry that document's token).
     const auto reader = reader_sessions_.find(owner->id());
@@ -3504,9 +3579,10 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
                                 frame_url.size() == reader->second.url_size &&
                                 std::hash<std::string_view>{}(frame_url) == reader->second.url_hash;
     // A report page speaks for the one report its URL names.
-    const std::optional<std::string> report_id =
-        is_start_page || is_reader_page ? std::nullopt : ReportIdForUrl(frame_url);
-    if (!is_start_page && !is_reader_page && !is_plan_page && !report_id) {
+    const std::optional<std::string> report_id = is_start_page || is_settings_page || is_reader_page
+                                                     ? std::nullopt
+                                                     : ReportIdForUrl(frame_url);
+    if (!is_start_page && !is_settings_page && !is_reader_page && !is_plan_page && !report_id) {
         return false;
     }
     const std::optional<json::Value> decoded = LocalPage::DecodeMessage(text);
@@ -3515,6 +3591,8 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     }
     if (is_reader_page) {
         HandleReaderMessage(*owner, *decoded);
+    } else if (is_settings_page) {
+        HandleSettingsMessage(*decoded);
     } else if (report_id) {
         HandleReportPageMessage(*decoded, *report_id, browser);
     } else if (is_plan_page) {
@@ -3618,8 +3696,7 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
 
 void BrowserWindow::CloseAgentPanelAndSession() {
     internal_page_.reset();
-    for (std::unique_ptr<LocalPage>* page :
-         {&agent_panel_, &settings_page_, &overview_page_, &bookmarks_page_}) {
+    for (std::unique_ptr<LocalPage>* page : {&agent_panel_, &overview_page_, &bookmarks_page_}) {
         if (*page != nullptr) {
             (*page)->Close();
             page->reset();
@@ -4082,12 +4159,16 @@ void BrowserWindow::UpdateAddressBarForNavigation(const NavigationSnapshot& snap
     }
 
     const Tab* shown_tab = DisplayedTab();
-    const std::string url = shown_tab != nullptr && ReaderActiveFor(*shown_tab)
-                                ? EffectiveUrl(*shown_tab)
-                                : snapshot.url;
+    const std::string url =
+        shown_tab != nullptr && (ReaderActiveFor(*shown_tab) || snapshot.url.empty())
+            ? EffectiveUrl(*shown_tab)
+            : snapshot.url;
     if (!start_page_url_.empty() && url == start_page_url_) {
         address_bar_model_.UpdateInternalPage(
             std::string(LocalPage::DisplayUrl(LocalPageKind::kStart)));
+    } else if (!settings_page_url_.empty() && IsSettingsPageUrl(url)) {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kSettings)));
     } else if (!plan_page_url_.empty() && url == plan_page_url_) {
         address_bar_model_.UpdateInternalPage(
             std::string(LocalPage::DisplayUrl(LocalPageKind::kPlan)));
@@ -4544,6 +4625,10 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     RestoreSavedScroll(*owner, frame);
     if (frame->GetURL().ToString() == StartPageUrl()) {
         frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
+    } else if (IsSettingsPageUrl(frame->GetURL().ToString())) {
+        RenderSettingsFrame(frame);
+        settings_message_.clear();
+        settings_focus_.Clear();
     } else if (const std::optional<std::string> report_id =
                    ReportIdForUrl(frame->GetURL().ToString())) {
         RenderReportFrame(frame, *report_id);
@@ -4864,6 +4949,10 @@ void BrowserWindow::ApplyKeymap() {
                                 false, true);
     }
     window_->SetAccelerator(kEscapeAccelerator, kVirtualKeyEscape, false, false, false, true);
+#if defined(__APPLE__)
+    // NSMenu owns command-key dispatch on macOS, so its equivalents follow the same live map.
+    RefreshMacMenuKeymap(keymap_);
+#endif
     RefreshAgentEntry();
 }
 
@@ -4935,7 +5024,7 @@ void BrowserWindow::RunKeyAction(KeyAction action) {
             ToggleInternalPage(LocalPageKind::kTabOverview);
             return;
         case KeyAction::kSettings:
-            ToggleInternalPage(LocalPageKind::kSettings);
+            ToggleSettings();
             return;
         case KeyAction::kReopenClosedTab:
             ExecuteCommand(BrowserCommand::kReopenClosedTab);
@@ -5276,8 +5365,7 @@ bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
         return true;
     }
     if (attached.local_page != nullptr) {
-        return attached.local_page == settings_page_.get() ||
-               attached.local_page == overview_page_.get() ||
+        return attached.local_page == overview_page_.get() ||
                attached.local_page == bookmarks_page_.get();
     }
     // A closed tab or a tab whose view was replaced no longer owns this attachment.
@@ -5680,7 +5768,7 @@ BookmarkResult BrowserWindow::ToggleFavorite(FavoriteScope scope, std::uint64_t 
 }
 
 std::optional<BrowserWindow::BookmarkablePage> BrowserWindow::CurrentBookmarkablePage() const {
-    // A local page (Bookmarks, Settings, All tabs) fills the slot the person sees, so it is the
+    // A local slot page (Bookmarks or All tabs) fills the slot the person sees, so it is the
     // page on screen and it cannot be bookmarked.
     if (internal_page_.has_value() && show_internal_page_) {
         return std::nullopt;
@@ -6018,13 +6106,16 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
     const Tab* active = active_tab();
     snapshot.tabs.reserve(space.tab_count());
     for (const Tab& tab : space.tabs()) {
-        snapshot.tabs.push_back({.title = tab.DisplayTitle(),
-                                 .active = active != nullptr && tab.id() == active->id(),
-                                 .pinned = tab.pinned(),
-                                 .favicon = tab.favicon(),
-                                 .sleeping = tab.sleeping(),
-                                 .group_parent = tab.group_parent(),
-                                 .group_label = tab.group_label()});
+        const bool settings = IsSettingsPageUrl(EffectiveUrl(tab));
+        snapshot.tabs.push_back(
+            {.title = settings ? "Settings" : tab.DisplayTitle(),
+             .active = active != nullptr && tab.id() == active->id(),
+             .pinned = tab.pinned(),
+             .favicon = tab.favicon(),
+             .fallback_icon = settings ? std::optional(ChromeIcon::kSettings) : std::nullopt,
+             .sleeping = tab.sleeping(),
+             .group_parent = tab.group_parent(),
+             .group_label = tab.group_label()});
     }
     if (const std::optional<BookmarkablePage> page = CurrentBookmarkablePage(); page.has_value()) {
         // The cheap http(s) check comes first, so internal pages never reach the validator. The

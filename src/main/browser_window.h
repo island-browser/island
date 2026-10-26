@@ -279,6 +279,11 @@ class BrowserWindow : public CefClient,
     // URL loads. Computed on first use (it needs CEF's base64 encoder).
     [[nodiscard]] const std::string& StartPageUrl() const;
     void SetStartPageUrlForTest(std::string url) { start_page_url_ = std::move(url); }
+    // Settings is an ordinary tab whose bridge accepts only this exact generated document.
+    // It is deliberately excluded from session restore.
+    [[nodiscard]] const std::string& SettingsPageUrl() const;
+    [[nodiscard]] bool IsSettingsPageUrl(std::string_view url) const;
+    void SetSettingsPageUrlForTest(std::string url) { settings_page_url_ = std::move(url); }
     // The state the start page renders, exposed for tests.
     [[nodiscard]] std::string StartPageStateJson() const;
     // Applies one start page message ({search}, {ask_agent}, {research}, {set_start_mode},
@@ -1141,6 +1146,8 @@ class BrowserWindow : public CefClient,
     // Pushes StartPageStateJson to every tab currently showing the start page
     // (and each open report page its report and theme).
     void RenderStartPages();
+    [[nodiscard]] bool RenderSettingsPages();
+    void RenderSettingsFrame(CefRefPtr<CefFrame> frame);
     void RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const;
     // The plan page's fixed data: URL, and the Plan tab's rendering.
     [[nodiscard]] const std::string& PlanPageUrl() const;
@@ -1227,6 +1234,9 @@ class BrowserWindow : public CefClient,
     void OnUpdaterChanged();
     void HideInternalPage();
     [[nodiscard]] LocalPage* InternalPageFor(LocalPageKind kind) const;
+    [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> SettingsTabLocation() const;
+    void OpenSettingsTab();
+    [[nodiscard]] bool CloseSettingsTab();
     void UpdateAddressBarForNavigation(const NavigationSnapshot& snapshot);
     void UpdateAddressBarForCurrentPage();
     [[nodiscard]] json::Value ThemeJson() const;
@@ -1518,7 +1528,6 @@ class BrowserWindow : public CefClient,
     AddressValidator address_validator_;
     // The sidebar agent: its panel view and the ACP session behind it.
     std::unique_ptr<LocalPage> agent_panel_;
-    std::unique_ptr<LocalPage> settings_page_;
     std::unique_ptr<LocalPage> overview_page_;
     std::unique_ptr<LocalPage> bookmarks_page_;
     std::optional<LocalPageKind> internal_page_;
@@ -1568,6 +1577,7 @@ class BrowserWindow : public CefClient,
     // The Settings section requested by ShowSettingsSection; its sequence tells the page a
     // request is new even when the section name repeats.
     SettingsFocus settings_focus_;
+    mutable std::string settings_page_url_;
     std::unique_ptr<update::Updater> updater_;
     CefRefPtr<CefContentBlocker> content_blocker_;
     // Most recent closed tabs, newest last (reopenable URLs), capped at

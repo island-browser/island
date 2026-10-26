@@ -148,7 +148,7 @@ CefBoxLayoutSettings FloatingCanvasLayout(const BrowserChrome::CardInsets& inset
 }
 
 // The rail uses a dedicated layout: a top inset (RailTopInsetDip), the shared
-// between-section step (RailSectionSpacingDip), and spacing_3 side and bottom
+// between-section step (RailSectionSpacingDip), and the density-owned side and bottom
 // insets so the whole column sits on one gutter.
 CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
@@ -157,8 +157,8 @@ CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     const int top = tokens.look == LookPreset::kNative && tokens.titlebar_band_dip > 0
                         ? tokens.titlebar_band_dip
                         : BrowserChrome::RailTopInsetDip(tokens);
-    settings.inside_border_insets =
-        CefInsets(top, tokens.spacing_3_dip, tokens.spacing_3_dip, tokens.spacing_3_dip);
+    settings.inside_border_insets = CefInsets(
+        top, tokens.sidebar_padding_dip, tokens.sidebar_padding_dip, tokens.sidebar_padding_dip);
     return settings;
 }
 
@@ -2148,8 +2148,8 @@ void BrowserChrome::AddFavoriteSections() {
     const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
     const std::vector<FavoriteEntrySnapshot>& spaces = collection.space_favorites;
     const int gap = tokens_.spacing_1_dip;
-    const int strip_width =
-        std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
+    const int strip_width = std::max(
+        0, tokens_.rail_width_dip - 2 * tokens_.sidebar_padding_dip - TabListScrollGutterDip());
     const GlobalStripLayout layout =
         ComputeGlobalStripLayout(globals.size(), strip_width, kGlobalStripPlateDip, gap,
                                  collection.add_current_page_available);
@@ -2489,13 +2489,20 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
 
         views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
-        views.favicon->SetAccessibleName(entry.favicon != nullptr ? "Tab favicon"
-                                                                  : "Tab favicon placeholder");
+        views.favicon->SetAccessibleName(entry.favicon != nullptr || entry.fallback_icon.has_value()
+                                             ? "Tab favicon"
+                                             : "Tab favicon placeholder");
         views.favicon->SetFocusable(false);
         views.favicon->SetMinimumSize(CefSize(slot, slot));
         views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
             views.favicon_source = entry.favicon;
+        } else if (entry.fallback_icon.has_value()) {
+            const std::optional<CefRefPtr<CefImage>> semantic_icon = icon_catalog_.Load(
+                *entry.fallback_icon, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+            if (semantic_icon.has_value()) {
+                views.favicon_source = *semantic_icon;
+            }
         } else if (fallback_icon.has_value()) {
             views.favicon_source = *fallback_icon;
         }
@@ -2626,6 +2633,12 @@ void BrowserChrome::RebuildCollapsedTabs() {
         views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
             views.favicon_source = entry.favicon;
+        } else if (entry.fallback_icon.has_value()) {
+            const std::optional<CefRefPtr<CefImage>> semantic_icon = icon_catalog_.Load(
+                *entry.fallback_icon, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+            if (semantic_icon.has_value()) {
+                views.favicon_source = *semantic_icon;
+            }
         } else if (fallback_icon.has_value()) {
             views.favicon_source = *fallback_icon;
         }
@@ -3155,6 +3168,7 @@ void BrowserChrome::ApplyLayoutTokens() {
                             std::to_string(static_cast<int>(tokens_.sidebar_side)) + "/" +
                             std::to_string(tokens_.control_height_dip) + "/" +
                             std::to_string(tokens_.row_gap_dip) + "/" +
+                            std::to_string(tokens_.sidebar_padding_dip) + "/" +
                             std::to_string(content.left) + "," + std::to_string(content.top) + "," +
                             std::to_string(content.right) + "," + std::to_string(content.bottom) +
                             "/" + std::to_string(agent.left) + "," + std::to_string(agent.top) +

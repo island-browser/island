@@ -1787,42 +1787,51 @@ TEST(BrowserWindowPagesTest, AViewYoungerThanOneHundredMillisecondsHoldsTheSwap)
     EXPECT_FALSE(window->ViewSwapPendingForTest());
 }
 
-TEST(BrowserWindowPagesTest, OpeningSettingsWaitsForTheYoungTabToSettle) {
+TEST(BrowserWindowPagesTest, SettingsIsOneOrdinaryClosableTabWithItsOwnChromeIdentity) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    const TabId attached = window->active_tab_id();
-    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
-    window->SetAttachedViewForSwapTest(attached);
-    window->BrowserCreatedForViewSwapTest(attached);
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
 
-    const std::size_t swaps_before = window->ViewSwapCountForTest();
-    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+    window->ToggleSettings();
+    ASSERT_EQ(window->spaces()[window->active_space_index()].tab_count(), 2U);
+    const TabId settings = window->active_tab_id();
+    EXPECT_FALSE(window->internal_page().has_value());
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "Settings");
+    const SidebarCollectionSnapshot sidebar = window->BuildSidebarCollection();
+    ASSERT_EQ(sidebar.tabs.size(), 2U);
+    EXPECT_EQ(sidebar.tabs.back().title, "Settings");
+    EXPECT_EQ(sidebar.tabs.back().fallback_icon, ChromeIcon::kSettings);
+    EXPECT_FALSE(sidebar.add_current_page_available);
 
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
-    EXPECT_TRUE(window->ViewSwapPendingForTest());
-    const std::uint64_t generation = window->AttachedViewGenerationForTest();
-    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
-    window->RecheckPendingViewSwapForTest(generation);
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
-    EXPECT_FALSE(window->ViewSwapPendingForTest());
-    EXPECT_EQ(window->internal_page(), LocalPageKind::kSettings);
+    ASSERT_TRUE(window->CreateSpace("Other"));
+    ASSERT_EQ(window->space_count(), 2U);
+    window->ToggleSettings();
+    EXPECT_EQ(window->active_space_index(), 0U);
+    EXPECT_EQ(window->spaces()[0].tab_count(), 2U);
+    EXPECT_EQ(window->spaces()[1].tab_count(), 1U);
+    EXPECT_EQ(window->active_tab_id(), settings);
+    ASSERT_TRUE(window->MoveTabWithinSpace(0, 1, 0));
+    EXPECT_EQ(window->active_tab_id(), settings);
+    window->ExecuteCommand(BrowserCommand::kCloseTab);
+    EXPECT_EQ(window->spaces()[window->active_space_index()].tab_count(), 1U);
 }
 
-TEST(BrowserWindowPagesTest, HidingYoungSettingsWaitsForItToSettle) {
+TEST(BrowserWindowPagesTest, SettingsBridgeRequiresTheExactDocumentAndSessionDoesNotRestoreIt) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
-    window->SetAttachedInternalPageForSwapTest(LocalPageKind::kSettings);
+    constexpr std::string_view kSettings = "data:text/html,settings-document";
+    window->SetSettingsPageUrlForTest(std::string(kSettings));
+    EXPECT_TRUE(window->IsSettingsPageUrl(kSettings));
+    EXPECT_FALSE(window->IsSettingsPageUrl("https://example.test/"));
+    EXPECT_FALSE(window->IsSettingsPageUrl("data:text/html,settings-document#forged"));
 
-    const std::size_t swaps_before = window->ViewSwapCountForTest();
-    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
-
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
-    EXPECT_TRUE(window->ViewSwapPendingForTest());
-    const std::uint64_t generation = window->AttachedViewGenerationForTest();
-    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
-    window->RecheckPendingViewSwapForTest(generation);
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
-    EXPECT_FALSE(window->ViewSwapPendingForTest());
-    EXPECT_FALSE(window->internal_page().has_value());
+    window->OpenSettingsSection("privacy");
+    ASSERT_EQ(window->spaces()[window->active_space_index()].tab_count(), 2U);
+    const std::optional<Value> settings_state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(settings_state.has_value());
+    EXPECT_EQ(settings_state->FindMember("settings")->StringOr("focus", ""), "privacy");
+    const SessionState session = window->BuildSessionState();
+    ASSERT_EQ(session.spaces.size(), 1U);
+    ASSERT_EQ(session.spaces[0].tabs.size(), 1U);
+    EXPECT_NE(session.spaces[0].tabs[0].url, kSettings);
 }
 
 TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves) {
