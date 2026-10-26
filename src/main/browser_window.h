@@ -370,6 +370,20 @@ class BrowserWindow : public CefClient,
         return space_icon_picker_scheduled_;
     }
     void RunScheduledSpaceIconPickerForTest() { RunScheduledSpaceIconPicker(); }
+    // Space menu: opens are counted before the palette guard, so headless tests see them. Headless
+    // windows have no palette, so a test sets the palette's mode flag to model a showing menu.
+    [[nodiscard]] std::size_t SpaceMenuShowsForTest() const noexcept { return space_menu_shows_; }
+    void SetSpaceMenuOpenForTest(bool open) { space_menu_open_ = open; }
+    // SaveSession calls made so far (counted before SessionStore::Save runs).
+    [[nodiscard]] std::size_t SessionSaveRequestsForTest() const noexcept {
+        return session_save_requests_;
+    }
+    // Fullscreen: the traffic-light inset the resolved tokens reserve, and the fullscreen flag
+    // OnWindowFullscreenTransition sets (a test cannot enter real fullscreen headless).
+    void SetFullscreenForTest(bool fullscreen) { fullscreen_ = fullscreen; }
+    [[nodiscard]] int TitlebarBandDipForTest() const {
+        return ResolvedTokens(ResolvedChromeTheme()).titlebar_band_dip;
+    }
     // Headless windows have no CEF task queue: scheduling records the task without posting it.
     void DisableUiTaskPostingForTest() { ui_tasks_enabled_for_test_ = false; }
     // Real-gate seams: headless tests identify the tab represented by the content slot and drive
@@ -1370,6 +1384,9 @@ class BrowserWindow : public CefClient,
     bool space_icon_picker_scheduled_ = false;
     bool ui_tasks_enabled_for_test_ = true;
     std::size_t space_icon_picker_shows_ = 0;
+    std::size_t space_menu_shows_ = 0;
+    // Mutable: SaveSession is const; the counter is test bookkeeping only.
+    mutable std::size_t session_save_requests_ = 0;
     bool closing_plan_after_confirmation_ = false;
     // Why the last plan action was refused (depth limit, agent busy); empty when none.
     std::string plan_notice_;

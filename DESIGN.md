@@ -305,9 +305,8 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   `hover` plate as a tab row, no accent) and opens a tab exactly like ⌘T; the collapsed rail's "+"
   sits after the tab icons. Clicking the active space's segment (or its rail icon) opens the space
   menu: Rename, Change icon, the five colour presets, New space and, with another space present,
-  Delete space. It is a palette listing shown only while open, not a persistent overlay. In
-  Arc and Graphite the
-  footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
+  Delete space. It is a palette listing shown only while open, not a persistent overlay.
+  In Arc and Graphite the footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
   centered with the icon buttons and spaced like them: `hover` on hover, `segment_selected` while
   the panel is open, the label `text` and the sparkle `text_2`, never an accent fill or label.
   Favicons sit on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on

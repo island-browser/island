@@ -590,6 +590,25 @@ ArgbColor BrowserChrome::TextfieldOutlineColor(const ChromeTokens& tokens, bool 
     return tokens.border;
 }
 
+ArgbColor BrowserChrome::NewTabRowFill(const ChromeTokens& tokens, bool hovered) {
+    return TabRowFill(tokens, /*active=*/false, /*pinned=*/false, hovered,
+                      /*behind_favorite=*/false)
+        .value_or(tokens.canvas);
+}
+
+std::optional<CornerPatch> BrowserChrome::NewTabCornerPatch(const DipRect& bounds, bool hovered) {
+    if (!hovered || bounds.width <= 0 || bounds.height <= 0) {
+        return std::nullopt;
+    }
+    return CornerPatch{
+        .x = bounds.x, .y = bounds.y, .width = bounds.width, .height = bounds.height,
+        .radius = kRowFillRadiusDip};
+}
+
+BrowserChrome::SpaceSegmentClick BrowserChrome::SpaceSegmentClickFor(bool is_active_space) {
+    return is_active_space ? SpaceSegmentClick::kOpenMenu : SpaceSegmentClick::kSelectSpace;
+}
+
 std::optional<CornerPatch> BrowserChrome::AddressCornerPatch(const ChromeTokens& tokens,
                                                              const DipRect& bounds,
                                                              bool sidebar_expanded) {
@@ -2125,10 +2144,9 @@ void BrowserChrome::ApplyNewTabVisual(const CefRefPtr<CefLabelButton>& button, b
     if (button == nullptr) {
         return;
     }
-    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
-    // The same neutral plate as the Agent entry and the rail's footer buttons: hover paints the
-    // tokens' hover fill, and the label keeps the secondary text color (no accent).
-    button->SetBackgroundColor(FooterAgentPlate(tokens_, /*open=*/false, hovered, rail).argb);
+    // The plate a tab row takes for the same hover state, so the New tab row and the tab rows
+    // below it match. The label keeps the secondary text color (no accent).
+    button->SetBackgroundColor(NewTabRowFill(tokens_, hovered).argb);
     button->SetEnabledTextColors(tokens_.text_secondary.argb);
     for (const cef_button_state_t state :
          {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED}) {
@@ -2625,6 +2643,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
             AddSectionHeader(title, ChromeViewId::kTabsSectionHeader, title + " section");
     }
     // The New tab row sits directly under the tabs header, before the first tab row.
+    // The rebuilt row starts unhovered; a stale flag would keep the old hover fill and patch.
+    new_tab_hovered_ = false;
     new_tab_button_ = AddNewTabRow();
 
     const int row_height = RowHeight();
@@ -2823,6 +2843,7 @@ void BrowserChrome::RebuildCollapsedTabs() {
         collapsed_tab_list_->AddChildView(views.row);
     }
     // The "+" New tab icon comes after the tab favicons, at the end of the rail's list.
+    collapsed_new_tab_hovered_ = false;
     collapsed_new_tab_button_ = AddCollapsedNewTab();
     UpdateCollapsedTabListSize();
 }
@@ -3746,7 +3767,9 @@ void BrowserChrome::DispatchCollectionAction(CollectionButtonAction action, std:
             return;
         case CollectionButtonAction::kActivateSpace:
             // The active space's segment opens its menu; any other space is selected.
-            if (index < space_entries_.size() && space_entries_[index].active) {
+            if (SpaceSegmentClickFor(index < space_entries_.size() &&
+                                     space_entries_[index].active) ==
+                SpaceSegmentClick::kOpenMenu) {
                 host_->ShowSpaceMenu(index);
             } else {
                 host_->SelectSpace(index);
@@ -4332,6 +4355,16 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
     }
     if (sidebar_expanded_) {
         const WindowRect viewport = InWindow(tab_list_scroll_);
+        if (new_tab_button_ != nullptr) {
+            const WindowRect row = InWindow(new_tab_button_);
+            if (Contains(viewport, row)) {
+                if (const std::optional<CornerPatch> patch = NewTabCornerPatch(
+                        {.x = row.x, .y = row.y, .width = row.width, .height = row.height},
+                        new_tab_hovered_)) {
+                    patches.push_back(*patch);
+                }
+            }
+        }
         for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
              ++index) {
             if (!filled(tab_entries_[index], tab_entry_views_[index].hovered)) {
@@ -4344,6 +4377,17 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
         }
     } else {
         const WindowRect viewport = InWindow(collapsed_tab_scroll_);
+        if (collapsed_new_tab_button_ != nullptr) {
+            const WindowRect button = InWindow(collapsed_new_tab_button_);
+            if (Contains(viewport, button)) {
+                if (const std::optional<CornerPatch> patch = NewTabCornerPatch(
+                        {.x = button.x, .y = button.y, .width = button.width,
+                         .height = button.height},
+                        collapsed_new_tab_hovered_)) {
+                    patches.push_back(*patch);
+                }
+            }
+        }
         for (const CollapsedTabViews& views : collapsed_tab_views_) {
             if (views.source_index >= tab_entries_.size() ||
                 !filled(tab_entries_[views.source_index], views.hovered)) {

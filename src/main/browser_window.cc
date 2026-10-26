@@ -533,6 +533,7 @@ SessionState BrowserWindow::BuildSessionState() const {
 }
 
 void BrowserWindow::SaveSession() const {
+    ++session_save_requests_;
     // Spaces currently create their request contexts without a cache path, so
     // there is no storage directory to persist yet.
     static_cast<void>(
@@ -4424,6 +4425,8 @@ bool BrowserWindow::GetTitlebarHeight(CefRefPtr<CefWindow>, float* titlebar_heig
         return false;
     }
     // The traffic lights sit halfway down this height: centered on the sidebar's top strip.
+    // Deliberately not zeroed in fullscreen, unlike the token inset (ResolvedTokens): CEF keeps the
+    // frameless titlebar's geometry, and macOS hides the lights there, so nothing visible reads it.
     *titlebar_height = static_cast<float>(BrowserChrome::TrafficLightBandDip());
     return true;
 }
@@ -6120,11 +6123,14 @@ void BrowserWindow::ShowSearchPalette() {
 
 void BrowserWindow::ShowCommandPalette() {
     CEF_REQUIRE_UI_THREAD();
+    // The palette opens in its ordinary mode. A flag left over from the icon picker or the space
+    // menu would make the next submit act on that old listing and drop a normal command.
+    space_icon_picker_open_ = false;
+    space_menu_open_ = false;
     if (closing_ || window_ == nullptr) {
         return;
     }
     CloseCheatsheet(/*refocus_page=*/false);
-    space_icon_picker_open_ = false;
     if (command_palette_ == nullptr) {
         // Lazily created on the first Cmd/Ctrl+K, then only shown and hidden.
         command_palette_ = std::make_unique<CommandPaletteView>(
@@ -6218,6 +6224,7 @@ void BrowserWindow::ShowSpaceMenu(std::size_t index) {
 
 void BrowserWindow::OpenSpaceMenu() {
     CEF_REQUIRE_UI_THREAD();
+    ++space_menu_shows_;
     if (closing_ || window_ == nullptr) {
         return;
     }
@@ -6273,9 +6280,12 @@ void BrowserWindow::RunSpaceMenuCommand(const SpaceMenuCommand& command) {
             ExecuteCommand(BrowserCommand::kNewSpace);
             break;
         case SpaceMenuAction::kDeleteSpace:
-            // The existing close-space command: it removes the active space at once, as it always
-            // has.
-            ExecuteCommand(BrowserCommand::kCloseSpace);
+            // Delete is offered only while another space remains. Closing the last space would
+            // replace it with a blank default space (RemoveSpaceAtIndex), so it is refused here
+            // too.
+            if (spaces_.size() > 1) {
+                ExecuteCommand(BrowserCommand::kCloseSpace);
+            }
             break;
     }
     FocusBrowserView();

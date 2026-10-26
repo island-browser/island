@@ -22,7 +22,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
   sites; bulk, import, folder-mutation and reorder tools are not exposed.
 
-- Sidebar favorites (Bookmarks 0.9): a global favorites strip shows the first six favorites then "+N", and the "+" that adds the current page sits at the end of the "Global favorites" header row. The strip's plates and gaps shrink to fit the sidebar (down to 24 and 2 DIP). The current space's favorites appear under "<Space> · Favorites" (Graphite: "Favorites"), and the tabs follow under a "Tabs" header (Arc and Graphite show it only when favorites come first). Pinned tabs sit under the tabs header. A failed save shows a status row above the footer, with Retry when the change can run again. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button is removed.
+- Sidebar favorites (Bookmarks 0.9): a global favorites strip shows the first six favorites then "+N", and the "+" that adds the current page sits at the end of the "Global favorites" header row. The strip's plates and gaps shrink to fit the sidebar (down to 24 and 2 DIP). The current space's favorites appear under "<Space> · Favorites" (Graphite: "Favorites"), and the tabs follow under a "Tabs" header (Arc and Graphite show it only when favorites come first). Pinned tabs sit under the tabs header. A failed save shows a status row above the footer, with Retry when the change can run again. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button sits after the tab icons (see Changed).
 - Favorites have their data path in place: each favorite list is projected for the sidebar, and a
   favorite can show its own virtual tab in the content slot without touching the selected tab. While
   it is shown, the address field, navigation, find, zoom and the agent's current page act on it, and
@@ -36,6 +36,16 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   its virtual tabs everywhere.
 
 ### Changed
+
+- The sidebar's "+ New tab" row is back: directly under the "<Space> · Tabs" header in every look,
+  and the collapsed rail's "+" after the tab icons. Both open a tab like ⌘T
+  (ChromeViewIds 1094 and 1095; 1052 stays retired).
+- Clicking the active space in the space switcher (or its rail icon) opens a menu: Rename space,
+  Change icon, the five colour presets, New space and Delete space. A click on another space still
+  switches to it. Colour can now be changed from the sidebar.
+- Arc hover: the sidebar row highlight is a subtle neutral plate instead of a heavy blue-white block.
+- macOS fullscreen: the traffic-light inset is removed while the window is fullscreen and restored
+  on exit, so the sidebar no longer leaves an empty band on the left and top.
 - Sidebar favorites repaint their text and generic icons on a theme switch (round 4: the row titles were near-white on the light canvas), and the keyboard focus ring on a strip icon is centred and no longer clipped.
 
 - Sidebar favorites, fix round 2: while a favorite is shown, the space's selected tab is drawn with the neutral selected plate instead of the accent, until the favorite closes. Favorite icons, "+N", "+" and rail favorites carry the accessible names the runtime uses, and the section decisions are shared by the builders and the contract tests.
@@ -93,16 +103,6 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   in prefs (`agent_trusted_sites`, normalized to bare lowercase hosts).
 
 ### Changed
-
-- The sidebar's "+ New tab" row is back: directly under the "<Space> · Tabs" header in every look,
-  and the collapsed rail's "+" after the tab icons. Both open a tab like ⌘T
-  (ChromeViewIds 1094 and 1095; 1052 stays retired).
-- Clicking the active space in the space switcher (or its rail icon) opens a menu: Rename space,
-  Change icon, the five colour presets, New space and Delete space. A click on another space still
-  switches to it. Colour can now be changed from the sidebar.
-- Arc hover: the sidebar row highlight is a subtle neutral plate instead of a heavy blue-white block.
-- macOS fullscreen: the traffic-light inset is removed while the window is fullscreen and restored
-  on exit, so the sidebar no longer leaves an empty band on the left and top.
 
 - Native look (command palette): a 20% scrim behind the ⌘K palette, sentence-case group headers
   (Tabs, Spaces, Commands, Go to, Bookmarks, History, Reports), distinct row icons, rounded neutral

@@ -522,6 +522,17 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static std::optional<CornerPatch> AddressCornerPatch(const ChromeTokens& tokens,
                                                                        const DipRect& bounds,
                                                                        bool sidebar_expanded);
+    // The "+ New tab" row's fill: the plate a tab row takes for the same hover state (TabRowFill),
+    // so the two rows never differ. Idle, it is the canvas the rows sit on.
+    [[nodiscard]] static ArgbColor NewTabRowFill(const ChromeTokens& tokens, bool hovered);
+    // The rounded corner patch for a hovered "+ New tab" row at `bounds` (window DIP), with the
+    // tab rows' radius. Nullopt while the row is idle or has no area.
+    [[nodiscard]] static std::optional<CornerPatch> NewTabCornerPatch(const DipRect& bounds,
+                                                                      bool hovered);
+    // Where a click on a space segment (or its rail icon) goes: the active space opens its menu
+    // (space_menu.h); any other space is selected.
+    enum class SpaceSegmentClick : std::uint8_t { kOpenMenu, kSelectSpace };
+    [[nodiscard]] static SpaceSegmentClick SpaceSegmentClickFor(bool is_active_space);
     // A CEF font list ("Family, [Medium |Semi-Bold |Bold ]13px") for the resolved interface font.
     // The weight is explicit. The tokens are those gfx::FontList::ParseDescription accepts in
     // the pinned Chromium (150.0.7871.129); an unknown token ("SemiBold") fails the whole list.
@@ -1338,12 +1349,12 @@ class BrowserChrome final : public NavigationObserver {
     }
     // The active space's name as a header shows it (truncated), or empty when it has none.
     [[nodiscard]] std::string ActiveSpaceHeaderName() const;
-    // Creates one section header label (no focus, no ink) and appends it to tab_strip_.
     // The "+ New tab" row (expanded, after the tabs header) and the collapsed rail's "+" icon.
     // Both use the neutral row plate: hover paints the tokens' hover fill, never the accent.
     CefRefPtr<CefLabelButton> AddNewTabRow();
     CefRefPtr<CefLabelButton> AddCollapsedNewTab();
     void ApplyNewTabVisual(const CefRefPtr<CefLabelButton>& button, bool hovered);
+    // Creates one section header label (no focus, no ink) and appends it to tab_strip_.
     CefRefPtr<CefLabelButton> AddSectionHeader(const std::string& text, ChromeViewId id,
                                                const std::string& accessible_name);
     void ApplyCollectionTheme();

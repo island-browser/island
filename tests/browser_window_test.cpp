@@ -2092,4 +2092,114 @@ TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsRemovalFailsThenItStaysShownAn
 }
 
 }  // namespace
+
+TEST(BrowserWindowTest, GivenASpaceMenuFlagLeftOverWhenTheCommandPaletteOpensThenItsRowsRun) {
+    // Regression (OF-C): the menu's mode flag outlived the menu, so a normal palette submit was
+    // read as a menu row and dropped. Opening the palette now clears the flag first.
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId first_tab = window->active_tab_id();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    ASSERT_NE(window->active_tab_id(), first_tab);
+
+    window->SetSpaceMenuOpenForTest(true);
+    window->ShowCommandPalette();
+    PaletteSelection selection;
+    selection.kind = PaletteEntryKind::kTab;
+    selection.tab.id = first_tab;
+    window->OnCommandPaletteSubmitted(selection, "");
+
+    EXPECT_EQ(window->active_tab_id(), first_tab);
+}
+
+TEST(BrowserWindowTest, GivenASpaceMenuOpenWhenAnOrdinarySelectionIsSubmittedThenItFailsClosed) {
+    // While the menu is up, only its rows act: a tab row or a typed address is swallowed.
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId first_tab = window->active_tab_id();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId second_tab = window->active_tab_id();
+
+    window->SetSpaceMenuOpenForTest(true);
+    PaletteSelection selection;
+    selection.kind = PaletteEntryKind::kTab;
+    selection.tab.id = first_tab;
+    window->OnCommandPaletteSubmitted(selection, "");
+    EXPECT_EQ(window->active_tab_id(), second_tab);
+
+    window->SetSpaceMenuOpenForTest(true);
+    window->OnCommandPaletteSubmitted(PaletteSelection{}, "https://example.com/");
+    EXPECT_EQ(window->active_tab_id(), second_tab);
+}
+
+TEST(BrowserWindowTest, GivenTheActiveSpaceSegmentWhenClickedThenItsMenuOpensNotAnotherSpace) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    ASSERT_EQ(window->space_count(), 2U);
+    ASSERT_EQ(window->active_space_index(), 1U);
+    const std::size_t shows_before = window->SpaceMenuShowsForTest();
+
+    window->ShowSpaceMenu(0);
+    EXPECT_EQ(window->SpaceMenuShowsForTest(), shows_before);
+    EXPECT_EQ(window->active_space_index(), 1U);
+
+    window->ShowSpaceMenu(1);
+    EXPECT_EQ(window->SpaceMenuShowsForTest(), shows_before + 1);
+}
+
+TEST(BrowserWindowTest, GivenASpaceMenuColourWhenChosenThenTheActiveSpaceTakesItAndSessionSaves) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    const std::size_t saves_before = window->SessionSaveRequestsForTest();
+    const SpaceMenuColorChoice& red = kSpaceMenuColorChoices[3];
+    ASSERT_EQ(red.name, "Red");
+
+    window->RunSpaceMenuCommand(SpaceMenuCommand{.action = SpaceMenuAction::kSetColor,
+                                                 .hex = std::string(red.hex)});
+
+    const Space* space = window->FindSpace(window->active_space_id());
+    ASSERT_NE(space, nullptr);
+    EXPECT_EQ(space->color(), red.color);
+    EXPECT_GT(window->SessionSaveRequestsForTest(), saves_before);
+}
+
+TEST(BrowserWindowTest, GivenOneSpaceWhenTheMenuDeletesItThenTheSameSpaceStays) {
+    // Closing the last space would replace it with a fresh default space (new id, no name), so
+    // the menu must not offer or run that: the space and its name survive.
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->RenameSpace(0, "Work"));
+    const SpaceId before = window->active_space_id();
+
+    window->RunSpaceMenuCommand(SpaceMenuCommand{.action = SpaceMenuAction::kDeleteSpace});
+
+    EXPECT_EQ(window->space_count(), 1U);
+    EXPECT_EQ(window->active_space_id(), before);
+    EXPECT_EQ(window->FindSpace(before)->name(), "Work");
+}
+
+TEST(BrowserWindowTest, GivenTwoSpacesWhenTheMenuDeletesTheActiveOneThenItIsRemoved) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    ASSERT_EQ(window->space_count(), 2U);
+
+    window->RunSpaceMenuCommand(SpaceMenuCommand{.action = SpaceMenuAction::kDeleteSpace});
+
+    EXPECT_EQ(window->space_count(), 1U);
+}
+
+TEST(BrowserWindowTest, GivenFullscreenWhenTheTitlebarInsetResolvesThenItIsZeroUntilExit) {
+    // The traffic-light inset follows fullscreen: macOS hides the lights there, so the tokens
+    // reserve no band; on exit the band returns (frameless platforms only).
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+#if defined(__APPLE__)
+    const int windowed = BrowserChrome::TrafficLightBandDip();
+#else
+    const int windowed = 0;  // no frameless titlebar off macOS, so no inset either way
+#endif
+
+    window->SetFullscreenForTest(true);
+    EXPECT_EQ(window->TitlebarBandDipForTest(), 0);
+
+    window->SetFullscreenForTest(false);
+    EXPECT_EQ(window->TitlebarBandDipForTest(), windowed);
+}
 }  // namespace island

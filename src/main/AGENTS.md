@@ -125,6 +125,11 @@ platform executable links.
   `kSpaceMenuColorChoices`, shared with New Space. To add a row, extend `SpaceMenuAction`, the
   builder, the parser and `RunSpaceMenuCommand`. Dev capture: `space_menu` opens it (the macOS
   selector is `openSpaceMenu:`, `IslandApp::OpenSpaceMenu`).
+  `BrowserChrome::SpaceSegmentClickFor` decides the routing (active → menu, other → select).
+  Hover fills of the New tab row use `NewTabRowFill` (the tab row's `TabRowFill`) and
+  `NewTabCornerPatch` (the tab rows' 8 DIP radius), both listed in `ComputeCornerPatches`.
+  Fullscreen: `ResolvedTokens` drops `titlebar_band_dip` while `fullscreen_`; tests read it
+  through `TitlebarBandDipForTest`.
   Fullscreen: `OnWindowFullscreenTransition` tracks `fullscreen_`; `ResolvedTokens` drops the
   frameless `titlebar_band_dip` (the traffic-light inset) while fullscreen, so the rail and the
   navigation row stop reserving room for hidden buttons, and restores it on exit.

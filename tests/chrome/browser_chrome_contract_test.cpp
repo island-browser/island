@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "browser_chrome.h"
+#include "design_tokens.h"
+#include "sidebar_collection.h"
 
 namespace island {
 namespace {
@@ -357,8 +359,9 @@ TEST(BrowserChromeContractTest, GivenTheArcRailWhenInspectedThenItHasNoNewTabRow
         order.push_back(child.id);
     }
     // Top to bottom: navigation, address, the tab list, then the bottom group (divider, space
-    // bar, footer); the current-page card stays last and collapsed. The New Tab row is gone:
-    // ⌘T (Ctrl+T), the Browser menu and the palette open tabs.
+    // bar, footer); the current-page card stays last and collapsed. The rail has no New Tab
+    // control of its own: the expanded tab list carries the "+ New tab" row, and ⌘T (Ctrl+T),
+    // the Browser menu and the palette open tabs too.
     EXPECT_EQ(order,
               (std::vector<ChromeViewId>{ChromeViewId::kNavigationRow, ChromeViewId::kAddressRow,
                                          ChromeViewId::kValidationMessage, ChromeViewId::kTabStrip,
@@ -1060,4 +1063,37 @@ TEST(BrowserChromeFavoritesContractTest, GivenStripHeadersThenEachLookNamesItsSc
 }
 
 }  // namespace
+
+TEST(BrowserChromeContractTest, GivenASpaceSegmentWhenClickedThenOnlyTheActiveSpaceOpensItsMenu) {
+    // The active segment opens the space menu; any other segment selects its space.
+    EXPECT_EQ(BrowserChrome::SpaceSegmentClickFor(/*is_active_space=*/true),
+              BrowserChrome::SpaceSegmentClick::kOpenMenu);
+    EXPECT_EQ(BrowserChrome::SpaceSegmentClickFor(/*is_active_space=*/false),
+              BrowserChrome::SpaceSegmentClick::kSelectSpace);
+}
+
+TEST(BrowserChromeContractTest, GivenAHoveredNewTabRowThenItsCornersAndFillMatchTheTabRows) {
+    // Regression (OF-C): the "+ New tab" row hovered as a square plate beside rounded tab rows.
+    const ChromeTokens tokens = ChromeTokens::ForLook(LookPreset::kNative, ChromeTheme::kLight);
+    const DipRect bounds{.x = 12, .y = 40, .width = 200, .height = 30};
+
+    const std::optional<CornerPatch> patch =
+        BrowserChrome::NewTabCornerPatch(bounds, /*hovered=*/true);
+    ASSERT_TRUE(patch.has_value());
+    // 8 DIP: the tab rows' fill radius (kRowFillRadiusDip in browser_chrome.cc).
+    EXPECT_EQ(patch->radius, 8);
+    EXPECT_EQ(patch->x, bounds.x);
+    EXPECT_EQ(patch->y, bounds.y);
+    EXPECT_EQ(patch->width, bounds.width);
+    EXPECT_EQ(patch->height, bounds.height);
+
+    // Idle, the row is the canvas the rows sit on: no patch, and the fill is the idle tab fill.
+    EXPECT_FALSE(BrowserChrome::NewTabCornerPatch(bounds, /*hovered=*/false).has_value());
+    EXPECT_EQ(BrowserChrome::NewTabRowFill(tokens, /*hovered=*/true),
+              TabRowFill(tokens, /*active=*/false, /*pinned=*/false, /*hovered=*/true,
+                         /*behind_favorite=*/false)
+                  .value_or(tokens.canvas));
+    EXPECT_EQ(BrowserChrome::NewTabRowFill(tokens, /*hovered=*/false),
+              TabRowFill(tokens, false, false, false, false).value_or(tokens.canvas));
+}
 }  // namespace island

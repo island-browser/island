@@ -32,7 +32,7 @@ When you focus the address field from the rail with ⌘L (Ctrl+L), the sidebar e
 
 A **+ New tab** row sits under the space's tabs header, above your first tab. Click it to open a tab, the same as ⌘T (Ctrl+T). In the collapsed rail, the **+** button sits after the tab icons.
 
-## Change the space menu
+## Use the space menu
 
 Click the space you are already in (its segment in the bottom bar, or its icon in the collapsed rail) to open its menu:
 
