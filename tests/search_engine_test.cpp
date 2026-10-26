@@ -169,6 +169,59 @@ TEST(SearchEngineTest, GivenABidiOrFormatControlInTheQueryWhenReadThenTheUrlIsSh
               std::nullopt);  // U+2069 PDI
 }
 
+TEST(SearchEngineTest, GivenAZeroWidthOrOtherFormatCharacterInTheQueryWhenReadThenTheUrlIsShown) {
+    // Cf characters are invisible in a single-line field, so "https" plus a ZWSP reads as a URL.
+    EXPECT_EQ(SearchQueryFromResultsUrl(
+                  "https://www.google.com/search?q=https%E2%80%8B%3A%2F%2Fbank.example%2Flogin"),
+              std::nullopt);  // U+200B ZWSP
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%8Cbrowser"),
+              std::nullopt);  // U+200C ZWNJ
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%8Dbrowser"),
+              std::nullopt);  // U+200D ZWJ
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%81%A0browser"),
+              std::nullopt);  // U+2060 WORD JOINER
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%EF%BB%BFbrowser"),
+              std::nullopt);  // U+FEFF BOM
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%C2%ADbrowser"),
+              std::nullopt);  // U+00AD SOFT HYPHEN
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E1%A0%8Ebrowser"),
+              std::nullopt);  // U+180E MONGOLIAN VOWEL SEPARATOR
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%D8%9Cbrowser"),
+              std::nullopt);  // U+061C ARABIC LETTER MARK
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%F3%A0%80%A0x"),
+              std::nullopt);  // U+E0020 TAG SPACE
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%E2%80%A8browser"),
+              std::nullopt);  // U+2028 LINE SEPARATOR
+}
+
+TEST(SearchEngineTest, GivenLookAlikeUrlPunctuationInTheQueryWhenReadThenTheUrlIsShown) {
+    // Fullwidth forms and separators that look like ':', '/' or '.' can make a URL look typed.
+    EXPECT_EQ(SearchQueryFromResultsUrl(
+                  "https://www.google.com/search?q=https%EF%BC%9A%EF%BC%8F%EF%BC%8Fbank.example"),
+              std::nullopt);  // U+FF1A, U+FF0F
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=bank%EF%BC%8Eexample"),
+              std::nullopt);  // U+FF0E
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=bank.example%E2%81%84x"),
+              std::nullopt);  // U+2044 FRACTION SLASH
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=bank.example%E2%88%95x"),
+              std::nullopt);  // U+2215 DIVISION SLASH
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=bank%E3%80%82example"),
+              std::nullopt);  // U+3002 IDEOGRAPHIC FULL STOP
+    EXPECT_EQ(SearchQueryFromResultsUrl(
+                  "https://www.google.com/search?q=%EF%BD%82%EF%BD%81%EF%BD%8E%EF%BD%8B%20island"),
+              std::nullopt);  // fullwidth letters
+}
+
+TEST(SearchEngineTest, GivenNonAsciiTextInTheQueryWhenReadThenItIsStillShown) {
+    EXPECT_EQ(SearchQueryFromResultsUrl(
+                  "https://www.google.com/search?q=%D0%BE%D1%81%D1%82%D1%80%D0%BE%D0%B2"
+                  "%20%D0%B1%D1%80%D0%B0%D1%83%D0%B7%D0%B5%D1%80"),
+              "\xD0\xBE\xD1\x81\xD1\x82\xD1\x80\xD0\xBE\xD0\xB2 \xD0\xB1\xD1\x80\xD0\xB0"
+              "\xD1\x83\xD0\xB7\xD0\xB5\xD1\x80");  // "остров браузер"
+    EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=%E6%9D%B1%E4%BA%AC"),
+              "\xE6\x9D\xB1\xE4\xBA\xAC");  // "東京"
+}
+
 TEST(SearchEngineTest, GivenInvalidUtf8InTheQueryWhenReadThenTheUrlIsShown) {
     EXPECT_EQ(SearchQueryFromResultsUrl("https://www.google.com/search?q=island%FFbrowser"),
               std::nullopt);  // lone continuation-invalid lead byte
@@ -207,6 +260,14 @@ TEST(SearchEngineTest, GivenEveryEngineRowWhenCheckedThenItsShapeIsOneTheReaderP
         // The parameter name sits between '?' and the trailing '='.
         EXPECT_GT(prefix.size(), question + 2) << engine.key;
         EXPECT_EQ(prefix.back(), '=') << engine.key;
+        for (const std::string_view host : engine.extra_results_hosts) {
+            if (host.empty()) {
+                continue;
+            }
+            // A bare host: no scheme, path, port, userinfo or query.
+            EXPECT_EQ(host.find_first_of(":/?#@ "), std::string_view::npos) << host;
+            EXPECT_NE(host.find('.'), std::string_view::npos) << host;
+        }
     }
 }
 

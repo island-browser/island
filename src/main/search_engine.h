@@ -57,9 +57,10 @@ struct SearchEngine {
 // '?', "q" or "text"). Other parameters and the fragment are ignored, the first occurrence of the
 // parameter wins, and '+' and %XX decode. nullopt also comes back for a blank query, and for a
 // query the address field must not show as text: one that reads as an address rather than a
-// search (ClassifyAddressInput), that has a control or bidi/format character, or that is not valid
-// UTF-8. The address field then shows the real URL. While a results page shows its query, the real
-// URL stays in the tab.
+// search (ClassifyAddressInput), that has a control, a format (Cf) character, a line separator or
+// look-alike URL punctuation (fullwidth ASCII included), or that is not valid UTF-8. The address
+// field then shows the real URL. While a results page shows its query, the real URL stays in the
+// tab.
 [[nodiscard]] std::optional<std::string> SearchQueryFromResultsUrl(std::string_view url);
 
 // What the start page's three-mode switch does with Enter, persisted as the

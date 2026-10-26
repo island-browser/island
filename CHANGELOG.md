@@ -39,11 +39,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   what Copy URL and the tab hold.
 - Results pages of Yandex's regional sites (yandex.ru, ya.ru) show their query too.
 - A search query that would read as an address (for example `q=https://bank.example/login`), that
-  holds a control or bidi/format character, or that is not valid UTF-8 is not shown in the address
+  holds a control character, a hidden format character (such as a zero-width space or soft hyphen),
+  fullwidth or look-alike URL punctuation, or that is not valid UTF-8 is not shown in the address
   field; the field keeps the real URL. A link to a results page cannot make the field show another
-  address.
-- The address field's placeholder keeps CEF's default colour in Arc and Graphite; the pinned CEF
-  has no placeholder colour setter (Native draws its placeholder in the secondary text token).
+  address. Queries in other scripts, such as Cyrillic or CJK, still show. A query that needs one of
+  the hidden characters (for example a Persian query with a zero-width non-joiner) shows the URL.
 
 ### Fixed
 

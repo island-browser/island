@@ -360,7 +360,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   placeholder in CEF's default colour: the pinned CEF has no placeholder colour setter
   (`SetPlaceholderTextColor` is behind `CEF_API_REMOVED(15000)`), so this is an accepted limit. It
   is never the field's text. A search engine's results page shows its query at rest instead of the
-  URL, unless the query would read as an address or hides characters (then the URL shows);
+  URL, unless the query would read as an address, holds a control, a hidden format character or
+  look-alike URL punctuation, or is not valid UTF-8 (then the URL shows);
   focusing the field keeps the query.
 - **Address-field indicators (Native):** 20 DIP glyph buttons inside the 30 DIP address field, at
   its edges, in `text_secondary`, each shown only when it has something to say (spec §3).
