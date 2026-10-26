@@ -4921,13 +4921,15 @@ bool BrowserWindow::AttachedViewWillRemain(const AttachedView& attached) const {
     if (!attached.tab.has_value()) {
         return false;
     }
-    const Space& space = active_space();
-    if (space.split().has_value()) {
-        // A pane that changes slot is removed and re-added by the attach, so it leaves.
-        return *attached.tab ==
-               (attached.second_slot ? space.split()->second : space.split()->first);
+    const std::optional<ShownPanes> panes = ShownPanesFor();
+    if (!panes.has_value()) {
+        return false;
     }
-    return *attached.tab == space.active_tab_id();
+    if (panes->second.has_value()) {
+        // A pane that changes slot is removed and re-added by the attach, so it leaves.
+        return *attached.tab == (attached.second_slot ? *panes->second : panes->first);
+    }
+    return *attached.tab == panes->first;
 }
 
 bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
@@ -5185,22 +5187,10 @@ void BrowserWindow::AttachActiveTabBrowserView() {
         show_internal_page_ = false;
         shortcut_conflict_.reset();
     }
-    if (displayed_favorite_.has_value()) {
-        // Single-pane display only: the favorite takes the whole slot. A split pair stays in its
-        // space and is shown again once the favorite closes or another tab is selected.
-        Tab* virtual_tab = FindVirtualTab(*displayed_favorite_);
-        if (virtual_tab != nullptr && EnsureTabBrowserView(*virtual_tab)) {
-            chrome_->AttachBrowserView(virtual_tab->browser_view());
-            SetAttachedViews(
-                {AttachedView{.view = virtual_tab->browser_view(), .tab = virtual_tab->id()}});
-            ApplyPageViewVisibility();
-            return;
-        }
-    }
-    Space& space = active_space();
-    if (space.split().has_value()) {
-        Tab* first = space.FindTab(space.split()->first);
-        Tab* second = space.FindTab(space.split()->second);
+    const std::optional<ShownPanes> panes = ShownPanesFor();
+    if (panes.has_value() && panes->second.has_value()) {
+        Tab* first = FindTabById(panes->first);
+        Tab* second = FindTabById(*panes->second);
         // A restored split partner has no view until first shown; both panes
         // are built on the same path as kNewTab before the split attaches.
         if (first != nullptr && second != nullptr && EnsureTabBrowserView(*first) &&
@@ -5214,7 +5204,8 @@ void BrowserWindow::AttachActiveTabBrowserView() {
             return;
         }
     }
-    Tab* tab = active_tab();
+    // The shown tab: the displayed favorite's virtual tab, else the selected ordinary tab.
+    Tab* tab = DisplayedTab();
     if (tab == nullptr || !EnsureTabBrowserView(*tab)) {
         return;
     }
@@ -5360,6 +5351,7 @@ bool BrowserWindow::ReconcileFavoriteTabs() {
     bool displayed_gone = false;
     for (const FavoriteTabKey& key : gone) {
         if (displayed_favorite_ == key) {
+            ClearShownTabObservers();
             displayed_favorite_.reset();
             displayed_gone = true;
         }
@@ -5437,19 +5429,37 @@ bool BrowserWindow::ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark
     if (scope.has_value() && *scope != active_space().id().value) {
         return false;
     }
-    const FavoriteTabRecord& record = favorite_tabs_.Ensure(key, bookmark->url);
+    // The URL the virtual tab would load: its last one, or the favorite URL for a new tab. An
+    // address that does not validate is never loaded; the activation is a no-op with a status.
+    const FavoriteTabRecord* existing = favorite_tabs_.Find(key);
+    const std::string& target =
+        existing != nullptr && !existing->last_url.empty() ? existing->last_url : bookmark->url;
+    const ValidatedAddress address =
+        address_validator_ ? address_validator_(target) : ParseAndValidate(target);
+    if (!address.is_valid()) {
+        failed_bookmark_mutation_ = FailedBookmarkMutation{
+            .message =
+                "This favorite's stored address is not a valid web address, so it was not "
+                "opened.",
+            .retry = nullptr};
+        UpdateChromeCollections();
+        return false;
+    }
+    favorite_tabs_.Ensure(key, bookmark->url);
     if (!virtual_tabs_.contains(key)) {
         Tab tab{NextTabId()};
-        const ValidatedAddress address = address_validator_ ? address_validator_(record.last_url)
-                                                            : ParseAndValidate(record.last_url);
-        if (address.is_valid()) {
-            tab.SetStartupUrl(address.url);
-            // No observer yet: the tab's snapshot carries the favorite's URL from the first push
-            // on, before the browser (or a failed load) reports an address of its own.
-            tab.navigation_state().SetAddress(address.url);
-        }
+        tab.SetStartupUrl(address.url);
+        // No observer yet: the tab's snapshot carries the favorite's URL from the first push on,
+        // before the browser (or a failed load) reports an address of its own.
+        tab.navigation_state().SetAddress(address.url);
         virtual_tabs_.emplace(key, std::move(tab));
     }
+    // The favorite covers the focused pane of a split (the selected ordinary tab, which stays
+    // selected behind it). The ordinary tab list and its selection are not changed.
+    const std::optional<SplitPairing>& split = active_space().split();
+    favorite_pane_ = split.has_value() && active_space().has_active_tab()
+                         ? std::optional<TabId>(active_space().active_tab_id())
+                         : std::nullopt;
     // Only the displayed favorite changes: the ordinary tab list and its selection stay as they
     // were, so no Detach here (a Detach would end the display we are about to start).
     ClearShownTabObservers();
@@ -5469,6 +5479,81 @@ void BrowserWindow::CloseFavoriteTab() {
     DropVirtualTab(key);
     favorite_tabs_.ResetToFavorite(key);
     AttachActiveTabObservers();
+}
+
+std::optional<BrowserWindow::ShownPanes> BrowserWindow::ShownPanesFor() const {
+    const Tab* shown = DisplayedTab();
+    if (shown == nullptr) {
+        return std::nullopt;
+    }
+    const std::optional<SplitPairing>& split = active_space().split();
+    if (!split.has_value()) {
+        return ShownPanes{.first = shown->id()};
+    }
+    if (!displayed_favorite_.has_value()) {
+        return ShownPanes{.first = split->first, .second = split->second};
+    }
+    if (favorite_pane_ == split->first) {
+        return ShownPanes{.first = shown->id(), .second = split->second};
+    }
+    if (favorite_pane_ == split->second) {
+        return ShownPanes{.first = split->first, .second = shown->id()};
+    }
+    // The split no longer holds the pane the favorite covered: the favorite fills the slot alone.
+    return ShownPanes{.first = shown->id()};
+}
+
+std::optional<std::string> BrowserWindow::TabStartupUrlForTest(TabId id) const {
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            if (tab.id() == id) {
+                return tab.startup_url();
+            }
+        }
+    }
+    for (const auto& [key, tab] : virtual_tabs_) {
+        if (tab.id() == id) {
+            return tab.startup_url();
+        }
+    }
+    return std::nullopt;
+}
+
+bool BrowserWindow::AgentOwnsTab(TabId id) const {
+    for (const Space& space : spaces_) {
+        for (const Tab& tab : space.tabs()) {
+            if (tab.id() == id) {
+                return tab.opened_by_agent();
+            }
+        }
+    }
+    return false;  // virtual favorite tabs are never the agent's
+}
+
+BookmarkResult BrowserWindow::DeleteBookmark(std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    return RunBookmarkMutation(
+        [this, bookmark_id] { return bookmarks_.DeleteBookmark(bookmark_id); });
+}
+
+std::optional<std::string> BrowserWindow::FavoritePeekUrl(FavoriteScope scope,
+                                                          std::uint64_t bookmark_id) const {
+    const FavoriteTabKey key{.scope = scope, .bookmark_id = bookmark_id};
+    const Bookmark* bookmark = bookmarks_.FindBookmark(bookmark_id);
+    if (bookmark == nullptr || !FavoriteListContains(key)) {
+        return std::nullopt;
+    }
+    // Same visibility rule as ActivateFavorite: only the global strip and the active space's list.
+    if (scope.has_value() && *scope != active_space().id().value) {
+        return std::nullopt;
+    }
+    return bookmark->url;
+}
+
+bool BrowserWindow::PeekFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::optional<std::string> url = FavoritePeekUrl(scope, bookmark_id);
+    return url.has_value() && OpenPeek(*url);
 }
 
 SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
@@ -5726,6 +5811,17 @@ std::vector<TabSleepInput> BrowserWindow::CollectSleepInputs() const {
             inputs.push_back(input);
         }
     }
+    // Favorite virtual tabs follow the ordinary policy. The displayed one counts as the page on
+    // screen, so it is never eligible; a hidden one may sleep and keeps its session record.
+    for (const auto& [key, tab] : virtual_tabs_) {
+        TabSleepInput input;
+        input.id = tab.id();
+        input.active = displayed_favorite_ == key;
+        input.sleeping = tab.sleeping();
+        input.has_browser = tab.browser() != nullptr;
+        input.web_page = !WebUrlOf(tab).empty();
+        inputs.push_back(input);
+    }
     return inputs;
 }
 
@@ -5741,6 +5837,12 @@ void BrowserWindow::TouchActiveTabs() {
     if (space.split().has_value()) {
         sleep_policy_.Touch(space.split()->first, now);
         sleep_policy_.Touch(space.split()->second, now);
+    }
+    if (displayed_favorite_.has_value()) {
+        const auto shown = virtual_tabs_.find(*displayed_favorite_);
+        if (shown != virtual_tabs_.end()) {
+            sleep_policy_.Touch(shown->second.id(), now);
+        }
     }
 }
 
@@ -5787,6 +5889,9 @@ void BrowserWindow::RunSleepTick() {
         for (const Tab& tab : space.tabs()) {
             sleep_policy_.Observe(tab.id(), now);
         }
+    }
+    for (const auto& [key, tab] : virtual_tabs_) {
+        sleep_policy_.Observe(tab.id(), now);
     }
     for (const TabId id : sleep_policy_.Expired(CollectSleepInputs(), now)) {
         if (Tab* tab = FindTabById(id)) {
@@ -5887,6 +5992,9 @@ bool BrowserWindow::SleepTab(TabId id, double scroll_x, double scroll_y) {
     const Space& active = active_space();
     if (active.has_active_tab() && active.active_tab_id() == id) {
         return false;  // the page on screen never sleeps
+    }
+    if (const Tab* shown = DisplayedTab(); shown != nullptr && shown->id() == id) {
+        return false;  // a displayed favorite's virtual tab is the page on screen too
     }
     const std::string url = WebUrlOf(*tab);
     if (url.empty()) {
@@ -6536,6 +6644,14 @@ void BrowserWindow::RecordBlockedRequest(int browser_identifier) {
                 RecordBlockedRequestForTab(tab.id());
                 return;
             }
+        }
+    }
+    // A displayed favorite (and any hidden one with a browser) counts its blocked requests too.
+    for (auto& [key, tab] : virtual_tabs_) {
+        const CefRefPtr<CefBrowser> browser = tab.browser();
+        if (browser != nullptr && browser->GetIdentifier() == browser_identifier) {
+            RecordBlockedRequestForTab(tab.id());
+            return;
         }
     }
 }

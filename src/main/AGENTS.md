@@ -264,10 +264,34 @@ kind switch of `BrowserWindow::TasksStateJson`.
   each live virtual tab's current URL as its last URL. `RestoreSessionState` restores records before
   anything else (they belong to the library) and drops those whose favorite is gone. The display is
   never restored. Older builds ignore the key, so they drop these records only when they save.
-- **Known limits (Task 2).** A split pair is hidden, not dropped, while a favorite fills the slot.
-  Virtual tabs are not sleep candidates. Only `BuildSidebarCollection` and the window logic are
-  unit-tested; `SetSidebarCollection` needs CEF and is not. The tab strip's active entry is still the
-  selected ordinary tab while a favorite is shown (the favorite's `displayed` flag is the only mark).
+- **Virtual-tab lifecycle (Task 7).**
+  - *Split.* `favorite_pane_` is the focused split member (the active tab) at activation. The favorite
+    fills that pane and the other pane keeps its tab. `ShownPanesFor()` is the one place that decides
+    the slots: `AttachActiveTabBrowserView` and `AttachedViewWillRemain` both use it, and
+    `ShownPanesForTest()` exposes it. Selecting any tab ends the display (as before), so a favorite
+    moves to the other pane by selecting that pane's tab and activating the favorite again. It is
+    never in both panes. Cmd+W returns only that pane.
+  - *Sleep.* `CollectSleepInputs` includes the virtual tabs: the displayed one is `active` (never
+    eligible), a hidden one follows `TabSleepPolicy`. `SleepTab` refuses the displayed one. The idle
+    clock of the displayed tab is touched on every tick. A slept virtual tab keeps its record;
+    `ActivateFavorite` reuses the same `TabId`, and its startup URL is the last URL.
+  - *Invalid stored URL.* `ActivateFavorite` validates the URL it would load (the record's last URL,
+    else the favorite URL) before it creates a record or a tab. An invalid URL returns false, changes
+    nothing, and sets `failed_bookmark_mutation_` with no retry, so the sidebar shows a non-retryable
+    status.
+  - *Peek.* `FavoritePeekUrl` returns the bookmark URL of a listed favorite (global, or the active
+    space's list); `PeekFavorite` opens it with `OpenPeek`. It never touches the virtual tab or the
+    displayed favorite. The sidebar's Cmd/middle-click wiring is not in this layer yet.
+  - *Agent.* `AgentOwnsTab(TabId)` is true only for an ordinary tab the agent opened. Virtual tabs are
+    never agent-owned, so a displayed favorite is the person's tab. The agent bridge still lists
+    spaces only.
+  - *Removal.* `DeleteBookmark` runs through `RunBookmarkMutation`; `ReconcileFavoriteTabs` then
+    drops every record of the bookmark, clears the displayed one's observer, and returns the slot to
+    the selected ordinary tab. A failed mutation rolls back, so the display and its record survive.
+  - *Still limited.* `RecordBlockedRequest(int)` searches the virtual tabs by browser identifier, but
+    headless tests cannot create a browser, so only the `TabId` path (`RecordBlockedRequestForTab`) is
+    unit-tested. `SetSidebarCollection` needs CEF and is not unit-tested. The tab strip's active entry
+    is still the selected ordinary tab while a favorite is shown (the `displayed` flag is the mark).
 - **Extension points.** A new favorite list kind goes into `FavoriteScope`'s users and
   `FavoriteListContains`. A new per-tab record field goes into `FavoriteTabRecord`,
   `ToSessionFavoriteTabs`/`FavoriteTabsFromSession`, and `FavoriteTabState` (session store). A new

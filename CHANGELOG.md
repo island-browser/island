@@ -20,6 +20,11 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   favorite can show its own virtual tab in the content slot without touching the selected tab. While
   it is shown, the address field, navigation, find, zoom and the agent's current page act on it, and
   Cmd+W closes it.
+- Favorite virtual tabs, lifecycle (Task 7): in split view a favorite fills only the focused pane, and
+  selecting the other pane then activating the favorite moves it. A hidden favorite's virtual tab
+  follows the tab sleep policy and wakes at its last URL, while a displayed one never sleeps. A stored
+  favorite URL that is not a valid web address does nothing and shows a status with no Retry. Peek can
+  open a favorite's URL without touching its tab. Deleting a bookmark removes its virtual tabs everywhere.
 
 ### Changed
 - Sidebar favorites repaint their text and generic icons on a theme switch (round 4: the row titles were near-white on the light canvas), and the keyboard focus ring on a strip icon is centred and no longer clipped.

@@ -677,6 +677,30 @@ class BrowserWindow : public CefClient,
     // The tab the person sees and that page commands, the address field and the agent target: the
     // displayed favorite's virtual tab, else the selected ordinary tab. Empty without a tab.
     [[nodiscard]] std::optional<TabId> shown_tab_id() const noexcept;
+    // The tabs the content slot shows: the single shown tab, or the split pair. While a favorite
+    // covers one split pane, the favorite takes that pane and the other pane keeps its tab.
+    struct ShownPanes {
+        TabId first;
+        std::optional<TabId> second;  // engaged only while a split is shown
+        bool operator==(const ShownPanes&) const = default;
+    };
+    [[nodiscard]] std::optional<ShownPanes> ShownPanesForTest() const { return ShownPanesFor(); }
+    [[nodiscard]] std::vector<TabSleepInput> SleepInputsForTest() const {
+        return CollectSleepInputs();
+    }
+    // The URL a tab recreates from (ordinary or virtual). Empty when the tab is unknown.
+    [[nodiscard]] std::optional<std::string> TabStartupUrlForTest(TabId id) const;
+    // Agent ownership: only an ordinary tab the agent opened belongs to the agent. A favorite's
+    // virtual tab is the person's, whether it is shown or hidden.
+    [[nodiscard]] bool AgentOwnsTab(TabId id) const;
+    // Deletes a bookmark everywhere it is referenced (folder and every favorite list). Its
+    // favorites' virtual tabs go with it, and a displayed one returns the slot to its ordinary tab.
+    BookmarkResult DeleteBookmark(std::uint64_t bookmark_id);
+    // Peek of a favorite: the bookmark's URL, when the favorite is listed here (the global strip or
+    // the active space's list). Peek never touches the favorite's virtual tab.
+    [[nodiscard]] std::optional<std::string> FavoritePeekUrl(FavoriteScope scope,
+                                                             std::uint64_t bookmark_id) const;
+    bool PeekFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
     [[nodiscard]] const FavoriteTabRecord* FavoriteTabRecordFor(const FavoriteTabKey& key) const {
         return favorite_tabs_.Find(key);
     }
@@ -1235,6 +1259,7 @@ class BrowserWindow : public CefClient,
     // Destroys a virtual tab and closes its browser. Its record is left to the caller.
     void DropVirtualTab(const FavoriteTabKey& key);
     [[nodiscard]] Tab* FindVirtualTab(const FavoriteTabKey& key) noexcept;
+    [[nodiscard]] std::optional<ShownPanes> ShownPanesFor() const;
     // Returns the content slot to the selected ordinary tab when a virtual tab is displayed.
     void ReturnToOrdinaryTab();
     // Closes every CefBrowser owned by |space|'s tabs. Must run after the
@@ -1439,6 +1464,8 @@ class BrowserWindow : public CefClient,
     std::map<FavoriteTabKey, Tab> virtual_tabs_;
     FavoriteTabRegistry favorite_tabs_;
     std::optional<FavoriteTabKey> displayed_favorite_;
+    // The split member the displayed favorite covers: the focused pane when it was activated.
+    std::optional<TabId> favorite_pane_;
     // The last failed bookmark mutation (or the load problem) and how to run it again. A null retry
     // means the status cannot be retried, only dismissed.
     struct FailedBookmarkMutation {
