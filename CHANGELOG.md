@@ -39,11 +39,15 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   what Copy URL and the tab hold.
 - Results pages of Yandex's regional sites (yandex.ru, ya.ru) show their query too.
 - A search query that would read as an address (for example `q=https://bank.example/login`), that
-  holds a control character, a hidden format character (such as a zero-width space or soft hyphen),
-  fullwidth or look-alike URL punctuation, or that is not valid UTF-8 is not shown in the address
-  field; the field keeps the real URL. A link to a results page cannot make the field show another
-  address. Queries in other scripts, such as Cyrillic or CJK, still show. A query that needs one of
-  the hidden characters (for example a Persian query with a zero-width non-joiner) shows the URL.
+  holds a control character, that is not valid UTF-8, or that has a non-ASCII character other than
+  a letter, mark, number or space separator is not shown in the address field; the field keeps the
+  real URL. The rule is: only letters, numbers and spaces outside ASCII; anything else shows the full
+  address.
+  A link to a results page cannot make the field show another address. Such characters include
+  look-alike punctuation and symbols (`∶`, `ː`, `／`), format and invisible characters, emoji, and
+  fullwidth forms. Queries in Cyrillic, CJK, accented Latin or Devanagari still show. Accepted cost:
+  quotes and dashes (such as `«island»` or an em dash) also show the URL, and so does a Persian
+  query with a zero-width non-joiner.
 
 ### Fixed
 

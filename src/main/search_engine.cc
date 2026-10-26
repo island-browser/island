@@ -1,14 +1,17 @@
 #include "search_engine.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
 
 #include "address_input.h"
+#include "query_display_ranges.h"
 #include "search_provider.h"
 
 namespace island {
@@ -78,57 +81,23 @@ constexpr int kFirstHexLetterValue = 10;
     return decoded;
 }
 
-struct CodePointRange {
-    std::uint32_t first;
-    std::uint32_t last;
-};
-
-// Unicode general category Cf (format characters): soft hyphen, the Arabic and Egyptian format
-// controls, the zero-width space and joiners, the bidi marks and embeddings, the word joiner and
-// invisible operators, the BOM, the interlinear annotation characters and the tag characters.
-// They take no width in a single-line field, so they can hide a letter or split a host name.
-constexpr std::array<CodePointRange, 21> kFormatCharacters = {{
-    {0x00AD, 0x00AD},   {0x0600, 0x0605},   {0x061C, 0x061C},   {0x06DD, 0x06DD},
-    {0x070F, 0x070F},   {0x0890, 0x0891},   {0x08E2, 0x08E2},   {0x180E, 0x180E},
-    {0x200B, 0x200F},   {0x202A, 0x202E},   {0x2060, 0x2064},   {0x2066, 0x206F},
-    {0xFEFF, 0xFEFF},   {0xFFF9, 0xFFFB},   {0x110BD, 0x110BD}, {0x110CD, 0x110CD},
-    {0x13430, 0x1343F}, {0x1BCA0, 0x1BCA3}, {0x1D173, 0x1D17A}, {0xE0001, 0xE0001},
-    {0xE0020, 0xE007F},
-}};
-
-// Punctuation that reads as the ':', '/' or '.' of a URL without being one. The fullwidth ASCII
-// block (U+FF01..U+FF5E) is handled as a range in IsDisplayHostile.
-constexpr std::array<std::uint32_t, 10> kLookAlikeUrlPunctuation = {
-    0x2024, 0x2044, 0x2215, 0x2216, 0x29F8, 0x3002, 0xA789, 0xFE13, 0xFE52, 0xFF61,
-};
-
-// Code points that must not reach a single-line address field: C0 and C1 controls (DEL included),
-// the line and paragraph separators U+2028 and U+2029, every Cf format character, and look-alike
-// URL punctuation (fullwidth ASCII included). The format characters and the look-alikes can hide
-// or disguise the rest of an address on screen, so a query that holds one is not shown.
-[[nodiscard]] constexpr bool IsDisplayHostile(std::uint32_t code_point) noexcept {
-    if (code_point < 0x20 || (code_point >= 0x7F && code_point <= 0x9F) || code_point == 0x2028 ||
-        code_point == 0x2029) {
-        return true;
+// True when a non-ASCII code point may be shown in the address field's query: a letter, mark,
+// number or space separator outside the excluded modifier-letter and fullwidth blocks (the
+// generated table in query_display_ranges.h). Every other non-ASCII code point, including
+// punctuation, symbols, format characters and line separators, makes the full address show.
+[[nodiscard]] bool IsDisplayShownNonAscii(std::uint32_t code_point) noexcept {
+    const auto after = std::upper_bound(
+        kDisplayShownNonAsciiRanges.begin(), kDisplayShownNonAsciiRanges.end(), code_point,
+        [](std::uint32_t value, const CodePointRange& range) { return value < range.first; });
+    if (after == kDisplayShownNonAsciiRanges.begin()) {
+        return false;
     }
-    if (code_point >= 0xFF01 && code_point <= 0xFF5E) {
-        return true;
-    }
-    for (const CodePointRange& range : kFormatCharacters) {
-        if (code_point >= range.first && code_point <= range.last) {
-            return true;
-        }
-    }
-    for (const std::uint32_t look_alike : kLookAlikeUrlPunctuation) {
-        if (code_point == look_alike) {
-            return true;
-        }
-    }
-    return false;
+    return code_point <= std::prev(after)->last;
 }
 
 // True when `text` is well-formed UTF-8 (no overlong forms, surrogates or values past U+10FFFF)
-// and has no display-hostile code point.
+// and every code point is one the field may show: ASCII without controls, or a non-ASCII code
+// point that IsDisplayShownNonAscii accepts.
 [[nodiscard]] bool IsShowableQuery(std::string_view text) noexcept {
     std::size_t index = 0;
     while (index < text.size()) {
@@ -162,7 +131,11 @@ constexpr std::array<std::uint32_t, 10> kLookAlikeUrlPunctuation = {
         const bool overlong =
             (length == 3 && code_point < 0x800) || (length == 4 && code_point < 0x10000);
         const bool surrogate = code_point >= 0xD800 && code_point <= 0xDFFF;
-        if (overlong || surrogate || code_point > 0x10FFFF || IsDisplayHostile(code_point)) {
+        if (overlong || surrogate || code_point > 0x10FFFF) {
+            return false;
+        }
+        const bool ascii_control = code_point < 0x20 || code_point == 0x7F;
+        if (ascii_control || (code_point >= 0x80 && !IsDisplayShownNonAscii(code_point))) {
             return false;
         }
         index += length;
