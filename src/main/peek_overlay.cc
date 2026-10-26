@@ -17,18 +17,17 @@
 #include "include/views/cef_panel_delegate.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
+#include "peek_layout.h"
 #include "runtime_style.h"
 
 namespace island {
 namespace {
 
 constexpr int kTitleBarHeightDip = 36;
-constexpr int kCardMarginXDip = 56;
-constexpr int kCardMarginYDip = 36;
-constexpr int kCardMaxWidthDip = 1080;
-constexpr int kCardMinSizeDip = 240;
 constexpr int kAddressMaxChars = 96;
-constexpr int kButtonWidthDip = 92;
+// The title bar's buttons: a 28 DIP toolbar-style row (the same height as the toolbar buttons).
+constexpr int kTitleButtonHeightDip = 28;
+constexpr int kCloseButtonSizeDip = 28;
 
 [[nodiscard]] bool IsHttpUrl(const std::string& url) {
     return url.rfind("https://", 0) == 0 || url.rfind("http://", 0) == 0;
@@ -176,21 +175,16 @@ class PeekOverlay::Client final : public CefClient,
     IMPLEMENT_REFCOUNTING(Client);
 };
 
-PeekOverlay::PeekOverlay(PeekOverlayHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens)
-    : host_(&host), window_(std::move(window)), tokens_(tokens) {}
+PeekOverlay::PeekOverlay(PeekOverlayHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens,
+                         std::filesystem::path icon_resource_root)
+    : host_(&host),
+      window_(std::move(window)),
+      tokens_(tokens),
+      icons_(std::move(icon_resource_root)) {}
 
 PeekOverlay::~PeekOverlay() { Detach(); }
 
-DipRect PeekOverlay::CardBounds(const DipRect& content) noexcept {
-    const int width = std::max(std::min(content.width - 2 * kCardMarginXDip, kCardMaxWidthDip),
-                               std::min(kCardMinSizeDip, content.width));
-    const int height =
-        std::max(content.height - 2 * kCardMarginYDip, std::min(kCardMinSizeDip, content.height));
-    return {.x = content.x + (content.width - width) / 2,
-            .y = content.y + (content.height - height) / 2,
-            .width = width,
-            .height = height};
-}
+DipRect PeekOverlay::CardBounds(const DipRect& content) noexcept { return PeekCardBounds(content); }
 
 bool PeekOverlay::OwnsBrowser(const CefRefPtr<CefBrowser>& browser) const {
     return browser != nullptr && browser_ != nullptr && browser->IsSame(browser_);
@@ -261,22 +255,25 @@ void PeekOverlay::BuildViews(const std::string& url, CefRefPtr<CefRequestContext
     title_bar_->AddChildView(address_);
     row_layout->SetFlexForView(address_, 1);
 
+    // Both buttons are ghost controls like the toolbar's: no fill of their own, the native
+    // hover and pressed ink, and a neutral focus ring (the window's overlay ring, see
+    // BrowserWindow::OverlayFocusRingShown). Their icons come from the shared catalog.
     open_as_tab_ = CefLabelButton::CreateLabelButton(button_delegate_, "Open as tab");
     open_as_tab_->SetID(static_cast<int>(ChromeViewId::kPeekOpenAsTab));
     open_as_tab_->SetAccessibleName("Open as tab");
     open_as_tab_->SetTooltipText("Move this page into the current space as a tab");
     open_as_tab_->SetFocusable(true);
     open_as_tab_->SetInkDropEnabled(true);
-    open_as_tab_->SetMinimumSize(CefSize(kButtonWidthDip, kTitleBarHeightDip - 8));
+    open_as_tab_->SetMinimumSize(CefSize(0, kTitleButtonHeightDip));
     title_bar_->AddChildView(open_as_tab_);
 
-    close_ = CefLabelButton::CreateLabelButton(button_delegate_, "Close");
+    close_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
     close_->SetID(static_cast<int>(ChromeViewId::kPeekClose));
-    close_->SetAccessibleName("Close peek");
+    close_->SetAccessibleName("Close Peek");
     close_->SetTooltipText("Close (Esc)");
     close_->SetFocusable(true);
     close_->SetInkDropEnabled(true);
-    close_->SetMinimumSize(CefSize(kButtonWidthDip - 28, kTitleBarHeightDip - 8));
+    close_->SetMinimumSize(CefSize(kCloseButtonSizeDip, kCloseButtonSizeDip));
     title_bar_->AddChildView(close_);
 
     content_->AddChildView(title_bar_);
@@ -368,12 +365,21 @@ void PeekOverlay::ApplyColors() {
     address_->SetBackgroundColor(tokens_.surface_secondary.argb);
     address_->SetEnabledTextColors(tokens_.text_secondary.argb);
     address_->SetFontList("Geist Mono, 12px");
-    open_as_tab_->SetBackgroundColor(tokens_.text.argb);
-    open_as_tab_->SetEnabledTextColors(tokens_.surface.argb);
+    open_as_tab_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    open_as_tab_->SetEnabledTextColors(tokens_.text.argb);
     open_as_tab_->SetFontList("Geist, Medium 13px");
-    close_->SetBackgroundColor(tokens_.surface.argb);
-    close_->SetEnabledTextColors(tokens_.text.argb);
-    close_->SetFontList("Geist, Medium 13px");
+    close_->SetBackgroundColor(tokens_.surface_secondary.argb);
+    // The icon-only close keeps the same secondary tone as the find bar's close.
+    const auto set_icon = [&](const CefRefPtr<CefLabelButton>& button, ChromeIcon icon,
+                              ChromeIconSize size) {
+        const std::optional<CefRefPtr<CefImage>> image =
+            icons_.Load(icon, ChromeIconTone::kSecondary, size);
+        if (image.has_value()) {
+            button->SetImage(CEF_BUTTON_STATE_NORMAL, *image);
+        }
+    };
+    set_icon(open_as_tab_, ChromeIcon::kPlus, ChromeIconSize::k13);
+    set_icon(close_, ChromeIcon::kClose, ChromeIconSize::k13);
 }
 
 void PeekOverlay::RefreshAddress() {

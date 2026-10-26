@@ -55,6 +55,11 @@ class Space {
 
     // The appended tab becomes the active tab.
     void AppendTab(Tab tab);
+    // Inserts an ordinary (ungrouped) tab right after the active tab's group: after the active
+    // tab, or after its parent and that parent's children when the active tab is grouped. A
+    // pinned group is never split, so the tab lands after it at the earliest. The tab becomes
+    // active only when `activate` is true; otherwise the active tab stays selected.
+    TabId InsertTabAfterActive(Tab tab, bool activate);
     // Inserts a one-level grouped tab immediately after the parent's existing children. The tab
     // becomes active only when `activate` is true; otherwise the active tab stays selected. A
     // pinned parent's children never split the pinned group: they start the unpinned tabs, right

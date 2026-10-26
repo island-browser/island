@@ -45,6 +45,7 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "keymap.h"
+#include "link_open_policy.h"
 #include "local_page.h"
 #include "navigation_state.h"
 #include "peek_overlay.h"
@@ -603,6 +604,10 @@ class BrowserWindow : public CefClient,
     // OpenPeek validates |url| like any address and replaces an open peek's page.
     bool OpenPeek(std::string_view url);
     void ClosePeek();
+    // A page's link open (see link_open_policy.h) as a tab of the active space, placed after the
+    // current tab's group. `activate` selects it; otherwise the selection stays. `url` is
+    // validated like any address; false when closing or when it is not an allowed web URL.
+    bool OpenLinkTab(std::string_view url, bool activate);
     [[nodiscard]] bool peek_open() const noexcept { return peek_ != nullptr && peek_->open(); }
     // The ⌘/ shortcut cheatsheet. While it is open it owns Escape, ahead of a peek and of
     // stop-loading.
@@ -1215,6 +1220,9 @@ class BrowserWindow : public CefClient,
     void TouchActiveTabs();
     void RestoreSavedScroll(Tab& tab, CefRefPtr<CefFrame> frame);
     void DeferPeek(const std::string& url);
+    // Runs the decision made by DecideLinkOpen for a new-tab open a page requested.
+    void HandleLinkOpen(CefRefPtr<CefBrowser> browser, const std::string& url,
+                        LinkOpenAction action);
     [[nodiscard]] PeekOverlay& EnsurePeek();
     [[nodiscard]] bool IsPeekLinkSource(CefRefPtr<CefBrowser> browser) const;
 

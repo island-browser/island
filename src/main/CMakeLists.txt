@@ -52,6 +52,7 @@ add_library(island_browser_core STATIC
     sidebar_state.cc
     space.cc
     peek_overlay.cc
+    link_open_policy.cc
     space_rename_overlay.cc
     startup_options.cc
     dev_capture.cc

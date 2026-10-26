@@ -24,6 +24,18 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- Links from pages open the way you asked for them. Shift+click opens a link in the Peek card. A
+  plain click on a link that opens in a new tab (target=_blank, or a page's window.open after a
+  click), and Cmd/Ctrl+click or middle-click, open an ordinary tab: a plain click opens it in the
+  foreground next to the current tab, Cmd/Ctrl+click and middle-click in the background. Before
+  this, the Cmd/Ctrl+click and middle-click opens went to Peek, and plain new-tab links did too.
+  Script-initiated popups and tabs without a click stay rejected.
+- The Peek card is sized from the window: 80% of the content area's width and 85% of its height,
+  centered, with minimums of 360 by 280 DIP, and it follows the window when the window resizes.
+- The Peek buttons are restyled as neutral toolbar-style controls: "Open as tab" with an icon and
+  label, and an icon-only close with the accessible name "Close Peek". Both use the native hover
+  and pressed states and a neutral focus ring, with no accent color.
+
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
   imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
   file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be

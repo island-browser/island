@@ -481,3 +481,12 @@ the window margin on macOS, optional in Settings). No glass stacks, no glow, no 
 | Native Graphite pass partly verified | `src/main/browser_chrome.cc`, `src/main/welcome_flow.cc`, `src/main/pages/start.html` | The macOS light-theme sidebar was inspected in a running build through an in-process window capture (the sandbox cannot use screen recording), up to the theme-reset repaint. The final address-field holder, space-chip widths, the restyled welcome card, and the styled start page were built and unit-tested but not looked at; dark theme, Windows, and Linux were verified only through the token tests. | Visual pass of the welcome card, start page, dark theme, and the other platforms. |
 | Arc corners are native patches, not view radii | `src/main/macos/page_card_mac.mm`, `src/main/browser_chrome.cc` | CEF 150 `cef_views` exposes no corner radius, clips button images to the button insets, and the Views compositor is opaque, so rounded fills and the rounded page card are drawn by a native macOS overlay (corner patches and a ring frame) on top of square views. Windows/Linux keep square corners and the platform frame. The interface-font choice applies to the sidebar and the internal pages; the palettes and the welcome card keep Geist. | Close if CEF exposes view corner radii or custom-drawn views. |
 | Focus ring on the address pill stays square | `src/main/browser_chrome.cc` | The 1 px accent ring is a panel behind the pill, so its square corners show beside the rounded fill while the field has focus. | Same exit. |
+
+### Peek card (0.9)
+
+- The card is sized from the content area: 80% of its width and 85% of its height, centered, with
+  minimums of 360 by 280 DIP (`peek_layout.h`), and it follows window resizes while open.
+- Its two title-bar buttons are ghost controls on `surface_secondary`, like the toolbar: "Open as
+  tab" carries a `plus` icon and label, and the close is an icon-only `×` named "Close Peek". They
+  use the native hover and pressed ink and a neutral focus ring (the overlay ring, never the accent).
+  No button in the card is filled with `text` or `accent`.

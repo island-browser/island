@@ -26,6 +26,7 @@
 #include "design_tokens.h"
 #include "download_path.h"
 #include "favicon_policy.h"
+#include "link_open_policy.h"
 #include "include/base/cef_bind.h"
 #include "include/base/cef_build.h"
 #include "include/base/cef_callback.h"
@@ -3825,6 +3826,26 @@ void BrowserWindow::OnFaviconDownloaded(TabId tab_id, const std::string& icon_ur
     }
 }
 
+namespace {
+
+// CEF's disposition as the CEF-free policy sees it (link_open_policy.h).
+LinkDisposition LinkDispositionFrom(cef_window_open_disposition_t disposition) {
+    switch (disposition) {
+        case CEF_WOD_CURRENT_TAB:
+            return LinkDisposition::kCurrentTab;
+        case CEF_WOD_NEW_FOREGROUND_TAB:
+            return LinkDisposition::kNewForegroundTab;
+        case CEF_WOD_NEW_BACKGROUND_TAB:
+            return LinkDisposition::kNewBackgroundTab;
+        case CEF_WOD_NEW_WINDOW:
+            return LinkDisposition::kNewWindow;
+        default:
+            return LinkDisposition::kOther;
+    }
+}
+
+}  // namespace
+
 bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int,
                                   const CefString& target_url, const CefString&,
                                   cef_window_open_disposition_t target_disposition,
@@ -3832,13 +3853,11 @@ bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
                                   CefRefPtr<CefClient>&, CefBrowserSettings&,
                                   CefRefPtr<CefDictionaryValue>&, bool*) {
     CEF_REQUIRE_UI_THREAD();
-    // Popups and new windows stay rejected (Island is single-window). A user-initiated new-tab
-    // open (Cmd/Ctrl+click, middle-click, target=_blank) becomes a peek instead.
-    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
-         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
-        user_gesture && IsPeekLinkSource(browser)) {
-        DeferPeek(target_url.ToString());
-    }
+    // Popups stay rejected (Island is single-window), so the popup itself is always cancelled.
+    // What the person asked for is decided by link_open_policy.h: Shift+click peeks, plain and
+    // script-with-gesture new tabs open a foreground tab, Cmd/Ctrl/middle-click a background tab.
+    HandleLinkOpen(browser, target_url.ToString(),
+                   DecideLinkOpen(LinkDispositionFrom(target_disposition), user_gesture));
     return true;
 }
 
@@ -3846,15 +3865,15 @@ CefRefPtr<CefContextMenuHandler> BrowserWindow::GetContextMenuHandler() { return
 
 bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                      const CefString& target_url,
-                                     cef_window_open_disposition_t target_disposition, bool) {
+                                     cef_window_open_disposition_t target_disposition,
+                                     bool user_gesture) {
     CEF_REQUIRE_UI_THREAD();
-    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
-         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
-        IsPeekLinkSource(browser)) {
-        DeferPeek(target_url.ToString());
-        return true;
+    const LinkDisposition disposition = LinkDispositionFrom(target_disposition);
+    if (disposition == LinkDisposition::kCurrentTab || disposition == LinkDisposition::kOther) {
+        return false;
     }
-    return false;
+    HandleLinkOpen(browser, target_url.ToString(), DecideLinkOpen(disposition, user_gesture));
+    return true;
 }
 
 void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
@@ -3922,10 +3941,28 @@ void BrowserWindow::DeferPeek(const std::string& url) {
                             CefRefPtr<BrowserWindow>(this), url)));
 }
 
+void BrowserWindow::HandleLinkOpen(CefRefPtr<CefBrowser> browser, const std::string& url,
+                                   LinkOpenAction action) {
+    if (action == LinkOpenAction::kReject || !IsPeekLinkSource(browser)) {
+        return;
+    }
+    if (action == LinkOpenAction::kPeek) {
+        DeferPeek(url);
+        return;
+    }
+    // Like the peek, the tab opens on the next UI task, outside CEF's dispatch.
+    const bool activate = action == LinkOpenAction::kForegroundTab;
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window, std::string target, bool select) {
+                                static_cast<void>(window->OpenLinkTab(target, select));
+                            },
+                            CefRefPtr<BrowserWindow>(this), url, activate)));
+}
+
 PeekOverlay& BrowserWindow::EnsurePeek() {
     if (peek_ == nullptr) {
-        peek_ =
-            std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()));
+        peek_ = std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()),
+                                              icon_resource_root_);
     }
     return *peek_;
 }
@@ -3941,6 +3978,8 @@ bool BrowserWindow::OpenPeek(std::string_view url) {
     }
     PeekOverlay& peek = EnsurePeek();
     peek.Open(address.url, active_space().request_context(), chrome_snapshot_.content_bounds);
+    // An open card takes the neutral overlay focus ring (no accent) like the palettes do.
+    OnOverlayFocusRingChanged();
     return peek.open();
 }
 
@@ -3949,6 +3988,41 @@ void BrowserWindow::ClosePeek() {
     if (peek_ != nullptr) {
         peek_->Close();
     }
+}
+
+bool BrowserWindow::OpenLinkTab(std::string_view url, bool activate) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return false;
+    }
+    const ValidatedAddress address = address_validator_(url);
+    if (!address.is_valid() || !IsWebUrl(address.url)) {
+        return false;
+    }
+    Space& space = active_space();
+    Tab tab{NextTabId()};
+    tab.SetStartupUrl(address.url);
+    if (!activate) {
+        // A background tab keeps the selection and the content view; its browser is created
+        // when the tab is first shown (EnsureTabBrowserView), like a background plan child.
+        static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/false));
+        UpdateChromeCollections();
+        return true;
+    }
+    context_chip_.reset();  // the new tab is a new page context
+    DetachActiveTabObservers();
+    static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/true));
+    Tab* appended = active_tab();
+    if (chrome_ != nullptr && appended != nullptr) {
+        // Same creation path as AppendTabToActiveSpace: the space's request context and the
+        // tab's startup URL.
+        CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+            this, CefString(StartupUrlForTab(*appended)), CefBrowserSettings(), nullptr,
+            space.request_context(), this);
+        appended->SetBrowserView(browser_view);
+    }
+    AttachActiveTabObservers();
+    return true;
 }
 
 void BrowserWindow::OnPeekOpenAsTab(std::string url) {
@@ -3964,6 +4038,8 @@ void BrowserWindow::OnPeekOpenAsTab(std::string url) {
 void BrowserWindow::OnPeekClosed() {
     CEF_REQUIRE_UI_THREAD();
     if (!closing_) {
+        // The card's neutral focus ring goes away with it: the window's ring is recomputed.
+        OnOverlayFocusRingChanged();
         FocusBrowserView();
     }
 }
@@ -6207,7 +6283,7 @@ void BrowserWindow::OnOverlayFocusRingChanged() {
 
 bool BrowserWindow::OverlayFocusRingShown() const {
     return (welcome_ != nullptr && welcome_->visible()) ||
-           (command_palette_ != nullptr && command_palette_->visible());
+           (command_palette_ != nullptr && command_palette_->visible()) || peek_open();
 }
 
 void BrowserWindow::ApplyPageViewVisibility() {
