@@ -138,7 +138,7 @@ target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIB
                       island_agent island_search island_content_blocker_ffi)
 if(SQLite3_FOUND)
     target_compile_definitions(island_tests PRIVATE ISLAND_HAS_SQLITE3=1)
-    target_link_libraries(island_tests PRIVATE ${SQLite3_LIBRARIES})
+    target_link_libraries(island_tests PRIVATE SQLite::SQLite3)
 endif()
 
 # Compile the exact same wrapper without the Rust definition to prove the

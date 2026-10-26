@@ -12,7 +12,8 @@ namespace island {
 
 // Browsers Island can import from. The Chromium family shares one
 // `Bookmarks` JSON schema; Safari is a macOS plist read behind the platform
-// seam; Firefox bookmarks come from its compressed JSON backups (no SQLite);
+// seam; Firefox bookmarks come from places.sqlite when SQLite is available,
+// otherwise from compressed JSON backups;
 // Arc contributes spaces and pinned tabs (browser_import.h).
 enum class ImportSource : std::uint8_t {
     kChrome,

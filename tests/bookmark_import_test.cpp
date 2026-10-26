@@ -124,7 +124,7 @@ TEST(BookmarkImportTest, GivenInstalledBrowsersWhenDetectedThenOnlyReadableOnesA
     EXPECT_TRUE(saw_chrome);
 }
 
-TEST(BookmarkImportTest, GivenChromeDefaultAndProfileWhenDetectedThenAReadableProfileIsOffered) {
+TEST(BookmarkImportTest, GivenChromeProfilesWhenImportedThenTheirBookmarksAreUnited) {
     const std::filesystem::path home = TempHome("chrome_profiles");
     const std::filesystem::path root = (home / ChromeBookmarksPath()).parent_path().parent_path();
     WriteFile(root / "Default/Bookmarks", R"({"roots":{"bookmark_bar":{"children":[]}}})");
@@ -140,8 +140,28 @@ TEST(BookmarkImportTest, GivenChromeDefaultAndProfileWhenDetectedThenAReadablePr
     ASSERT_NE(chrome, sources.end());
     EXPECT_TRUE(chrome->detected);
     EXPECT_TRUE(chrome->available);
-    EXPECT_EQ(chrome->bookmarks_path.filename(), "Bookmarks");
     EXPECT_EQ(chrome->bookmarks_path.parent_path().filename(), "Default");
+    const auto imported = ImportFromSource(ImportSource::kChrome, home);
+    ASSERT_TRUE(imported.has_value());
+    ASSERT_EQ(imported->size(), 1U);
+    EXPECT_EQ((*imported)[0].url, "https://profile.test");
+    std::filesystem::remove_all(home);
+}
+
+TEST(BookmarkImportTest, GivenChromeProfileWithoutBookmarksWhenDetectedThenItIsAbsent) {
+    const std::filesystem::path home = TempHome("chrome_empty_profile");
+    const std::filesystem::path root = (home / ChromeBookmarksPath()).parent_path().parent_path();
+    std::filesystem::create_directories(root / "Default");
+
+    const std::vector<ImportSourceInfo> sources = DetectInstalledSources(home);
+    const auto chrome =
+        std::find_if(sources.begin(), sources.end(),
+                     [](const ImportSourceInfo& info) { return info.id == ImportSource::kChrome; });
+    ASSERT_NE(chrome, sources.end());
+    EXPECT_FALSE(chrome->detected);
+    EXPECT_FALSE(chrome->available);
+    EXPECT_TRUE(chrome->unavailable_reason.empty());
+    std::filesystem::remove_all(home);
 }
 
 TEST(BookmarkImportTest, GivenAnImportableSourceWhenImportedThenItsBookmarksAreReturned) {

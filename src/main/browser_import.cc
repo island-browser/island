@@ -71,8 +71,13 @@ bool IsMacOrWindowsFirefox() {
 #endif
 }
 
-std::vector<std::filesystem::path> FirefoxProfileDirectories(const std::filesystem::path& home) {
-    std::vector<std::filesystem::path> profiles;
+struct FirefoxProfile {
+    std::filesystem::path path;
+    bool preferred = false;
+};
+
+std::vector<FirefoxProfile> FirefoxProfileDirectories(const std::filesystem::path& home) {
+    std::vector<FirefoxProfile> profiles;
     for (const std::filesystem::path& root : FirefoxDataRoots(home)) {
         const std::filesystem::path default_root =
             IsMacOrWindowsFirefox() ? root / "Profiles" : root;
@@ -81,7 +86,7 @@ std::vector<std::filesystem::path> FirefoxProfileDirectories(const std::filesyst
             for (const std::filesystem::directory_entry& entry :
                  std::filesystem::directory_iterator(default_root, ec)) {
                 if (ec) break;
-                if (entry.is_directory(ec)) profiles.push_back(entry.path());
+                if (entry.is_directory(ec)) profiles.push_back({.path = entry.path()});
             }
         }
 
@@ -91,15 +96,22 @@ std::vector<std::filesystem::path> FirefoxProfileDirectories(const std::filesyst
         if (!ini_file.is_open()) continue;
         const std::string ini((std::istreambuf_iterator<char>(ini_file)),
                               std::istreambuf_iterator<char>());
+        std::string section;
         bool relative = true;
+        bool preferred = false;
         std::string path;
         const auto add_profile = [&] {
             if (path.empty()) return;
             const std::filesystem::path candidate =
                 relative ? root / path : std::filesystem::path(path);
-            if (std::filesystem::is_directory(candidate, ec) &&
-                std::find(profiles.begin(), profiles.end(), candidate) == profiles.end()) {
-                profiles.push_back(candidate);
+            if (!std::filesystem::is_directory(candidate, ec)) return;
+            const auto found = std::find_if(
+                profiles.begin(), profiles.end(),
+                [&candidate](const FirefoxProfile& profile) { return profile.path == candidate; });
+            if (found == profiles.end()) {
+                profiles.push_back({.path = candidate, .preferred = preferred});
+            } else if (preferred) {
+                found->preferred = true;
             }
         };
         std::size_t start = 0;
@@ -110,10 +122,21 @@ std::vector<std::filesystem::path> FirefoxProfileDirectories(const std::filesyst
             if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
             if (!line.empty() && line.front() == '[') {
                 add_profile();
+                section = std::string(line);
                 path.clear();
                 relative = true;
+                preferred = false;
             } else if (line.rfind("Path=", 0) == 0) {
                 path = std::string(line.substr(5));
+            } else if (line.rfind("Default=", 0) == 0) {
+                const std::string_view value = line.substr(8);
+                if (section.rfind("[Install", 0) == 0) {
+                    path = std::string(value);
+                    relative = true;
+                    preferred = true;
+                } else if (value == "1") {
+                    preferred = true;
+                }
             } else if (line == "IsRelative=0") {
                 relative = false;
             } else if (line == "IsRelative=1") {
@@ -125,6 +148,11 @@ std::vector<std::filesystem::path> FirefoxProfileDirectories(const std::filesyst
         add_profile();
     }
     return profiles;
+}
+
+std::string SqlitePath(const std::filesystem::path& path) {
+    const auto text = path.u8string();
+    return {text.begin(), text.end()};
 }
 
 std::optional<std::vector<BookmarkItem>> ImportFirefoxPlaces(
@@ -140,26 +168,48 @@ std::optional<std::vector<BookmarkItem>> ImportFirefoxPlaces(
         ("island-firefox-places-" +
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
          std::to_string(next_temp_id++) + ".sqlite");
+    const std::filesystem::path source_wal = source_path.string() + "-wal";
+    const std::filesystem::path temp_wal = temp.string() + "-wal";
+    const std::filesystem::path temp_shm = temp.string() + "-shm";
+    const auto cleanup = [&] {
+        std::filesystem::remove(temp, ec);
+        std::filesystem::remove(temp_wal, ec);
+        std::filesystem::remove(temp_shm, ec);
+    };
     if (ec ||
         !std::filesystem::copy_file(source_path, temp, std::filesystem::copy_options::none, ec)) {
+        cleanup();
+        return std::nullopt;
+    }
+    std::error_code wal_ec;
+    if (std::filesystem::is_regular_file(source_wal, wal_ec) &&
+        !std::filesystem::copy_file(source_wal, temp_wal, std::filesystem::copy_options::none,
+                                    wal_ec)) {
+        cleanup();
         return std::nullopt;
     }
     sqlite3* database = nullptr;
-    const int open_result = sqlite3_open_v2(temp.c_str(), &database, SQLITE_OPEN_READONLY, nullptr);
+    const std::string temp_sqlite_path = SqlitePath(temp);
+    const int open_result =
+        sqlite3_open_v2(temp_sqlite_path.c_str(), &database, SQLITE_OPEN_READWRITE, nullptr);
     if (open_result != SQLITE_OK) {
         if (database != nullptr) sqlite3_close(database);
-        std::filesystem::remove(temp, ec);
+        cleanup();
         return std::nullopt;
     }
     constexpr char kQuery[] =
-        "SELECT COALESCE(moz_bookmarks.title, moz_places.url), moz_places.url "
-        "FROM moz_bookmarks JOIN moz_places ON moz_bookmarks.fk = moz_places.id "
-        "WHERE moz_bookmarks.type = 1 AND moz_places.url IS NOT NULL "
-        "AND moz_places.url != '' ORDER BY moz_bookmarks.id";
+        "WITH RECURSIVE tag_items(id) AS ("
+        "SELECT id FROM moz_bookmarks WHERE guid = 'tags________' "
+        "UNION ALL SELECT b.id FROM moz_bookmarks b JOIN tag_items t ON b.parent = t.id) "
+        "SELECT COALESCE(b.title, p.url), p.url FROM moz_bookmarks b "
+        "JOIN moz_places p ON b.fk = p.id WHERE b.type = 1 AND p.url IS NOT NULL "
+        "AND p.url != '' AND substr(p.url, 1, 6) != 'place:' "
+        "AND substr(p.url, 1, 11) != 'javascript:' "
+        "AND b.id NOT IN (SELECT id FROM tag_items) ORDER BY b.parent, b.position, b.id";
     sqlite3_stmt* statement = nullptr;
     if (sqlite3_prepare_v2(database, kQuery, -1, &statement, nullptr) != SQLITE_OK) {
         sqlite3_close(database);
-        std::filesystem::remove(temp, ec);
+        cleanup();
         return std::nullopt;
     }
     std::vector<BookmarkItem> items;
@@ -174,7 +224,7 @@ std::optional<std::vector<BookmarkItem>> ImportFirefoxPlaces(
     const bool complete = step == SQLITE_DONE || items.size() == kMaxImportedBookmarks;
     sqlite3_finalize(statement);
     sqlite3_close(database);
-    std::filesystem::remove(temp, ec);
+    cleanup();
     return complete ? std::optional<std::vector<BookmarkItem>>(std::move(items)) : std::nullopt;
 #endif
 }
@@ -323,8 +373,8 @@ std::optional<std::vector<BookmarkItem>> ParseFirefoxBookmarks(std::string_view 
 std::filesystem::path FindFirefoxBookmarksBackup(const std::filesystem::path& base_home) {
     std::filesystem::path newest;
     std::filesystem::file_time_type newest_time{};
-    for (const std::filesystem::path& profile : FirefoxProfileDirectories(base_home)) {
-        const std::filesystem::path backups = profile / "bookmarkbackups";
+    for (const FirefoxProfile& profile : FirefoxProfileDirectories(base_home)) {
+        const std::filesystem::path backups = profile.path / "bookmarkbackups";
         std::error_code inner;
         if (!std::filesystem::is_directory(backups, inner)) continue;
         for (const auto& entry : std::filesystem::directory_iterator(backups, inner)) {
@@ -343,12 +393,20 @@ std::filesystem::path FindFirefoxBookmarksBackup(const std::filesystem::path& ba
 }
 
 std::filesystem::path FindFirefoxPlacesDatabase(const std::filesystem::path& base_home) {
-    for (const std::filesystem::path& profile : FirefoxProfileDirectories(base_home)) {
-        const std::filesystem::path database = profile / "places.sqlite";
+    std::filesystem::path newest;
+    std::filesystem::file_time_type newest_time{};
+    for (const FirefoxProfile& profile : FirefoxProfileDirectories(base_home)) {
+        const std::filesystem::path database = profile.path / "places.sqlite";
         std::error_code ec;
-        if (std::filesystem::is_regular_file(database, ec)) return database;
+        if (!std::filesystem::is_regular_file(database, ec)) continue;
+        if (profile.preferred) return database;
+        const auto time = std::filesystem::last_write_time(database, ec);
+        if (newest.empty() || (!ec && time > newest_time)) {
+            newest = database;
+            newest_time = time;
+        }
     }
-    return {};
+    return newest;
 }
 
 std::optional<std::vector<BookmarkItem>> ImportFirefoxBookmarks(

@@ -51,6 +51,12 @@ TEST(WelcomeFlowStyleTest, ShortNoteStaysOnOneLineAndEmptyNoteHasNoLines) {
     EXPECT_TRUE(WelcomeFlow::WrapUnreadableNote({}, 64).empty());
 }
 
+TEST(WelcomeFlowStyleTest, ThemeSegmentIndexMapsEveryPreference) {
+    EXPECT_EQ(WelcomeFlow::ThemeSegmentIndex(ThemePreference::kSystem), 0);
+    EXPECT_EQ(WelcomeFlow::ThemeSegmentIndex(ThemePreference::kLight), 1);
+    EXPECT_EQ(WelcomeFlow::ThemeSegmentIndex(ThemePreference::kDark), 2);
+}
+
 TEST(WelcomeFlowStyleTest, OverlayHeightGrowsWithRowsAndNoteLines) {
     const int base = WelcomeFlow::ContentHeightDip(0, 0);
     EXPECT_GT(WelcomeFlow::ContentHeightDip(1, 0), base);

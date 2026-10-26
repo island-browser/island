@@ -1,8 +1,8 @@
 #ifndef ISLAND_BROWSER_IMPORT_H_
 #define ISLAND_BROWSER_IMPORT_H_
 
-// Readers for the browsers outside the Chromium family. CEF-free and
-// dependency-free:
+// Readers for the browsers outside the Chromium family. CEF-free; Firefox's
+// places.sqlite reader is enabled when SQLite3 is available:
 //  - Firefox: bookmarks from profile `places.sqlite`, copied to a temporary
 //    file before opening so a running Firefox cannot hold the import open.
 //    The newest compressed JSON backup remains a fallback for old profiles.

@@ -79,6 +79,8 @@ class WelcomeFlow final {
     // full instead of being ellipsized. Pure; exposed for tests.
     [[nodiscard]] static std::vector<std::string> WrapUnreadableNote(
         const std::vector<std::string>& names, std::size_t max_chars);
+    // CEF-free mapping for both a press and a host-driven theme change.
+    [[nodiscard]] static int ThemeSegmentIndex(ThemePreference preference);
     // The hairline-outlined card's overall height in DIP for the given source mix.
     [[nodiscard]] static int ContentHeightDip(int readable_sources, int note_lines);
     [[nodiscard]] static constexpr int WidthDip() { return 560; }

@@ -124,6 +124,18 @@ std::vector<std::string> WelcomeFlow::WrapUnreadableNote(const std::vector<std::
     return lines;
 }
 
+int WelcomeFlow::ThemeSegmentIndex(ThemePreference preference) {
+    switch (preference) {
+        case ThemePreference::kSystem:
+            return 0;
+        case ThemePreference::kLight:
+            return 1;
+        case ThemePreference::kDark:
+            return 2;
+    }
+    return 0;
+}
+
 int WelcomeFlow::ContentHeightDip(int readable_sources, int note_lines) {
     // Import section: label, one 34 DIP outlined row per readable source, and the
     // wrapped note block, separated by kItemGapDip.
@@ -521,9 +533,7 @@ void WelcomeFlow::HandleButtonPressed(int view_id) {
         ApplyColors();
         // CEF retains focus on the pressed segment across a theme reset unless it is explicitly
         // moved. Focus is the neutral rounded ring; selection is the separate raised plate.
-        const int selected_index = chosen_theme_ == ThemePreference::kSystem  ? 0
-                                   : chosen_theme_ == ThemePreference::kLight ? 1
-                                                                              : 2;
+        const int selected_index = ThemeSegmentIndex(chosen_theme_);
         if (theme_buttons_[selected_index] != nullptr) {
             theme_buttons_[selected_index]->RequestFocus();
         }
@@ -611,9 +621,7 @@ void WelcomeFlow::Show() {
     overlay_.get()->SetVisible(true);
     ApplyColors();
     UpdateImportButtonState();
-    const int selected_index = chosen_theme_ == ThemePreference::kSystem  ? 0
-                               : chosen_theme_ == ThemePreference::kLight ? 1
-                                                                          : 2;
+    const int selected_index = ThemeSegmentIndex(chosen_theme_);
     if (theme_buttons_[selected_index] != nullptr) {
         theme_buttons_[selected_index]->RequestFocus();
     }
@@ -665,10 +673,8 @@ void WelcomeFlow::SetChosenTheme(ThemePreference preference) {
     if (detached_ || chosen_theme_ == preference) return;
     chosen_theme_ = preference;
     ApplyColors();
-    const int selected_index = chosen_theme_ == ThemePreference::kSystem  ? 0
-                               : chosen_theme_ == ThemePreference::kLight ? 1
-                                                                          : 2;
-    if (theme_buttons_[selected_index] != nullptr) {
+    const int selected_index = ThemeSegmentIndex(chosen_theme_);
+    if (visible_ && theme_buttons_[selected_index] != nullptr) {
         theme_buttons_[selected_index]->RequestFocus();
     }
 }

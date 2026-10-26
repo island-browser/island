@@ -46,7 +46,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Fixed
 
-- The Welcome card now finds Chrome's Default, numbered and Local State-listed profiles, and Firefox profiles named in `profiles.ini`; Firefox imports a temporary copy of `places.sqlite` while Firefox is running. Browsers with no local profile are no longer misleadingly called “Not readable,” and real read failures say why. The selected Appearance plate and its separate neutral focus ring now move together.
+- The Welcome card now imports the union of Chrome's Default, numbered and Local State-listed profiles. Firefox honors its selected `profiles.ini` profile (or newest database), copies its WAL changes into the temporary `places.sqlite` import, and skips smart, script and tag bookmarks. Browsers with no bookmarks are no longer misleadingly called “Not readable,” and real read failures say why. The selected Appearance plate and its separate neutral focus ring now move together.
 - The Bookmarks page now keeps bookmark actions in one keyboard-accessible `...` menu, names
   current-space favorites, omits favorites for removed spaces, clears transient open/import
   feedback at the next interaction or page visit, and keeps it separate from a failed-save Retry.

@@ -13,15 +13,15 @@ neutral segmented control as the sidebar.
 
 ## Import bookmarks
 
-Under **Import**, Island lists the browsers it found on this computer. It can read bookmarks from Chrome-family browsers, Safari and Firefox, and the spaces and pinned tabs of Arc.
+Under **Import**, Island lists the browsers it found on this computer. It can read bookmarks from Chrome-family browsers, Safari and Firefox, and the spaces and pinned tabs of Arc. One Chrome-family row imports the combined bookmarks from its readable profiles.
 
 1. Tick the browsers you want to import.
 2. Click **Import selected**. To skip importing, click **Start browsing**.
 
 Nothing leaves your computer. Browsers without a local profile are not listed; a detected profile
-that Island cannot open is shown with the specific reason. If Island finds no readable bookmarks,
-the card says so. Firefox can be open while importing: Island reads a temporary copy of its profile
-database.
+that Island cannot open is shown with the specific reason. A profile with no bookmarks is not
+listed. If Island finds no readable bookmarks, the card says so. Firefox can be open while
+importing: Island reads a temporary copy of its profile database and its current changes.
 
 Imported bookmarks show up in the [command palette](../search/command-palette.md). Arc spaces become Island spaces with their colors and pinned tabs.
 

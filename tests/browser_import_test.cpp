@@ -63,20 +63,33 @@ void WriteFile(const std::filesystem::path& path, const std::string& content) {
     std::ofstream(path, std::ios::binary) << content;
 }
 
-void WriteFirefoxPlaces(const std::filesystem::path& path) {
+std::string SqlitePath(const std::filesystem::path& path) {
+    const auto text = path.u8string();
+    return {text.begin(), text.end()};
+}
+
+void WriteFirefoxPlaces(const std::filesystem::path& path,
+                        std::string_view url = "https://profile.test/") {
 #if defined(ISLAND_HAS_SQLITE3)
     std::filesystem::create_directories(path.parent_path());
     sqlite3* database = nullptr;
-    ASSERT_EQ(sqlite3_open(path.c_str(), &database), SQLITE_OK);
+    const std::string sqlite_path = SqlitePath(path);
+    ASSERT_EQ(sqlite3_open(sqlite_path.c_str(), &database), SQLITE_OK);
     ASSERT_NE(database, nullptr);
-    ASSERT_EQ(sqlite3_exec(database,
-                           "CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT);"
-                           "CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk "
-                           "INTEGER, title TEXT);"
-                           "INSERT INTO moz_places VALUES (1, 'https://profile.test/');"
-                           "INSERT INTO moz_bookmarks VALUES (1, 1, 1, 'Profile bookmark');",
-                           nullptr, nullptr, nullptr),
-              SQLITE_OK);
+    ASSERT_EQ(
+        sqlite3_exec(database,
+                     "CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT);"
+                     "CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk "
+                     "INTEGER, title TEXT, parent INTEGER, position INTEGER, guid TEXT);"
+                     "INSERT INTO moz_places VALUES (1, 'https://profile.test/');"
+                     "INSERT INTO moz_bookmarks VALUES (1, 1, 1, 'Profile bookmark', 1, 0, '');",
+                     nullptr, nullptr, nullptr),
+        SQLITE_OK);
+    if (url != "https://profile.test/") {
+        ASSERT_EQ(sqlite3_exec(database, "UPDATE moz_places SET url = 'https://alternate.test/';",
+                               nullptr, nullptr, nullptr),
+                  SQLITE_OK);
+    }
     ASSERT_EQ(sqlite3_close(database), SQLITE_OK);
 #else
     static_cast<void>(path);
@@ -194,7 +207,8 @@ TEST(BrowserImportTest, FirefoxProfilesIniNonDefaultPlacesDatabaseImportsWhileSo
     WriteFirefoxPlaces(profile / "places.sqlite");
 
     sqlite3* busy = nullptr;
-    ASSERT_EQ(sqlite3_open((profile / "places.sqlite").c_str(), &busy), SQLITE_OK);
+    const std::string sqlite_path = SqlitePath(profile / "places.sqlite");
+    ASSERT_EQ(sqlite3_open(sqlite_path.c_str(), &busy), SQLITE_OK);
     ASSERT_NE(busy, nullptr);
     ASSERT_EQ(sqlite3_exec(busy, "BEGIN EXCLUSIVE;", nullptr, nullptr, nullptr), SQLITE_OK);
     EXPECT_EQ(FindFirefoxPlacesDatabase(home), profile / "places.sqlite");
@@ -204,6 +218,118 @@ TEST(BrowserImportTest, FirefoxProfilesIniNonDefaultPlacesDatabaseImportsWhileSo
     EXPECT_EQ((*imported)[0].url, "https://profile.test/");
     ASSERT_EQ(sqlite3_exec(busy, "ROLLBACK;", nullptr, nullptr, nullptr), SQLITE_OK);
     ASSERT_EQ(sqlite3_close(busy), SQLITE_OK);
+#endif
+}
+
+TEST(BrowserImportTest, FirefoxWalDatabaseCopiesItsLiveBookmarks) {
+#if !defined(ISLAND_HAS_SQLITE3)
+    GTEST_SKIP() << "SQLite is unavailable in this toolchain.";
+#else
+    const std::filesystem::path home = TempHome("firefox_wal");
+#if defined(_WIN32)
+    const std::filesystem::path root = home / "AppData/Roaming/Mozilla/Firefox/Profiles";
+#elif defined(__APPLE__)
+    const std::filesystem::path root = home / "Library/Application Support/Firefox/Profiles";
+#else
+    const std::filesystem::path root = home / ".mozilla/firefox";
+#endif
+    const std::filesystem::path places = root / "wal.default-release/places.sqlite";
+    std::filesystem::create_directories(places.parent_path());
+    sqlite3* writer = nullptr;
+    const std::string sqlite_path = SqlitePath(places);
+    ASSERT_EQ(sqlite3_open(sqlite_path.c_str(), &writer), SQLITE_OK);
+    ASSERT_NE(writer, nullptr);
+    ASSERT_EQ(sqlite3_exec(writer,
+                           "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;"
+                           "CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT);"
+                           "CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk "
+                           "INTEGER, title TEXT, parent INTEGER, position INTEGER, guid TEXT);"
+                           "INSERT INTO moz_places VALUES (1, 'https://wal-only.test/');"
+                           "INSERT INTO moz_bookmarks VALUES (1, 1, 1, 'WAL only', 1, 0, '');",
+                           nullptr, nullptr, nullptr),
+              SQLITE_OK);
+    ASSERT_TRUE(std::filesystem::is_regular_file(places.string() + "-wal"));
+
+    const auto imported = ImportFromSource(ImportSource::kFirefox, home);
+    ASSERT_TRUE(imported.has_value());
+    ASSERT_EQ(imported->size(), 1U);
+    EXPECT_EQ((*imported)[0].url, "https://wal-only.test/");
+    ASSERT_EQ(sqlite3_close(writer), SQLITE_OK);
+    std::filesystem::remove_all(home);
+#endif
+}
+
+TEST(BrowserImportTest, FirefoxPlacesMatchesBackupBookmarkRulesAndPositionOrder) {
+#if !defined(ISLAND_HAS_SQLITE3)
+    GTEST_SKIP() << "SQLite is unavailable in this toolchain.";
+#else
+    const std::filesystem::path home = TempHome("firefox_places_rules");
+#if defined(_WIN32)
+    const std::filesystem::path root = home / "AppData/Roaming/Mozilla/Firefox/Profiles";
+#elif defined(__APPLE__)
+    const std::filesystem::path root = home / "Library/Application Support/Firefox/Profiles";
+#else
+    const std::filesystem::path root = home / ".mozilla/firefox";
+#endif
+    const std::filesystem::path places = root / "rules.default/places.sqlite";
+    std::filesystem::create_directories(places.parent_path());
+    sqlite3* database = nullptr;
+    const std::string sqlite_path = SqlitePath(places);
+    ASSERT_EQ(sqlite3_open(sqlite_path.c_str(), &database), SQLITE_OK);
+    ASSERT_EQ(
+        sqlite3_exec(database,
+                     "CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT);"
+                     "CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk "
+                     "INTEGER, title TEXT, parent INTEGER, position INTEGER, guid TEXT);"
+                     "INSERT INTO moz_places VALUES (1, 'https://second.test/'),"
+                     "(2, 'place:sort=8'), (3, 'javascript:alert(1)'),"
+                     "(4, 'https://tagged.test/'), (5, 'https://first.test/');"
+                     "INSERT INTO moz_bookmarks VALUES (10, 2, NULL, 'Tags', 0, 0, 'tags________'),"
+                     "(11, 2, NULL, 'Tag', 10, 0, ''),"
+                     "(12, 1, 4, 'Tagged', 11, 0, ''),"
+                     "(13, 1, 2, 'Smart', 1, 0, ''),"
+                     "(14, 1, 3, 'Script', 1, 1, ''),"
+                     "(15, 1, 1, 'Second', 1, 2, ''),"
+                     "(16, 1, 5, 'First', 1, 1, '');",
+                     nullptr, nullptr, nullptr),
+        SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(database), SQLITE_OK);
+
+    const auto imported = ImportFromSource(ImportSource::kFirefox, home);
+    ASSERT_TRUE(imported.has_value());
+    EXPECT_EQ(*imported,
+              (std::vector<BookmarkItem>{{.title = "First", .url = "https://first.test/"},
+                                         {.title = "Second", .url = "https://second.test/"}}));
+    std::filesystem::remove_all(home);
+#endif
+}
+
+TEST(BrowserImportTest, FirefoxPlacesPrefersProfilesIniDefaultThenNewestDatabase) {
+#if !defined(ISLAND_HAS_SQLITE3)
+    GTEST_SKIP() << "SQLite is unavailable in this toolchain.";
+#else
+    const std::filesystem::path home = TempHome("firefox_profile_choice");
+#if defined(_WIN32)
+    const std::filesystem::path root = home / "AppData/Roaming/Mozilla/Firefox";
+#elif defined(__APPLE__)
+    const std::filesystem::path root = home / "Library/Application Support/Firefox";
+#else
+    const std::filesystem::path root = home / ".mozilla/firefox";
+#endif
+    const std::filesystem::path stale = root / "Profiles/a.default/places.sqlite";
+    const std::filesystem::path preferred = root / "Profiles/b.default-release/places.sqlite";
+    WriteFirefoxPlaces(stale);
+    WriteFirefoxPlaces(preferred, "https://alternate.test/");
+    std::filesystem::last_write_time(stale, std::filesystem::file_time_type::clock::now());
+    WriteFile(root / "profiles.ini",
+              "[InstallABC]\nDefault=Profiles/b.default-release\n\n[Profile0]\n"
+              "Path=Profiles/b.default-release\nIsRelative=1\nDefault=1\n");
+    EXPECT_EQ(FindFirefoxPlacesDatabase(home), preferred);
+    const auto imported = ImportFromSource(ImportSource::kFirefox, home);
+    ASSERT_TRUE(imported.has_value());
+    ASSERT_EQ(imported->size(), 1U);
+    EXPECT_EQ((*imported)[0].url, "https://alternate.test/");
+    std::filesystem::remove_all(home);
 #endif
 }
 

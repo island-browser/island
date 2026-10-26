@@ -71,7 +71,7 @@ target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
 if(SQLite3_FOUND)
     target_compile_definitions(island_browser_core PRIVATE ISLAND_HAS_SQLITE3=1)
-    target_link_libraries(island_browser_core PRIVATE ${SQLite3_LIBRARIES})
+    target_link_libraries(island_browser_core PRIVATE SQLite::SQLite3)
 endif()
 target_link_libraries(island_browser_core PUBLIC island_agent island_search island_content_blocker_ffi)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
