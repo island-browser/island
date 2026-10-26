@@ -89,6 +89,7 @@
 - (void)newSpace:(id)sender;
 - (void)closeSpace:(id)sender;
 - (void)beginSpaceRenaming:(id)sender;
+- (void)openSpaceMenu:(id)sender;
 - (void)setActiveSpaceIcon:(id)sender;
 - (void)moveSpaceLeft:(id)sender;
 - (void)moveSpaceRight:(id)sender;
@@ -153,6 +154,12 @@
 - (void)beginSpaceRenaming:(id)sender {
     if (app_ != nullptr) {
         app_->BeginSpaceRenaming();
+    }
+}
+
+- (void)openSpaceMenu:(id)sender {
+    if (app_ != nullptr) {
+        app_->OpenSpaceMenu();
     }
 }
 

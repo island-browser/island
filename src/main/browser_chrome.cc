@@ -2084,6 +2084,63 @@ int BrowserChrome::GlobalStripWidthDip(const ChromeTokens& tokens) {
     return std::max(0, tokens.rail_width_dip - 2 * tokens.spacing_3_dip - TabListScrollGutterDip());
 }
 
+CefRefPtr<CefLabelButton> BrowserChrome::AddNewTabRow() {
+    CEF_REQUIRE_UI_THREAD();
+    CefRefPtr<CollectionButtonDelegate> delegate =
+        new CollectionButtonDelegate(this, CollectionButtonAction::kNewTab, 0);
+    tab_button_delegates_.push_back(delegate);
+    CefRefPtr<CefLabelButton> row = CefLabelButton::CreateLabelButton(delegate, "New tab");
+    row->SetID(static_cast<int>(ChromeViewId::kTabsNewTabRow));
+    row->SetAccessibleName(std::string(kNewTabAccessibleName));
+    row->SetTooltipText("New tab");
+    row->SetFocusable(true);
+    row->SetInkDropEnabled(false);
+    row->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    row->SetMinimumSize(CefSize(0, RowHeight()));
+    row->SetFontList(FontList(13, ChromeFontWeight::kRegular));
+    tab_strip_->AddChildView(row);
+    ApplyNewTabVisual(row, /*hovered=*/false);
+    return row;
+}
+
+CefRefPtr<CefLabelButton> BrowserChrome::AddCollapsedNewTab() {
+    CEF_REQUIRE_UI_THREAD();
+    CefRefPtr<CollectionButtonDelegate> delegate =
+        new CollectionButtonDelegate(this, CollectionButtonAction::kNewTab, 0);
+    collapsed_tab_delegates_.push_back(delegate);
+    CefRefPtr<CefLabelButton> button = CefLabelButton::CreateLabelButton(delegate, "");
+    button->SetID(static_cast<int>(ChromeViewId::kCollapsedRailNewTab));
+    button->SetAccessibleName(std::string(kNewTabAccessibleName));
+    button->SetTooltipText("New tab");
+    button->SetFocusable(true);
+    button->SetInkDropEnabled(false);
+    button->SetMinimumSize(CefSize(kCollapsedRailButtonDip, kCollapsedRailButtonDip));
+    collapsed_tab_list_->AddChildView(button);
+    ApplyNewTabVisual(button, /*hovered=*/false);
+    return button;
+}
+
+void BrowserChrome::ApplyNewTabVisual(const CefRefPtr<CefLabelButton>& button, bool hovered) {
+    CEF_REQUIRE_UI_THREAD();
+    if (button == nullptr) {
+        return;
+    }
+    const ArgbColor rail = ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail);
+    // The same neutral plate as the Agent entry and the rail's footer buttons: hover paints the
+    // tokens' hover fill, and the label keeps the secondary text color (no accent).
+    button->SetBackgroundColor(FooterAgentPlate(tokens_, /*open=*/false, hovered, rail).argb);
+    button->SetEnabledTextColors(tokens_.text_secondary.argb);
+    for (const cef_button_state_t state :
+         {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED}) {
+        button->SetTextColor(state, tokens_.text_secondary.argb);
+    }
+    if (const std::optional<CefRefPtr<CefImage>> plus =
+            icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+        plus.has_value()) {
+        button->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
+    }
+}
+
 CefRefPtr<CefLabelButton> BrowserChrome::AddSectionHeader(const std::string& text, ChromeViewId id,
                                                           const std::string& accessible_name) {
     CefRefPtr<CefLabelButton> header = CefLabelButton::CreateLabelButton(button_delegate_, text);
@@ -2105,10 +2162,11 @@ void BrowserChrome::UpdateTabStripPreferredSize() {
         (favorites_section_header_ != nullptr ? 1 : 0) + (tabs_section_header_ != nullptr ? 1 : 0);
     const int kickers = static_cast<int>(group_kickers_.size());
     const int spacing = TabListLayout(tokens_).between_child_spacing;
-    const int children = count + headers + kickers + favorite_block_children_;
+    const int new_tab_rows = new_tab_button_ != nullptr ? 1 : 0;
+    const int children = count + headers + kickers + favorite_block_children_ + new_tab_rows;
     const int height = count * RowHeight() + headers * NativeSectionHeaderHeightDip() +
                        kickers * GroupedTabKickerHeightDip() + favorite_block_height_dip_ +
-                       std::max(0, children - 1) * spacing;
+                       new_tab_rows * RowHeight() + std::max(0, children - 1) * spacing;
     const int width =
         std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
     if (tab_strip_delegate_ != nullptr) {
@@ -2546,6 +2604,7 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     group_kickers_.clear();
     favorites_section_header_ = nullptr;
     tabs_section_header_ = nullptr;
+    new_tab_button_ = nullptr;
     global_header_ = nullptr;
     global_header_row_ = nullptr;
     global_add_ = nullptr;
@@ -2565,6 +2624,8 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         tabs_section_header_ =
             AddSectionHeader(title, ChromeViewId::kTabsSectionHeader, title + " section");
     }
+    // The New tab row sits directly under the tabs header, before the first tab row.
+    new_tab_button_ = AddNewTabRow();
 
     const int row_height = RowHeight();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
@@ -2693,6 +2754,7 @@ void BrowserChrome::RebuildCollapsedTabs() {
     collapsed_tab_list_->RemoveAllChildViews();
     collapsed_pinned_separator_ = nullptr;
     collapsed_pinned_separator_wrapper_ = nullptr;
+    collapsed_new_tab_button_ = nullptr;
     AddCollapsedFavorites();
 
     const CollapsedRailTabLayout layout = CollapsedRailLayout(tab_entries_);
@@ -2760,14 +2822,17 @@ void BrowserChrome::RebuildCollapsedTabs() {
         collapsed_tab_views_.push_back(views);
         collapsed_tab_list_->AddChildView(views.row);
     }
+    // The "+" New tab icon comes after the tab favicons, at the end of the rail's list.
+    collapsed_new_tab_button_ = AddCollapsedNewTab();
     UpdateCollapsedTabListSize();
 }
 
 void BrowserChrome::UpdateCollapsedTabListSize() {
     const std::size_t separators = (collapsed_pinned_separator_wrapper_ != nullptr ? 1 : 0) +
                                    (collapsed_favorite_separator_wrapper_ != nullptr ? 1 : 0);
+    const std::size_t new_tab_icons = collapsed_new_tab_button_ != nullptr ? 1 : 0;
     const int height = CollapsedRailListHeightDip(
-        tab_entries_.size() + collapsed_favorite_buttons_.size(), separators);
+        tab_entries_.size() + collapsed_favorite_buttons_.size() + new_tab_icons, separators);
     if (collapsed_tab_list_delegate_ != nullptr) {
         collapsed_tab_list_delegate_->SetPreferredSize(CefSize(kCollapsedRailButtonDip, height));
     }
@@ -3680,7 +3745,15 @@ void BrowserChrome::DispatchCollectionAction(CollectionButtonAction action, std:
             host_->CloseTab(index);
             return;
         case CollectionButtonAction::kActivateSpace:
-            host_->SelectSpace(index);
+            // The active space's segment opens its menu; any other space is selected.
+            if (index < space_entries_.size() && space_entries_[index].active) {
+                host_->ShowSpaceMenu(index);
+            } else {
+                host_->SelectSpace(index);
+            }
+            return;
+        case CollectionButtonAction::kNewTab:
+            host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
             return;
         case CollectionButtonAction::kUnpinTab:
             host_->SetTabPinned(index, false);
@@ -4006,6 +4079,8 @@ void BrowserChrome::ApplyRailButtonTheme() {
 // which changes independently of the theme.
 void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
+    ApplyNewTabVisual(new_tab_button_, new_tab_hovered_);
+    ApplyNewTabVisual(collapsed_new_tab_button_, collapsed_new_tab_hovered_);
     ApplyCollapsedRailTheme();
     ApplyFavoriteVisuals();
     ApplyFavoriteInk();
@@ -4368,6 +4443,17 @@ void BrowserChrome::RefreshRowHover() {
             views.hovered = hovered;
             ApplyCollapsedTabVisual(position);
         }
+    }
+    const bool new_tab_hovered = new_tab_button_ != nullptr && over(new_tab_button_);
+    if (new_tab_hovered != new_tab_hovered_) {
+        new_tab_hovered_ = new_tab_hovered;
+        ApplyNewTabVisual(new_tab_button_, new_tab_hovered_);
+    }
+    const bool collapsed_new_tab_hovered =
+        collapsed_new_tab_button_ != nullptr && over(collapsed_new_tab_button_);
+    if (collapsed_new_tab_hovered != collapsed_new_tab_hovered_) {
+        collapsed_new_tab_hovered_ = collapsed_new_tab_hovered;
+        ApplyNewTabVisual(collapsed_new_tab_button_, collapsed_new_tab_hovered_);
     }
     // Button state callbacks can arrive while the sidebar is still being built, before the
     // Agent entry exists; it has no hover to track until then.

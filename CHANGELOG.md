@@ -92,6 +92,16 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- The sidebar's "+ New tab" row is back: directly under the "<Space> · Tabs" header in every look,
+  and the collapsed rail's "+" after the tab icons. Both open a tab like ⌘T
+  (ChromeViewIds 1094 and 1095; 1052 stays retired).
+- Clicking the active space in the space switcher (or its rail icon) opens a menu: Rename space,
+  Change icon, the five colour presets, New space and Delete space. A click on another space still
+  switches to it. Colour can now be changed from the sidebar.
+- Arc hover: the sidebar row highlight is a subtle neutral plate instead of a heavy blue-white block.
+- macOS fullscreen: the traffic-light inset is removed while the window is fullscreen and restored
+  on exit, so the sidebar no longer leaves an empty band on the left and top.
+
 - Native look (command palette): a 20% scrim behind the ⌘K palette, sentence-case group headers
   (Tabs, Spaces, Commands, Go to, Bookmarks, History, Reports), distinct row icons, rounded neutral
   selection and keycap plates, right-aligned shortcuts read from the current keymap, and a neutral

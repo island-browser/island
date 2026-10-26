@@ -346,13 +346,14 @@ TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAre
     const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
 
     ASSERT_NE(tab_strip, nullptr);
-    // The list holds its headers and tab rows only; there is no New Tab row. With no favorites
-    // above them, the tabs header leads the pinned rows too (spec §6): a pinned tab never sits
-    // under a favorites header.
-    ASSERT_EQ(tab_strip->children.size(), 3U);
+    // The list holds its headers, the New tab row (directly under the tabs header, 0.9 owner
+    // feedback 2026-10-26) and the tab rows. With no favorites above them, the tabs header leads
+    // the pinned rows too (spec §6): a pinned tab never sits under a favorites header.
+    ASSERT_EQ(tab_strip->children.size(), 4U);
     EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kTabsSectionHeader);
-    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabStripEntry);
+    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabsNewTabRow);
     EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabStripEntry);
+    EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
 }
 
 TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsHeader) {
@@ -379,8 +380,9 @@ TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsH
     const ChromeViewId kicker = ChromeViewId::kTabGroupKicker;
     // The tabs header comes before the first (pinned) row, so the pinned rows read as tabs, and
     // every kicker sits under it.
-    EXPECT_EQ(ids, (std::vector<ChromeViewId>{ChromeViewId::kTabsSectionHeader, entry, entry,
-                                              kicker, entry, entry, kicker, entry, entry}));
+    EXPECT_EQ(ids, (std::vector<ChromeViewId>{ChromeViewId::kTabsSectionHeader,
+                                              ChromeViewId::kTabsNewTabRow, entry, entry, kicker,
+                                              entry, entry, kicker, entry, entry}));
 }
 
 TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesFirst) {
@@ -395,11 +397,12 @@ TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesF
     const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
 
     ASSERT_NE(tab_strip, nullptr);
-    ASSERT_EQ(tab_strip->children.size(), 4U);
+    ASSERT_EQ(tab_strip->children.size(), 5U);
     EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kTabsSectionHeader);
-    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabStripEntry);
-    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabGroupKicker);
-    EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
+    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabsNewTabRow);
+    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabStripEntry);
+    EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabGroupKicker);
+    EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kTabStripEntry);
 }
 
 TEST(BrowserWindowTest, GivenFramelessNativeToolbarWhenRailDoesNotClearLightsThenInsetDoes) {

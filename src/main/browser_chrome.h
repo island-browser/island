@@ -184,6 +184,12 @@ enum class ChromeViewId : int {
     // The header row above the global strip: the "Global favorites" label with the "+" add control
     // at its trailing end (ruling a).
     kGlobalFavoritesHeaderRow = 1093,
+    // 0.9 owner feedback (2026-10-26): the "+ New tab" row returns. kTabsNewTabRow is the expanded
+    // list's row, directly after the tabs header (or first when there is none);
+    // kCollapsedRailNewTab is the rail's "+" icon after the tab favicons. Both open a tab exactly
+    // like ⌘T. 1052 stays retired and is not reused.
+    kTabsNewTabRow = 1094,
+    kCollapsedRailNewTab = 1095,
 };
 
 // What the Agent entry's status dot shows, from the agent state the window already tracks.
@@ -335,7 +341,12 @@ enum class CollectionButtonAction : std::uint8_t {
     kAddCurrentPageAsGlobalFavorite,
     kRetryBookmarkStatus,
     kDismissBookmarkStatus,
+    // The expanded "+ New tab" row and the collapsed rail's "+": both run kNewTab.
+    kNewTab,
 };
+
+// The accessible name of both New tab controls (the expanded row and the collapsed "+").
+inline constexpr std::string_view kNewTabAccessibleName = "New tab";
 
 // What the collapsed rail draws for a tab projection: the tab order (source indices into
 // the projection, pinned tabs first and otherwise in list order) and the position in that
@@ -372,6 +383,9 @@ class BrowserChromeHost {
     virtual void SelectTab(std::size_t index) = 0;
     virtual void CloseTab(std::size_t index) = 0;
     virtual void SelectSpace(std::size_t index) = 0;
+    // A click on the active space's segment (or rail icon) opens its menu (space_menu.h); a
+    // click on any other space selects it through SelectSpace.
+    virtual void ShowSpaceMenu(std::size_t index) = 0;
     virtual void BeginAddressEditing() = 0;
     virtual void SetAddressFocusRingSuppressed(bool suppressed) = 0;
     virtual void CancelAddressEditing() = 0;
@@ -1008,6 +1022,7 @@ class BrowserChrome final : public NavigationObserver {
         if (TabsHeaderBeforeFirstRow(look, tabs_precede, !tabs.empty())) {
             children.push_back({ChromeViewId::kTabsSectionHeader, {}});
         }
+        children.push_back({ChromeViewId::kTabsNewTabRow, {}, std::string(kNewTabAccessibleName)});
         for (std::size_t i = 0; i < tabs.size(); ++i) {
             if (native && NeedsGroupKicker(tabs, i)) {
                 children.push_back({ChromeViewId::kTabGroupKicker, {}});
@@ -1053,6 +1068,9 @@ class BrowserChrome final : public NavigationObserver {
         for (std::size_t i = 0; i < collection.tabs.size(); ++i) {
             order.push_back({ChromeViewId::kCollapsedRailTab, {}});
         }
+        // The rail's "+" New tab icon closes the list, after the tab favicons.
+        order.push_back(
+            {ChromeViewId::kCollapsedRailNewTab, {}, std::string(kNewTabAccessibleName)});
         return order;
     }
 
@@ -1321,6 +1339,11 @@ class BrowserChrome final : public NavigationObserver {
     // The active space's name as a header shows it (truncated), or empty when it has none.
     [[nodiscard]] std::string ActiveSpaceHeaderName() const;
     // Creates one section header label (no focus, no ink) and appends it to tab_strip_.
+    // The "+ New tab" row (expanded, after the tabs header) and the collapsed rail's "+" icon.
+    // Both use the neutral row plate: hover paints the tokens' hover fill, never the accent.
+    CefRefPtr<CefLabelButton> AddNewTabRow();
+    CefRefPtr<CefLabelButton> AddCollapsedNewTab();
+    void ApplyNewTabVisual(const CefRefPtr<CefLabelButton>& button, bool hovered);
     CefRefPtr<CefLabelButton> AddSectionHeader(const std::string& text, ChromeViewId id,
                                                const std::string& accessible_name);
     void ApplyCollectionTheme();
@@ -1404,6 +1427,10 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> tab_strip_;
     CefRefPtr<CefLabelButton> favorites_section_header_;
     CefRefPtr<CefLabelButton> tabs_section_header_;
+    CefRefPtr<CefLabelButton> new_tab_button_;
+    bool new_tab_hovered_ = false;
+    CefRefPtr<CefLabelButton> collapsed_new_tab_button_;
+    bool collapsed_new_tab_hovered_ = false;
     // Bookmarks 0.9: the global strip's header and strip, and the failure status row above the
     // fixed footer. favorites_section_header_ names the current space's favorites.
     CefRefPtr<CefLabelButton> global_header_;

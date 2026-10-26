@@ -290,7 +290,13 @@ ChromeTokens Tint(const ChromeTokens& base, ArgbColor space_color, ChromeTheme t
     const auto derive = [&](double mix) {
         tinted.canvas = MixColor(dark ? base.background : base.surface_secondary, space, mix);
         tinted.selected = MixColor(tinted.canvas, white, dark ? 0.14 : 0.62);
-        tinted.hover = MixColor(tinted.canvas, white, dark ? 0.07 : 0.34);
+        // The hover plate is a subtle neutral step off the tinted canvas: a faint lift toward the
+        // text colour in dark, a faint lift toward white in light (a step toward the text on a
+        // near-white canvas, which has no room to lighten). The old 34% white mix read as a heavy,
+        // blue-tinged block on the sidebar.
+        const bool near_white = RelativeLuminance(tinted.canvas) > 0.8;
+        tinted.hover = dark || near_white ? MixColor(tinted.canvas, base.text, dark ? 0.08 : 0.05)
+                                          : MixColor(tinted.canvas, white, 0.12);
         tinted.well = MixColor(tinted.canvas, white, dark ? 0.09 : 0.46);
     };
     const auto readable = [&]() {

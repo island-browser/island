@@ -61,6 +61,7 @@
 #include "settings_focus.h"
 #include "sidebar_state.h"
 #include "space.h"
+#include "space_menu.h"
 #include "space_rename_overlay.h"
 #include "start_tiles.h"
 #include "tab.h"
@@ -729,6 +730,16 @@ class BrowserWindow : public CefClient,
     // Opens the rename overlay for the active space. Menu-driven on macOS (no
     // key equivalent); F2 is the cross-platform accelerator.
     void BeginSpaceRenaming();
+    // Opens the active space's menu (space_menu.h) as a palette listing: rename, change icon,
+    // colour presets, new space, delete space. Shown only while open, like the icon picker. A
+    // click on the active space's segment reaches it through ShowSpaceMenu; the dev action
+    // `space_menu` and the macOS dev selector reach it directly.
+    void OpenSpaceMenu();
+    // Runs a chosen menu row. Rename and icon hand the focus to their own overlay.
+    void RunSpaceMenuCommand(const SpaceMenuCommand& command);
+    // Queues RunSpaceMenuCommand on the next UI task: the palette's submit has just released its
+    // overlay, and rename/icon must show theirs after it (same FIFO as ScheduleSpaceIconPicker).
+    void ScheduleSpaceMenuCommand(SpaceMenuCommand command);
     // Find in page: opens the find bar on the active tab (or reselects its field when it is open),
     // optionally running `query` at once. Headless windows keep only the model, so tests and
     // dev actions can drive it.
@@ -764,6 +775,7 @@ class BrowserWindow : public CefClient,
     void SelectTab(std::size_t index) override;
     void CloseTab(std::size_t index) override;
     void SelectSpace(std::size_t index) override;
+    void ShowSpaceMenu(std::size_t index) override;
     void BeginAddressEditing() override;
     void SetAddressFocusRingSuppressed(bool suppressed) override;
     // What the last address focus change repainted: nothing, the three focus colors only, or a
@@ -886,6 +898,9 @@ class BrowserWindow : public CefClient,
     void OnWindowCreated(CefRefPtr<CefWindow> window) override;
     void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
     void OnWindowBoundsChanged(CefRefPtr<CefWindow> window, const CefRect& new_bounds) override;
+    // macOS fullscreen hides the traffic lights, so the frameless titlebar inset is dropped while
+    // fullscreen and restored on exit (ResolvedTokens reads fullscreen_).
+    void OnWindowFullscreenTransition(CefRefPtr<CefWindow> window, bool is_completed) override;
     void OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool chrome_theme) override;
     CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
     bool CanClose(CefRefPtr<CefWindow> window) override;
@@ -1346,6 +1361,10 @@ class BrowserWindow : public CefClient,
     std::map<std::string, TabId> plan_node_tabs_;
     // True while the command palette is the space-icon picker (no tabs, no history rows).
     bool space_icon_picker_open_ = false;
+    // True while the command palette is the active space's menu (space_menu.h).
+    bool space_menu_open_ = false;
+    // True from a completed fullscreen transition until the window leaves fullscreen.
+    bool fullscreen_ = false;
     // The agent's most recent page during a research (runtime only; never persisted).
     std::optional<TabId> agent_tab_id_;
     bool space_icon_picker_scheduled_ = false;

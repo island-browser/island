@@ -299,8 +299,14 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   26 compact) and 16px icons on a 4/8/12 DIP rhythm: back/forward, then the address as one soft
   `well` pill (the outline turns `--accent` while the field has focus), then the tab list — rows
   on the canvas, the selected tab a soft `selected` fill, the hovered one `hover`, no outline — and
-  a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T
-  (Ctrl+T), the Browser menu on macOS and the command palette open tabs. In Arc and Graphite the
+  a footer with a quiet space chip and icon buttons. A "+ New tab" row sits directly under the
+  "<Space> · Tabs" header, before the first tab row, in every look (owner decision 2026-10-26; it
+  supersedes the 0.9 spec §9-4 removal). It is a row of the tab list (the same height and neutral
+  `hover` plate as a tab row, no accent) and opens a tab exactly like ⌘T; the collapsed rail's "+"
+  sits after the tab icons. Clicking the active space's segment (or its rail icon) opens the space
+  menu: Rename, Change icon, the five colour presets, New space and, with another space present,
+  Delete space. It is a palette listing shown only while open, not a persistent overlay. In
+  Arc and Graphite the
   footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
   centered with the icon buttons and spaced like them: `hover` on hover, `segment_selected` while
   the panel is open, the label `text` and the sparkle `text_2`, never an accent fill or label.

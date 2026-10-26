@@ -106,7 +106,29 @@ platform executable links.
   projections; button names come from the same `*AccessibleName` helpers. Tab row fills (R15) go
   through `TabRowFill`, and the failure row's colors through `BookmarkStatusRowColors`. The
   new `ChromeViewId`s are `1081`–`1093` (`1093` is the global header row holding the label and the
-  trailing "+"); `1052` (collapsed New Tab) is retired. Dev capture: `favorite:global:<i>` and
+  trailing "+"); `1052` (collapsed New Tab) is retired and never reused. The New tab row returned
+  on 2026-10-26 with two new ids: `1094` (`kTabsNewTabRow`, the expanded row directly under the
+  tabs header, built by `AddNewTabRow` and projected by `TabStripContract`) and `1095`
+  (`kCollapsedRailNewTab`, the rail's "+" after the tab icons, built by `AddCollapsedNewTab` and
+  listed last by `CollapsedRailOrder`). Both run `CollectionButtonAction::kNewTab`, which calls
+  `ExecuteBrowserCommand(BrowserCommand::kNewTab)`; `ApplyNewTabVisual` paints them with the
+  neutral `FooterAgentPlate` plate and is hover-tracked in `RefreshRowHover`.
+  Space menu (`space_menu.h/.cc`): a click on the ACTIVE space's segment or rail icon runs
+  `kActivateSpace`, which calls `BrowserChromeHost::ShowSpaceMenu` (any other space is selected
+  as before). `BrowserWindow::OpenSpaceMenu` shows `SpaceMenuPaletteCommands(can_delete)` on the
+  command palette in a `space_menu_open_` mode (the palette is created lazily, like Cmd+K).
+  Submitting a row goes through `ParseSpaceMenuCommandId` and `ScheduleSpaceMenuCommand`, which runs
+  `RunSpaceMenuCommand` on the next UI task after the palette releases its overlay. Rename calls
+  `BeginSpaceRenaming`, Change icon `ShowSpaceIconPicker`, a colour `SetSpaceColorFromHex` then
+  `SaveSession` and `ApplyAppearance`, New space `kNewSpace`, Delete space `kCloseSpace` (no
+  confirmation, the same as the existing command). The colour presets live in
+  `kSpaceMenuColorChoices`, shared with New Space. To add a row, extend `SpaceMenuAction`, the
+  builder, the parser and `RunSpaceMenuCommand`. Dev capture: `space_menu` opens it (the macOS
+  selector is `openSpaceMenu:`, `IslandApp::OpenSpaceMenu`).
+  Fullscreen: `OnWindowFullscreenTransition` tracks `fullscreen_`; `ResolvedTokens` drops the
+  frameless `titlebar_band_dip` (the traffic-light inset) while fullscreen, so the rail and the
+  navigation row stop reserving room for hidden buttons, and restores it on exit.
+  Dev capture: `favorite:global:<i>` and
   `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`), and
   `focus:global_favorite:<i>` moves keyboard focus to the i-th global strip icon
   (`IslandApp::FocusGlobalFavoriteForDev`).

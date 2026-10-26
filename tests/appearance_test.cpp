@@ -168,7 +168,10 @@ TEST(AppearanceTokensTest, GivenAnySpaceColorAndTintThenTextStaysReadableOnEvery
             for (const int tint : {0, 25, 60, 100}) {
                 const ChromeTokens t = ChromeTokens::ForTheme(theme).Customized(
                     {space}, theme, {.look = LookPreset::kArc, .sidebar_tint_percent = tint});
+                SCOPED_TRACE(testing::Message() << std::hex << space << " tint=" << std::dec << tint
+                                                << " dark=" << (theme == ChromeTheme::kDark));
                 for (const ArgbColor surface : {t.canvas, t.selected, t.hover, t.well}) {
+                    SCOPED_TRACE(testing::Message() << "surface=" << std::hex << surface.argb);
                     EXPECT_GE(ContrastRatio(t.text, surface), 4.5);
                     EXPECT_GE(ContrastRatio(t.text_secondary, surface), 4.5);
                 }

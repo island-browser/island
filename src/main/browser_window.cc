@@ -53,6 +53,7 @@
 #include "runtime_style.h"
 #include "search_provider.h"
 #include "session_store.h"
+#include "space_menu.h"
 #include "start_tiles.h"
 #include "startup_options.h"
 #include "window_agent_host.h"
@@ -83,10 +84,13 @@ constexpr ArgbColor kDefaultSpaceColor{0xFF0090FF};
 // Fixed palette for spaces created through New Space, cycled in creation order
 // so the switcher's color marks stay distinguishable. The default space keeps
 // the palette's first entry.
-constexpr std::array<ArgbColor, 5> kSpaceColorPalette{
-    ArgbColor{0xFF0090FF}, ArgbColor{0xFF30A46C}, ArgbColor{0xFFFFB224},
-    ArgbColor{0xFFE5484D}, ArgbColor{0xFF8E4EC6},
-};
+constexpr auto kSpaceColorPalette = [] {
+    std::array<ArgbColor, kSpaceMenuColorChoices.size()> colors{};
+    for (std::size_t i = 0; i < colors.size(); ++i) {
+        colors[i] = kSpaceMenuColorChoices[i].color;
+    }
+    return colors;
+}();
 
 // The per-user home root the import detection probes under (mirrors the
 // session/prefs path conventions: profile-relative on Windows, home-relative
@@ -3336,7 +3340,7 @@ void BrowserWindow::DismissFailedBookmarkStatus() {
 ChromeTokens BrowserWindow::ResolvedTokens(ChromeTheme theme) const {
     ChromeTokens tokens = ChromeTokens::ForLook(prefs_.appearance.look, theme)
                               .Customized(active_space().color(), theme, prefs_.appearance);
-    if (FramelessWindowSupported()) {
+    if (FramelessWindowSupported() && !fullscreen_) {
         tokens.titlebar_band_dip = BrowserChrome::TrafficLightBandDip();
     }
     return tokens;
@@ -4379,6 +4383,21 @@ void BrowserWindow::OnWindowBoundsChanged(CefRefPtr<CefWindow>, const CefRect& n
         peek_->UpdateBounds(chrome_snapshot_.content_bounds);
     }
     PublishChromeSnapshot();
+}
+
+void BrowserWindow::OnWindowFullscreenTransition(CefRefPtr<CefWindow> window, bool is_completed) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window == nullptr || !is_completed) {
+        return;
+    }
+    const bool fullscreen = window->IsFullscreen();
+    if (fullscreen == fullscreen_) {
+        return;
+    }
+    fullscreen_ = fullscreen;
+    // The traffic-light inset follows the window: macOS hides the buttons in fullscreen, so the
+    // rail and navigation row stop reserving room for them until the window leaves fullscreen.
+    ApplyTheme(window, ResolvedChromeTheme(), false);
 }
 
 void BrowserWindow::OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool) {
@@ -6170,6 +6189,79 @@ void BrowserWindow::ShowSpaceIconPicker() {
     command_palette_->Show({}, {}, {}, SpaceIconPaletteCommands(), {});
 }
 
+void BrowserWindow::ShowSpaceMenu(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    // Only the active space has a menu; the sidebar selects any other space instead.
+    if (index == active_space_index_) {
+        OpenSpaceMenu();
+    }
+}
+
+void BrowserWindow::OpenSpaceMenu() {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return;
+    }
+    if (command_palette_ == nullptr) {
+        // Created on first use, like ShowCommandPalette: the menu may be the first palette opened.
+        command_palette_ = std::make_unique<CommandPaletteView>(
+            *this, window_, ResolvedTokens(ResolvedChromeTheme()), &ParseAndValidate,
+            icon_resource_root_);
+    }
+    space_icon_picker_open_ = false;
+    space_menu_open_ = true;
+    // Delete is offered only when another space would remain (the last space is never removed).
+    command_palette_->Show({}, {}, {}, SpaceMenuPaletteCommands(spaces_.size() > 1), {});
+}
+
+void BrowserWindow::ScheduleSpaceMenuCommand(SpaceMenuCommand command) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    if (!ui_tasks_enabled_for_test_) {
+        // Headless tests have no CEF task queue; they run the command inline.
+        RunSpaceMenuCommand(command);
+        return;
+    }
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window, SpaceMenuCommand queued) {
+                                window->RunSpaceMenuCommand(queued);
+                            },
+                            CefRefPtr<BrowserWindow>(this), std::move(command))));
+}
+
+void BrowserWindow::RunSpaceMenuCommand(const SpaceMenuCommand& command) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_) {
+        return;
+    }
+    switch (command.action) {
+        case SpaceMenuAction::kRename:
+            BeginSpaceRenaming();
+            return;
+        case SpaceMenuAction::kChangeIcon:
+            ShowSpaceIconPicker();
+            return;
+        case SpaceMenuAction::kSetColor:
+            // The same path the Settings page takes for a space colour.
+            if (SetSpaceColorFromHex(active_space_index_, command.hex)) {
+                SaveSession();
+                ApplyAppearance();
+            }
+            break;
+        case SpaceMenuAction::kNewSpace:
+            ExecuteCommand(BrowserCommand::kNewSpace);
+            break;
+        case SpaceMenuAction::kDeleteSpace:
+            // The existing close-space command: it removes the active space at once, as it always
+            // has.
+            ExecuteCommand(BrowserCommand::kCloseSpace);
+            break;
+    }
+    FocusBrowserView();
+}
+
 void BrowserWindow::ScheduleSpaceIconPicker() {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || space_icon_picker_scheduled_) {
@@ -6195,7 +6287,7 @@ void BrowserWindow::RunScheduledSpaceIconPicker() {
 
 void BrowserWindow::OnCommandPaletteQueryChanged(std::string_view query) {
     CEF_REQUIRE_UI_THREAD();
-    if (closing_ || history_ == nullptr || space_icon_picker_open_) {
+    if (closing_ || history_ == nullptr || space_icon_picker_open_ || space_menu_open_) {
         return;
     }
     const std::string requested(query);
@@ -6254,6 +6346,18 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
     if (closing_) {
         return;
     }
+    const bool was_space_menu = std::exchange(space_menu_open_, false);
+    if (was_space_menu) {
+        if (selection.kind == PaletteEntryKind::kCommand) {
+            if (const std::optional<SpaceMenuCommand> command =
+                    ParseSpaceMenuCommandId(selection.command.id)) {
+                ScheduleSpaceMenuCommand(*command);
+                return;  // the command decides where the focus goes
+            }
+        }
+        FocusBrowserView();
+        return;
+    }
     const bool was_space_icon_picker = std::exchange(space_icon_picker_open_, false);
     if (was_space_icon_picker) {
         if (selection.kind == PaletteEntryKind::kCommand) {
@@ -6299,6 +6403,7 @@ void BrowserWindow::OnCommandPaletteSubmitted(const PaletteSelection& selection,
 void BrowserWindow::OnCommandPaletteDismissed() {
     CEF_REQUIRE_UI_THREAD();
     space_icon_picker_open_ = false;
+    space_menu_open_ = false;
     // Escape restores focus to the invocation point, which is the browser view
     // by default.
     FocusBrowserView();

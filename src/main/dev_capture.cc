@@ -59,7 +59,7 @@ DevCaptureOptions DevCaptureOptions::Parse(std::span<const std::string_view> arg
 }
 
 std::string_view DevActionSelectorName(std::string_view action) {
-    static constexpr std::array<std::pair<std::string_view, std::string_view>, 18> kActions = {{
+    static constexpr std::array<std::pair<std::string_view, std::string_view>, 19> kActions = {{
         {"welcome", "showWelcome:"},
         {"theme:system", "useSystemTheme:"},
         {"theme:light", "useLightTheme:"},
@@ -77,6 +77,7 @@ std::string_view DevActionSelectorName(std::string_view action) {
         {"toggle_split", "toggleSplit:"},
         {"new_space", "newSpace:"},
         {"rename_space", "beginSpaceRenaming:"},
+        {"space_menu", "openSpaceMenu:"},
         {"cheatsheet", "showCheatsheet:"},
     }};
     for (const auto& [name, selector] : kActions) {

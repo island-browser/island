@@ -43,6 +43,7 @@ TEST(DevCaptureOptions, IgnoresMalformedOrOutOfRangeDelays) {
 
 TEST(DevCaptureActions, MenuBackedNamesMapToTheirSelectors) {
     EXPECT_EQ(DevActionSelectorName("command_palette"), "openCommandPalette:");
+    EXPECT_EQ(DevActionSelectorName("space_menu"), "openSpaceMenu:");
     EXPECT_EQ(DevActionSelectorName("cheatsheet"), "showCheatsheet:");
     EXPECT_EQ(DevActionSelectorName("theme:dark"), "useDarkTheme:");
     EXPECT_TRUE(DevActionSelectorName("navigate:https://example.com").empty());

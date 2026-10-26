@@ -103,8 +103,14 @@ TEST(BrowserChromeContractTest, GivenTabStripEntriesWhenProjectedThenEachEntryHa
     const ChromeViewTreeNode* tab_strip = FindChild(tree, ChromeViewId::kTabStrip);
     ASSERT_NE(tab_strip, nullptr);
 
-    ASSERT_EQ(tab_strip->children.size(), tabs.size());
+    // The New tab row leads the list when there is no tabs header (Arc without favorites).
+    ASSERT_EQ(tab_strip->children.size(), tabs.size() + 1);
+    EXPECT_EQ(tab_strip->children.front().id, ChromeViewId::kTabsNewTabRow);
     for (const ChromeViewTreeNode& entry : tab_strip->children) {
+        if (entry.id == ChromeViewId::kTabsNewTabRow) {
+            EXPECT_TRUE(entry.children.empty());
+            continue;
+        }
         EXPECT_EQ(entry.id, ChromeViewId::kTabStripEntry);
         ASSERT_EQ(entry.children.size(), 3U);
         EXPECT_EQ(entry.children[0].id, ChromeViewId::kTabStripEntryFavicon);
@@ -147,7 +153,9 @@ TEST(BrowserChromeContractTest,
     const ChromeViewTreeNode* space_switcher = FindChild(tree, ChromeViewId::kSpaceSwitcher);
     ASSERT_NE(tab_strip, nullptr);
     ASSERT_NE(space_switcher, nullptr);
-    EXPECT_TRUE(tab_strip->children.empty());
+    // The New tab row is the list's only child when there are no tabs.
+    ASSERT_EQ(tab_strip->children.size(), 1U);
+    EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kTabsNewTabRow);
     EXPECT_TRUE(space_switcher->children.empty());
 
     const ChromeViewTreeNode* rail = FindChild(tree, ChromeViewId::kRail);
@@ -454,7 +462,10 @@ TEST(BrowserChromeNativeContractTest, GivenNativeRailWhenInspectedThenBottomHold
     EXPECT_EQ(static_cast<int>(ChromeViewId::kRailSwitcherRow), 1076);
 }
 
-TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenTheListHasNoNewTabRow) {
+TEST(BrowserChromeNativeContractTest,
+     GivenNativeTabsWhenProjectedThenTheNewTabRowSitsUnderTheHeader) {
+    // 0.9 owner feedback (2026-10-26) brings the "+ New tab" row back: exactly one, directly under
+    // the tabs header and before the first tab row.
     const std::vector<SpaceSwitcherEntrySnapshot> spaces = {{.name = "Default", .active = true}};
     for (const std::size_t count : {std::size_t{0}, std::size_t{1}, std::size_t{3}}) {
         std::vector<TabStripEntrySnapshot> tabs(count, TabStripEntrySnapshot{.title = "Island"});
@@ -462,13 +473,22 @@ TEST(BrowserChromeNativeContractTest, GivenNativeTabsWhenProjectedThenTheListHas
             BrowserChrome::CollectionCountContract(tabs, spaces, LookPreset::kNative);
         const ChromeViewTreeNode* tab_strip = FindChild(tree, ChromeViewId::kTabStrip);
         ASSERT_NE(tab_strip, nullptr);
-        // The list holds only tab rows and its section headers and kickers.
+        // The list holds only tab rows, section headers, kickers and the New tab row.
+        std::size_t new_tab_rows = 0;
         for (const ChromeViewTreeNode& child : tab_strip->children) {
             EXPECT_TRUE(child.id == ChromeViewId::kTabStripEntry ||
                         child.id == ChromeViewId::kTabsSectionHeader ||
                         child.id == ChromeViewId::kFavoritesSectionHeader ||
-                        child.id == ChromeViewId::kTabGroupKicker);
+                        child.id == ChromeViewId::kTabGroupKicker ||
+                        child.id == ChromeViewId::kTabsNewTabRow);
+            new_tab_rows += child.id == ChromeViewId::kTabsNewTabRow ? 1U : 0U;
         }
+        EXPECT_EQ(new_tab_rows, 1U);
+        // Native shows the header whenever there are tabs, so the row follows it at index 1.
+        const std::size_t position = count == 0 ? 0U : 1U;
+        ASSERT_LT(position, tab_strip->children.size());
+        EXPECT_EQ(tab_strip->children[position].id, ChromeViewId::kTabsNewTabRow);
+        EXPECT_EQ(tab_strip->children[position].name, "New tab");
     }
 }
 
@@ -788,6 +808,7 @@ TEST(BrowserChromeFavoritesContractTest, GivenFavoritesWhenProjectedThenTheStrip
                                                 ChromeViewId::kSpaceFavoriteRow,
                                                 ChromeViewId::kSpaceFavoriteRow,
                                                 ChromeViewId::kTabsSectionHeader,
+                                                ChromeViewId::kTabsNewTabRow,
                                                 ChromeViewId::kTabStripEntry,
                                                 ChromeViewId::kTabStripEntry,
                                                 ChromeViewId::kTabStripEntry};
@@ -860,11 +881,12 @@ TEST(BrowserChromeFavoritesContractTest, GivenMoreThanTheStripHoldsThenMoreNames
 TEST(BrowserChromeFavoritesContractTest, GivenTheCollapsedRailThenEachFavoriteCarriesItsScope) {
     const std::vector<ChromeViewTreeNode> rail =
         BrowserChrome::CollapsedRailOrder(Collection(1, 1, 0));
-    // Global, the hairline, then the space favorite (no tabs in this collection).
-    ASSERT_EQ(rail.size(), 3U);
+    // Global, the hairline, the space favorite, then the rail's "+" New tab icon (no tabs here).
+    ASSERT_EQ(rail.size(), 4U);
     EXPECT_EQ(rail[0].name, "Global favorite: G0 (1 of 1)");
     EXPECT_EQ(rail[1].id, ChromeViewId::kCollapsedRailSeparator);
     EXPECT_EQ(rail[2].name, "Favorite: S0");
+    EXPECT_EQ(rail[3].id, ChromeViewId::kCollapsedRailNewTab);
 }
 
 TEST(BrowserChromeFavoritesContractTest, GivenNoAcceptablePageThenNoAddControlShows) {
@@ -881,8 +903,8 @@ TEST(BrowserChromeFavoritesContractTest, GivenOnlyTheAddControlThenTheHeaderRowH
         Collection(0, 0, 0, /*pinned_tabs=*/false, /*add_visible=*/true), kWorkSpace,
         LookPreset::kArc);
 
-    EXPECT_EQ(ChildIdsOf(strip),
-              (std::vector<ChromeViewId>{ChromeViewId::kGlobalFavoritesHeaderRow}));
+    EXPECT_EQ(ChildIdsOf(strip), (std::vector<ChromeViewId>{ChromeViewId::kGlobalFavoritesHeaderRow,
+                                                            ChromeViewId::kTabsNewTabRow}));
     EXPECT_NE(FindChild(strip, ChromeViewId::kGlobalFavoritesAdd), nullptr);
     EXPECT_EQ(FindChild(strip, ChromeViewId::kGlobalFavoritesStrip), nullptr);
 }
@@ -903,8 +925,8 @@ TEST(BrowserChromeFavoritesContractTest, GivenNativePinnedTabsThenTheTabsHeaderP
 
     const std::vector<ChromeViewId> expected = {
         ChromeViewId::kFavoritesSectionHeader, ChromeViewId::kSpaceFavoriteRow,
-        ChromeViewId::kTabsSectionHeader, ChromeViewId::kTabStripEntry,
-        ChromeViewId::kTabStripEntry};
+        ChromeViewId::kTabsSectionHeader,      ChromeViewId::kTabsNewTabRow,
+        ChromeViewId::kTabStripEntry,          ChromeViewId::kTabStripEntry};
     EXPECT_EQ(ChildIdsOf(strip), expected);
 }
 
@@ -936,15 +958,16 @@ TEST(BrowserChromeFavoritesContractTest, GivenArcWithoutFavoritesThenNoTabsLabel
         BrowserChrome::SidebarCollectionContract(Collection(0, 1, 2), kWorkSpace, LookPreset::kArc);
     const std::vector<ChromeViewId> expected = {
         ChromeViewId::kFavoritesSectionHeader, ChromeViewId::kSpaceFavoriteRow,
-        ChromeViewId::kTabsSectionHeader, ChromeViewId::kTabStripEntry,
-        ChromeViewId::kTabStripEntry};
+        ChromeViewId::kTabsSectionHeader,      ChromeViewId::kTabsNewTabRow,
+        ChromeViewId::kTabStripEntry,          ChromeViewId::kTabStripEntry};
     EXPECT_EQ(ChildIdsOf(with_space), expected);
 }
 
-TEST(BrowserChromeFavoritesContractTest, GivenNoFavoritesThenTheCollectionIsTheTabsAlone) {
+TEST(BrowserChromeFavoritesContractTest, GivenNoFavoritesThenTheCollectionIsTheNewTabRowAlone) {
+    // No favorites and no tabs: no header, just the New tab row (the one way to open a tab here).
     const ChromeViewTreeNode strip =
         BrowserChrome::SidebarCollectionContract(Collection(0, 0, 0), kWorkSpace, LookPreset::kArc);
-    EXPECT_TRUE(strip.children.empty());
+    EXPECT_EQ(ChildIdsOf(strip), (std::vector<ChromeViewId>{ChromeViewId::kTabsNewTabRow}));
 }
 
 TEST(BrowserChromeFavoritesContractTest, GivenTheFavoriteIdsWhenComparedThenTheyAppendAfter1080) {
@@ -961,20 +984,32 @@ TEST(BrowserChromeFavoritesContractTest, GivenTheFavoriteIdsWhenComparedThenThey
     EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailGlobalFavorite), 1091);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailSpaceFavorite), 1092);
     EXPECT_EQ(static_cast<int>(ChromeViewId::kGlobalFavoritesHeaderRow), 1093);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kTabsNewTabRow), 1094);
+    EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailNewTab), 1095);
     // 1052 stays reserved for the retired collapsed New Tab control; no view carries it.
     EXPECT_EQ(static_cast<int>(ChromeViewId::kCollapsedRailNewTabRetired), 1052);
 }
 
-TEST(BrowserChromeFavoritesContractTest, GivenFavoritesWhenProjectedThenNoNewTabControlAppears) {
+TEST(BrowserChromeFavoritesContractTest, GivenFavoritesWhenProjectedThenOneNewTabControlPerLook) {
+    // The expanded row sits under the tabs header; the collapsed "+" closes the rail's list. The
+    // retired 1052 id never reappears.
     const ChromeViewTreeNode strip = BrowserChrome::SidebarCollectionContract(
         Collection(8, 2, 3), kWorkSpace, LookPreset::kNative);
     const std::vector<ChromeViewId> collapsed =
         RailIds(BrowserChrome::CollapsedRailOrder(Collection(8, 2, 3)));
 
-    for (const ChromeViewId id : collapsed) {
-        EXPECT_NE(id, ChromeViewId::kCollapsedRailNewTabRetired);
-    }
-    EXPECT_EQ(FindChild(strip, ChromeViewId::kCollapsedRailNewTabRetired), nullptr);
+    ASSERT_FALSE(collapsed.empty());
+    EXPECT_EQ(collapsed.back(), ChromeViewId::kCollapsedRailNewTab);
+    EXPECT_EQ(std::count(collapsed.begin(), collapsed.end(), ChromeViewId::kCollapsedRailNewTab),
+              1);
+    EXPECT_EQ(
+        std::count(collapsed.begin(), collapsed.end(), ChromeViewId::kCollapsedRailNewTabRetired),
+        0);
+    EXPECT_EQ(std::count_if(strip.children.begin(), strip.children.end(),
+                            [](const ChromeViewTreeNode& child) {
+                                return child.id == ChromeViewId::kTabsNewTabRow;
+                            }),
+              1);
 }
 
 TEST(BrowserChromeFavoritesContractTest, GivenTheCollapsedRailThenGlobalsSeparateFromSpaces) {
@@ -982,14 +1017,15 @@ TEST(BrowserChromeFavoritesContractTest, GivenTheCollapsedRailThenGlobalsSeparat
         RailIds(BrowserChrome::CollapsedRailOrder(Collection(2, 2, 2)));
 
     // Same logical order as the expanded sidebar: global icons, a hairline, space favorites,
-    // then the tab icons.
+    // then the tab icons, and the "+" New tab icon last.
     const std::vector<ChromeViewId> expected = {ChromeViewId::kCollapsedRailGlobalFavorite,
                                                 ChromeViewId::kCollapsedRailGlobalFavorite,
                                                 ChromeViewId::kCollapsedRailSeparator,
                                                 ChromeViewId::kCollapsedRailSpaceFavorite,
                                                 ChromeViewId::kCollapsedRailSpaceFavorite,
                                                 ChromeViewId::kCollapsedRailTab,
-                                                ChromeViewId::kCollapsedRailTab};
+                                                ChromeViewId::kCollapsedRailTab,
+                                                ChromeViewId::kCollapsedRailNewTab};
     EXPECT_EQ(order, expected);
 }
 

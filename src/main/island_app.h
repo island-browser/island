@@ -82,6 +82,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
     void BeginSpaceRenaming();
+    // Opens the active space's menu (the palette listing of space_menu.h).
+    void OpenSpaceMenu();
     void SetActiveSpaceIcon(const std::string& icon_id);
     void SetSpaceIconForDev(std::size_t index, const std::string& icon_id);
     [[nodiscard]] std::string ActiveSpaceIconId() const;

@@ -120,6 +120,14 @@ void IslandApp::BeginSpaceRenaming() {
     }
 }
 
+void IslandApp::OpenSpaceMenu() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenSpaceMenu();
+    }
+}
+
 void IslandApp::SetActiveSpaceIcon(const std::string& icon_id) {
     CEF_REQUIRE_UI_THREAD();
 
