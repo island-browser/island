@@ -419,7 +419,8 @@ class StartPage(unittest.TestCase):
     def test_placeholders_follow_the_mode_verbatim(self) -> None:
         self.assertIn('placeholder="Search with Google"', self.html)
         self.assertIn('"Search with " + state.engine', self.html)
-        self.assertIn('"Ask about this tab or anything"', self.html)
+        self.assertIn('"Ask the agent anything"', self.html)
+        self.assertNotIn("Ask about this tab", self.html)
         self.assertIn('"Research a question \\u2014 you\'ll see the plan first"', self.html)
 
     def test_tab_cycles_the_segments_only_from_the_field(self) -> None:

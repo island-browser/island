@@ -30,6 +30,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
   URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
   stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
+- The address field shows an empty address as a "Search or enter address" placeholder in every
+  look, so the start page reads as a field. The placeholder is never the field's text.
+- The start page's Ask Agent mode says "Ask the agent anything" instead of "Ask about this tab or
+  anything"; the agent panel keeps the tab wording because a page is its context.
+- After a search on Google, Yandex or DuckDuckGo the address field shows the query instead of the
+  results URL. Focusing the field keeps the query, and Enter searches again. The real URL is still
+  what Copy URL and the tab hold.
 
 ### Fixed
 

@@ -3671,6 +3671,10 @@ void BrowserWindow::UpdateAddressBarForNavigation(const NavigationSnapshot& snap
         address_bar_model_.UpdateInternalPage(
             std::string(LocalPage::DisplayUrl(LocalPageKind::kReport)) +
             url.substr(report_page_url_.size()));
+    } else if (std::optional<std::string> query = SearchQueryFromResultsUrl(url);
+               query.has_value()) {
+        // The results page of a search engine shows its query; the URL stays in the tab.
+        address_bar_model_.UpdateSearchQuery(std::move(*query));
     } else {
         address_bar_model_.UpdateCommittedUrl(url);
     }

@@ -2,6 +2,7 @@
 #define ISLAND_SEARCH_ENGINE_H_
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -45,6 +46,14 @@ struct SearchEngine {
 // encoded per RFC 3986 with PercentEncodeQuery, e.g.
 // "https://www.google.com/search?q=hello%20world".
 [[nodiscard]] std::string BuildSearchUrl(const SearchEngine& engine, std::string_view query);
+
+// The query a results page of one of SearchEngines() was opened for, or nullopt when `url` is not
+// such a page. A match needs https, the engine's exact host (ASCII case ignored) and exact path,
+// and the engine's query parameter (the part of url_prefix after '?', "q" or "text"). Other
+// parameters and the fragment are ignored, the first occurrence of the parameter wins, '+' and
+// %XX decode, and a blank query is nullopt. The address field shows this text instead of the URL
+// while the page is a results page; the real URL stays in the tab.
+[[nodiscard]] std::optional<std::string> SearchQueryFromResultsUrl(std::string_view url);
 
 // What the start page's three-mode switch does with Enter, persisted as the
 // last-used mode.
