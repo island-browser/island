@@ -382,6 +382,14 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   system font at 10/700 in sentence case; a join deduplicates its incoming branch letters and reads
   "Joins A + B". Report pages use the same Native sentence-case treatment for their kicker and
   table headers; Arc and Graphite retain their mono uppercase tone.
+- **Bookmarks page:** a local content-slot library with a labelled search field and a compact Import /
+  New folder toolbar. A neutral raised folder row marks the current folder (`aria-current`), while
+  bookmark rows expose title, host, folder move, scoped-favorite controls and edit/delete actions.
+  It collapses from folders-and-results columns into one reading-order column. Failed native saves
+  remain an inline live status directly below the toolbar with Retry; deleting a non-empty folder
+  offers Move bookmarks to Unfiled and requires an in-page confirmation before permanent deletion.
+  It uses ThemeJson tokens only: neutral raised hover, selection and non-address focus states, with
+  the danger token reserved for destructive confirmation.
 - **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground. The accent is used only for the
@@ -432,7 +440,10 @@ between the groups; the active tab is the same soft `selected` fill as the selec
     65 % opacity and the tag "Queued · #n".
   - *Chips in the composer's bottom row:* the page chip (one 22 px plate: the share toggle, with
     the ✕ that removes the page context inside the same `--fill` plate) and, for a selection, a
-    quote chip. Both share the 22 px chip style and ellipsize on one line.
+    quote chip. Both share the 22 px chip style and ellipsize on one line. Once sent, the same
+    neutral page and quote chips appear above that user's bubble in the thread; they are transcript
+    metadata, not repeated prompt text. Thread quotes use the same one-line text span as composer
+    quotes, including long selections.
   - *Collect sheet:* a 12 px-radius dialog over a 20 % scrim, with one text field labelled in
     sentence case at 11 px 600, a list of tab rows (checkbox, title and mono URL on a 1px
     `--border-2` list) and a Collect button that is disabled until something is typed. Checkboxes

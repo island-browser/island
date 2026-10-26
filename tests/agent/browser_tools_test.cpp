@@ -42,9 +42,132 @@ TEST(BrowserToolsTest, DefinitionsAreUniqueObjectSchemas) {
         EXPECT_EQ(def.input_schema.StringOr("type", ""), "object") << def.name;
         EXPECT_NE(def.input_schema.FindMember("properties"), nullptr) << def.name;
     }
-    EXPECT_GE(names.size(), 20U);
+    EXPECT_GE(names.size(), 26U);
     EXPECT_TRUE(toolbox.HasTool("page_snapshot"));
     EXPECT_FALSE(toolbox.HasTool("nope"));
+}
+
+TEST(BrowserToolsTest, ListsBookmarksAndFavoritesWithFilters) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    const Value bookmarks = ResultJson(
+        CallTool(toolbox, "browser_list_bookmarks",
+                 Value::MakeObject().Set("folder_path", Value::String("Work / References"))));
+    ASSERT_EQ(bookmarks.FindMember("bookmarks")->array_val.size(), 1U);
+    EXPECT_EQ(bookmarks.FindMember("bookmarks")->array_val[0].IntOr("id", 0), 7);
+    const Value favorites = ResultJson(CallTool(
+        toolbox, "browser_list_favorites", Value::MakeObject().Set("scope", Value::String("12"))));
+    ASSERT_EQ(favorites.FindMember("favorites")->array_val.size(), 1U);
+    EXPECT_EQ(favorites.FindMember("favorites")->array_val[0].StringOr("title", ""), "Island");
+    const Value all_favorites = ResultJson(CallTool(toolbox, "browser_list_favorites"));
+    ASSERT_EQ(all_favorites.FindMember("favorites")->array_val.size(), 1U);
+    EXPECT_EQ(all_favorites.FindMember("favorites")->array_val[0].IntOr("id", 0), 7);
+}
+
+TEST(BrowserToolsTest, BookmarkInvalidArgumentsDoNotAskOrWrite) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    EXPECT_TRUE(CallTool(toolbox, "browser_add_bookmark").is_error);
+    EXPECT_TRUE(
+        CallTool(toolbox, "browser_remove_bookmark", Value::MakeObject().Set("id", Value::Int(99)))
+            .is_error);
+    EXPECT_TRUE(
+        CallTool(toolbox, "browser_add_favorite",
+                 Value::MakeObject().Set("id", Value::Int(7)).Set("scope", Value::String("0")))
+            .is_error);
+    EXPECT_TRUE(CallTool(toolbox, "browser_add_bookmark",
+                         Value::MakeObject().Set("url", Value::String("javascript:alert(1)")))
+                    .is_error);
+    EXPECT_EQ(host.resolved_targets, (std::vector<std::string>{"javascript:alert(1)"}));
+    EXPECT_TRUE(host.confirmations.empty());
+    EXPECT_TRUE(std::none_of(host.calls.begin(), host.calls.end(), [](const std::string& call) {
+        return call.starts_with("add_") || call.starts_with("remove_");
+    }));
+}
+
+TEST(BrowserToolsTest, BookmarkMutationsAskBeforeWritingAndReportHostErrors) {
+    FakeBrowserHost host;
+    host.defer_confirmations = true;
+    host.trusted = {"example.test"};
+    BrowserToolbox toolbox(host);
+    std::optional<ToolResult> result;
+    toolbox.Call("browser_add_bookmark",
+                 Value::MakeObject()
+                     .Set("url", Value::String("https://example.test/a"))
+                     .Set("title", Value::String("Example"))
+                     .Set("folder_path", Value::String("Work")),
+                 [&](ToolResult value) { result = std::move(value); });
+    ASSERT_EQ(host.confirmations.size(), 1U);
+    EXPECT_EQ(host.confirmations[0].summary,
+              "Add bookmark \"Example\" on example.test to folder \"Work\"");
+    EXPECT_FALSE(host.confirmations[0].trusted_allowed);
+    EXPECT_TRUE(host.confirmations[0].task_grant_allowed);
+    EXPECT_FALSE(result.has_value());
+    EXPECT_TRUE(std::none_of(host.calls.begin(), host.calls.end(), [](const std::string& call) {
+        return call.starts_with("add_bookmark:");
+    }));
+    host.bookmark_status = HostStatus::Error("disk full");
+    host.AnswerNext(ConfirmationAnswer::kAllowOnce);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_TRUE(result->is_error);
+    EXPECT_NE(result->content[0].text.find("disk full"), std::string::npos);
+}
+
+TEST(BrowserToolsTest, BookmarkTaskGrantIsBoundToTheBookmarkAndScope) {
+    FakeBrowserHost host;
+    host.answers = {ConfirmationAnswer::kAllowForTask, ConfirmationAnswer::kCancel,
+                    ConfirmationAnswer::kCancel};
+    BrowserToolbox toolbox(host);
+    const auto add_favorite = [&toolbox](std::int64_t id, std::string scope) {
+        return CallTool(toolbox, "browser_add_favorite",
+                        Value::MakeObject()
+                            .Set("id", Value::Int(id))
+                            .Set("scope", Value::String(std::move(scope))));
+    };
+    EXPECT_FALSE(add_favorite(7, "global").is_error);
+    EXPECT_FALSE(add_favorite(7, "global").is_error);
+    EXPECT_TRUE(add_favorite(8, "global").is_error);
+    EXPECT_TRUE(add_favorite(7, "12").is_error);
+    EXPECT_EQ(host.confirmations.size(), 3U);
+}
+
+TEST(BrowserToolsTest, RemovingFavoriteOutsideItsScopeDoesNotAskOrWrite) {
+    FakeBrowserHost host;
+    BrowserToolbox toolbox(host);
+    EXPECT_TRUE(
+        CallTool(toolbox, "browser_remove_favorite",
+                 Value::MakeObject().Set("id", Value::Int(7)).Set("scope", Value::String("77")))
+            .is_error);
+    EXPECT_TRUE(host.confirmations.empty());
+    EXPECT_EQ(host.calls, (std::vector<std::string>{"list_bookmarks"}));
+}
+
+TEST(BrowserToolsTest, BookmarkMutationAllowTaskCancelAndTimeoutBehaveSafely) {
+    FakeBrowserHost host;
+    host.answers = {ConfirmationAnswer::kAllowForTask, ConfirmationAnswer::kCancel,
+                    ConfirmationAnswer::kTimeout};
+    BrowserToolbox toolbox(host);
+    EXPECT_FALSE(
+        CallTool(toolbox, "browser_remove_favorite",
+                 Value::MakeObject().Set("id", Value::Int(7)).Set("scope", Value::String("12")))
+            .is_error);
+    // The task grant bypasses a second card, even though this scope never permits trusted-site
+    // bypass.
+    EXPECT_FALSE(
+        CallTool(toolbox, "browser_remove_favorite",
+                 Value::MakeObject().Set("id", Value::Int(7)).Set("scope", Value::String("12")))
+            .is_error);
+    EXPECT_EQ(host.confirmations.size(), 1U);
+    toolbox.ResetTaskGrants();
+    EXPECT_TRUE(
+        CallTool(toolbox, "browser_remove_bookmark", Value::MakeObject().Set("id", Value::Int(7)))
+            .is_error);
+    EXPECT_TRUE(CallTool(toolbox, "browser_add_bookmark",
+                         Value::MakeObject().Set("url", Value::String("https://new.test/")))
+                    .is_error);
+    EXPECT_EQ(host.calls,
+              (std::vector<std::string>{"list_bookmarks", "remove_favorite:7:12", "list_bookmarks",
+                                        "remove_favorite:7:12", "list_bookmarks"}));
 }
 
 TEST(BrowserToolsTest, ListTabsReportsActiveSpaceAndTabs) {
@@ -243,10 +366,9 @@ TEST(BrowserToolsTest, TypeRefusesWhenTheFocusDidNotLandOnTheTarget) {
     host.QueueScriptResult(R"({"ok":false,"facts":{"tag":"body","type":"",
         "page_origin":"https://island.test"}})");
     BrowserToolbox toolbox(host);
-    const ToolResult result = CallTool(toolbox, "page_type",
-                                       Value::MakeObject()
-                                           .Set("ref", Value::Int(3))
-                                           .Set("text", Value::String("x")));
+    const ToolResult result =
+        CallTool(toolbox, "page_type",
+                 Value::MakeObject().Set("ref", Value::Int(3)).Set("text", Value::String("x")));
     EXPECT_TRUE(result.is_error);
     for (const FakeBrowserHost::DevToolsRecord& call : host.devtools) {
         EXPECT_NE(call.method, "Input.insertText");
@@ -659,6 +781,7 @@ TEST(BrowserToolsTest, TypingWithoutFactsAsksAndCannotBeTrusted) {
                     .is_error);
     ASSERT_EQ(host.confirmations.size(), 1u);
     EXPECT_FALSE(host.confirmations[0].trusted_allowed);
+    EXPECT_FALSE(host.confirmations[0].task_grant_allowed);
     EXPECT_EQ(CountMethod(host, "Input.insertText"), 0);
 }
 
@@ -692,6 +815,8 @@ TEST(BrowserToolsTest, CardFieldAskedEvenOnTrustedSiteAndNeverGrantedForTask) {
     host.QueueScriptResult(facts);
     host.answers.push_back(ConfirmationAnswer::kAllowForTask);
     EXPECT_FALSE(CallTool(toolbox, "page_type", args).is_error);
+    ASSERT_FALSE(host.confirmations.empty());
+    EXPECT_FALSE(host.confirmations[0].task_grant_allowed);
     host.QueueScriptResult(facts);
     EXPECT_TRUE(CallTool(toolbox, "page_type", args).is_error);
     EXPECT_EQ(host.confirmations.size(), 2u);

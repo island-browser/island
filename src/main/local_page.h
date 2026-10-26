@@ -23,6 +23,9 @@ enum class LocalPageKind : std::uint8_t {
     kAgent,
     kSettings,
     kTabOverview,
+    // The managed local bookmark library. Task 6b owns showing this page and
+    // dispatching its messages; the page document and URL live here.
+    kBookmarks,
     // Island's own start/search page. Unlike the others it is not shown in a
     // LocalPage view: it is the document a tab's own browser loads, so a
     // search can navigate that tab. Its messages reach the window through the

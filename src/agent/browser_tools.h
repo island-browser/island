@@ -65,6 +65,29 @@ struct HostStatus {
     static HostStatus Error(std::string message) { return {false, std::move(message)}; }
 };
 
+// CEF-free data exchanged with the window-side bookmark bridge. Folder paths are display paths
+// (for example "Work / References"); favorite scopes are global or a persisted decimal space id.
+struct AgentFavoriteScope {
+    std::optional<std::uint64_t> space_id;
+};
+
+struct AgentBookmarkInfo {
+    std::uint64_t id = 0;
+    std::string title;
+    std::string url;
+    std::string folder_path;
+    std::vector<AgentFavoriteScope> favorite_scopes;
+};
+
+struct AgentBookmarkDraft {
+    std::string title;
+    std::string url;
+    std::string folder_path;
+};
+
+using AgentBookmarksCallback = std::function<void(HostStatus, std::vector<AgentBookmarkInfo>)>;
+using AgentBookmarkStatusCallback = std::function<void(HostStatus)>;
+
 // Result of a DevTools protocol call: the method's `result` object, or an
 // error message.
 struct DevToolsReply {
@@ -94,6 +117,8 @@ struct ConfirmationRequest {
     std::string host;
     std::optional<std::size_t> tab;
     bool trusted_allowed = true;  // false: the prompt must not offer "Trust this site"
+    // false: the prompt must not offer "Allow for this task".
+    bool task_grant_allowed = true;
 };
 
 // Browser operations the tool layer needs. Tab indices are positions in the
@@ -125,6 +150,39 @@ class AgentBrowserHost {
     // The URL browser_navigate would load for `text` (search text becomes a search URL), or
     // nullopt when it resolves to no allowed address.
     virtual std::optional<std::string> ResolveNavigationTarget(std::string_view text) = 0;
+    // Bookmark operations are asynchronous because the window-side store may save on its owner
+    // thread. Defaults fail closed until the window bridge implements them.
+    virtual void ListBookmarks(std::optional<std::string> folder_path,
+                               AgentBookmarksCallback done) {
+        (void)folder_path;
+        done(HostStatus::Error("bookmarks unavailable"), {});
+    }
+    // With no scope, returns every bookmark that is a favorite in any scope, in display order.
+    virtual void ListFavorites(std::optional<AgentFavoriteScope> scope,
+                               AgentBookmarksCallback done) {
+        (void)scope;
+        done(HostStatus::Error("bookmarks unavailable"), {});
+    }
+    virtual void AddBookmark(AgentBookmarkDraft bookmark, AgentBookmarkStatusCallback done) {
+        (void)bookmark;
+        done(HostStatus::Error("bookmarks unavailable"));
+    }
+    virtual void RemoveBookmark(std::uint64_t id, AgentBookmarkStatusCallback done) {
+        (void)id;
+        done(HostStatus::Error("bookmarks unavailable"));
+    }
+    virtual void AddFavorite(std::uint64_t bookmark_id, AgentFavoriteScope scope,
+                             AgentBookmarkStatusCallback done) {
+        (void)bookmark_id;
+        (void)scope;
+        done(HostStatus::Error("bookmarks unavailable"));
+    }
+    virtual void RemoveFavorite(std::uint64_t bookmark_id, AgentFavoriteScope scope,
+                                AgentBookmarkStatusCallback done) {
+        (void)bookmark_id;
+        (void)scope;
+        done(HostStatus::Error("bookmarks unavailable"));
+    }
 };
 
 // One MCP content block of a tool result.
@@ -220,6 +278,14 @@ class BrowserToolbox {
     void Scroll(const json::Value& args, ToolCallback done);
     void EvaluateTool(const json::Value& args, ToolCallback done);
     void Screenshot(const json::Value& args, ToolCallback done);
+    void ListBookmarks(const json::Value& args, ToolCallback done);
+    void ListFavorites(const json::Value& args, ToolCallback done);
+    void AddBookmark(const json::Value& args, ToolCallback done);
+    void RemoveBookmark(const json::Value& args, ToolCallback done);
+    void AddFavorite(const json::Value& args, ToolCallback done);
+    void RemoveFavorite(const json::Value& args, ToolCallback done);
+    void WithBookmark(std::uint64_t id, std::function<void(AgentBookmarkInfo, ToolCallback)> run,
+                      ToolCallback done);
 
     AgentBrowserHost& host_;
     std::vector<ToolDefinition> definitions_;

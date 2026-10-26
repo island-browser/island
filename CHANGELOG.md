@@ -15,6 +15,13 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with
+  title/URL editing, folder actions, favorite controls, import handoff, inline save status and
+  destructive folder confirmation. Browser-window state and command wiring land separately.
+- Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
+  add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
+  sites; bulk, import, folder-mutation and reorder tools are not exposed.
+
 - Sidebar favorites (Bookmarks 0.9): a global favorites strip shows the first six favorites then "+N", and the "+" that adds the current page sits at the end of the "Global favorites" header row. The strip's plates and gaps shrink to fit the sidebar (down to 24 and 2 DIP). The current space's favorites appear under "<Space> · Favorites" (Graphite: "Favorites"), and the tabs follow under a "Tabs" header (Arc and Graphite show it only when favorites come first). Pinned tabs sit under the tabs header. A failed save shows a status row above the footer, with Retry when the change can run again. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button is removed.
 - Favorites have their data path in place: each favorite list is projected for the sidebar, and a
   favorite can show its own virtual tab in the content slot without touching the selected tab. While
@@ -37,6 +44,17 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
   URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
   stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
+
+### Fixed
+
+- Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
+  long selection chips stay on one ellipsized line.
+
+## [0.8.1] - 2026-10-24
+
+### Fixed
+
+- The Windows build passes its tests again (an export test kept a file open while deleting it).
 
 ## [0.8.0] - 2026-10-24
 
@@ -585,7 +603,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/island-browser/island/releases/tag/v0.8.1
 [0.8.0]: https://github.com/island-browser/island/releases/tag/v0.8.0
 [0.7.3]: https://github.com/island-browser/island/releases/tag/v0.7.3
 [0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2

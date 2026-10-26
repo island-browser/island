@@ -112,8 +112,8 @@ class EveryLocalPage(unittest.TestCase):
     def test_pages_exist(self) -> None:
         self.assertEqual(
             [path.name for path in PAGE_FILES],
-            ["agent.html", "plan.html", "report.html", "settings.html", "start.html",
-             "tab_overview.html"],
+            ["agent.html", "bookmarks.html", "plan.html", "report.html", "settings.html",
+             "start.html", "tab_overview.html"],
         )
         self.assertEqual([path.name for path in SCRIPT_FILES], ["markdown.js"])
 
@@ -140,7 +140,7 @@ class EveryLocalPage(unittest.TestCase):
                 self.assertNotIn("@@ISLAND_MARKDOWN@@", built)
                 self.assertIn("function islandMarkdown(", built)
                 self.assertNotIn("function islandMarkdown(", page(name))
-        for name in ("settings.html", "start.html", "tab_overview.html"):
+        for name in ("bookmarks.html", "settings.html", "start.html", "tab_overview.html"):
             with self.subTest(page=name):
                 self.assertNotIn(PLACEHOLDER, page(name))
 
@@ -190,6 +190,162 @@ class EveryLocalPage(unittest.TestCase):
                 for variable in BRANCH_VARIABLES:
                     self.assertIn(f'"{variable}"', apply_theme)
         self.assertGreater(checked_pages, 0)
+
+
+class BookmarksPage(unittest.TestCase):
+    def setUp(self) -> None:
+        self.html = page("bookmarks.html")
+
+    def test_documents_the_native_state_and_message_table(self) -> None:
+        for key in (
+            "folders:", "bookmarks:", "current_space:", "selected_folder:",
+            "import_sources:", "status:", "agent_naming?:bool",
+        ):
+            self.assertIn(key, self.html)
+        for message in (
+            'type: "bookmarks:open"', 'type: "bookmarks:open-new-tab"',
+            'type: "bookmarks:edit"', 'type: "bookmarks:delete"',
+            'type: "bookmarks:move"', 'type: "folder:create"',
+            'type: "folder:rename"', 'type: "folder:delete"',
+            'type: "favorite:toggle-global"', 'type: "favorite:toggle-space"',
+            'type: "import"', 'type: "retry"', 'type: "select-folder"',
+        ):
+            with self.subTest(message=message):
+                self.assertIn(message, self.html)
+
+    def test_uses_theme_tokens_and_neutral_accessible_states(self) -> None:
+        stylesheet = self.html[self.html.index("<style>") : self.html.index("</style>")]
+        self.assertNotRegex(stylesheet, r"#[0-9a-fA-F]{3,8}|rgb|hsl")
+        self.assertIn(":focus-visible", stylesheet)
+        self.assertIn("box-shadow: 0 0 0 2px var(--text-2)", stylesheet)
+        self.assertIn(".search:focus-within", stylesheet)
+        search_input = stylesheet[stylesheet.index(".search input") : stylesheet.index(
+            ".search input::placeholder"
+        )]
+        self.assertIn("box-shadow: none", search_input)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", stylesheet)
+        self.assertIn("var(--danger)", stylesheet)
+
+    def test_has_live_status_retry_and_folder_delete_confirmation(self) -> None:
+        self.assertIn('role="status" aria-live="polite"', self.html)
+        self.assertIn('id="retry">Retry</button>', self.html)
+        self.assertIn('role="dialog" aria-modal="true"', self.html)
+        self.assertIn("Move bookmarks to Unfiled", self.html)
+        self.assertIn("Delete bookmarks permanently?", self.html)
+        self.assertIn("function trapConfirm", self.html)
+
+    def test_keeps_editing_and_agent_naming_safe(self) -> None:
+        self.assertIn('event.key === "Escape"', self.html)
+        self.assertIn("state.agent_naming", self.html)
+        self.assertIn("agent.disabled = true", self.html)
+        self.assertIn('aria-current", "page"', self.html)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_node_harness_keeps_edit_draft_focus_and_two_step_delete_safe(self) -> None:
+        """The page script is run against a small DOM harness, not just parsed."""
+        script = re.search(r"<script>(.*?)</script>", self.html, re.DOTALL).group(1)
+        harness = r'''
+class Node {
+  constructor(tag) { this.tagName = tag; this.children = []; this.listeners = {}; this.dataset = {};
+    this.style = { setProperty() {} }; this.attributes = {}; this.hidden = false; this.value = "";
+    this._textContent = ""; this.className = ""; this.type = ""; }
+  get textContent() { return this._textContent; }
+  set textContent(value) { this._textContent = String(value); this.children = []; }
+  appendChild(node) { this.children.push(node); return node; }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); }
+  setAttribute(key, value) { this.attributes[key] = String(value); }
+  getAttribute(key) { return this.attributes[key]; }
+  querySelector(selector) { return find(this, selector); }
+  querySelectorAll(selector) { return findAll(this, selector); }
+  focus() { document.activeElement = this; }
+  select() { this.selected = true; }
+}
+function hasClass(node, name) { return node.className.split(/\s+/).includes(name); }
+function match(node, selector) {
+  if (selector === "button" || selector === "input") return node.tagName === selector;
+  if (selector === ".edit") return hasClass(node, "edit");
+  if (selector === ".folder-tools") return hasClass(node, "folder-tools");
+  if (selector === '[data-edit-field="title"]') return node.dataset.editField === "title";
+  if (selector === '[data-edit-field="url"]') return node.dataset.editField === "url";
+  if (selector === "button:not([disabled])") return node.tagName === "button" && !node.disabled;
+  return false;
+}
+function findAll(node, selector) { let out = []; for (const child of node.children) { if (match(child, selector)) out.push(child); out = out.concat(findAll(child, selector)); } return out; }
+function find(node, selector) {
+  if (selector === ".folder-tools input") { const tools = find(node, ".folder-tools"); return tools && find(tools, "input"); }
+  return findAll(node, selector)[0] || null;
+}
+function findIncluding(node, selector) { return match(node, selector) ? node : find(node, selector); }
+const ids = {}; const document = { activeElement: null, documentElement: new Node("html"),
+  createElement(tag) { return new Node(tag); }, getElementById(id) { return ids[id]; },
+  querySelector(selector) { for (const node of Object.values(ids)) { const found = findIncluding(node, selector); if (found) return found; } return null; },
+  listeners: {}, addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+  dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); } };
+for (const id of ["query", "new-folder", "new-folder-name", "folder-list", "folder-total", "bookmark-list", "results-title", "result-count", "empty", "import-menu", "import-button", "status", "retry", "confirm-title", "confirm-copy", "confirm-move", "confirm-delete", "confirm-backdrop", "confirm-cancel", "new-folder-button", "cancel-folder"]) ids[id] = new Node(id === "query" || id.includes("name") ? "input" : "div");
+ids.status.appendChild(new Node("span")); ids["confirm-backdrop"].appendChild(ids["confirm-cancel"]); ids["confirm-backdrop"].appendChild(ids["confirm-move"]); ids["confirm-backdrop"].appendChild(ids["confirm-delete"]);
+const messages = []; const console = { log(value) { messages.push(JSON.parse(value.slice(8))); } }; const window = {}; global.setTimeout = (fn) => fn();
+'''
+        result = subprocess.run(
+            [NODE, "-e", harness + script + r'''
+const base = { folders: [{ id: "f", name: "Folder", count: 1 }], bookmarks: [{ id: "b", title: "Old", url: "https://old.test", host: "old.test", folder_id: "f", spaces: [] }], selected_folder: "all", import_sources: [] };
+window.islandRender(base);
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
+let edit = find(ids["bookmark-list"], ".edit"); let title = edit.querySelector('[data-edit-field="title"]'); let url = edit.querySelector('[data-edit-field="url"]');
+title.value = "Title draft"; title.focus(); title.dispatch("input");
+ids.query.focus(); ids.query.dispatch("input");
+if (document.activeElement !== ids.query) throw new Error("search focus was stolen");
+edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]');
+if (title.value !== "Title draft") throw new Error("rebuilt title draft lost");
+url = edit.querySelector('[data-edit-field="url"]'); url.value = "https://draft.test"; url.focus(); url.dispatch("input"); window.islandRender(base);
+edit = find(ids["bookmark-list"], ".edit"); url = edit.querySelector('[data-edit-field="url"]');
+if (url.value !== "https://draft.test" || document.activeElement !== url) throw new Error("draft or URL focus lost");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
+ids["confirm-delete"].dispatch("click"); ids["confirm-delete"].dispatch("click");
+if (messages.filter((message) => message.type === "folder:delete" && message.mode === "delete").length !== 1) throw new Error("delete did not send exactly once");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "Hide").dispatch("click");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+let rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+rename.value = "Folder draft"; rename.focus(); rename.dispatch("input"); window.islandRender(base);
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (rename.value !== "Folder draft" || document.activeElement !== rename) throw new Error("folder draft or focus lost");
+ids.query.focus(); window.islandRender(base);
+if (document.activeElement !== ids.query) throw new Error("search focus was stolen by folder rename");
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (rename.value !== "Folder draft") throw new Error("rebuilt folder draft lost");
+findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
+ids["confirm-cancel"].dispatch("click");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "Hide").dispatch("click");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+findAll(find(ids["folder-list"], ".folder-tools"), "button").find((node) => node.textContent === "Delete").dispatch("click");
+document.dispatch("keydown", { key: "Escape" });
+if (messages.filter((message) => message.type === "folder:delete").length !== 1) throw new Error("cancel or escape sent delete");
+const switching = { folders: [{ id: "f-a", name: "Folder A", count: 1 }, { id: "f-b", name: "Folder B", count: 1 }], bookmarks: [{ id: "a", title: "Bookmark A", url: "https://a.test", host: "a.test", folder_id: "f-a", spaces: [] }, { id: "b", title: "Bookmark B", url: "https://b.test", host: "b.test", folder_id: "f-b", spaces: [] }], selected_folder: "all", import_sources: [] };
+window.islandRender(switching);
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
+edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]'); title.value = "Bookmark A draft"; title.dispatch("input");
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click");
+edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]'); url = edit.querySelector('[data-edit-field="url"]');
+if (title.value !== "Bookmark B" || url.value !== "https://b.test") throw new Error("bookmark A draft leaked into bookmark B");
+if (document.activeElement !== title) throw new Error("bookmark B title was not focused");
+edit.dispatch("submit");
+let saved = messages.filter((message) => message.type === "bookmarks:edit").pop();
+if (!saved || saved.id !== "b" || saved.title !== "Bookmark B" || saved.url !== "https://b.test") throw new Error("bookmark B save used bookmark A values");
+findAll(ids["folder-list"], "button").find((node) => node.textContent === "More").dispatch("click");
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input"); rename.value = "Folder A draft"; rename.dispatch("input");
+findAll(ids["folder-list"], "button").filter((node) => node.textContent === "More")[0].dispatch("click");
+rename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (rename.value !== "Folder B") throw new Error("folder A draft leaked into folder B");
+find(ids["folder-list"], ".folder-tools").dispatch("submit");
+saved = messages.filter((message) => message.type === "folder:rename").pop();
+if (!saved || saved.id !== "f-b" || saved.name !== "Folder B") throw new Error("folder B save used folder A values");
+'''],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class StartPage(unittest.TestCase):
@@ -796,6 +952,14 @@ class AgentContextChip(unittest.TestCase):
 
     def test_the_quote_is_set_as_text(self) -> None:
         self.assertIn('getElementById("quote-text").textContent = quote', self.html)
+
+    def test_sent_quote_chip_is_a_one_line_text_span(self) -> None:
+        start = self.html.index("function itemNode")
+        render = self.html[start : self.html.index("function render", start)]
+        self.assertIn('var quote = el("div", "quote-chip")', render)
+        self.assertIn('quote.appendChild(el("span", "", context.selection))', render)
+        self.assertRegex(self.html,
+                         r"\.quote-chip span \{[^}]*white-space: nowrap;[^}]*text-overflow: ellipsis;")
 
 
 def agent_component_css(html: str) -> str:

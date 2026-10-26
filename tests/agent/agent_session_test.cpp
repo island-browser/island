@@ -203,6 +203,18 @@ TEST(AgentSessionTest, SwitchingAgentsRestartsOnlyARunningAgent) {
 
 #endif
 
+TEST(AgentSessionTest, DevPromptUsesContextForTheThreadFixture) {
+    AgentSession session([](std::function<void()> task) { task(); }, [] {});
+    session.AddDevUserPrompt("Compare the espresso grinders on my list");
+    const auto parsed = json::Parse(session.transcript().ToJson());
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(parsed->array_val.size(), 1U);
+    const json::Value* context = parsed->array_val[0].FindMember("context");
+    ASSERT_NE(context, nullptr);
+    EXPECT_EQ(context->StringOr("title", ""), "Example Domain");
+    EXPECT_GT(context->StringOr("selection", "").size(), 80U);
+}
+
 TEST(AgentSessionTest, LaunchArgvUsesTheLoginShellOrSplitsTheCommand) {
     AgentSessionConfig config;
     config.command = "npx -y \"@scope/agent acp\"";
