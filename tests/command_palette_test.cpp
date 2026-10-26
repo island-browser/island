@@ -750,6 +750,26 @@ TEST(CommandPaletteCommandsTest, GivenBookmarkCommandsThenTheyHeadTheBookmarksGr
     EXPECT_EQ(PaletteGroupHeader(found[0]), "Bookmarks");
 }
 
+TEST(CommandPaletteCommandsTest, GivenAnEmptyQueryThenGeneralCommandsPrecedeTheBookmarksGroup) {
+    // The window's registry lists its bookmark commands first, so the input order here is the
+    // reverse of the order the empty query must show.
+    const std::vector<PaletteCommandEntry> commands{
+        {.id = "add_bookmark", .title = "Add bookmark", .bookmark_group = true},
+        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {Bookmark("Docs", "https://docs.test/")};
+
+    const std::vector<PaletteEntry> all = ComposePaletteResults("", {}, {}, bookmarks, {}, commands);
+
+    ASSERT_EQ(all.size(), 3U);
+    EXPECT_EQ(all[0].command.id, "sleep_inactive_tabs");
+    EXPECT_EQ(all[1].command.id, "add_bookmark");
+    EXPECT_EQ(all[2].kind, PaletteEntryKind::kBookmark);
+    // One "Bookmarks" header: the group's command starts it and its rows continue it.
+    EXPECT_EQ(PaletteGroupHeader(all[0]), "Commands");
+    EXPECT_EQ(PaletteGroupHeader(all[1]), "Bookmarks");
+    EXPECT_EQ(PaletteGroupHeader(all[2]), "Bookmarks");
+}
+
 TEST(CommandPaletteCommandsTest, GivenAHighlightedCommandWhenSubmittedThenItsIdIsReturnedOnce) {
     CommandPaletteModel model([](std::string_view) { return ValidatedAddress{}; });
     model.SetCommands({{.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"}});

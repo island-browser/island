@@ -1800,6 +1800,75 @@ TEST(BrowserWindowTest, GivenAFavoriteWhenMovedThenTheListOrderChangesAndTheEnds
     EXPECT_EQ(status->text, "This favorite is already at that end.");
 }
 
+TEST(BrowserWindowTest, GivenAMoveThenTheStatusAnnouncesTheNewPlaceUntilDismissed) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult first = window->AddFavoriteByUrl(std::nullopt, "A", "https://a.test/");
+    const BookmarkResult second = window->AddFavoriteByUrl(std::nullopt, "B", "https://b.test/");
+    ASSERT_TRUE(first.ok());
+    ASSERT_TRUE(second.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, second.id));
+
+    window->RunPaletteCommand("move_global_favorite_left");
+    std::optional<BookmarkStatusSnapshot> status = window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_TRUE(status->ok);
+    EXPECT_FALSE(status->retryable);
+    EXPECT_EQ(status->text, "Moved b.test to position 1 of 2");
+
+    window->DismissFailedBookmarkStatus();
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFailedFavoriteWhenThePageChangesThenRetryActsOnTheFailedPage) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_bookmark_retry_page_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://a.test/"));
+    window->RunPaletteCommand("toggle_global_favorite");
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    // The person goes to another page before pressing Retry; the retry still favorites A.
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://b.test/"));
+    std::filesystem::remove_all(dir / "bookmarks.json.tmp");
+    EXPECT_TRUE(window->RetryLastBookmarkMutation().ok());
+
+    EXPECT_TRUE(window->bookmarks().FindBookmarkByUrl("https://a.test/").has_value());
+    EXPECT_FALSE(window->bookmarks().FindBookmarkByUrl("https://b.test/").has_value());
+    EXPECT_EQ(GlobalFavorites(*window).size(), 1U);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(BrowserWindowTest, GivenAFailedRemovalThenRetryRepeatsTheRemovalNotTheOppositeChange) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_bookmark_retry_direction_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+    ASSERT_TRUE(library.AddFavoriteByUrl(std::nullopt, "A", "https://a.test/").ok());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://a.test/"));
+    ASSERT_EQ(GlobalFavorites(*window).size(), 1U);
+
+    // The removal cannot be saved, so it fails and offers Retry.
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+    window->RunPaletteCommand("toggle_global_favorite");
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    std::filesystem::remove_all(dir / "bookmarks.json.tmp");
+    EXPECT_TRUE(window->RetryLastBookmarkMutation().ok());
+    EXPECT_TRUE(GlobalFavorites(*window).empty());
+    std::filesystem::remove_all(dir);
+}
+
 TEST(BrowserWindowTest, GivenEachBookmarkPaletteCommandWhenRunThenItRunsItsAction) {
     const CefRefPtr<BrowserWindow> window = MakeWebWindow();
     ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));

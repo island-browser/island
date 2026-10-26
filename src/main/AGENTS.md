@@ -376,18 +376,20 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   `move_space_favorite_up/down`) appear only for a favorite that can move that way. Add a
   `PaletteCommandEntry` there, route its stable id in `RunPaletteCommand`, and add a window test.
   Bookmark and favorite commands set `PaletteCommandEntry::bookmark_group`: they list under the
-  "Bookmarks" header (`PaletteGroupHeader`) just before the bookmark rows, not under "Commands".
+  "Bookmarks" header (`PaletteGroupHeader`) after the general "Commands", then the bookmark rows under
+  the same header. `ComposePaletteResults` keeps that order for an empty query too.
   Bookmark results remain `kBookmark`; `PaletteBookmarkEntries()` gives one row per library bookmark
   in folder order, with its folder and every presented favorite scope joined into one label
   ("Global, Work"; a removed space's list is skipped). The view prints folder and scope as muted
   text after the title (`result_details_`).
-- Bookmark commands that change the page resolve it once through `CurrentBookmarkablePage()`: the
-  displayed favorite's virtual tab when one is shown, else the selected tab, and nothing while a local
-  page fills the slot or the URL is not http(s). Each runs inside `RunBookmarkMutation`, so a refusal
-  ("Only web pages can be favorites.") reaches the status. Known gap: the palette cannot announce a
-  successful move ("Moved … to position N of M"). The only status row is sidebar-owned and drawn in
-  warning colors, and a success needs an "ok" variant in `browser_chrome.*`, which this change left
-  alone.
+- Bookmark commands that change the page resolve it through `CurrentBookmarkablePage()` when the
+  command runs: the displayed favorite's virtual tab when one is shown, else the selected tab, and
+  nothing while a local page fills the slot or the URL is not http(s). The page and the add-or-remove
+  or position decision are captured before `RunBookmarkMutation`, and the lambda only applies them. So
+  a Retry repeats the same change to the same page, even after the displayed page has changed. A refusal
+  ("Only web pages can be favorites.") reaches the status. A successful move sets `bookmark_notice_`,
+  and the sidebar status row shows it as "Moved <title> to position N of M" (`BookmarkStatusSnapshot::ok`,
+  neutral colors). Any later mutation or Dismiss clears it.
 - Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
   (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
   the icon. Each command submit must reach the host after the palette released its overlay, so the

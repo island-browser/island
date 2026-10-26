@@ -2112,17 +2112,20 @@ void BrowserChrome::UpdateBookmarkStatusRow() {
     const std::optional<BookmarkStatusSnapshot>& status = sidebar_collection_.bookmark_status;
     bookmark_status_row_->SetVisible(status.has_value());
     if (status.has_value()) {
+        // A failure is warning-colored; a success notice is neutral, so the two read differently.
+        const ArgbColor text_color = status->ok ? tokens_.text : tokens_.warning_text;
+        const ArgbColor background = status->ok ? tokens_.surface_secondary : tokens_.warning_bg;
         bookmark_status_text_->SetText(status->text);
         bookmark_status_text_->SetTooltipText(status->text);
-        bookmark_status_text_->SetEnabledTextColors(tokens_.warning_text.argb);
+        bookmark_status_text_->SetEnabledTextColors(text_color.argb);
         bookmark_status_retry_->SetVisible(status->retryable);
         bookmark_status_retry_->SetEnabledTextColors(tokens_.text.argb);
-        bookmark_status_dismiss_->SetEnabledTextColors(tokens_.warning_text.argb);
+        bookmark_status_dismiss_->SetEnabledTextColors(text_color.argb);
         for (const CefRefPtr<CefLabelButton>& button :
              {bookmark_status_text_, bookmark_status_retry_, bookmark_status_dismiss_}) {
-            button->SetBackgroundColor(tokens_.warning_bg.argb);
+            button->SetBackgroundColor(background.argb);
         }
-        bookmark_status_row_->SetBackgroundColor(tokens_.warning_bg.argb);
+        bookmark_status_row_->SetBackgroundColor(background.argb);
     }
     sidebar_->Layout();
 }

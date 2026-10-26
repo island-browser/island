@@ -257,11 +257,12 @@ struct FavoriteEntrySnapshot {
     bool operator==(const FavoriteEntrySnapshot&) const = default;
 };
 
-// The last failed bookmark mutation, shown inline. |retryable| means RetryLastBookmarkMutation can
-// run it again; DismissBookmarkStatus clears it.
+// The last bookmark outcome shown inline: a failed mutation, or a success notice when |ok|.
+// |retryable| means RetryLastBookmarkMutation can run it again; DismissBookmarkStatus clears it.
 struct BookmarkStatusSnapshot {
     std::string text;
     bool retryable = false;
+    bool ok = false;
 
     bool operator==(const BookmarkStatusSnapshot&) const = default;
 };

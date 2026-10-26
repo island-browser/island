@@ -1255,9 +1255,9 @@ class BrowserWindow : public CefClient,
     // tabs with the library afterwards and reprojects the sidebar.
     BookmarkResult RunBookmarkMutation(std::function<BookmarkResult()> mutation);
     BookmarkResult ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
-    // The unrouted library steps behind the toggles and the reorder: callers run them inside
-    // RunBookmarkMutation so a failure reaches the status.
-    BookmarkResult ToggleFavoriteInLibrary(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Each command resolves the page (and any add-or-remove or position decision) when it is run,
+    // then hands RunBookmarkMutation a lambda that only applies that decision. A Retry therefore
+    // repeats the same change to the same page, however the displayed page has changed since.
     BookmarkResult ToggleFavoriteForCurrentPage(FavoriteScope scope);
     BookmarkResult AddCurrentPageBookmark();
     // Moves the current page's favorite by `step` (-1 or +1) within its list.
@@ -1498,6 +1498,9 @@ class BrowserWindow : public CefClient,
         std::function<BookmarkResult()> retry;
     };
     std::optional<FailedBookmarkMutation> failed_bookmark_mutation_;
+    // The success notice of the last bookmark change that has one (a reorder announces its new
+    // place). Any later mutation or a dismiss clears it, and it never coexists with a failure.
+    std::optional<std::string> bookmark_notice_;
     // Transient page feedback (such as an unsupported saved URL or import outcome). It never
     // replaces the durable mutation status above, because that status may carry Retry.
     struct BookmarksPageStatus {

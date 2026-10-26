@@ -346,8 +346,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
 - **Palette bookmark rows and the Bookmarks group:** a bookmark row keeps its title in `--text`. Its
   folder path and favorite scope ("Global, Work") follow as secondary text in `--text-secondary`
   (12 DIP Native, 13 DIP Arc/Graphite), never in the title color. The bookmark and favorite commands
-  sit under one sentence-case "Bookmarks" header, before the bookmark rows, and use the same kind
-  label as a bookmark ("Bookmark"). Page-changing rows are hidden when the page cannot be bookmarked.
+  sit under one sentence-case "Bookmarks" header, after the general commands and before the bookmark
+  rows, and use the same kind label as a bookmark ("Bookmark"). An empty query keeps that order. Page-changing rows are hidden when the page cannot be bookmarked.
 - **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
   document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
   on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),

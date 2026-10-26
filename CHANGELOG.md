@@ -32,6 +32,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   metadata, and offers a "Bookmarks" group: Open Bookmarks, Add bookmark, add/remove global or
   current-space favorite, move the current page's favorite (left/right in the global list, up/down
   in a space list, only where it can move), `New folder`, and "Open Bookmarks to import…".
+  A successful move says where the favorite landed ("Moved … to position N of M") in the sidebar
+  status row. Retry on a failed bookmark change repeats that change on the page it was run for.
   The bookmark commands act on the page on screen, including a displayed favorite, and a refusal
   (for example a non-web page) shows in the bookmark status.
 

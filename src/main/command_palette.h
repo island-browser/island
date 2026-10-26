@@ -226,8 +226,10 @@ enum class PaletteMatchRank : std::uint8_t {
 //      ties preserve input order. History is already ranked by SearchIndex.
 //   2. A non-empty query appends exactly one kUrl row after every section,
 //      carrying the raw query text.
-//   3. An empty (or all-whitespace) query lists every tab, space, and bookmark
-//      in canonical input order and omits the kUrl row.
+//   3. An empty (or all-whitespace) query lists every tab, space, command, and
+//      bookmark in canonical order and omits the kUrl row. Inside the commands,
+//      the general commands come before the Bookmarks group, and that group's
+//      commands come before the bookmark rows, so the group has one header.
 // Non-matching entries are excluded; the kUrl row is the only unconditional
 // row for a non-empty query.
 [[nodiscard]] std::vector<PaletteEntry> ComposePaletteResults(

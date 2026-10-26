@@ -3644,9 +3644,9 @@ void BrowserWindow::OpenMoreGlobalFavorites() {
 
 void BrowserWindow::AddCurrentPageToGlobalFavorites() {
     CEF_REQUIRE_UI_THREAD();
-    // The page on screen, the same one the palette's commands act on.
-    static_cast<void>(RunBookmarkMutation([this]() -> BookmarkResult {
-        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    // The page on screen, the same one the palette's commands act on, fixed before the mutation.
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    static_cast<void>(RunBookmarkMutation([this, page]() -> BookmarkResult {
         if (!page.has_value()) {
             return BookmarkResult{.error = BookmarkError::kInvalidInput,
                                   .message = "Only web pages can be favorites."};
@@ -5665,16 +5665,12 @@ bool BrowserWindow::IsFavorite(FavoriteScope scope, std::uint64_t bookmark_id) c
 
 BookmarkResult BrowserWindow::ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
     CEF_REQUIRE_UI_THREAD();
-    return RunBookmarkMutation(
-        [this, scope, bookmark_id] { return ToggleFavoriteInLibrary(scope, bookmark_id); });
-}
-
-BookmarkResult BrowserWindow::ToggleFavoriteInLibrary(FavoriteScope scope,
-                                                      std::uint64_t bookmark_id) {
-    if (IsFavorite(scope, bookmark_id)) {
-        return bookmarks_.RemoveFavorite(scope, bookmark_id);
-    }
-    return bookmarks_.AddFavorite(scope, bookmark_id);
+    // The direction is decided now, so a Retry repeats this change rather than flipping it.
+    const bool remove = IsFavorite(scope, bookmark_id);
+    return RunBookmarkMutation([this, scope, bookmark_id, remove] {
+        return remove ? bookmarks_.RemoveFavorite(scope, bookmark_id)
+                      : bookmarks_.AddFavorite(scope, bookmark_id);
+    });
 }
 
 std::optional<BrowserWindow::BookmarkablePage> BrowserWindow::CurrentBookmarkablePage() const {
@@ -5701,26 +5697,28 @@ std::optional<BrowserWindow::BookmarkablePage> BrowserWindow::CurrentBookmarkabl
 
 BookmarkResult BrowserWindow::ToggleFavoriteForCurrentPage(FavoriteScope scope) {
     CEF_REQUIRE_UI_THREAD();
-    // Every outcome, including "not a web page", goes through the mutation seam so the status
-    // shows it. The page is read inside the mutation, after any earlier change to the slot.
-    return RunBookmarkMutation([this, scope]() -> BookmarkResult {
-        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    // The page is resolved now, and so is the add-or-remove decision. Every outcome, including
+    // "not a web page", still goes through the mutation seam so the status shows it.
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    const std::optional<std::uint64_t> id =
+        page.has_value() ? bookmarks_.FindBookmarkByUrl(page->url) : std::nullopt;
+    const bool remove = id.has_value() && IsFavorite(scope, *id);
+    return RunBookmarkMutation([this, scope, page, id, remove]() -> BookmarkResult {
         if (!page.has_value()) {
             return BookmarkResult{.error = BookmarkError::kInvalidInput,
                                   .message = "Only web pages can be favorites."};
         }
-        const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(page->url);
-        if (id.has_value()) {
-            return ToggleFavoriteInLibrary(scope, *id);
+        if (!id.has_value()) {
+            return bookmarks_.AddFavoriteByUrl(scope, page->title, page->url);
         }
-        return bookmarks_.AddFavoriteByUrl(scope, page->title, page->url);
+        return remove ? bookmarks_.RemoveFavorite(scope, *id) : bookmarks_.AddFavorite(scope, *id);
     });
 }
 
 BookmarkResult BrowserWindow::AddCurrentPageBookmark() {
     CEF_REQUIRE_UI_THREAD();
-    return RunBookmarkMutation([this]() -> BookmarkResult {
-        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    return RunBookmarkMutation([this, page]() -> BookmarkResult {
         if (!page.has_value()) {
             return BookmarkResult{.error = BookmarkError::kInvalidInput,
                                   .message = "Only web pages can be bookmarked."};
@@ -5731,27 +5729,37 @@ BookmarkResult BrowserWindow::AddCurrentPageBookmark() {
 
 BookmarkResult BrowserWindow::MoveCurrentPageFavorite(FavoriteScope scope, int step) {
     CEF_REQUIRE_UI_THREAD();
-    return RunBookmarkMutation([this, scope, step]() -> BookmarkResult {
-        const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
-        const std::optional<std::uint64_t> id =
-            page.has_value() ? bookmarks_.FindBookmarkByUrl(page->url) : std::nullopt;
-        const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
-        const auto found = !id.has_value() || favorite_ids == nullptr
-                               ? std::vector<std::uint64_t>::const_iterator{}
-                               : std::find(favorite_ids->begin(), favorite_ids->end(), *id);
-        if (!id.has_value() || favorite_ids == nullptr || found == favorite_ids->end()) {
-            return BookmarkResult{.error = BookmarkError::kNotFound,
-                                  .message = "This page is not in that favorites list."};
-        }
-        const auto position = static_cast<std::size_t>(found - favorite_ids->begin());
-        const bool at_end = step < 0 ? position == 0 : position + 1 >= favorite_ids->size();
-        if (at_end) {
-            return BookmarkResult{.error = BookmarkError::kInvalidInput,
-                                  .message = "This favorite is already at that end."};
-        }
-        const std::size_t target = step < 0 ? position - 1 : position + 1;
-        return bookmarks_.ReorderFavorite(scope, *id, target);
-    });
+    const auto refuse = [this](BookmarkError error, std::string message) {
+        return RunBookmarkMutation([error, message = std::move(message)] {
+            return BookmarkResult{.error = error, .message = message};
+        });
+    };
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    const std::optional<std::uint64_t> id =
+        page.has_value() ? bookmarks_.FindBookmarkByUrl(page->url) : std::nullopt;
+    const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+    const auto found = !id.has_value() || favorite_ids == nullptr
+                           ? std::vector<std::uint64_t>::const_iterator{}
+                           : std::find(favorite_ids->begin(), favorite_ids->end(), *id);
+    if (!id.has_value() || favorite_ids == nullptr || found == favorite_ids->end()) {
+        return refuse(BookmarkError::kNotFound, "This page is not in that favorites list.");
+    }
+    const auto position = static_cast<std::size_t>(found - favorite_ids->begin());
+    const std::size_t count = favorite_ids->size();
+    const bool at_end = step < 0 ? position == 0 : position + 1 >= count;
+    if (at_end) {
+        return refuse(BookmarkError::kInvalidInput, "This favorite is already at that end.");
+    }
+    const std::size_t target = step < 0 ? position - 1 : position + 1;
+    const BookmarkResult result = RunBookmarkMutation(
+        [this, scope, id = *id, target] { return bookmarks_.ReorderFavorite(scope, id, target); });
+    if (result.ok()) {
+        // A move is the one change the person cannot see on the page, so it says where it landed.
+        bookmark_notice_ = "Moved " + page->title + " to position " + std::to_string(target + 1) +
+                           " of " + std::to_string(count);
+        UpdateChromeCollections();
+    }
+    return result;
 }
 
 BookmarkCommandState BrowserWindow::CurrentBookmarkCommandState() const {
@@ -5828,6 +5836,7 @@ BookmarkResult BrowserWindow::RetryLastBookmarkMutation() {
 void BrowserWindow::DismissBookmarkStatus() {
     CEF_REQUIRE_UI_THREAD();
     failed_bookmark_mutation_.reset();
+    bookmark_notice_.reset();
     UpdateChromeCollections();
 }
 
@@ -5848,6 +5857,7 @@ bool IsRetryableBookmarkError(BookmarkError error) {
 
 BookmarkResult BrowserWindow::RunBookmarkMutation(std::function<BookmarkResult()> mutation) {
     CEF_REQUIRE_UI_THREAD();
+    bookmark_notice_.reset();
     BookmarkResult result = mutation();
     if (result.ok()) {
         failed_bookmark_mutation_.reset();
@@ -6023,6 +6033,8 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
         snapshot.bookmark_status =
             BookmarkStatusSnapshot{.text = failed_bookmark_mutation_->message,
                                    .retryable = failed_bookmark_mutation_->retry != nullptr};
+    } else if (bookmark_notice_.has_value()) {
+        snapshot.bookmark_status = BookmarkStatusSnapshot{.text = *bookmark_notice_, .ok = true};
     }
     return snapshot;
 }

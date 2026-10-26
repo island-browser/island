@@ -215,8 +215,16 @@ std::vector<PaletteEntry> ComposePaletteResults(std::string_view query,
     for (const PaletteSpaceEntry& space : spaces) {
         canonical.push_back({.kind = PaletteEntryKind::kSpace, .space = space});
     }
+    // General commands first, then the Bookmarks group: its commands, then the bookmark rows.
     for (const PaletteCommandEntry& command : commands) {
-        canonical.push_back({.kind = PaletteEntryKind::kCommand, .command = command});
+        if (!command.bookmark_group) {
+            canonical.push_back({.kind = PaletteEntryKind::kCommand, .command = command});
+        }
+    }
+    for (const PaletteCommandEntry& command : commands) {
+        if (command.bookmark_group) {
+            canonical.push_back({.kind = PaletteEntryKind::kCommand, .command = command});
+        }
     }
     for (const PaletteBookmarkEntry& bookmark : bookmarks) {
         canonical.push_back({.kind = PaletteEntryKind::kBookmark, .bookmark = bookmark});
