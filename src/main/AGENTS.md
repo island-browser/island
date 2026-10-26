@@ -260,7 +260,8 @@ kind switch of `BrowserWindow::TasksStateJson`.
 - **Virtual tabs.** `virtual_tabs_` (`std::map<FavoriteTabKey, Tab>`) holds live `Tab`s outside
   `spaces_`; their `TabId`s come from `NextTabId()` and are never persisted. `displayed_favorite_`
   names the one shown. `ActivateFavorite` ensures the record, creates the tab (its startup URL is
-  the record's last URL, validated) and calls `AttachActiveTabObservers`; the selected ordinary tab
+  the record's last URL when that validates, else the favorite URL) and calls
+  `AttachActiveTabObservers`; the selected ordinary tab
   and its list are not touched. `AttachActiveTabBrowserView` shows a displayed favorite ahead of the
   split and ordinary paths. `FindTabById`, `FindTabByBrowser` and `FindTabByBrowserView` search the
   virtual tabs too, so CEF callbacks and view swaps resolve them. A favicon finished for a virtual
@@ -298,10 +299,12 @@ kind switch of `BrowserWindow::TasksStateJson`.
     eligible), a hidden one follows `TabSleepPolicy`. `SleepTab` refuses the displayed one. The idle
     clock of the displayed tab is touched on every tick. A slept virtual tab keeps its record;
     `ActivateFavorite` reuses the same `TabId`, and its startup URL is the last URL.
-  - *Invalid stored URL.* `ActivateFavorite` validates the URL it would load (the record's last URL,
-    else the favorite URL) before it creates a record or a tab. An invalid URL returns false, changes
-    nothing, and sets `failed_bookmark_mutation_` with no retry, so the sidebar shows a non-retryable
-    status.
+  - *Invalid stored URL.* `ActivateFavorite` validates the record's last URL first. If it does not
+    validate, the record is reset (`ResetToFavorite`) and a hidden existing tab's startup URL is
+    reset, so the favorite opens at its favorite URL. Only an invalid favorite URL is a no-op: it
+    returns false before it creates a record or a tab, and it sets `failed_bookmark_mutation_` with
+    no retry. That status is written only into an empty slot, so a pending Retry or a library status
+    is never replaced by an activation failure (activation is not a library write).
   - *Peek.* `FavoritePeekUrl` returns the bookmark URL of a listed favorite (global, or the active
     space's list); `PeekFavorite` opens it with `OpenPeek`. It never touches the virtual tab or the
     displayed favorite. The sidebar's Cmd/middle-click wiring is not in this layer yet.

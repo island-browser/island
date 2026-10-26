@@ -103,6 +103,22 @@ TEST(TabSleepPolicyTest, GivenExcludedTabsThenTheyNeverSleep) {
     EXPECT_EQ(now[0], TabId{9});
 }
 
+TEST(TabSleepPolicyTest, GivenAShownFavoriteTabThenItNeverSleepsWhileAHiddenOneDoes) {
+    // A favorite's virtual tab is the page on screen while it is displayed (active), and a hidden
+    // one is an ordinary background tab for the policy.
+    TabSleepPolicy policy(15);
+    TabSleepInput shown = Idle(1);
+    shown.active = true;
+    const TabSleepInput hidden = Idle(2);
+    policy.Touch(shown.id, kStart);
+    policy.Touch(hidden.id, kStart);
+    const std::vector<TabSleepInput> tabs{shown, hidden};
+
+    const std::vector<TabId> expired = policy.Expired(tabs, kStart + minutes(60));
+    ASSERT_EQ(expired.size(), 1U);
+    EXPECT_EQ(expired[0], TabId{2});
+}
+
 TEST(TabSleepPolicyTest, GivenAForgottenTabThenItIsNoLongerTracked) {
     TabSleepPolicy policy(15);
     policy.Touch(TabId{1}, kStart);

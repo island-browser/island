@@ -5452,23 +5452,42 @@ bool BrowserWindow::ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark
     if (scope.has_value() && *scope != active_space().id().value) {
         return false;
     }
-    // The URL the virtual tab would load: its last one, or the favorite URL for a new tab. An
-    // address that does not validate is never loaded; the activation is a no-op with a status.
+    // The URL the virtual tab loads: its last URL when that still validates, else the favorite URL.
+    // A stored last URL that does not validate (a damaged session, or a page the validator now
+    // rejects) is reset to the favorite URL, so the favorite never becomes unopenable. Only an
+    // invalid favorite URL is a no-op, which leaves the record and the tab untouched.
+    const auto validate = [this](const std::string& text) {
+        return address_validator_ ? address_validator_(text) : ParseAndValidate(text);
+    };
     const FavoriteTabRecord* existing = favorite_tabs_.Find(key);
-    const std::string& target =
-        existing != nullptr && !existing->last_url.empty() ? existing->last_url : bookmark->url;
-    const ValidatedAddress address =
-        address_validator_ ? address_validator_(target) : ParseAndValidate(target);
+    const bool has_last_url = existing != nullptr && !existing->last_url.empty();
+    ValidatedAddress address;
+    if (has_last_url) {
+        address = validate(existing->last_url);
+    }
+    const bool reset_last_url = has_last_url && !address.is_valid();
     if (!address.is_valid()) {
-        failed_bookmark_mutation_ = FailedBookmarkMutation{
-            .message =
-                "This favorite's stored address is not a valid web address, so it was not "
-                "opened.",
-            .retry = nullptr};
-        UpdateChromeCollections();
+        address = validate(bookmark->url);
+    }
+    if (!address.is_valid()) {
+        // The status slot holds one message. A pending Retry or a library status stays visible.
+        if (!failed_bookmark_mutation_.has_value()) {
+            failed_bookmark_mutation_ = FailedBookmarkMutation{
+                .message = "This favorite's web address is not valid, so it was not opened.",
+                .retry = nullptr};
+            UpdateChromeCollections();
+        }
         return false;
     }
     favorite_tabs_.Ensure(key, bookmark->url);
+    if (reset_last_url) {
+        favorite_tabs_.ResetToFavorite(key);
+        if (Tab* stored = FindVirtualTab(key); stored != nullptr) {
+            // A hidden or sleeping virtual tab wakes from its startup URL, so it takes the reset
+            // too.
+            stored->SetStartupUrl(address.url);
+        }
+    }
     if (!virtual_tabs_.contains(key)) {
         Tab tab{NextTabId()};
         tab.SetStartupUrl(address.url);

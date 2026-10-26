@@ -1905,7 +1905,14 @@ TEST(BrowserWindowTest, GivenAShownFavoriteWhenSleepRunsThenItIsNotEligibleButAH
     EXPECT_EQ(window->TabStartupUrlForTest(virtual_tab), "https://mail.test/");
 }
 
-TEST(BrowserWindowTest, GivenAFavoriteWithAnInvalidStoredUrlWhenActivatedThenItIsANoOp) {
+ValidatedAddress AcceptHttpsExceptBadTest(std::string_view text) {
+    if (text.find("bad.test") != std::string_view::npos) {
+        return {.url = {}, .error = AddressError::kNotAbsolute};
+    }
+    return AcceptHttps(text);
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWithAnInvalidStoredUrlWhenActivatedThenItResetsAndOpens) {
     const CefRefPtr<BrowserWindow> window = MakeWebWindow();
     const BookmarkResult mail =
         window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
@@ -1916,21 +1923,69 @@ TEST(BrowserWindowTest, GivenAFavoriteWithAnInvalidStoredUrlWhenActivatedThenItI
                                                    .reset_url = "https://mail.test/",
                                                    .last_url = "not a url"});
     ASSERT_TRUE(window->RestoreSessionStateForTest(state));
-    const std::optional<TabId> before = window->shown_tab_id();
 
-    EXPECT_FALSE(window->ActivateFavorite(std::nullopt, mail.id));
+    // The stored last URL does not validate, so the record goes back to the favorite URL and the
+    // favorite opens there. A favorite that could never open again would be lost to the person.
+    const FavoriteTabKey key{std::nullopt, mail.id};
+    EXPECT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(window->displayed_favorite(), std::optional<FavoriteTabKey>(key));
+    ASSERT_TRUE(window->shown_tab_id().has_value());
+    EXPECT_EQ(window->TabStartupUrlForTest(*window->shown_tab_id()), "https://mail.test/");
+    const FavoriteTabRecord* record = window->FavoriteTabRecordFor(key);
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->last_url, "https://mail.test/");
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWithAnInvalidBookmarkUrlWhenActivatedThenItIsANoOp) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult bad = window->AddFavoriteByUrl(std::nullopt, "Bad", "https://bad.test/");
+    ASSERT_TRUE(bad.ok());
+    window->SetAddressValidatorForTest(&AcceptHttpsExceptBadTest);
+    const FavoriteTabKey key{std::nullopt, bad.id};
+
+    EXPECT_FALSE(window->ActivateFavorite(std::nullopt, bad.id));
     EXPECT_FALSE(window->displayed_favorite().has_value());
-    EXPECT_EQ(window->shown_tab_id(), before);
-    // The person is told, without a retry, and the stored record is left for them to fix.
+    // Nothing is created: no record and no virtual tab. The person is told, without a retry.
+    EXPECT_EQ(window->FavoriteTabRecordFor(key), nullptr);
     const std::optional<BookmarkStatusSnapshot> status =
         window->BuildSidebarCollection().bookmark_status;
     ASSERT_TRUE(status.has_value());
     EXPECT_FALSE(status->text.empty());
     EXPECT_FALSE(status->retryable);
-    const FavoriteTabRecord* record =
-        window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id});
-    ASSERT_NE(record, nullptr);
-    EXPECT_EQ(record->last_url, "not a url");
+}
+
+TEST(BrowserWindowTest, GivenAPendingRetryWhenAnInvalidFavoriteIsActivatedThenTheRetryIsKept) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_favorite_activation_keeps_retry_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+    const BookmarkResult mail =
+        library.AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    const BookmarkResult bad = library.AddFavoriteByUrl(std::nullopt, "Bad", "https://bad.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(bad.ok());
+    // A directory where the atomic write's temporary file goes makes the next save fail.
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    window->SetAddressValidatorForTest(&AcceptHttpsExceptBadTest);
+    const BookmarkResult failed = window->RemoveFavorite(std::nullopt, mail.id);
+    ASSERT_EQ(failed.error, BookmarkError::kFileWriteError);
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status.has_value());
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    // An activation failure is not a library write: the pending Retry must survive it.
+    EXPECT_FALSE(window->ActivateFavorite(std::nullopt, bad.id));
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_TRUE(status->retryable);
+
+    std::filesystem::remove_all(dir);
 }
 
 TEST(BrowserWindowTest, GivenAFavoriteWhenPeekedThenItsUrlOpensWithoutTouchingItsVirtualTab) {
