@@ -3,9 +3,9 @@
 
 // Readers for the browsers outside the Chromium family. CEF-free and
 // dependency-free:
-//  - Firefox: bookmarks from the newest `bookmarkbackups/*.jsonlz4` backup in
-//    any profile (Mozilla's LZ4 container around the bookmarks JSON tree), so
-//    no SQLite is needed.
+//  - Firefox: bookmarks from profile `places.sqlite`, copied to a temporary
+//    file before opening so a running Firefox cannot hold the import open.
+//    The newest compressed JSON backup remains a fallback for old profiles.
 //  - Arc: spaces, their colors, and pinned tabs from `StorableSidebar.json`.
 // Every reader returns std::nullopt for "cannot read" and never throws.
 
@@ -33,6 +33,8 @@ namespace island {
 // The newest `bookmarkbackups/*.jsonlz4` under any Firefox profile below
 // `base_home` (platform profile roots, snap included); empty if none.
 [[nodiscard]] std::filesystem::path FindFirefoxBookmarksBackup(
+    const std::filesystem::path& base_home);
+[[nodiscard]] std::filesystem::path FindFirefoxPlacesDatabase(
     const std::filesystem::path& base_home);
 [[nodiscard]] std::optional<std::vector<BookmarkItem>> ImportFirefoxBookmarks(
     const std::filesystem::path& base_home);

@@ -18,7 +18,10 @@ Under **Import**, Island lists the browsers it found on this computer. It can re
 1. Tick the browsers you want to import.
 2. Click **Import selected**. To skip importing, click **Start browsing**.
 
-Nothing leaves your computer. If Island finds no readable bookmarks, the card says so.
+Nothing leaves your computer. Browsers without a local profile are not listed; a detected profile
+that Island cannot open is shown with the specific reason. If Island finds no readable bookmarks,
+the card says so. Firefox can be open while importing: Island reads a temporary copy of its profile
+database.
 
 Imported bookmarks show up in the [command palette](../search/command-palette.md). Arc spaces become Island spaces with their colors and pinned tabs.
 

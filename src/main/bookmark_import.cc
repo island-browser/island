@@ -1,6 +1,8 @@
 #include "bookmark_import.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -50,6 +52,23 @@ bool PlatformCanReadSafari() { return true; }
 bool PlatformCanReadSafari() { return false; }
 #endif
 
+std::vector<std::string> ChromeProfilesFromLocalState(const std::filesystem::path& user_data) {
+    std::ifstream in(user_data / "Local State", std::ios::binary);
+    if (!in.is_open()) return {};
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::optional<json::Value> root = json::Parser(text).Parse();
+    if (!root || !root->IsObject()) return {};
+    const json::Value* profile = root->FindMember("profile");
+    const json::Value* cache = profile == nullptr ? nullptr : profile->FindMember("info_cache");
+    if (cache == nullptr || !cache->IsObject()) return {};
+    std::vector<std::string> names;
+    for (const auto& [name, value] : cache->object_val) {
+        static_cast<void>(value);
+        if (!name.empty()) names.push_back(name);
+    }
+    return names;
+}
+
 std::filesystem::path SourceBookmarksPath(const SourcePaths& source,
                                           const std::filesystem::path& base_home) {
 #if defined(_WIN32)
@@ -60,9 +79,7 @@ std::filesystem::path SourceBookmarksPath(const SourcePaths& source,
     const std::filesystem::path primary = base_home / source.linux_path;
 #endif
     std::error_code ec;
-    if (std::filesystem::is_regular_file(primary, ec)) {
-        return primary;
-    }
+    if (std::filesystem::is_regular_file(primary, ec)) return primary;
     // Many setups keep bookmarks in a non-Default profile ("Profile 1", …):
     // fall back to any profile's Bookmarks file under the browser's user-data
     // root (the primary path's parent directory minus its last segment).
@@ -70,17 +87,47 @@ std::filesystem::path SourceBookmarksPath(const SourcePaths& source,
     if (!std::filesystem::is_directory(user_data, ec)) {
         return primary;
     }
+    for (const std::string& name : ChromeProfilesFromLocalState(user_data)) {
+        const std::filesystem::path candidate = user_data / name / "Bookmarks";
+        if (std::filesystem::is_regular_file(candidate, ec)) return candidate;
+    }
     for (const std::filesystem::directory_entry& entry :
          std::filesystem::directory_iterator(user_data, ec)) {
         if (ec) {
             break;
         }
+        const std::string name = entry.path().filename().string();
+        const bool profile = name == "Default" ||
+                             (name.rfind("Profile ", 0) == 0 && name.size() > 8 &&
+                              std::all_of(name.begin() + 8, name.end(),
+                                          [](unsigned char c) { return std::isdigit(c) != 0; }));
+        if (!profile) continue;
         const std::filesystem::path candidate = entry.path() / "Bookmarks";
         if (std::filesystem::is_regular_file(candidate, ec)) {
             return candidate;
         }
     }
     return primary;
+}
+
+bool HasSourceProfile(const SourcePaths& source, const std::filesystem::path& base_home) {
+#if defined(_WIN32)
+    const std::filesystem::path primary = base_home / source.windows_path;
+#elif defined(__APPLE__)
+    const std::filesystem::path primary = base_home / source.macos_path;
+#else
+    const std::filesystem::path primary = base_home / source.linux_path;
+#endif
+    std::error_code ec;
+    // The profile directory itself must exist. Its parent is often the shared
+    // Application Support directory, so treating that as a profile made a
+    // fresh HOME report every Chromium browser as “not readable.”
+    return std::filesystem::is_directory(primary.parent_path(), ec);
+}
+
+bool CanOpenForRead(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return in.is_open();
 }
 
 // Chromium stores URL entries as {"type":"url","name":...,"url":...} nested in
@@ -165,9 +212,19 @@ std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path
     for (const SourcePaths& entry : kChromiumSources) {
         const std::filesystem::path path = SourceBookmarksPath(entry, base_home);
         std::error_code ec;
-        const bool available = std::filesystem::is_regular_file(path, ec);
-        sources.push_back(ImportSourceInfo{static_cast<ImportSource>(chromium_index),
-                                           entry.display_name, available, path});
+        const bool file_exists = std::filesystem::is_regular_file(path, ec);
+        const bool detected = file_exists || HasSourceProfile(entry, base_home);
+        const bool available = file_exists && CanOpenForRead(path);
+        sources.push_back(ImportSourceInfo{
+            .id = static_cast<ImportSource>(chromium_index),
+            .display_name = entry.display_name,
+            .detected = detected,
+            .available = available,
+            .bookmarks_path = path,
+            .unavailable_reason = !detected || available
+                                      ? ""
+                                      : (file_exists ? "bookmarks file cannot be opened"
+                                                     : "no bookmarks file in its profile")});
         ++chromium_index;
     }
 
@@ -175,14 +232,34 @@ std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path
     const std::filesystem::path safari_path = base_home / "Library/Safari/Bookmarks.plist";
     const bool safari_available =
         PlatformCanReadSafari() && std::filesystem::is_regular_file(safari_path, ec);
-    sources.push_back(
-        ImportSourceInfo{ImportSource::kSafari, "Safari", safari_available,
-                         PlatformCanReadSafari() ? safari_path : std::filesystem::path{}});
-    const std::filesystem::path firefox = FindFirefoxBookmarksBackup(base_home);
-    sources.push_back(
-        ImportSourceInfo{ImportSource::kFirefox, "Firefox", !firefox.empty(), firefox});
+    sources.push_back(ImportSourceInfo{
+        .id = ImportSource::kSafari,
+        .display_name = "Safari",
+        .detected = safari_available,
+        .available = safari_available,
+        .bookmarks_path = PlatformCanReadSafari() ? safari_path : std::filesystem::path{}});
+    const std::filesystem::path firefox = FindFirefoxPlacesDatabase(base_home);
+    const std::filesystem::path firefox_backup = FindFirefoxBookmarksBackup(base_home);
+    const std::filesystem::path firefox_path = !firefox.empty() ? firefox : firefox_backup;
+    const bool firefox_detected = !firefox_path.empty();
+    const bool firefox_available = firefox_detected && CanOpenForRead(firefox_path);
+    sources.push_back(ImportSourceInfo{
+        .id = ImportSource::kFirefox,
+        .display_name = "Firefox",
+        .detected = firefox_detected,
+        .available = firefox_available,
+        .bookmarks_path = firefox_path,
+        .unavailable_reason =
+            firefox_detected && !firefox_available ? "profile database cannot be opened" : ""});
     const std::filesystem::path arc = FindArcSidebarFile(base_home);
-    sources.push_back(ImportSourceInfo{ImportSource::kArc, "Arc", !arc.empty(), arc});
+    sources.push_back(ImportSourceInfo{.id = ImportSource::kArc,
+                                       .display_name = "Arc",
+                                       .detected = !arc.empty(),
+                                       .available = !arc.empty() && CanOpenForRead(arc),
+                                       .bookmarks_path = arc,
+                                       .unavailable_reason = !arc.empty() && !CanOpenForRead(arc)
+                                                                 ? "sidebar data cannot be opened"
+                                                                 : ""});
     return sources;
 }
 

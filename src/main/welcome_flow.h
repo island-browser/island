@@ -45,10 +45,11 @@ class WelcomeFlowHost {
 // "just start browsing".
 //
 // Structure (DESIGN.md §5): a `--surface` card holding a title and lede, an appearance
-// control, an import section with one toggle row per readable browser plus a wrapped note for
-// unreadable ones, and a right-aligned footer with a secondary Import button and the primary
-// "Start browsing" button. Native uses radius-12 caps, sentence-case labels and the sidebar's
-// compact segment shape; Arc and Graphite retain their square hairline card and uppercase labels.
+// control, an import section with one toggle row per readable browser plus a wrapped note for a
+// detected-but-unreadable profile, and a right-aligned footer with a secondary Import button and
+// the primary "Start browsing" button. Native uses radius-12 caps, sentence-case labels and the
+// sidebar's compact segment shape; Arc and Graphite retain their square hairline card and uppercase
+// labels.
 class WelcomeFlow final {
   public:
     WelcomeFlow(WelcomeFlowHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens,
@@ -61,6 +62,9 @@ class WelcomeFlow final {
     void Show();
     void Hide();
     void ApplyTheme(ChromeTokens tokens);
+    // Keeps the card's selected plate in sync when the theme changes through a
+    // menu, shortcut, or developer action rather than one of its own buttons.
+    void SetChosenTheme(ThemePreference preference);
     // Re-centers the card and re-fits the scrim to the window.
     void UpdateBounds();
     // Drops the window/overlay references and detaches every delegate. Safe to

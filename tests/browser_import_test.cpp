@@ -1,6 +1,9 @@
 #include "browser_import.h"
 
 #include <gtest/gtest.h>
+#if defined(ISLAND_HAS_SQLITE3)
+#include <sqlite3.h>
+#endif
 
 #include <cstdlib>
 #include <filesystem>
@@ -58,6 +61,26 @@ std::string LiteralMozLz4(const std::string& text) {
 void WriteFile(const std::filesystem::path& path, const std::string& content) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream(path, std::ios::binary) << content;
+}
+
+void WriteFirefoxPlaces(const std::filesystem::path& path) {
+#if defined(ISLAND_HAS_SQLITE3)
+    std::filesystem::create_directories(path.parent_path());
+    sqlite3* database = nullptr;
+    ASSERT_EQ(sqlite3_open(path.c_str(), &database), SQLITE_OK);
+    ASSERT_NE(database, nullptr);
+    ASSERT_EQ(sqlite3_exec(database,
+                           "CREATE TABLE moz_places (id INTEGER PRIMARY KEY, url TEXT);"
+                           "CREATE TABLE moz_bookmarks (id INTEGER PRIMARY KEY, type INTEGER, fk "
+                           "INTEGER, title TEXT);"
+                           "INSERT INTO moz_places VALUES (1, 'https://profile.test/');"
+                           "INSERT INTO moz_bookmarks VALUES (1, 1, 1, 'Profile bookmark');",
+                           nullptr, nullptr, nullptr),
+              SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(database), SQLITE_OK);
+#else
+    static_cast<void>(path);
+#endif
 }
 
 std::filesystem::path TempHome(const std::string& name) {
@@ -151,6 +174,37 @@ TEST(BrowserImportTest, FirefoxImportPicksTheNewestBackupOfAnyProfile) {
     }
     EXPECT_TRUE(listed);
     std::filesystem::remove_all(home);
+}
+
+TEST(BrowserImportTest, FirefoxProfilesIniNonDefaultPlacesDatabaseImportsWhileSourceIsBusy) {
+#if !defined(ISLAND_HAS_SQLITE3)
+    GTEST_SKIP() << "SQLite is unavailable in this toolchain.";
+#else
+    const std::filesystem::path home = TempHome("firefox_places");
+#if defined(_WIN32)
+    const std::filesystem::path data_root = home / "AppData/Roaming/Mozilla/Firefox";
+#elif defined(__APPLE__)
+    const std::filesystem::path data_root = home / "Library/Application Support/Firefox";
+#else
+    const std::filesystem::path data_root = home / ".mozilla/firefox";
+#endif
+    const std::filesystem::path profile = data_root / "outside-default";
+    WriteFile(data_root / "profiles.ini",
+              "[Profile0]\nPath=outside-default\nIsRelative=1\nDefault=1\n");
+    WriteFirefoxPlaces(profile / "places.sqlite");
+
+    sqlite3* busy = nullptr;
+    ASSERT_EQ(sqlite3_open((profile / "places.sqlite").c_str(), &busy), SQLITE_OK);
+    ASSERT_NE(busy, nullptr);
+    ASSERT_EQ(sqlite3_exec(busy, "BEGIN EXCLUSIVE;", nullptr, nullptr, nullptr), SQLITE_OK);
+    EXPECT_EQ(FindFirefoxPlacesDatabase(home), profile / "places.sqlite");
+    const auto imported = ImportFromSource(ImportSource::kFirefox, home);
+    ASSERT_TRUE(imported.has_value());
+    ASSERT_EQ(imported->size(), 1U);
+    EXPECT_EQ((*imported)[0].url, "https://profile.test/");
+    ASSERT_EQ(sqlite3_exec(busy, "ROLLBACK;", nullptr, nullptr, nullptr), SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(busy), SQLITE_OK);
+#endif
 }
 
 constexpr std::string_view kArcSidebar = R"({

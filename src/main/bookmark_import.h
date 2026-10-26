@@ -33,11 +33,17 @@ enum class ImportSource : std::uint8_t {
 struct ImportSourceInfo {
     ImportSource id;
     std::string display_name;
+    // True when a profile or source file was found. Sources with no local
+    // profile are omitted from the Welcome card rather than called unreadable.
+    bool detected = false;
     // True when the source's bookmarks file exists and this build can read it.
     bool available = false;
     // The bookmarks file that was probed (exists or not); empty for sources
     // whose path does not apply on this platform.
     std::filesystem::path bookmarks_path;
+    // A short, user-facing reason when a detected source is unavailable. It
+    // is empty for absent and readable sources.
+    std::string unavailable_reason;
 };
 
 // Probes the well-known bookmark locations under |base_home| (the user's home

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 
@@ -121,6 +122,26 @@ TEST(BookmarkImportTest, GivenInstalledBrowsersWhenDetectedThenOnlyReadableOnesA
         }
     }
     EXPECT_TRUE(saw_chrome);
+}
+
+TEST(BookmarkImportTest, GivenChromeDefaultAndProfileWhenDetectedThenAReadableProfileIsOffered) {
+    const std::filesystem::path home = TempHome("chrome_profiles");
+    const std::filesystem::path root = (home / ChromeBookmarksPath()).parent_path().parent_path();
+    WriteFile(root / "Default/Bookmarks", R"({"roots":{"bookmark_bar":{"children":[]}}})");
+    WriteFile(
+        root / "Profile 1/Bookmarks",
+        R"({"roots":{"bookmark_bar":{"children":[{"type":"url","url":"https://profile.test"}]}}})");
+    WriteFile(root / "Local State", R"({"profile":{"info_cache":{"Default":{},"Profile 1":{}}}})");
+
+    const std::vector<ImportSourceInfo> sources = DetectInstalledSources(home);
+    const auto chrome =
+        std::find_if(sources.begin(), sources.end(),
+                     [](const ImportSourceInfo& info) { return info.id == ImportSource::kChrome; });
+    ASSERT_NE(chrome, sources.end());
+    EXPECT_TRUE(chrome->detected);
+    EXPECT_TRUE(chrome->available);
+    EXPECT_EQ(chrome->bookmarks_path.filename(), "Bookmarks");
+    EXPECT_EQ(chrome->bookmarks_path.parent_path().filename(), "Default");
 }
 
 TEST(BookmarkImportTest, GivenAnImportableSourceWhenImportedThenItsBookmarksAreReturned) {

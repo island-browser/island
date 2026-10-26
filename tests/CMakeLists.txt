@@ -1,4 +1,5 @@
 include(FetchContent)
+find_package(SQLite3 QUIET)
 
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 # island_cef_tests links CEF, which forces the static CRT (/MT) on Windows.
@@ -135,6 +136,10 @@ target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main"
                            "${CMAKE_SOURCE_DIR}/tests" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
                       island_agent island_search island_content_blocker_ffi)
+if(SQLite3_FOUND)
+    target_compile_definitions(island_tests PRIVATE ISLAND_HAS_SQLITE3=1)
+    target_link_libraries(island_tests PRIVATE ${SQLite3_LIBRARIES})
+endif()
 
 # Compile the exact same wrapper without the Rust definition to prove the
 # no-toolchain build remains an allow-all stub even when the main build has

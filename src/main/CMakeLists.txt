@@ -1,4 +1,5 @@
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
+find_package(SQLite3 QUIET)
 
 add_library(island_browser_core STATIC
     ${ISLAND_LOCAL_PAGE_SOURCES}
@@ -68,6 +69,10 @@ target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_compile_options(island_browser_core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
+if(SQLite3_FOUND)
+    target_compile_definitions(island_browser_core PRIVATE ISLAND_HAS_SQLITE3=1)
+    target_link_libraries(island_browser_core PRIVATE ${SQLite3_LIBRARIES})
+endif()
 target_link_libraries(island_browser_core PUBLIC island_agent island_search island_content_blocker_ffi)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 

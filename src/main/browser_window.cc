@@ -7166,6 +7166,9 @@ bool BrowserWindow::SetThemePreference(ThemePreference preference) {
     }
     prefs_.theme = preference;
     SavePrefs();
+    if (welcome_ != nullptr) {
+        welcome_->SetChosenTheme(preference);
+    }
     if (window_ != nullptr) {
         ApplyTheme(window_, ResolvedChromeTheme(), true);
     }
