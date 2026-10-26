@@ -235,6 +235,17 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
       if (button) button.focus();
     }, 0);
   }
+  // An outside mousedown closes the menu on the existing nodes: a re-render here would replace the
+  // node under the pointer, so the click that follows would never land, and focus must stay where
+  // the person clicked.
+  function dismissBookmarkMenu() {
+    if (openMenu === null) return;
+    var menu = document.querySelector(".bookmark-menu");
+    var trigger = document.querySelector('.bookmark-actions .icon[data-bookmark-id="' + openMenu + '"]');
+    openMenu = null; menuFocusId = null;
+    if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+  }
   function isBookmarkActionTarget(node) {
     while (node) {
       if (typeof node.className === "string" &&
@@ -302,7 +313,9 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     captureBookmarkDraft();
     var needle = $("query").value.trim().toLowerCase();
     var bookmarks = (state.bookmarks || []).filter(function (bookmark) { return (state.selected_folder === "all" || String(bookmark.folder_id) === String(state.selected_folder)) && matches(bookmark, needle); });
+    var focused = document.activeElement, focusedMenuId = focused && focused.dataset && focused.className === "icon" && focused.dataset.bookmarkId !== undefined ? focused.dataset.bookmarkId : null;
     var list = $("bookmark-list"); list.textContent = ""; bookmarks.forEach(function (bookmark) { list.appendChild(renderBookmark(bookmark)); });
+    if (focusedMenuId !== null) { var restored = document.querySelector('.bookmark-actions .icon[data-bookmark-id="' + focusedMenuId + '"]'); if (restored) restored.focus(); }
     $("results-title").textContent = selectedFolderName(); $("result-count").textContent = text(bookmarks.length) + " bookmarks"; $("empty").hidden = bookmarks.length !== 0;
   }
   function renderImports() {
@@ -325,7 +338,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   $("confirm-cancel").addEventListener("click", closeConfirm);
   $("confirm-move").addEventListener("click", function () { if (deletingFolder) post({ type: "folder:delete", id: deletingFolder.id, mode: "move" }); deletingFolder = null; closeConfirm(); });
   $("confirm-delete").addEventListener("click", function () { if (!deletingFolder) return; if (!$("confirm-move").hidden) { $("confirm-title").textContent = "Delete bookmarks permanently?"; $("confirm-copy").textContent = "This cannot be undone. Delete the bookmarks and this folder?"; $("confirm-move").hidden = true; $("confirm-delete").textContent = "Delete permanently"; $("confirm-delete").focus(); return; } post({ type: "folder:delete", id: deletingFolder.id, mode: "delete" }); deletingFolder = null; closeConfirm(); });
-  document.addEventListener("mousedown", function (event) { if (openMenu !== null && !isBookmarkActionTarget(event.target)) closeBookmarkMenu(true); });
+  document.addEventListener("mousedown", function (event) { if (openMenu !== null && !isBookmarkActionTarget(event.target)) dismissBookmarkMenu(); });
   document.addEventListener("keydown", function (event) { trapConfirm(event); if (!$("confirm-backdrop").hidden && event.key === "Escape") { event.preventDefault(); closeConfirm(); } else if (openMenu !== null && event.key === "Escape") { event.preventDefault(); closeBookmarkMenu(true); } });
   function applyTheme(theme) {
     if (!theme) return; var root = document.documentElement;

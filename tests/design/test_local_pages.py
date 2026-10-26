@@ -252,6 +252,7 @@ class Node {
   get textContent() { return this._textContent; }
   set textContent(value) { this._textContent = String(value); this.children = []; }
   appendChild(node) { node.parentNode = this; this.children.push(node); return node; }
+  removeChild(node) { this.children = this.children.filter((child) => child !== node); node.parentNode = null; return node; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); }
   setAttribute(key, value) { this.attributes[key] = String(value); }
@@ -310,14 +311,28 @@ document.dispatch("keydown", { key: "Escape" });
 let menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
 if (document.activeElement !== menuButton) throw new Error("Escape did not restore menu trigger focus");
 menuButton.dispatch("click");
+ids.query.focus();
 document.dispatch("mousedown", { target: ids.query });
 if (find(ids["bookmark-list"], ".bookmark-menu")) throw new Error("outside click did not close bookmark menu");
+if (document.activeElement !== ids.query) throw new Error("outside mousedown on search did not leave focus in search");
 menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
-if (document.activeElement !== menuButton) throw new Error("outside click did not restore menu trigger focus");
+if (menuButton.getAttribute("aria-expanded") !== "false") throw new Error("outside click left the menu button expanded");
+menuButton.dispatch("click");
+const folderChoice = findAll(ids["folder-list"], "button").find((node) => node.textContent === "Folder");
+document.dispatch("mousedown", { target: folderChoice });
+if (find(ids["bookmark-list"], ".bookmark-menu")) throw new Error("mousedown on a folder row did not close the menu");
+if (!findAll(ids["folder-list"], "button").includes(folderChoice)) throw new Error("mousedown re-rendered the folder row, so the click would be lost");
+folderChoice.dispatch("click");
+if (!messages.some((message) => message.type === "select-folder" && message.id === "f")) throw new Error("folder was not selected by one click");
+window.islandRender(base);
+menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
 menuButton.dispatch("click");
 find(ids["bookmark-list"], ".bookmark-menu").querySelectorAll('[role="menuitem"]')[1].dispatch("click");
 menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
 if (document.activeElement !== menuButton) throw new Error("favorite toggle did not restore menu trigger focus");
+window.islandRender(base);
+const rerenderedButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
+if (document.activeElement !== rerenderedButton || rerenderedButton.dataset.bookmarkId !== "b") throw new Error("native re-render lost focus on the menu trigger");
 clickBookmarkEdit(0);
 let edit = find(ids["bookmark-list"], ".edit"); let title = edit.querySelector('[data-edit-field="title"]'); let url = edit.querySelector('[data-edit-field="url"]');
 title.value = "Title draft"; title.focus(); title.dispatch("input");
