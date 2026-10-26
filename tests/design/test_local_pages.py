@@ -266,8 +266,10 @@ function match(node, selector) {
   if (selector === "button" || selector === "input") return node.tagName === selector;
   if (selector === ".edit") return hasClass(node, "edit");
   if (selector === ".folder-tools") return hasClass(node, "folder-tools");
+  if (selector === ".bookmark-menu") return hasClass(node, "bookmark-menu");
   if (selector === '[data-edit-field="title"]') return node.dataset.editField === "title";
   if (selector === '[data-edit-field="url"]') return node.dataset.editField === "url";
+  if (selector === '[role="menuitem"]') return node.getAttribute("role") === "menuitem";
   if (selector === "button:not([disabled])") return node.tagName === "button" && !node.disabled;
   return false;
 }
@@ -284,6 +286,7 @@ const ids = {}; const document = { activeElement: null, documentElement: new Nod
   dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); } };
 for (const id of ["query", "new-folder", "new-folder-name", "folder-list", "folder-total", "bookmark-list", "results-title", "result-count", "empty", "import-menu", "import-button", "status", "retry", "confirm-title", "confirm-copy", "confirm-move", "confirm-delete", "confirm-backdrop", "confirm-cancel", "new-folder-button", "cancel-folder"]) ids[id] = new Node(id === "query" || id.includes("name") ? "input" : "div");
 ids.status.appendChild(new Node("span")); ids["confirm-backdrop"].appendChild(ids["confirm-cancel"]); ids["confirm-backdrop"].appendChild(ids["confirm-move"]); ids["confirm-backdrop"].appendChild(ids["confirm-delete"]);
+ids["confirm-backdrop"].hidden = true;
 const messages = []; const console = { log(value) { messages.push(JSON.parse(value.slice(8))); } }; const window = {}; global.setTimeout = (fn) => fn();
 '''
         result = subprocess.run(
@@ -291,6 +294,15 @@ const messages = []; const console = { log(value) { messages.push(JSON.parse(val
 const base = { folders: [{ id: "f", name: "Folder", count: 1 }], bookmarks: [{ id: "b", title: "Old", url: "https://old.test", host: "old.test", folder_id: "f", spaces: [] }], selected_folder: "all", import_sources: [] };
 function clickBookmarkEdit(index) { findAll(ids["bookmark-list"], "button").filter((node) => node.textContent === "\u22ef")[index].dispatch("click"); findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "Edit").dispatch("click"); }
 window.islandRender(base);
+findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef").dispatch("click");
+let bookmarkMenu = find(ids["bookmark-list"], ".bookmark-menu");
+let menuItems = bookmarkMenu.querySelectorAll('[role="menuitem"]');
+if (!menuItems.length || document.activeElement !== menuItems[0]) throw new Error("bookmark menu did not expose or focus its first menuitem");
+bookmarkMenu.dispatch("keydown", { key: "ArrowDown" });
+if (document.activeElement !== menuItems[1]) throw new Error("bookmark menu ArrowDown did not advance focus");
+bookmarkMenu.dispatch("keydown", { key: "End" });
+if (document.activeElement !== menuItems[menuItems.length - 1]) throw new Error("bookmark menu End did not move focus to last item");
+document.dispatch("keydown", { key: "Escape" });
 clickBookmarkEdit(0);
 let edit = find(ids["bookmark-list"], ".edit"); let title = edit.querySelector('[data-edit-field="title"]'); let url = edit.querySelector('[data-edit-field="url"]');
 title.value = "Title draft"; title.focus(); title.dispatch("input");
@@ -324,6 +336,17 @@ document.dispatch("keydown", { key: "Escape" });
 if (messages.filter((message) => message.type === "folder:delete").length !== 1) throw new Error("cancel or escape sent delete");
 const switching = { folders: [{ id: "f-a", name: "Folder A", count: 1 }, { id: "f-b", name: "Folder B", count: 1 }], bookmarks: [{ id: "a", title: "Bookmark A", url: "https://a.test", host: "a.test", folder_id: "f-a", spaces: [] }, { id: "b", title: "Bookmark B", url: "https://b.test", host: "b.test", folder_id: "f-b", spaces: [] }], selected_folder: "all", import_sources: [] };
 window.islandRender(switching);
+let folderMenus = findAll(ids["folder-list"], "button").filter((node) => node.textContent === "\u22ef");
+folderMenus[0].dispatch("click");
+let folderRename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+folderRename.value = "Folder A draft"; folderRename.dispatch("input");
+folderMenus = findAll(ids["folder-list"], "button").filter((node) => node.textContent === "\u22ef");
+folderMenus[1].dispatch("click");
+folderRename = find(ids["folder-list"], ".folder-tools").querySelector("input");
+if (folderRename.value !== "Folder B") throw new Error("folder A draft leaked into folder B");
+find(ids["folder-list"], ".folder-tools").dispatch("submit");
+let renamed = messages.filter((message) => message.type === "folder:rename").pop();
+if (!renamed || renamed.id !== "f-b" || renamed.name !== "Folder B") throw new Error("folder B save used folder A values");
 clickBookmarkEdit(0);
 edit = find(ids["bookmark-list"], ".edit"); title = edit.querySelector('[data-edit-field="title"]'); title.value = "Bookmark A draft"; title.dispatch("input");
 clickBookmarkEdit(0);

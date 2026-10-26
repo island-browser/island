@@ -1601,6 +1601,7 @@ void BrowserWindow::OpenBookmarksPage() {
         }
         return;
     }
+    bookmarks_page_status_.reset();
     ToggleInternalPage(LocalPageKind::kBookmarks);
 }
 
@@ -1648,6 +1649,9 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
 void BrowserWindow::HideInternalPage() {
     if (!internal_page_.has_value()) {
         return;
+    }
+    if (internal_page_ == LocalPageKind::kBookmarks) {
+        bookmarks_page_status_.reset();
     }
     internal_page_.reset();
     show_internal_page_ = false;
@@ -2004,6 +2008,9 @@ void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
         ScheduleLocalPagesRender();
         return;
     }
+    // Page feedback describes the preceding interaction only. Durable save failures live in
+    // failed_bookmark_mutation_ instead, so their Retry action remains visible.
+    bookmarks_page_status_.reset();
     if (type == "select-folder") {
         const json::Value* value = message.FindMember("id");
         if (value != nullptr && value->IsString() && value->string_val == "all") {
@@ -2079,8 +2086,10 @@ void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
             return;
         }
         const BookmarkImportResult result = ImportBookmarksFromBrowser(*source_id);
-        bookmarks_page_status_ =
-            BookmarksPageStatus{.kind = result.ok ? "ok" : "error", .message = result.text};
+        if (!result.durable_failure) {
+            bookmarks_page_status_ =
+                BookmarksPageStatus{.kind = result.ok ? "ok" : "error", .message = result.text};
+        }
         ScheduleLocalPagesRender();
         return;
     }
@@ -2783,29 +2792,11 @@ std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
         return "Imported " + std::to_string(added) + (added == 1 ? " space" : " spaces") +
                " with " + std::to_string(tabs) + " pinned tabs from Arc.";
     }
-    const std::optional<std::vector<BookmarkItem>> items =
-        ImportFromSource(*source, UserBaseHome());
-    std::string name(source_id);
-    for (const ImportSourceInfo& info : DetectInstalledSources(UserBaseHome())) {
-        if (info.id == *source) {
-            name = info.display_name;
-        }
-    }
-    if (!items.has_value()) {
-        return "Could not read " + name + " bookmarks.";
-    }
-    const BookmarkResult merged =
-        RunBookmarkMutation([this, folder = "Imported from " + name, items = *items] {
-            return bookmarks_.Import(folder, items);
-        });
-    if (!merged.ok()) {
-        // The status row carries this failure (RunBookmarkMutation), so it is not repeated here.
+    const BookmarkImportResult result = ImportBookmarksFromBrowser(source_id);
+    if (result.durable_failure) {
         return {};
     }
-    const std::size_t added = merged.added;
-    return added == 0 ? "No new bookmarks in " + name + "."
-                      : "Imported " + std::to_string(added) + " bookmarks from " + name +
-                            ". Find them in the command palette.";
+    return result.text;
 }
 
 BrowserWindow::BookmarkImportResult BrowserWindow::ImportBookmarksFromBrowser(
@@ -2832,7 +2823,7 @@ BrowserWindow::BookmarkImportResult BrowserWindow::ImportBookmarksFromBrowser(
             return bookmarks_.Import(folder, items);
         });
     if (!merged.ok()) {
-        return {.ok = false, .text = merged.message};
+        return {.ok = false, .durable_failure = true, .text = merged.message};
     }
     const std::size_t added = merged.added;
     return {.ok = true,

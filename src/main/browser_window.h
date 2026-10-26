@@ -1274,6 +1274,9 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] bool IsFavorite(FavoriteScope scope, std::uint64_t bookmark_id) const;
     struct BookmarkImportResult {
         bool ok = false;
+        // A failed durable mutation has already populated the Retry-capable
+        // bookmark status, so local pages must not repeat it as transient feedback.
+        bool durable_failure = false;
         std::string text;
     };
     [[nodiscard]] BookmarkImportResult ImportBookmarksFromBrowser(std::string_view source_id);

@@ -172,10 +172,27 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherHandlesLibraryActionsAndTransien
     send("{\"type\":\"bookmarks:delete\",\"id\":" + std::to_string(bookmark) + "}");
     EXPECT_EQ(window->bookmarks().FindBookmark(bookmark), nullptr);
 
+    send(R"({"type":"folder:create","name":"Discard"})");
+    const std::optional<Value> with_discard_folder = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(with_discard_folder.has_value());
+    const Value* discard_folders = with_discard_folder->FindMember("folders");
+    ASSERT_NE(discard_folders, nullptr);
+    const std::uint64_t discard =
+        static_cast<std::uint64_t>(discard_folders->array_val.back().IntOr("id", 0));
+    const BookmarkResult discarded =
+        window->AddFavoriteByUrl(std::nullopt, "Discard", "https://discard.test/");
+    ASSERT_TRUE(discarded.ok());
+    send("{\"type\":\"bookmarks:move\",\"id\":" + std::to_string(discarded.id) +
+         ",\"folder_id\":" + std::to_string(discard) + "}");
+    send("{\"type\":\"folder:delete\",\"id\":" + std::to_string(discard) + ",\"mode\":\"delete\"}");
+    EXPECT_EQ(window->bookmarks().FindFolder(discard), nullptr);
+    EXPECT_EQ(window->bookmarks().FindBookmark(discarded.id), nullptr);
+
     const BookmarkResult invalid_added =
         window->AddFavoriteByUrl(std::nullopt, "Old", "https://old.test/");
     ASSERT_TRUE(invalid_added.ok());
     const std::uint64_t invalid = invalid_added.id;
+    const std::string before_open = SpaceAt(*window, 0).tabs()[0].startup_url();
     send("{\"type\":\"bookmarks:edit\",\"id\":" + std::to_string(invalid) +
          ",\"title\":\"Old\",\"url\":\"javascript:alert(1)\"}");
     ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
@@ -184,11 +201,55 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherHandlesLibraryActionsAndTransien
     ASSERT_TRUE(with_error.has_value());
     ASSERT_NE(with_error->FindMember("page_status"), nullptr);
     EXPECT_EQ(with_error->FindMember("page_status")->StringOr("kind", ""), "error");
+    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), before_open);
     send(R"({"type":"import","source_id":"unknown"})");
     ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
     const Bookmark* unchanged_invalid = window->bookmarks().FindBookmark(invalid);
     ASSERT_NE(unchanged_invalid, nullptr);
     EXPECT_EQ(unchanged_invalid->url, "javascript:alert(1)");
+    const std::optional<Value> rejected_import = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(rejected_import.has_value());
+    EXPECT_TRUE(rejected_import->FindMember("page_status")->IsNull());
+}
+
+TEST(BrowserWindowPagesTest, BookmarkPageClearsTransientFeedbackAndKeepsRetryableSaveFailures) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const auto send = [&window](std::string_view text) {
+        const std::optional<Value> message = json::Parse(text);
+        ASSERT_TRUE(message.has_value()) << text;
+        window->OnLocalPageMessage(LocalPageKind::kBookmarks, *message);
+    };
+    const BookmarkResult invalid =
+        window->AddFavoriteByUrl(std::nullopt, "Old", "https://old.test/");
+    ASSERT_TRUE(invalid.ok());
+    send("{\"type\":\"bookmarks:edit\",\"id\":" + std::to_string(invalid.id) +
+         ",\"title\":\"Old\",\"url\":\"javascript:alert(1)\"}");
+    send("{\"type\":\"bookmarks:open\",\"id\":" + std::to_string(invalid.id) + "}");
+    ASSERT_FALSE(json::Parse(window->BookmarksStateJson())->FindMember("page_status")->IsNull());
+    send(R"({"type":"select-folder","id":"all"})");
+    EXPECT_TRUE(json::Parse(window->BookmarksStateJson())->FindMember("page_status")->IsNull());
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "island_bookmarks_page_retry" / "bookmarks.json";
+    std::error_code error;
+    std::filesystem::remove_all(path.parent_path(), error);
+    std::filesystem::create_directories(path.parent_path(), error);
+    BookmarkStore library(path);
+    static_cast<void>(library.Load());
+    std::filesystem::create_directories(std::filesystem::path(path.string() + ".tmp"), error);
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    send(R"({"type":"folder:create","name":"Cannot save"})");
+    const std::optional<Value> failed = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(failed.has_value());
+    EXPECT_TRUE(failed->FindMember("status")->BoolOr("retry", false));
+    EXPECT_TRUE(failed->FindMember("page_status")->IsNull());
+    EXPECT_TRUE(window->bookmarks().state().folders.empty());
+    send(R"({"type":"retry"})");
+    const std::optional<Value> retried = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(retried.has_value());
+    EXPECT_TRUE(retried->FindMember("status")->BoolOr("retry", false));
+    EXPECT_TRUE(window->bookmarks().state().folders.empty());
+    std::filesystem::remove_all(path.parent_path(), error);
 }
 
 TEST(BrowserWindowPagesTest, KeymapEditsTakeEffectAndShortcutsRunActions) {

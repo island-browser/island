@@ -225,7 +225,7 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     labels.forEach(function (label) { var badge = document.createElement("span"); badge.className = "scope"; badge.textContent = label; scopes.appendChild(badge); });
     return scopes;
   }
-  function action(label, handler) { var node = button(label, ""); node.addEventListener("click", handler); return node; }
+  function action(label, handler) { var node = button(label, ""); node.setAttribute("role", "menuitem"); node.addEventListener("click", handler); return node; }
   function renderBookmark(bookmark) {
     var item = document.createElement("li"); item.className = "bookmark"; item.tabIndex = 0;
     item.addEventListener("keydown", function (event) { if (event.key === "Enter" && event.target === item) { event.preventDefault(); post({ type: "bookmarks:open", id: bookmark.id }); } });
@@ -264,6 +264,17 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
       (state.folders || []).forEach(function (folder) { if (String(folder.id) !== String(bookmark.folder_id)) menu.appendChild(action(text(folder.name), function () { post({ type: "bookmarks:move", id: bookmark.id, folder_id: folder.id }); openMenu = null; render(); })); });
       menu.appendChild(action("Edit", function () { editingBookmark = { id: bookmark.id, title: text(bookmark.title), url: text(bookmark.url), restoreFocus: "title", selectTitle: true }; openMenu = null; render(); }));
       menu.appendChild(action("Delete", function () { post({ type: "bookmarks:delete", id: bookmark.id }); openMenu = null; render(); }));
+      menu.addEventListener("keydown", function (event) {
+        var items = menu.querySelectorAll('[role="menuitem"]');
+        var index = Array.prototype.indexOf.call(items, document.activeElement);
+        if (!items.length || index < 0) return;
+        var target = null;
+        if (event.key === "ArrowDown") target = items[(index + 1) % items.length];
+        if (event.key === "ArrowUp") target = items[(index + items.length - 1) % items.length];
+        if (event.key === "Home") target = items[0];
+        if (event.key === "End") target = items[items.length - 1];
+        if (target) { event.preventDefault(); target.focus(); }
+      });
       actions.appendChild(menu);
       if (menuFocusId === bookmark.id) { menuFocusId = null; setTimeout(function () { var first = menu.querySelector("button"); if (first) first.focus(); }, 0); }
     }
