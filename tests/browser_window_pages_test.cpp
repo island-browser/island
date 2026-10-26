@@ -192,7 +192,7 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherHandlesLibraryActionsAndTransien
         window->AddFavoriteByUrl(std::nullopt, "Old", "https://old.test/");
     ASSERT_TRUE(invalid_added.ok());
     const std::uint64_t invalid = invalid_added.id;
-    const std::string before_open = SpaceAt(*window, 0).tabs()[0].startup_url();
+    const AddressBarSnapshot before_open = window->address_bar_snapshot();
     send("{\"type\":\"bookmarks:edit\",\"id\":" + std::to_string(invalid) +
          ",\"title\":\"Old\",\"url\":\"javascript:alert(1)\"}");
     ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
@@ -201,7 +201,8 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherHandlesLibraryActionsAndTransien
     ASSERT_TRUE(with_error.has_value());
     ASSERT_NE(with_error->FindMember("page_status"), nullptr);
     EXPECT_EQ(with_error->FindMember("page_status")->StringOr("kind", ""), "error");
-    EXPECT_EQ(SpaceAt(*window, 0).tabs()[0].startup_url(), before_open);
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, before_open.edit_text);
+    EXPECT_EQ(window->address_bar_snapshot().mode, before_open.mode);
     send(R"({"type":"import","source_id":"unknown"})");
     ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
     const Bookmark* unchanged_invalid = window->bookmarks().FindBookmark(invalid);
@@ -244,11 +245,13 @@ TEST(BrowserWindowPagesTest, BookmarkPageClearsTransientFeedbackAndKeepsRetryabl
     EXPECT_TRUE(failed->FindMember("status")->BoolOr("retry", false));
     EXPECT_TRUE(failed->FindMember("page_status")->IsNull());
     EXPECT_TRUE(window->bookmarks().state().folders.empty());
+    std::filesystem::remove_all(std::filesystem::path(path.string() + ".tmp"), error);
     send(R"({"type":"retry"})");
     const std::optional<Value> retried = json::Parse(window->BookmarksStateJson());
     ASSERT_TRUE(retried.has_value());
-    EXPECT_TRUE(retried->FindMember("status")->BoolOr("retry", false));
-    EXPECT_TRUE(window->bookmarks().state().folders.empty());
+    EXPECT_TRUE(retried->FindMember("status")->IsNull());
+    ASSERT_EQ(window->bookmarks().state().folders.size(), 1U);
+    EXPECT_EQ(window->bookmarks().state().folders[0].name, "Cannot save");
     std::filesystem::remove_all(path.parent_path(), error);
 }
 

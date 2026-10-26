@@ -226,6 +226,23 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     return scopes;
   }
   function action(label, handler) { var node = button(label, ""); node.setAttribute("role", "menuitem"); node.addEventListener("click", handler); return node; }
+  function closeBookmarkMenu(restoreFocus) {
+    if (openMenu === null) return;
+    var closedMenu = openMenu;
+    openMenu = null; menuFocusId = null; render();
+    if (restoreFocus) setTimeout(function () {
+      var button = document.querySelector('.bookmark-actions .icon[data-bookmark-id="' + closedMenu + '"]');
+      if (button) button.focus();
+    }, 0);
+  }
+  function isBookmarkActionTarget(node) {
+    while (node) {
+      if (typeof node.className === "string" &&
+          node.className.split(/\s+/).indexOf("bookmark-actions") >= 0) return true;
+      node = node.parentNode;
+    }
+    return false;
+  }
   function renderBookmark(bookmark) {
     var item = document.createElement("li"); item.className = "bookmark"; item.tabIndex = 0;
     item.addEventListener("keydown", function (event) { if (event.key === "Enter" && event.target === item) { event.preventDefault(); post({ type: "bookmarks:open", id: bookmark.id }); } });
@@ -258,8 +275,8 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
     if (openMenu === bookmark.id) {
       var menu = document.createElement("div"); menu.className = "bookmark-menu"; menu.setAttribute("role", "menu");
       menu.appendChild(action("Open in new tab", function () { post({ type: "bookmarks:open-new-tab", id: bookmark.id }); }));
-      menu.appendChild(action(bookmark.global ? "Remove global favorite" : "Add global favorite", function () { post({ type: "favorite:toggle-global", id: bookmark.id }); }));
-      if (state.current_space) menu.appendChild(action((spaceOn ? "Remove " : "Add ") + text(state.current_space.name) + " favorite", function () { post({ type: "favorite:toggle-space", id: bookmark.id }); }));
+      menu.appendChild(action(bookmark.global ? "Remove global favorite" : "Add global favorite", function () { post({ type: "favorite:toggle-global", id: bookmark.id }); closeBookmarkMenu(true); }));
+      if (state.current_space) menu.appendChild(action((spaceOn ? "Remove " : "Add ") + text(state.current_space.name) + " favorite", function () { post({ type: "favorite:toggle-space", id: bookmark.id }); closeBookmarkMenu(true); }));
       var moveLabel = document.createElement("span"); moveLabel.className = "bookmark-menu-label"; moveLabel.textContent = "Move to folder..."; menu.appendChild(moveLabel);
       (state.folders || []).forEach(function (folder) { if (String(folder.id) !== String(bookmark.folder_id)) menu.appendChild(action(text(folder.name), function () { post({ type: "bookmarks:move", id: bookmark.id, folder_id: folder.id }); openMenu = null; render(); })); });
       menu.appendChild(action("Edit", function () { editingBookmark = { id: bookmark.id, title: text(bookmark.title), url: text(bookmark.url), restoreFocus: "title", selectTitle: true }; openMenu = null; render(); }));
@@ -308,7 +325,8 @@ h1 { flex: none; margin: 0 8px 0 0; font: 700 26px/1.1 var(--display); letter-sp
   $("confirm-cancel").addEventListener("click", closeConfirm);
   $("confirm-move").addEventListener("click", function () { if (deletingFolder) post({ type: "folder:delete", id: deletingFolder.id, mode: "move" }); deletingFolder = null; closeConfirm(); });
   $("confirm-delete").addEventListener("click", function () { if (!deletingFolder) return; if (!$("confirm-move").hidden) { $("confirm-title").textContent = "Delete bookmarks permanently?"; $("confirm-copy").textContent = "This cannot be undone. Delete the bookmarks and this folder?"; $("confirm-move").hidden = true; $("confirm-delete").textContent = "Delete permanently"; $("confirm-delete").focus(); return; } post({ type: "folder:delete", id: deletingFolder.id, mode: "delete" }); deletingFolder = null; closeConfirm(); });
-  document.addEventListener("keydown", function (event) { trapConfirm(event); if (!$("confirm-backdrop").hidden && event.key === "Escape") { event.preventDefault(); closeConfirm(); } else if (openMenu !== null && event.key === "Escape") { event.preventDefault(); var closedMenu = openMenu; openMenu = null; menuFocusId = null; render(); setTimeout(function () { var button = document.querySelector('.bookmark-actions .icon[data-bookmark-id="' + closedMenu + '"]'); if (button) button.focus(); }, 0); } });
+  document.addEventListener("mousedown", function (event) { if (openMenu !== null && !isBookmarkActionTarget(event.target)) closeBookmarkMenu(true); });
+  document.addEventListener("keydown", function (event) { trapConfirm(event); if (!$("confirm-backdrop").hidden && event.key === "Escape") { event.preventDefault(); closeConfirm(); } else if (openMenu !== null && event.key === "Escape") { event.preventDefault(); closeBookmarkMenu(true); } });
   function applyTheme(theme) {
     if (!theme) return; var root = document.documentElement;
     [["bg","--bg"],["surface","--surface"],["surface_2","--surface-2"],["fill","--fill"],["text","--text"],["text_2","--text-2"],["text_3","--text-3"],["border","--border"],["border_2","--border-2"],["accent","--accent"],["selection","--selection"],["accent_soft","--accent-soft"],["accent_text","--accent-text"],["warn_bg","--warn-bg"],["warn_border","--warn-border"],["warn_text","--warn-text"],["success","--success"],["danger","--danger"],["segment_selected","--segment-selected"]].forEach(function (mapping) { if (theme[mapping[0]]) root.style.setProperty(mapping[1], theme[mapping[0]]); });

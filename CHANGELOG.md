@@ -13,6 +13,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ## [Unreleased]
 
+- Fix Bookmarks menu dismissal and retry regression coverage.
+
 ### Added
 
 - Sidebar favorites (Bookmarks 0.9): a global favorites strip (up to six icons, then "+N" and "+" to add the current page), the current space's favorites under "<Space> · Favorites", and a failed-save status row above the footer. The collapsed rail shows the same icons in order. The collapsed rail's "+" New Tab button is removed.

@@ -251,7 +251,7 @@ class Node {
     this._textContent = ""; this.className = ""; this.type = ""; }
   get textContent() { return this._textContent; }
   set textContent(value) { this._textContent = String(value); this.children = []; }
-  appendChild(node) { this.children.push(node); return node; }
+  appendChild(node) { node.parentNode = this; this.children.push(node); return node; }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
   dispatch(type, event = {}) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {}, ...event }); }
   setAttribute(key, value) { this.attributes[key] = String(value); }
@@ -264,6 +264,10 @@ class Node {
 function hasClass(node, name) { return node.className.split(/\s+/).includes(name); }
 function match(node, selector) {
   if (selector === "button" || selector === "input") return node.tagName === selector;
+  if (selector.startsWith('.bookmark-actions .icon[data-bookmark-id="')) {
+    const id = selector.match(/data-bookmark-id="([^"]+)"/)[1];
+    return hasClass(node, "icon") && node.dataset.bookmarkId === id;
+  }
   if (selector === ".edit") return hasClass(node, "edit");
   if (selector === ".folder-tools") return hasClass(node, "folder-tools");
   if (selector === ".bookmark-menu") return hasClass(node, "bookmark-menu");
@@ -303,6 +307,17 @@ if (document.activeElement !== menuItems[1]) throw new Error("bookmark menu Arro
 bookmarkMenu.dispatch("keydown", { key: "End" });
 if (document.activeElement !== menuItems[menuItems.length - 1]) throw new Error("bookmark menu End did not move focus to last item");
 document.dispatch("keydown", { key: "Escape" });
+let menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
+if (document.activeElement !== menuButton) throw new Error("Escape did not restore menu trigger focus");
+menuButton.dispatch("click");
+document.dispatch("mousedown", { target: ids.query });
+if (find(ids["bookmark-list"], ".bookmark-menu")) throw new Error("outside click did not close bookmark menu");
+menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
+if (document.activeElement !== menuButton) throw new Error("outside click did not restore menu trigger focus");
+menuButton.dispatch("click");
+find(ids["bookmark-list"], ".bookmark-menu").querySelectorAll('[role="menuitem"]')[1].dispatch("click");
+menuButton = findAll(ids["bookmark-list"], "button").find((node) => node.textContent === "\u22ef");
+if (document.activeElement !== menuButton) throw new Error("favorite toggle did not restore menu trigger focus");
 clickBookmarkEdit(0);
 let edit = find(ids["bookmark-list"], ".edit"); let title = edit.querySelector('[data-edit-field="title"]'); let url = edit.querySelector('[data-edit-field="url"]');
 title.value = "Title draft"; title.focus(); title.dispatch("input");
