@@ -58,6 +58,13 @@ struct SpaceState {
     std::optional<SplitState> split;
     // Optional in the file; empty and unknown values both mean no icon.
     std::string icon_id;
+    // 0.10 (R-D3, R-R1, R-D4). All optional in the file; an absent or wrong-typed member
+    // loads as empty. |web_data_key| names the space's cookie directory (R-D3); the store does
+    // not validate it, the web-data layer does. |import_key| marks a space created by an Arc
+    // import; |routes| holds host patterns that open in this space (R-R1).
+    std::string web_data_key;
+    std::string import_key;
+    std::vector<std::string> routes;
 
     bool operator==(const SpaceState&) const = default;
 };

@@ -138,6 +138,8 @@ add_executable(island_tests
 )
 
 target_compile_features(island_tests PRIVATE cxx_std_20)
+target_compile_definitions(island_tests PRIVATE
+    ISLAND_TEST_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 target_compile_options(island_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main"
                            "${CMAKE_SOURCE_DIR}/tests" "${CEF_ROOT}")

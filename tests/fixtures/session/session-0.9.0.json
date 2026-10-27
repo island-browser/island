@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "active_space_id": 2,
+  "spaces": [
+    {
+      "id": 1,
+      "name": "Work",
+      "color_argb": 4278190335,
+      "icon": "briefcase",
+      "tabs": [
+        {
+          "id": 10,
+          "url": "https://mail.example.test/",
+          "pinned": true
+        },
+        {
+          "id": 11,
+          "url": "https://docs.example.test/",
+          "group_parent": 10,
+          "group_label": "Docs"
+        },
+        {
+          "id": 12,
+          "url": "https://calendar.example.test/"
+        }
+      ],
+      "active_tab_id": 11,
+      "split": {
+        "first_tab_id": 11,
+        "second_tab_id": 12
+      }
+    },
+    {
+      "id": 2,
+      "name": "Home",
+      "color_argb": 4281545523,
+      "tabs": [
+        {
+          "id": 20,
+          "url": "https://news.example.test/"
+        }
+      ],
+      "active_tab_id": 20
+    }
+  ],
+  "favorite_tabs": [
+    {
+      "space_id": 1,
+      "bookmark_id": 7,
+      "reset_url": "https://mail.example.test/",
+      "last_url": "https://mail.example.test/inbox"
+    },
+    {
+      "bookmark_id": 9,
+      "reset_url": "https://status.example.test/",
+      "last_url": "https://status.example.test/"
+    }
+  ]
+}

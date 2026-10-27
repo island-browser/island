@@ -5,8 +5,11 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "tab_id.h"
 
@@ -591,6 +594,122 @@ TEST(SessionStore, FavoriteTabRecordsRoundTripAndOldFilesLoad) {
                     R"("reset_url":"https://a.test/","last_url":"https://a.test/"}]})");
     EXPECT_EQ(SessionStore::Load(path).error, SessionError::kSchemaError);
     std::filesystem::remove(path);
+}
+
+// ---------------------------------------------------------------------------
+// 0.10 optional members (R-D3, R-D4, R-R1): web_data_key, import_key, routes
+// ---------------------------------------------------------------------------
+
+// Saves |state| through the public writer and returns the bytes it wrote.
+std::string SaveToText(const SessionState& state) {
+    const auto path = std::filesystem::temp_directory_path() / "island_test_0_10_save.json";
+    EXPECT_EQ(SessionStore::Save(path, state), SessionError::kNone);
+    std::ifstream in(path, std::ios::binary);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::filesystem::remove(path);
+    return text;
+}
+
+// Loads |text| through the public reader.
+LoadResult LoadText(std::string_view text) {
+    const auto path = std::filesystem::temp_directory_path() / "island_test_0_10_load.json";
+    WriteFile(path, text);
+    LoadResult result = SessionStore::Load(path);
+    std::filesystem::remove(path);
+    return result;
+}
+
+TEST(SessionStore, WebDataKeyRoundTripsAndIsOptional) {
+    SessionState state;
+    SpaceState keyed;
+    keyed.id = SpaceId{1};
+    keyed.name = "Keyed";
+    keyed.color_argb = 1;
+    keyed.web_data_key = "0123456789abcdef0123456789abcdef";
+    SpaceState plain;
+    plain.id = SpaceId{2};
+    plain.name = "Plain";
+    plain.color_argb = 1;
+    state.spaces = {keyed, plain};
+
+    const std::string json = SaveToText(state);
+    EXPECT_NE(json.find("\"web_data_key\":\"0123456789abcdef0123456789abcdef\""),
+              std::string::npos);
+    EXPECT_EQ(json.find("\"web_data_key\"", json.find("\"Plain\"")), std::string::npos);
+
+    const LoadResult result = LoadText(json);
+    ASSERT_EQ(result.error, SessionError::kNone);
+    ASSERT_EQ(result.state.spaces.size(), 2u);
+    EXPECT_EQ(result.state.spaces[0].web_data_key, "0123456789abcdef0123456789abcdef");
+    EXPECT_EQ(result.state.spaces[1].web_data_key, "");
+}
+
+TEST(SessionStore, RoutesRoundTripAndAreOptional) {
+    SessionState state;
+    SpaceState space;
+    space.id = SpaceId{1};
+    space.name = "Dev";
+    space.color_argb = 1;
+    space.routes = {"github.com", "linear.app"};
+    state.spaces = {space};
+
+    LoadResult result = LoadText(SaveToText(state));
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state.spaces[0].routes,
+              (std::vector<std::string>{"github.com", "linear.app"}));
+
+    // A routes member that is not an array loads as no routes, and the session still loads.
+    result = LoadText(
+        R"({"version":1,"spaces":[{"id":1,"name":"Dev","color_argb":1,"routes":"github.com","tabs":[]}]})");
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_TRUE(result.state.spaces[0].routes.empty());
+}
+
+TEST(SessionStore, ImportKeyRoundTrips) {
+    SessionState state;
+    SpaceState space;
+    space.id = SpaceId{1};
+    space.name = "Arc";
+    space.color_argb = 1;
+    space.import_key = "arc:space:4f2a";
+    state.spaces = {space};
+
+    const LoadResult result = LoadText(SaveToText(state));
+    ASSERT_EQ(result.error, SessionError::kNone);
+    EXPECT_EQ(result.state.spaces[0].import_key, "arc:space:4f2a");
+}
+
+TEST(SessionStore, Loads090SessionFixture) {
+    const auto path =
+        std::filesystem::path(ISLAND_TEST_FIXTURE_DIR) / "session" / "session-0.9.0.json";
+    const LoadResult result = SessionStore::Load(path);
+    ASSERT_EQ(result.error, SessionError::kNone);
+    ASSERT_EQ(result.state.spaces.size(), 2u);
+    EXPECT_EQ(result.state.spaces[0].name, "Work");
+    EXPECT_EQ(result.state.spaces[0].icon_id, "briefcase");
+    EXPECT_EQ(result.state.spaces[0].tabs.size(), 3u);
+    EXPECT_TRUE(result.state.spaces[0].tabs[0].pinned);
+    EXPECT_TRUE(result.state.spaces[0].split.has_value());
+    EXPECT_EQ(result.state.spaces[1].name, "Home");
+    EXPECT_EQ(result.state.favorite_tabs.size(), 2u);
+    // Fields that 0.9 never wrote come back empty.
+    for (const SpaceState& space : result.state.spaces) {
+        EXPECT_EQ(space.web_data_key, "");
+        EXPECT_EQ(space.import_key, "");
+        EXPECT_TRUE(space.routes.empty());
+    }
+}
+
+TEST(SessionStore, UnknownMembersIgnored) {
+    const std::string json =
+        R"({"version":1,"future_top":{"a":[1,2]},"spaces":[{"id":1,"name":"Kept","color_argb":1,)"
+        R"("future_space":true,"tabs":[{"id":1,"url":"https://a.test/","future_tab":null}]}]})";
+    const LoadResult result = LoadText(json);
+    ASSERT_EQ(result.error, SessionError::kNone);
+    ASSERT_EQ(result.state.spaces.size(), 1u);
+    EXPECT_EQ(result.state.spaces[0].name, "Kept");
+    ASSERT_EQ(result.state.spaces[0].tabs.size(), 1u);
+    EXPECT_EQ(result.state.spaces[0].tabs[0].url, "https://a.test/");
 }
 
 }  // namespace

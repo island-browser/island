@@ -82,6 +82,23 @@ void WriteSpaceState(json::Writer& w, const SpaceState& space) {
         w.Key("icon");
         w.StringValue(space.icon_id);
     }
+    if (!space.web_data_key.empty()) {
+        w.Key("web_data_key");
+        w.StringValue(space.web_data_key);
+    }
+    if (!space.import_key.empty()) {
+        w.Key("import_key");
+        w.StringValue(space.import_key);
+    }
+    if (!space.routes.empty()) {
+        w.Key("routes");
+        w.StartArray();
+        for (const auto& route : space.routes) {
+            w.ArrayElement();
+            w.StringValue(route);
+        }
+        w.EndArray();
+    }
 
     w.Key("tabs");
     w.StartArray();
@@ -220,6 +237,21 @@ LoadResult ParseSessionState(const json::Value& root) {
             // A wrong-typed icon is ignored like an unknown id; it must not drop the session.
             if (icon->IsString()) {
                 space_state.icon_id = NormalizeSpaceIconId(icon->string_val);
+            }
+        }
+        // 0.10 optional members (R-D3, R-R1): a wrong-typed value loads as absent.
+        if (const json::Value* key = space_val.FindMember("web_data_key");
+            key != nullptr && key->IsString()) {
+            space_state.web_data_key = key->string_val;
+        }
+        if (const json::Value* key = space_val.FindMember("import_key");
+            key != nullptr && key->IsString()) {
+            space_state.import_key = key->string_val;
+        }
+        if (const json::Value* routes = space_val.FindMember("routes");
+            routes != nullptr && routes->IsArray()) {
+            for (const json::Value& route : routes->array_val) {
+                if (route.IsString()) space_state.routes.push_back(route.string_val);
             }
         }
 
