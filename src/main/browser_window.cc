@@ -48,6 +48,7 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "link_open_policy.h"
 #if defined(__APPLE__)
 #include "macos/keymap_menu_mac.h"
 #endif
@@ -832,13 +833,22 @@ Space& BrowserWindow::AppendSpace(std::string name) {
 }
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
+    AddTabToActiveSpace(std::move(startup_url), TabPlacement::kEnd, opened_by_agent);
+}
+
+void BrowserWindow::AddTabToActiveSpace(std::string startup_url, TabPlacement placement,
+                                        bool opened_by_agent) {
     Space& space = active_space();
     context_chip_.reset();  // the new tab is a new page context
     DetachActiveTabObservers();
     Tab tab{NextTabId()};
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetOpenedByAgent(opened_by_agent);
-    space.AppendTab(std::move(tab));
+    if (placement == TabPlacement::kAfterActive) {
+        static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/true));
+    } else {
+        space.AppendTab(std::move(tab));
+    }
     Tab* appended = active_tab();
     if (chrome_ != nullptr && appended != nullptr) {
         // Same creation path as OnWindowCreated's first view: the space's
@@ -4395,6 +4405,26 @@ void BrowserWindow::CompleteFaviconDownloadForTest(TabId tab, const std::string&
     OnFaviconDownloaded(tab, icon_url, std::move(image));
 }
 
+namespace {
+
+// CEF's disposition as the CEF-free policy sees it (link_open_policy.h).
+LinkDisposition LinkDispositionFrom(cef_window_open_disposition_t disposition) {
+    switch (disposition) {
+        case CEF_WOD_CURRENT_TAB:
+            return LinkDisposition::kCurrentTab;
+        case CEF_WOD_NEW_FOREGROUND_TAB:
+            return LinkDisposition::kNewForegroundTab;
+        case CEF_WOD_NEW_BACKGROUND_TAB:
+            return LinkDisposition::kNewBackgroundTab;
+        case CEF_WOD_NEW_WINDOW:
+            return LinkDisposition::kNewWindow;
+        default:
+            return LinkDisposition::kOther;
+    }
+}
+
+}  // namespace
+
 bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int,
                                   const CefString& target_url, const CefString&,
                                   cef_window_open_disposition_t target_disposition,
@@ -4402,13 +4432,12 @@ bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
                                   CefRefPtr<CefClient>&, CefBrowserSettings&,
                                   CefRefPtr<CefDictionaryValue>&, bool*) {
     CEF_REQUIRE_UI_THREAD();
-    // Popups and new windows stay rejected (Island is single-window). A user-initiated new-tab
-    // open (Cmd/Ctrl+click, middle-click, target=_blank) becomes a peek instead.
-    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
-         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
-        user_gesture && IsPeekLinkSource(browser)) {
-        DeferPeek(target_url.ToString());
-    }
+    // Popups stay rejected (Island is single-window), so the popup itself is always cancelled.
+    // What the person asked for is decided by link_open_policy.h: Cmd/Ctrl+click and middle-click
+    // peek (CEF reports both alike), Shift+click and plain or script-with-gesture new tabs open a
+    // foreground tab.
+    HandleLinkOpen(browser, target_url.ToString(),
+                   DecideLinkOpen(LinkDispositionFrom(target_disposition), user_gesture));
     return true;
 }
 
@@ -4416,15 +4445,15 @@ CefRefPtr<CefContextMenuHandler> BrowserWindow::GetContextMenuHandler() { return
 
 bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                      const CefString& target_url,
-                                     cef_window_open_disposition_t target_disposition, bool) {
+                                     cef_window_open_disposition_t target_disposition,
+                                     bool user_gesture) {
     CEF_REQUIRE_UI_THREAD();
-    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
-         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
-        IsPeekLinkSource(browser)) {
-        DeferPeek(target_url.ToString());
-        return true;
+    const LinkDisposition disposition = LinkDispositionFrom(target_disposition);
+    if (disposition == LinkDisposition::kCurrentTab || disposition == LinkDisposition::kOther) {
+        return false;
     }
-    return false;
+    HandleLinkOpen(browser, target_url.ToString(), DecideLinkOpen(disposition, user_gesture));
+    return true;
 }
 
 void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
@@ -4492,10 +4521,27 @@ void BrowserWindow::DeferPeek(const std::string& url) {
                             CefRefPtr<BrowserWindow>(this), url)));
 }
 
+void BrowserWindow::HandleLinkOpen(CefRefPtr<CefBrowser> browser, const std::string& url,
+                                   LinkOpenAction action) {
+    if (action == LinkOpenAction::kReject || !IsPeekLinkSource(browser)) {
+        return;
+    }
+    if (action == LinkOpenAction::kPeek) {
+        DeferPeek(url);
+        return;
+    }
+    // Like the peek, the tab opens on the next UI task, outside CEF's dispatch.
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window, std::string target) {
+                                static_cast<void>(window->OpenLinkTab(target));
+                            },
+                            CefRefPtr<BrowserWindow>(this), url)));
+}
+
 PeekOverlay& BrowserWindow::EnsurePeek() {
     if (peek_ == nullptr) {
-        peek_ =
-            std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()));
+        peek_ = std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()),
+                                              icon_resource_root_);
     }
     return *peek_;
 }
@@ -4511,6 +4557,8 @@ bool BrowserWindow::OpenPeek(std::string_view url) {
     }
     PeekOverlay& peek = EnsurePeek();
     peek.Open(address.url, active_space().request_context(), chrome_snapshot_.content_bounds);
+    // An open card takes the neutral overlay focus ring (no accent) like the palettes do.
+    OnOverlayFocusRingChanged();
     return peek.open();
 }
 
@@ -4521,19 +4569,34 @@ void BrowserWindow::ClosePeek() {
     }
 }
 
+bool BrowserWindow::OpenLinkTab(std::string_view url) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return false;
+    }
+    const ValidatedAddress address = address_validator_(url);
+    if (!address.is_valid() || !IsWebUrl(address.url)) {
+        return false;
+    }
+    AddTabToActiveSpace(address.url, TabPlacement::kAfterActive);
+    return true;
+}
+
 void BrowserWindow::OnPeekOpenAsTab(std::string url) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return;
     }
-    // The card's page is reopened as a real tab of the active space; the card's browser (and its
-    // history and scroll state) is not transferred.
-    AppendTabToActiveSpace(std::move(url));
+    // The card's page is reopened as a real tab of the active space, right after the current tab
+    // like a link open; the card's browser (and its history and scroll state) is not transferred.
+    AddTabToActiveSpace(std::move(url), TabPlacement::kAfterActive);
 }
 
 void BrowserWindow::OnPeekClosed() {
     CEF_REQUIRE_UI_THREAD();
     if (!closing_) {
+        // The card's neutral focus ring goes away with it: the window's ring is recomputed.
+        OnOverlayFocusRingChanged();
         FocusBrowserView();
     }
 }
@@ -7352,7 +7415,7 @@ void BrowserWindow::OnOverlayFocusRingChanged() {
 
 bool BrowserWindow::OverlayFocusRingShown() const {
     return (welcome_ != nullptr && welcome_->visible()) ||
-           (command_palette_ != nullptr && command_palette_->visible());
+           (command_palette_ != nullptr && command_palette_->visible()) || peek_open();
 }
 
 void BrowserWindow::ApplyPageViewVisibility() {

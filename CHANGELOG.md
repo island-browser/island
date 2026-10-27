@@ -43,6 +43,17 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   restart. Only the exact embedded Settings document may send Settings messages. Compact and
   Comfortable now use visibly different row, gap and sidebar-padding tokens in every look, empty
   lists are vertically centered, and shortcut changes update the macOS menu bar immediately.
+- Links from pages open the way you asked for them. Cmd/Ctrl+click a link to open it in the Peek
+  card; the middle button also opens Peek, because the browser reports it the same way. A plain
+  click on a link that opens in a new tab (target=_blank, or a page's window.open after a click)
+  and Shift+click open an ordinary tab in front, next to the current tab, and "Open as tab" places
+  its tab there too. Before this, plain new-tab links opened Peek. Script-initiated popups and
+  tabs without a click stay rejected.
+- The Peek card is sized from the window: 80% of the content area's width and 85% of its height,
+  centered, with minimums of 360 by 280 DIP, and it follows the window when the window resizes.
+- The Peek buttons are restyled as neutral toolbar-style controls: "Open as tab" with an icon and
+  label, and an icon-only close with the accessible name "Close Peek". Both use the native hover
+  and pressed states and a neutral focus ring, with no accent color.
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
   imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
   file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be

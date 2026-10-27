@@ -47,6 +47,8 @@ add_executable(island_tests
     navigation_state_test.cpp
     overlay_lifetime_test.cpp
     peek_state_test.cpp
+    peek_layout_test.cpp
+    link_open_policy_test.cpp
     prefs_store_test.cpp
     reader_mode_test.cpp
     settings_focus_test.cpp
@@ -107,6 +109,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_window_find_reader.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/link_open_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/collect_prompt.cc"
     "${CMAKE_SOURCE_DIR}/src/main/report_store.cc"
