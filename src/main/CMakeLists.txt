@@ -51,6 +51,7 @@ add_library(island_browser_core STATIC
     search_engine.cc
     search_provider.cc
     start_tiles.cc
+    session_save_scheduler.cc
     session_store.cc
     sha256.cc
     sidebar_state.cc

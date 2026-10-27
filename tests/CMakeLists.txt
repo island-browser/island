@@ -62,6 +62,7 @@ add_executable(island_tests
     search_provider_test.cpp
     start_tiles_test.cpp
     session_store_test.cpp
+    session_save_scheduler_test.cpp
     sidebar_state_test.cpp
     space_icon_cache_test.cpp
     space_menu_test.cpp
@@ -123,6 +124,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/search_engine.cc"
     "${CMAKE_SOURCE_DIR}/src/main/search_provider.cc"
     "${CMAKE_SOURCE_DIR}/src/main/start_tiles.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/session_save_scheduler.cc"
     "${CMAKE_SOURCE_DIR}/src/main/session_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sha256.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
