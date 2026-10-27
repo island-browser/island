@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import plistlib
 import struct
@@ -102,6 +103,12 @@ class DmgDsStoreTests(unittest.TestCase):
         self.assertIn(b"/Volumes/Island", alias)
         self.assertEqual(alias[-4:], b"\xff\xff\x00\x00")
         self.assertEqual(alias[10 + 28: 10 + 32], struct.pack(">I", 1_700_000_000 + dmg_ds_store.HFS_EPOCH_OFFSET))
+
+    def test_background_colour_fills_past_the_picture(self) -> None:
+        layout = dataclasses.replace(LAYOUT, background_rgb=(0.25, 0.5, 0.75))
+        view = plistlib.loads(read(dmg_ds_store.build(layout))[(".", "icvp")])
+        self.assertEqual((view["backgroundColorRed"], view["backgroundColorGreen"],
+                          view["backgroundColorBlue"]), (0.25, 0.5, 0.75))
 
     def test_file_is_deterministic_and_block_aligned(self) -> None:
         self.assertEqual(self.data, dmg_ds_store.build(LAYOUT))

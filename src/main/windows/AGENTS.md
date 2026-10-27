@@ -32,6 +32,13 @@ application/compatibility manifests embedded in the executable.
   `WIN32_LEAN_AND_MEAN` (see how `island_tests` sets them) so the `min`/`max` macros do not clobber
   `std::min`/`std::max`. `browser_chrome.h` also `#undef`s them defensively.
 - Windows support claims require native GitHub Actions evidence; there is no local build evidence.
+- Known gap (follow-up, not in the 0.9 icon change): the sandboxed release build (`USE_SANDBOX=ON`,
+  what `package.yml` and `ci.yml` build) ships CEF's icon-less `bootstrap.exe` as
+  `island_browser.exe`, so the exe has no icon in Explorer or on its taskbar button. The installer,
+  shortcuts and uninstall entry carry `island.ico`. The fix is a post-build step in the sandbox
+  branch of `cmake/platform/windows.cmake` that writes the icon into the copied `bootstrap.exe`
+  (`UpdateResource` or `rcedit`); it needs a Windows build to verify. Until then, `WM_SETICON` on
+  the main window would cover the taskbar only.
 
 ### Testing Requirements
 

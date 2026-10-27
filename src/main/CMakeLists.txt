@@ -107,14 +107,15 @@ if(APPLE)
             ERROR_QUIET)
         string(REGEX MATCH "<key>short-bundle-version</key>[ \t\r\n]*<string>([0-9]+)"
             _island_actool_match "${_island_actool_version}")
-        if(CMAKE_MATCH_1 GREATER_EQUAL 26)
+        if(_island_actool_match AND CMAKE_MATCH_1 GREATER_EQUAL 26)
             set(_island_actool_ok TRUE)
         endif()
     endif()
     if(_island_actool_ok)
-        file(GLOB ISLAND_GLASS_INPUTS "${ISLAND_GLASS_ICON}/icon.json" "${ISLAND_GLASS_ICON}/Assets/*")
+        file(GLOB ISLAND_GLASS_INPUTS CONFIGURE_DEPENDS "${ISLAND_GLASS_ICON}/icon.json" "${ISLAND_GLASS_ICON}/Assets/*")
         add_custom_command(
-            OUTPUT "${ISLAND_GLASS_CAR}"
+            OUTPUT "${ISLAND_GLASS_CAR}" "${CMAKE_CURRENT_BINARY_DIR}/glass-icon/Island.icns"
+                "${CMAKE_CURRENT_BINARY_DIR}/glass-icon/partial.plist"
             COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/glass-icon"
             COMMAND "${_island_actool}" "${ISLAND_GLASS_ICON}"
                 --compile "${CMAKE_CURRENT_BINARY_DIR}/glass-icon"

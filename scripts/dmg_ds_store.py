@@ -35,6 +35,7 @@ class Layout:
     text_size: int
     positions: dict[str, tuple[int, int]]  # item name -> icon centre in the window
     title_bar: int = 28
+    background_rgb: tuple[float, float, float] = (1.0, 1.0, 1.0)  # shows where the picture ends
     # The real volume's identity, so Finder resolves the background alias exactly (see
     # `installers._build_dmg`, which reads them from the mounted image). Unix seconds and
     # catalog node ids; the defaults are placeholders Finder falls back from by name.
@@ -52,8 +53,11 @@ def _pascal(text: str, size: int) -> bytes:
 def alias_record(layout: Layout) -> bytes:
     """A version-2 alias to `<volume>/<background_dir>/<background_name>`.
 
-    Finder resolves it by volume name and path when the ids of a real volume do not match, so
-    the identifiers here are fixed placeholders.
+    The volume and file ids are the real ones when the layout carries them (`installers` reads
+    them from the mounted image) and placeholders otherwise; Finder then resolves the alias by
+    volume name and path. HFS+ create dates are local time, but this adds the HFS epoch to Unix
+    time (UTC), so `volume_created` may not match the volume exactly; Finder falls back to the
+    name and path in that case.
     """
     volume_created = layout.volume_created + HFS_EPOCH_OFFSET
     file_created = layout.file_created + HFS_EPOCH_OFFSET
@@ -93,8 +97,10 @@ def records(layout: Layout) -> list[tuple[str, bytes, bytes, bytes]]:
     }
     view = {
         "viewOptionsVersion": 1, "backgroundType": 2,
-        "backgroundImageAlias": alias_record(layout), "backgroundColorRed": 1.0,
-        "backgroundColorGreen": 1.0, "backgroundColorBlue": 1.0, "iconSize": float(layout.icon_size),
+        "backgroundImageAlias": alias_record(layout),
+        "backgroundColorRed": layout.background_rgb[0],
+        "backgroundColorGreen": layout.background_rgb[1],
+        "backgroundColorBlue": layout.background_rgb[2], "iconSize": float(layout.icon_size),
         "textSize": float(layout.text_size), "arrangeBy": "none", "gridSpacing": 100.0,
         "gridOffsetX": 0.0, "gridOffsetY": 0.0, "labelOnBottom": True, "showIconPreview": True,
         "showItemInfo": False, "scrollPositionX": 0.0, "scrollPositionY": 0.0,

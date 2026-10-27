@@ -127,11 +127,16 @@ def macos_sign(app: Path) -> None:
     _run("codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app))
 
 
+# Measured on macOS 26 (the 2x capture): the title bar is 32 pt, not 28, and Finder's path bar is
+# 28 pt. The owner's Finder shows the path bar (a global preference that the .DS_Store does not
+# switch off), so the 400 pt picture fits the window only with 28 pt of spare content height.
+# With the path bar hidden that strip shows the picture's bottom colour.
 DMG_LAYOUT: Final = dmg_ds_store.Layout(
     volume_name=MAC_VOLUME_NAME, background_dir=DMG_BACKGROUND_DIR,
-    background_name=DMG_BACKGROUND_NAME, window_origin=(200, 120), window_size=(660, 400),
-    icon_size=128, text_size=13,
-    positions={MAC_APP_NAME: (165, 140), "Applications": (495, 140)})
+    background_name=DMG_BACKGROUND_NAME, window_origin=(200, 120), window_size=(660, 428),
+    title_bar=32, icon_size=128, text_size=13,
+    positions={MAC_APP_NAME: (165, 140), "Applications": (495, 140)},
+    background_rgb=(0x13 / 255, 0x45 / 255, 0x3F / 255))
 
 
 def stage_dmg_look(stage: Path) -> None:

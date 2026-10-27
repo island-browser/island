@@ -15,7 +15,7 @@ app bundle (that is `resources/island/`); the platform icon files are generated 
 | `app-icon.svg` | Light-appearance app icon: 1024 canvas, 824 squircle body at (100,100), soft shadow, no raster images. The one source for the `.icns`, `.ico`, Linux PNGs and Linux SVG |
 | `app-icon-dark.svg` | Dark-appearance variant; kept beside the light one, not yet used by a build (macOS 26 draws its dark glass rendition from `Island.icon`) |
 | `Island.icon/` | Icon Composer document for the macOS 26 Liquid Glass icon: `icon.json` (gradient fill, one group, `squares: shared`) and `Assets/{sea,sand,meadow,forest}.svg` layers split from `app-icon.svg` by `brand_icons.py glass`. `src/main/CMakeLists.txt` compiles it with `actool` into `Assets.car` (`CFBundleIconName` = `Island`); with no Xcode 26 `actool` the build warns and ships `island.icns` only |
-| `dmg-background.svg` | The 660x400 pt dmg window picture: label plates at the two icon slots, an arrow, "Drag Island to Applications" |
+| `dmg-background.svg` | The 660x400 pt dmg window picture (the window content is 660x428 pt: the picture plus Finder's 28 pt path bar; the bottom colour fills the rest when the path bar is hidden): label plates at the two icon slots, an arrow, "Drag Island to Applications" |
 | `dmg-background.png`, `dmg-background@2x.png` | Rendered from the SVG at 660x400 (72 dpi) and 1320x800 (144 dpi); `installers.py` joins them into a multi-resolution TIFF |
 
 ## For AI Agents

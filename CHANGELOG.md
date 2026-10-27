@@ -15,8 +15,9 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
-- An app icon on every platform (macOS `.icns` through `CFBundleIconFile`, Windows `.ico` in the exe
-  and the installer, Linux hicolor PNGs) and a designed macOS disk-image window: background picture,
+- An app icon on every platform (macOS `.icns` through `CFBundleIconFile`, Windows `.ico` in the
+  installer, shortcuts and uninstall entry, Linux hicolor PNGs) and a designed macOS disk-image
+  window: background picture,
   positioned icons, a volume icon and a "Drag Island to Applications" hint, built without a Finder
   session. The artwork is "Paper Relief"; `scripts/brand_icons.py install-concept` swaps it. On
   macOS 26 the app also carries a layered Liquid Glass icon (`Assets.car` through

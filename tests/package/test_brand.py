@@ -95,7 +95,7 @@ class GeneratedIconTests(unittest.TestCase):
             sizes.append(side)
         self.assertEqual(sizes, [16, 24, 32, 48, 64, 128, 256])
 
-    def test_linux_pngs_match_their_names_and_the_deb_ships_them(self) -> None:
+    def test_linux_icon_pngs_have_their_sizes_and_the_svg_is_the_brand_svg(self) -> None:
         for size in installers.LINUX_ICON_SIZES:
             self.assertEqual(png_size(MAIN / "linux" / "icons" / f"island-browser-{size}.png"), (size, size))
         self.assertEqual((MAIN / "linux" / "island-browser.svg").read_bytes(), (BRAND / "app-icon.svg").read_bytes())
@@ -153,7 +153,6 @@ class LiquidGlassIconTests(unittest.TestCase):
         self.assertIn("message(WARNING", cmake)
         self.assertNotIn("message(FATAL_ERROR \"actool", cmake)
 
-    @unittest.skipUnless(sys.platform == "darwin", "the glass command rasterizes nothing but needs macOS paths")
     def test_glass_command_is_reproducible(self) -> None:
         sys.path.insert(0, str(REPOSITORY / "scripts"))
         try:
@@ -182,8 +181,15 @@ class DmgLookTests(unittest.TestCase):
 
     def test_layout_matches_the_background_and_the_two_icons(self) -> None:
         layout = installers.DMG_LAYOUT
-        self.assertEqual(layout.window_size, (660, 400))
+        # The 400 pt picture fills the content area above Finder's 28 pt path bar; the 32 pt title
+        # bar is measured on macOS 26. Without that spare height Finder shows a scroll bar.
+        self.assertEqual(layout.window_size, (660, 400 + 28))
+        self.assertEqual(layout.title_bar, 32)
         self.assertEqual(set(layout.positions), {installers.MAC_APP_NAME, "Applications"})
+        svg = (BRAND / "dmg-background.svg").read_text(encoding="utf-8")
+        bottom = re.search(r'stop-color="(#[0-9A-Fa-f]{6})"/></linearGradient>', svg)
+        self.assertIsNotNone(bottom)
+        self.assertEqual(bottom.group(1).upper(), "#%02X%02X%02X" % tuple(round(c * 255) for c in layout.background_rgb))
         self.assertEqual((layout.volume_name, layout.background_dir, layout.background_name),
                          (installers.MAC_VOLUME_NAME, ".background", "background.tiff"))
 
