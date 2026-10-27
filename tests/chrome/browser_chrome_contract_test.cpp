@@ -1062,8 +1062,6 @@ TEST(BrowserChromeFavoritesContractTest, GivenStripHeadersThenEachLookNamesItsSc
     EXPECT_EQ(SpaceFavoritesHeaderTitle(LookPreset::kGraphite, "Work"), "Favorites");
 }
 
-}  // namespace
-
 TEST(BrowserChromeContractTest, GivenASpaceSegmentWhenClickedThenOnlyTheActiveSpaceOpensItsMenu) {
     // The active segment opens the space menu; any other segment selects its space.
     EXPECT_EQ(BrowserChrome::SpaceSegmentClickFor(/*is_active_space=*/true),
@@ -1096,4 +1094,7 @@ TEST(BrowserChromeContractTest, GivenAHoveredNewTabRowThenItsCornersAndFillMatch
     EXPECT_EQ(BrowserChrome::NewTabRowFill(tokens, /*hovered=*/false),
               TabRowFill(tokens, false, false, false, false).value_or(tokens.canvas));
 }
+
+}  // namespace
+
 }  // namespace island

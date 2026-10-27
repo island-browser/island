@@ -460,6 +460,9 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         const std::size_t index = std::strtoul(action.c_str() + kFocusFavorite.size(), nullptr, 10);
         return app->FocusGlobalFavoriteForDev(index);
     }
+    if (action == "focus:new_tab") {
+        return app->FocusNewTabForDev();
+    }
     constexpr std::string_view kPeek = "peek:";
     if (action.compare(0, kPeek.size(), kPeek) == 0) {
         static_cast<void>(app->OpenPeek(action.substr(kPeek.size())));

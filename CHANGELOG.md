@@ -39,7 +39,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 - The sidebar's "+ New tab" row is back: directly under the "<Space> · Tabs" header in every look,
   and the collapsed rail's "+" after the tab icons. Both open a tab like ⌘T
-  (ChromeViewIds 1094 and 1095; 1052 stays retired).
+  (ChromeViewIds 1094 and 1095; 1052 stays retired). Its keyboard focus ring is neutral and not
+  clipped.
 - Clicking the active space in the space switcher (or its rail icon) opens a menu: Rename space,
   Change icon, the five colour presets, New space and Delete space. A click on another space still
   switches to it. Colour can now be changed from the sidebar.

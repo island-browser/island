@@ -128,15 +128,18 @@ platform executable links.
   `BrowserChrome::SpaceSegmentClickFor` decides the routing (active → menu, other → select).
   Hover fills of the New tab row use `NewTabRowFill` (the tab row's `TabRowFill`) and
   `NewTabCornerPatch` (the tab rows' 8 DIP radius), both listed in `ComputeCornerPatches`.
-  Fullscreen: `ResolvedTokens` drops `titlebar_band_dip` while `fullscreen_`; tests read it
-  through `TitlebarBandDipForTest`.
   Fullscreen: `OnWindowFullscreenTransition` tracks `fullscreen_`; `ResolvedTokens` drops the
   frameless `titlebar_band_dip` (the traffic-light inset) while fullscreen, so the rail and the
-  navigation row stop reserving room for hidden buttons, and restores it on exit.
+  navigation row stop reserving room for hidden buttons, and restores it on exit. Tests read it
+  through `TitlebarBandDipForTest`.
+  The expanded New tab row sits in a wrapper panel that keeps `kNewTabFocusInsetDip` (2 DIP) on
+  every side, so its keyboard focus ring is not clipped by the tab list; `ComputeTabStrip`
+  height counts the wrapper.
   Dev capture: `favorite:global:<i>` and
   `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`), and
   `focus:global_favorite:<i>` moves keyboard focus to the i-th global strip icon
-  (`IslandApp::FocusGlobalFavoriteForDev`).
+  (`IslandApp::FocusGlobalFavoriteForDev`); `focus:new_tab` moves it to the New tab control that
+  is drawn (`IslandApp::FocusNewTabForDev`, the expanded row or the collapsed rail's "+").
 - `ChromeViewId` values `1001`–`1027` are a hard invariant. Never renumber them; allocate new IDs
   after `1027`.
 - Keep genuinely CEF-free logic (`design_tokens`, `navigation_state`, `address_bar_model`,

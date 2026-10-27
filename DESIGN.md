@@ -302,13 +302,15 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   a footer with a quiet space chip and icon buttons. A "+ New tab" row sits directly under the
   "<Space> · Tabs" header, before the first tab row, in every look (owner decision 2026-10-26; it
   supersedes the 0.9 spec §9-4 removal). It is a row of the tab list (the same height and neutral
-  `hover` plate as a tab row, no accent) and opens a tab exactly like ⌘T; the collapsed rail's "+"
-  sits after the tab icons. Clicking the active space's segment (or its rail icon) opens the space
-  menu: Rename, Change icon, the five colour presets, New space and, with another space present,
-  Delete space. It is a palette listing shown only while open, not a persistent overlay.
-  In Arc and Graphite the footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
-  centered with the icon buttons and spaced like them: `hover` on hover, `segment_selected` while
-  the panel is open, the label `text` and the sparkle `text_2`, never an accent fill or label.
+  `hover` plate as a tab row, no accent) and opens a tab exactly like ⌘T. Its keyboard focus ring
+  sits in a 2 DIP inset around the row (a wrapper panel), so the ring is neutral, rounded and not
+  clipped by the tab list; the collapsed rail's "+" sits after the tab icons. Clicking the active
+  space's segment (or its rail icon) opens the space menu: Rename, Change icon, the five colour
+  presets, New space and, with another space present, Delete space. It is a palette listing shown
+  only while open, not a persistent overlay. In Arc and Graphite the footer's Agent button is a
+  neutral plate at the row radius (8 DIP) and the control height, centered with the icon buttons and
+  spaced like them: `hover` on hover, `segment_selected` while the panel is open, the label `text`
+  and the sparkle `text_2`, never an accent fill or label.
   Favicons sit on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on
   a dark sidebar. Chrome text uses the interface font (Geist, the system font, or an installed
   family). CEF `cef_views` has no corner-radius API and clips button images to the button's insets,

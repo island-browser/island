@@ -63,6 +63,10 @@ constexpr int kHairlineDip = 1;
 constexpr int kNativeFocusRingDip = 2;
 // Room around a strip icon for its keyboard focus ring (2 DIP ring plus a pixel of air).
 constexpr int kStripFocusInsetDip = 4;
+// Room around the expanded "+ New tab" row for its keyboard focus ring. The row is a
+// CefLabelButton, whose ring is drawn just outside its bounds, so the row sits in a wrapper that
+// keeps this inset on every side; the row itself keeps the tab rows' height.
+constexpr int kNewTabFocusInsetDip = kNativeFocusRingDip;
 
 // Gap between the address outline and the textfield. Native's field already sits inside a 2 DIP
 // accent ring. Arc and Graphite put the field straight on their 1 DIP outline, and Chromium's
@@ -2117,7 +2121,15 @@ CefRefPtr<CefLabelButton> BrowserChrome::AddNewTabRow() {
     row->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
     row->SetMinimumSize(CefSize(0, RowHeight()));
     row->SetFontList(FontList(13, ChromeFontWeight::kRegular));
-    tab_strip_->AddChildView(row);
+    CefRefPtr<CefPanel> wrapper = CefPanel::CreatePanel(
+        new PanelDelegate(this, CefSize(0, RowHeight() + 2 * kNewTabFocusInsetDip)));
+    CefBoxLayoutSettings wrapper_settings;
+    wrapper_settings.horizontal = static_cast<int>(false);
+    wrapper_settings.inside_border_insets = CefInsets(kNewTabFocusInsetDip, kNewTabFocusInsetDip,
+                                                      kNewTabFocusInsetDip, kNewTabFocusInsetDip);
+    wrapper->SetToBoxLayout(wrapper_settings);
+    wrapper->AddChildView(row);
+    tab_strip_->AddChildView(wrapper);
     ApplyNewTabVisual(row, /*hovered=*/false);
     return row;
 }
@@ -2184,7 +2196,8 @@ void BrowserChrome::UpdateTabStripPreferredSize() {
     const int children = count + headers + kickers + favorite_block_children_ + new_tab_rows;
     const int height = count * RowHeight() + headers * NativeSectionHeaderHeightDip() +
                        kickers * GroupedTabKickerHeightDip() + favorite_block_height_dip_ +
-                       new_tab_rows * RowHeight() + std::max(0, children - 1) * spacing;
+                       new_tab_rows * (RowHeight() + 2 * kNewTabFocusInsetDip) +
+                       std::max(0, children - 1) * spacing;
     const int width =
         std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
     if (tab_strip_delegate_ != nullptr) {
@@ -2600,6 +2613,19 @@ bool BrowserChrome::FocusGlobalFavoriteIcon(std::size_t index) {
         }
         if (icon++ == index) {
             view->RequestFocus();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool BrowserChrome::FocusNewTab() {
+    CEF_REQUIRE_UI_THREAD();
+    // The collapsed rail and the expanded tab list are never drawn together; take whichever
+    // "+" is on screen.
+    for (const CefRefPtr<CefLabelButton>& button : {new_tab_button_, collapsed_new_tab_button_}) {
+        if (button != nullptr && button->IsDrawn()) {
+            button->RequestFocus();
             return true;
         }
     }

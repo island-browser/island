@@ -683,6 +683,7 @@ class BrowserWindow : public CefClient,
     bool ActivateFavoriteForDev(bool global, std::size_t index);
     // Developer capture (`focus:global_favorite:<i>`): keyboard focus to a global strip icon.
     bool FocusGlobalFavoriteForDev(std::size_t index);
+    bool FocusNewTabForDev();
     // Closes the displayed virtual tab: its record returns to the favorite URL and the content slot
     // shows the selected ordinary tab again. Does nothing when no favorite is displayed.
     void CloseFavoriteTab();

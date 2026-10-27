@@ -5432,6 +5432,11 @@ bool BrowserWindow::FocusGlobalFavoriteForDev(std::size_t index) {
     return chrome_ != nullptr && chrome_->FocusGlobalFavoriteIcon(index);
 }
 
+bool BrowserWindow::FocusNewTabForDev() {
+    CEF_REQUIRE_UI_THREAD();
+    return chrome_ != nullptr && chrome_->FocusNewTab();
+}
+
 bool BrowserWindow::ActivateFavoriteForDev(bool global, std::size_t index) {
     CEF_REQUIRE_UI_THREAD();
     const SidebarCollectionSnapshot collection = BuildSidebarCollection();

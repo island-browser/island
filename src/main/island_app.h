@@ -49,6 +49,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     bool ActivateFavoriteForDev(bool global, std::size_t index);
     // Moves keyboard focus to the i-th global strip icon (`focus:global_favorite:<i>`).
     bool FocusGlobalFavoriteForDev(std::size_t index);
+    bool FocusNewTabForDev();
     [[nodiscard]] std::size_t SleepingTabCount() const;
     // One-line state for the dev log: tab, sleeping-tab and peek state.
     [[nodiscard]] std::string DevStateReport() const;

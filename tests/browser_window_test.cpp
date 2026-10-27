@@ -2091,8 +2091,6 @@ TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsRemovalFailsThenItStaysShownAn
     std::filesystem::remove_all(dir);
 }
 
-}  // namespace
-
 TEST(BrowserWindowTest, GivenASpaceMenuFlagLeftOverWhenTheCommandPaletteOpensThenItsRowsRun) {
     // Regression (OF-C): the menu's mode flag outlived the menu, so a normal palette submit was
     // read as a menu row and dropped. Opening the palette now clears the flag first.
@@ -2202,4 +2200,7 @@ TEST(BrowserWindowTest, GivenFullscreenWhenTheTitlebarInsetResolvesThenItIsZeroU
     window->SetFullscreenForTest(false);
     EXPECT_EQ(window->TitlebarBandDipForTest(), windowed);
 }
+
+}  // namespace
+
 }  // namespace island

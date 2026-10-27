@@ -1179,6 +1179,9 @@ class BrowserChrome final : public NavigationObserver {
     // Developer capture (`focus:global_favorite:<i>`): moves keyboard focus to the i-th global
     // strip icon so its focus ring can be captured. False when no such icon is shown.
     bool FocusGlobalFavoriteIcon(std::size_t index);
+    // Developer capture (`focus:new_tab`): moves keyboard focus to the New tab control that is
+    // drawn (the expanded row, or the collapsed rail's "+") so its focus ring can be captured.
+    bool FocusNewTab();
     [[nodiscard]] const SidebarCollectionSnapshot& sidebar_collection() const noexcept {
         return sidebar_collection_;
     }
