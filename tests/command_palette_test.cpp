@@ -327,6 +327,34 @@ TEST(CommandPaletteTest, GivenFakeTabBookmarkAndHistoryResultsThenSectionsKeepTh
     EXPECT_EQ(results[4].kind, PaletteEntryKind::kUrl);
 }
 
+TEST(CommandPaletteTest, GivenLibraryBookmarksThenFolderAndFavoriteMetadataStayOnOneBookmarkRow) {
+    const PaletteBookmarkEntry bookmark{.id = 42,
+                                        .title = "Project notes",
+                                        .url = "https://example.test/notes",
+                                        .folder_path = "Work",
+                                        .scope_label = "Global"};
+    const std::vector<PaletteEntry> results = ComposePaletteResults("project", {}, {}, {bookmark});
+
+    ASSERT_EQ(results.size(), 2U);  // one bookmark result plus the URL affordance
+    EXPECT_EQ(results[0].kind, PaletteEntryKind::kBookmark);
+    EXPECT_EQ(results[0].bookmark.id, 42U);
+    EXPECT_EQ(results[0].bookmark.folder_path, "Work");
+    EXPECT_EQ(results[0].bookmark.scope_label, "Global");
+}
+
+TEST(CommandPaletteTest, GivenABookmarkSelectionThenTheModelReturnsItForTheWindowToValidate) {
+    CommandPaletteModel palette(NeverCalledValidator());
+    palette.SetBookmarks(
+        {{.id = 7, .title = "Saved", .url = "https://saved.test/", .folder_path = "Unfiled"}});
+    palette.Open();
+
+    const std::optional<PaletteSelection> selection = palette.Submit();
+
+    ASSERT_TRUE(selection.has_value());
+    EXPECT_EQ(selection->kind, PaletteEntryKind::kBookmark);
+    EXPECT_EQ(selection->bookmark.id, 7U);
+}
+
 TEST(CommandPaletteTest, GivenAHistoryRowWhenSubmittedThenItIsReturnedWithoutUrlValidation) {
     CommandPaletteModel palette(NeverCalledValidator());
     palette.Open();
@@ -638,21 +666,25 @@ TEST(CommandPaletteTest, GivenCandidateAndQueryPairsWhenClassifiedThenTheRankOrd
     EXPECT_EQ(ClassifyPaletteMatch("Anything", "   "), PaletteMatchRank::kNone);
 }
 
-TEST(CommandPaletteTest, GivenReportsWhenComposedThenTheyListAfterBookmarksAndRankByTitleOrQuestion) {
+TEST(CommandPaletteTest,
+     GivenReportsWhenComposedThenTheyListAfterBookmarksAndRankByTitleOrQuestion) {
     const std::vector<PaletteReportEntry> reports = {
         {.id = "r1", .title = "Rust in short", .question = "what is rust"},
         {.id = "r2", .title = "Sky colour", .question = "why is the sky blue"},
     };
-    const std::vector<PaletteBookmarkEntry> bookmarks = {{.title = "Rust book", .url = "https://r.test/"}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {
+        {.title = "Rust book", .url = "https://r.test/"}};
     // Empty query: canonical order, reports after bookmarks, no URL row.
-    const std::vector<PaletteEntry> all = ComposePaletteResults("", {}, {}, bookmarks, {}, {}, reports);
+    const std::vector<PaletteEntry> all =
+        ComposePaletteResults("", {}, {}, bookmarks, {}, {}, reports);
     ASSERT_EQ(all.size(), 3U);
     EXPECT_EQ(all[0].kind, PaletteEntryKind::kBookmark);
     EXPECT_EQ(all[1].kind, PaletteEntryKind::kReport);
     EXPECT_EQ(all[1].report.id, "r1");
 
     // The question matches too; the URL row stays last.
-    const std::vector<PaletteEntry> sky = ComposePaletteResults("blue", {}, {}, {}, {}, {}, reports);
+    const std::vector<PaletteEntry> sky =
+        ComposePaletteResults("blue", {}, {}, {}, {}, {}, reports);
     ASSERT_EQ(sky.size(), 2U);
     EXPECT_EQ(sky[0].kind, PaletteEntryKind::kReport);
     EXPECT_EQ(sky[0].report.id, "r2");
@@ -688,6 +720,54 @@ TEST(CommandPaletteCommandsTest, GivenCommandsThenTheyFollowSpacesAndMatchByTitl
     ASSERT_EQ(found.size(), 2U);  // the command, then the go-to row
     EXPECT_EQ(found[0].kind, PaletteEntryKind::kCommand);
     EXPECT_EQ(found[0].command.id, "sleep_inactive_tabs");
+}
+
+TEST(CommandPaletteCommandsTest, GivenBookmarkCommandsThenTheyHeadTheBookmarksGroupBeforeItsRows) {
+    const std::vector<PaletteCommandEntry> commands{
+        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"},
+        {.id = "add_bookmark", .title = "Add bookmark", .bookmark_group = true}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {Bookmark("Docs", "https://docs.test/")};
+
+    const std::vector<PaletteEntry> all =
+        ComposePaletteResults("", {}, {}, bookmarks, {}, commands);
+
+    ASSERT_EQ(all.size(), 3U);
+    EXPECT_EQ(all[0].kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(all[0].command.id, "sleep_inactive_tabs");
+    EXPECT_EQ(all[1].kind, PaletteEntryKind::kCommand);
+    EXPECT_EQ(all[1].command.id, "add_bookmark");
+    EXPECT_EQ(all[2].kind, PaletteEntryKind::kBookmark);
+    EXPECT_EQ(PaletteGroupHeader(all[0]), "Commands");
+    EXPECT_EQ(PaletteGroupHeader(all[1]), "Bookmarks");
+    EXPECT_EQ(PaletteGroupHeader(all[2]), "Bookmarks");
+    EXPECT_EQ(PaletteKindLabel(all[1], /*sentence_case=*/true), "Bookmark");
+
+    // A query that matches only the bookmark command still lists it in its group.
+    const std::vector<PaletteEntry> found =
+        ComposePaletteResults("add book", {}, {}, bookmarks, {}, commands);
+    ASSERT_GE(found.size(), 1U);
+    EXPECT_EQ(found[0].command.id, "add_bookmark");
+    EXPECT_EQ(PaletteGroupHeader(found[0]), "Bookmarks");
+}
+
+TEST(CommandPaletteCommandsTest, GivenAnEmptyQueryThenGeneralCommandsPrecedeTheBookmarksGroup) {
+    // The window's registry lists its bookmark commands first, so the input order here is the
+    // reverse of the order the empty query must show.
+    const std::vector<PaletteCommandEntry> commands{
+        {.id = "add_bookmark", .title = "Add bookmark", .bookmark_group = true},
+        {.id = "sleep_inactive_tabs", .title = "Sleep inactive tabs now"}};
+    const std::vector<PaletteBookmarkEntry> bookmarks = {Bookmark("Docs", "https://docs.test/")};
+
+    const std::vector<PaletteEntry> all = ComposePaletteResults("", {}, {}, bookmarks, {}, commands);
+
+    ASSERT_EQ(all.size(), 3U);
+    EXPECT_EQ(all[0].command.id, "sleep_inactive_tabs");
+    EXPECT_EQ(all[1].command.id, "add_bookmark");
+    EXPECT_EQ(all[2].kind, PaletteEntryKind::kBookmark);
+    // One "Bookmarks" header: the group's command starts it and its rows continue it.
+    EXPECT_EQ(PaletteGroupHeader(all[0]), "Commands");
+    EXPECT_EQ(PaletteGroupHeader(all[1]), "Bookmarks");
+    EXPECT_EQ(PaletteGroupHeader(all[2]), "Bookmarks");
 }
 
 TEST(CommandPaletteCommandsTest, GivenAHighlightedCommandWhenSubmittedThenItsIdIsReturnedOnce) {

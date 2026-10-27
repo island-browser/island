@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <optional>
 #include <span>
 #include <string>
@@ -18,6 +19,7 @@
 #include "include/wrapper/cef_library_loader.h"
 #include "island_app.h"
 #include "keymap.h"
+#include "macos/keymap_menu_mac.h"
 #include "prefs_store.h"
 #include "space_icon.h"
 #include "startup_options.h"
@@ -75,6 +77,7 @@
 - (void)toggleAgentPanel:(id)sender;
 - (void)togglePinTab:(id)sender;
 - (void)openSettings:(id)sender;
+- (void)openBookmarks:(id)sender;
 - (void)openTabOverview:(id)sender;
 - (void)showCheatsheet:(id)sender;
 - (void)newTab:(id)sender;
@@ -88,6 +91,7 @@
 - (void)newSpace:(id)sender;
 - (void)closeSpace:(id)sender;
 - (void)beginSpaceRenaming:(id)sender;
+- (void)openSpaceMenu:(id)sender;
 - (void)setActiveSpaceIcon:(id)sender;
 - (void)moveSpaceLeft:(id)sender;
 - (void)moveSpaceRight:(id)sender;
@@ -152,6 +156,12 @@
 - (void)beginSpaceRenaming:(id)sender {
     if (app_ != nullptr) {
         app_->BeginSpaceRenaming();
+    }
+}
+
+- (void)openSpaceMenu:(id)sender {
+    if (app_ != nullptr) {
+        app_->OpenSpaceMenu();
     }
 }
 
@@ -231,7 +241,13 @@
 
 - (void)openSettings:(id)sender {
     if (app_ != nullptr) {
-        app_->ToggleSettings();
+        app_->OpenSettings();
+    }
+}
+
+- (void)openBookmarks:(id)sender {
+    if (app_ != nullptr) {
+        app_->OpenBookmarksPage();
     }
 }
 
@@ -420,6 +436,8 @@ bool CaptureOwnWindows(const std::string& path) {
 // `sleep_report` logs how many tabs sleep, `find:<text>` opens the find bar on a query, and
 // `key:<id>` runs a keymap action.
 // `research:<question>` starts a Research task and `open_report` opens the newest report.
+// `favorite:global:<i>` and `favorite:space:<i>` show a sidebar favorite (zero-based), and
+// `focus:global_favorite:<i>` moves keyboard focus to a global strip icon.
 bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action) {
     constexpr std::string_view kNavigate = "navigate:";
     if (app == nullptr) {
@@ -433,6 +451,25 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
             island::ParseDevSpaceIconAction(action)) {
         app->SetSpaceIconForDev(space_icon->index, space_icon->icon_id);
         return true;
+    }
+    constexpr std::string_view kFavorite = "favorite:";
+    if (action.compare(0, kFavorite.size(), kFavorite) == 0) {
+        const std::string rest = action.substr(kFavorite.size());
+        const std::size_t colon = rest.find(':');
+        const std::string scope = colon == std::string::npos ? "" : rest.substr(0, colon);
+        if ((scope == "global" || scope == "space") && colon != std::string::npos) {
+            const std::size_t index = std::strtoul(rest.c_str() + colon + 1, nullptr, 10);
+            return app->ActivateFavoriteForDev(scope == "global", index);
+        }
+        return false;
+    }
+    constexpr std::string_view kFocusFavorite = "focus:global_favorite:";
+    if (action.compare(0, kFocusFavorite.size(), kFocusFavorite) == 0) {
+        const std::size_t index = std::strtoul(action.c_str() + kFocusFavorite.size(), nullptr, 10);
+        return app->FocusGlobalFavoriteForDev(index);
+    }
+    if (action == "focus:new_tab") {
+        return app->FocusNewTabForDev();
     }
     constexpr std::string_view kPeek = "peek:";
     if (action.compare(0, kPeek.size(), kPeek) == 0) {
@@ -527,6 +564,13 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
         const std::size_t equals = rest.find('=');
         app->ApplyAppearanceForDev(rest.substr(0, equals),
                                    equals == std::string::npos ? "" : rest.substr(equals + 1));
+        return true;
+    }
+    // `palette_query:<text>` opens ⌘K with the query typed in (the palette's bookmark rows and
+    // their folder and favorite labels are captured this way).
+    constexpr std::string_view kPaletteQuery = "palette_query:";
+    if (action.compare(0, kPaletteQuery.size(), kPaletteQuery) == 0) {
+        app->ShowCommandPaletteWithQueryForDev(action.substr(kPaletteQuery.size()));
         return true;
     }
     const std::string_view settings_section = island::DevSettingsSectionName(action);
@@ -659,33 +703,9 @@ NSMenuItem* AddBrowserMenuItem(NSMenu* menu, IslandMenuActions* menu_actions, NS
     return item;
 }
 
-// Applies the user's keymap (prefs overrides on the defaults) to a menu item:
-// NSMenu owns the command keys on macOS, so Settings edits land here on the
-// next launch. An unbound action keeps its menu entry without a key.
+// Applies the user's keymap to a menu item and registers it for live refreshes.
 void ApplyKeyBinding(NSMenuItem* item, island::KeyAction action, const island::Keymap& keymap) {
-    const std::optional<island::KeyBinding> binding = keymap.Binding(action);
-    const std::optional<island::MacKeyEquivalent> equivalent =
-        binding.has_value() ? island::ToMacKeyEquivalent(*binding) : std::nullopt;
-    if (!equivalent.has_value()) {
-        [item setKeyEquivalent:@""];
-        [item setKeyEquivalentModifierMask:0];
-        return;
-    }
-    NSEventModifierFlags mask = 0;
-    if (equivalent->command) {
-        mask |= NSEventModifierFlagCommand;
-    }
-    if (equivalent->control) {
-        mask |= NSEventModifierFlagControl;
-    }
-    if (equivalent->shift) {
-        mask |= NSEventModifierFlagShift;
-    }
-    if (equivalent->option) {
-        mask |= NSEventModifierFlagOption;
-    }
-    [item setKeyEquivalent:[NSString stringWithUTF8String:equivalent->key.c_str()]];
-    [item setKeyEquivalentModifierMask:mask];
+    island::ApplyMacMenuKeyBinding(item, action, keymap);
 }
 
 // Creates a Browser-menu item that runs |action| and takes its key equivalent

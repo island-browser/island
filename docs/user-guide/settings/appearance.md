@@ -19,7 +19,9 @@ These controls apply to the Arc and Graphite looks. **Native has no space color*
 
 ## Layout
 
-* **Sidebar density**: **Comfortable** or **Compact**.
+* **Sidebar density**: **Comfortable** uses 36 DIP rows, 6 DIP row gaps and 16 DIP sidebar padding;
+  **Compact** uses 28 DIP rows, 2 DIP gaps and 8 DIP padding. The difference applies in Native,
+  Arc and Graphite.
 * **Sidebar position**: **Left** or **Right**.
 * **Page corner radius**: 0, 6, 10 or 14 (macOS).
 * **Full bleed**: the page fills its side edge to edge, with no inset, rounding or shadow.

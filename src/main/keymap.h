@@ -106,6 +106,8 @@ struct MacKeyEquivalent {
     bool control = false;
     bool shift = false;
     bool option = false;
+
+    bool operator==(const MacKeyEquivalent&) const = default;
 };
 [[nodiscard]] std::optional<MacKeyEquivalent> ToMacKeyEquivalent(const KeyBinding& binding);
 
@@ -137,6 +139,11 @@ class Keymap {
   private:
     std::array<std::optional<KeyBinding>, kKeyActionCount> bindings_{};
 };
+
+// Resolves one action through the live keymap into the NSMenu representation. Kept CEF- and
+// Cocoa-free so immediate menu updates are covered headlessly.
+[[nodiscard]] std::optional<MacKeyEquivalent> MacKeyEquivalentForAction(const Keymap& keymap,
+                                                                        KeyAction action);
 
 // One row of the ⌘/ cheatsheet: what it does and its current keys ("" when unbound).
 struct CheatsheetRow {

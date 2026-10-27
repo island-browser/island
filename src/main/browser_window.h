@@ -35,6 +35,7 @@
 #include "collect_prompt.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
+#include "favorite_tabs.h"
 #include "find_bar_model.h"
 #include "find_bar_overlay.h"
 #include "history_recorder.h"
@@ -45,6 +46,7 @@
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_window_delegate.h"
 #include "keymap.h"
+#include "link_open_policy.h"
 #include "local_page.h"
 #include "navigation_state.h"
 #include "peek_overlay.h"
@@ -60,6 +62,7 @@
 #include "settings_focus.h"
 #include "sidebar_state.h"
 #include "space.h"
+#include "space_menu.h"
 #include "space_rename_overlay.h"
 #include "start_tiles.h"
 #include "tab.h"
@@ -90,6 +93,33 @@ class WindowAgentHost;
                                     kLuminanceScale;
     return luminance < kDarkThemeLuminance ? ChromeTheme::kDark : ChromeTheme::kLight;
 }
+
+// What the palette's bookmark commands need to know about the page on screen, read when the
+// palette opens. Positions index the page's favorite within its list (kNoFavoritePosition when it
+// is not there); the counts are the list sizes. The commands are titled and filtered from this.
+struct BookmarkCommandState {
+    static constexpr std::size_t kNoFavoritePosition = static_cast<std::size_t>(-1);
+
+    std::string space_name;
+    bool page_bookmarkable = false;
+    std::size_t global_position = kNoFavoritePosition;
+    std::size_t global_count = 0;
+    std::size_t space_position = kNoFavoritePosition;
+    std::size_t space_count = 0;
+
+    [[nodiscard]] bool global_favorite() const noexcept {
+        return global_position != kNoFavoritePosition;
+    }
+    [[nodiscard]] bool space_favorite() const noexcept {
+        return space_position != kNoFavoritePosition;
+    }
+};
+
+// Where a new selected tab goes in its space: at the end, or right after the current tab's group.
+enum class TabPlacement {
+    kEnd,
+    kAfterActive,
+};
 
 class BrowserWindow : public CefClient,
                       public CefDisplayHandler,
@@ -204,7 +234,9 @@ class BrowserWindow : public CefClient,
     };
     [[nodiscard]] std::size_t AgentSpaceIndex() const;
     [[nodiscard]] AgentTabLookup ResolveAgentTab(std::optional<std::size_t> index) const;
-    [[nodiscard]] bool IsAgentPlanTab(std::optional<std::size_t> index) const;
+    // Island-owned tab documents are never agent targets. Refusal happens before navigation or a
+    // DevTools call, so Settings cannot receive an agent-generated bridge message.
+    [[nodiscard]] bool IsAgentPrivilegedTab(std::optional<std::size_t> index) const;
     [[nodiscard]] CefRefPtr<CefBrowser> AgentBrowser(AgentTabRef ref) const;
     [[nodiscard]] bool NavigateAgentTab(std::optional<std::size_t> index, std::string_view text);
     // Activating brings the agent's page to the front, switching the person to its space.
@@ -236,6 +268,12 @@ class BrowserWindow : public CefClient,
     void SetAddressValidatorForTest(AddressValidator validator) {
         address_validator_ = std::move(validator);
     }
+    // Replaces the bookmark library the way the constructor loads it: its space IDs are reserved
+    // before any space can be created.
+    void ReplaceBookmarkLibraryForTest(BookmarkStore library);
+    // Starts a favicon download for |tab| as OnFaviconURLChange does, then delivers |image|.
+    void CompleteFaviconDownloadForTest(TabId tab, const std::string& icon_url,
+                                        CefRefPtr<CefImage> image);
 
     // What the address bar does with typed text: a search on the configured
     // engine when it is not a URL (address_input.h), else the validator's
@@ -251,6 +289,11 @@ class BrowserWindow : public CefClient,
     // URL loads. Computed on first use (it needs CEF's base64 encoder).
     [[nodiscard]] const std::string& StartPageUrl() const;
     void SetStartPageUrlForTest(std::string url) { start_page_url_ = std::move(url); }
+    // Settings is an ordinary tab whose bridge accepts only this exact generated document.
+    // It is deliberately excluded from session restore.
+    [[nodiscard]] const std::string& SettingsPageUrl() const;
+    [[nodiscard]] bool IsSettingsPageUrl(std::string_view url) const;
+    void SetSettingsPageUrlForTest(std::string url) { settings_page_url_ = std::move(url); }
     // The state the start page renders, exposed for tests.
     [[nodiscard]] std::string StartPageStateJson() const;
     // Applies one start page message ({search}, {ask_agent}, {research}, {set_start_mode},
@@ -362,6 +405,20 @@ class BrowserWindow : public CefClient,
         return space_icon_picker_scheduled_;
     }
     void RunScheduledSpaceIconPickerForTest() { RunScheduledSpaceIconPicker(); }
+    // Space menu: opens are counted before the palette guard, so headless tests see them. Headless
+    // windows have no palette, so a test sets the palette's mode flag to model a showing menu.
+    [[nodiscard]] std::size_t SpaceMenuShowsForTest() const noexcept { return space_menu_shows_; }
+    void SetSpaceMenuOpenForTest(bool open) { space_menu_open_ = open; }
+    // SaveSession calls made so far (counted before SessionStore::Save runs).
+    [[nodiscard]] std::size_t SessionSaveRequestsForTest() const noexcept {
+        return session_save_requests_;
+    }
+    // Fullscreen: the traffic-light inset the resolved tokens reserve, and the fullscreen flag
+    // OnWindowFullscreenTransition sets (a test cannot enter real fullscreen headless).
+    void SetFullscreenForTest(bool fullscreen) { fullscreen_ = fullscreen; }
+    [[nodiscard]] int TitlebarBandDipForTest() const {
+        return ResolvedTokens(ResolvedChromeTheme()).titlebar_band_dip;
+    }
     // Headless windows have no CEF task queue: scheduling records the task without posting it.
     void DisableUiTaskPostingForTest() { ui_tasks_enabled_for_test_ = false; }
     // Real-gate seams: headless tests identify the tab represented by the content slot and drive
@@ -442,8 +499,11 @@ class BrowserWindow : public CefClient,
     void SetExportPathForTest(std::filesystem::path path) {
         export_path_for_test_ = std::move(path);
     }
-    // The command palette's command list (the window's own commands).
-    [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands();
+    // The command palette's command list (the window's own commands). The bookmark rows come
+    // from `bookmarks` in the "Bookmarks" group; the page-changing ones are left out unless the
+    // page on screen can be bookmarked, and the reorder rows only for a page that is a favorite.
+    [[nodiscard]] static std::vector<PaletteCommandEntry> PaletteCommands(
+        const BookmarkCommandState& bookmarks = {});
     void SetPlanCloseConfirmationForTest(
         std::function<bool(std::string_view, std::string_view, std::string_view)> confirm) {
         plan_close_confirmation_for_test_ = std::move(confirm);
@@ -451,12 +511,27 @@ class BrowserWindow : public CefClient,
     void SetPlanEntriesForTest(std::vector<agent::AcpPlanEntry> entries) {
         plan_entries_ = std::move(entries);
     }
+    // Test seam: a palette bookmark selection through the same path as Enter in the palette.
+    void OpenPaletteBookmarkForTest(const PaletteBookmarkEntry& bookmark) {
+        OpenBookmark(bookmark);
+    }
     bool SetTabAddressForTest(std::size_t space, std::size_t tab, std::string url) {
         if (space >= spaces_.size() || tab >= spaces_[space].tab_count()) {
             return false;
         }
         spaces_[space].tabs()[tab].navigation_state().SetAddress(std::move(url));
         return true;
+    }
+    // The navigation state of the shown tab: the displayed favorite's, else the selected tab's.
+    [[nodiscard]] NavigationState* DisplayedNavigationForTest() {
+        Tab* tab = DisplayedTab();
+        return tab != nullptr ? &tab->navigation_state() : nullptr;
+    }
+    // The tab FocusBrowserView() hands keyboard focus to: the displayed favorite's, else the
+    // selected tab's (never the hidden selected tab behind a favorite).
+    [[nodiscard]] std::optional<TabId> FocusTargetTabIdForTest() const noexcept {
+        const Tab* tab = FocusTargetTab();
+        return tab != nullptr ? std::optional<TabId>(tab->id()) : std::nullopt;
     }
     // Marks a research task as running without sending anything, as if the
     // prompt had gone out after `turns_ended_before` turns.
@@ -511,11 +586,12 @@ class BrowserWindow : public CefClient,
     void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) override;
     void OnLocalPageBrowserCreated(LocalPageKind kind) override;
 
-    // Built-in pages shown in the content area (Settings, the all-tabs
-    // overview). Toggling the shown page hides it; selecting any tab hides it
-    // too. No-op without chrome.
+    // The All-tabs content-slot page. Toggling it hides it; selecting any tab hides it too.
+    // No-op without chrome. Settings is an ordinary tab and uses OpenSettings instead.
     void ToggleTabOverview() override;
-    void ToggleSettings() override;
+    void OpenSettings() override;
+    // Shows the managed bookmark library. Repeated requests keep its one local page focused.
+    void OpenBookmarksPage();
     // Opens Settings on one section (the Settings page names: appearance, shortcuts, ...).
     void OpenSettingsSection(std::string section);
     void OpenBlockerSettings() override;
@@ -525,7 +601,23 @@ class BrowserWindow : public CefClient,
     }
     // The state the pages render, exposed for tests.
     [[nodiscard]] std::string SettingsStateJson() const;
+    // Explicit headless seam for Settings behavior tests. Production messages must pass the
+    // exact-document bridge in OnConsoleMessage; OnLocalPageMessage(kSettings) is intentionally
+    // dead because Settings no longer owns a content-slot LocalPage.
+    void HandleSettingsMessageForTest(const json::Value& message) {
+        HandleSettingsMessage(message);
+    }
+    [[nodiscard]] bool HandleSettingsBridgeMessageForTest(std::string_view frame_url,
+                                                          const json::Value& message) {
+        return HandleSettingsBridgeMessage(frame_url, message);
+    }
+    void SetSettingsDocumentReadyForTest(TabId tab, bool ready);
+    [[nodiscard]] std::optional<std::string> DeliverSettingsRenderStateForTest(TabId tab);
+    [[nodiscard]] bool LocalPagesRenderScheduledForTest() const noexcept {
+        return agent_panel_render_scheduled_;
+    }
     [[nodiscard]] std::string TabOverviewStateJson() const;
+    [[nodiscard]] std::string BookmarksStateJson() const;
 
     // All-tabs overview operations, addressed by space and tab position.
     // Each returns false for out-of-range positions or while closing.
@@ -603,6 +695,10 @@ class BrowserWindow : public CefClient,
     // OpenPeek validates |url| like any address and replaces an open peek's page.
     bool OpenPeek(std::string_view url);
     void ClosePeek();
+    // A page's foreground link open (see link_open_policy.h) as a tab of the active space, placed
+    // after the current tab's group and selected. `url` is validated like any address; false
+    // when closing or when it is not an allowed web URL.
+    bool OpenLinkTab(std::string_view url);
     [[nodiscard]] bool peek_open() const noexcept { return peek_ != nullptr && peek_->open(); }
     // The ⌘/ shortcut cheatsheet. While it is open it owns Escape, ahead of a peek and of
     // stop-loading.
@@ -631,6 +727,78 @@ class BrowserWindow : public CefClient,
     }
     [[nodiscard]] const ChromeSnapshot& chrome_snapshot() const noexcept;
     [[nodiscard]] ChromeViewTreeNode chrome_view_tree_snapshot() const;
+    // Favorites (0.9). A scope is std::nullopt for the global strip or a space's SpaceId value.
+    // Every bookmark mutation runs through one helper: a failure is kept as the sidebar status
+    // with its retry, and a success clears it.
+    BookmarkResult AddFavoriteByUrl(FavoriteScope scope, std::string_view title,
+                                    std::string_view url);
+    BookmarkResult RemoveFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Toggle the active web page in the global or active-space favorite list.
+    // These small public seams are also the keyboard-shortcut targets.
+    BookmarkResult ToggleGlobalFavoriteForCurrentPage();
+    BookmarkResult ToggleSpaceFavoriteForCurrentPage();
+    // The palette's bookmark state, read when the palette opens: the page on screen and its
+    // favorite positions. One row per library bookmark, in folder order, with its favorite scopes
+    // joined as one label.
+    [[nodiscard]] BookmarkCommandState CurrentBookmarkCommandState() const;
+    [[nodiscard]] std::vector<PaletteBookmarkEntry> PaletteBookmarkEntries() const;
+    // Runs the last failed bookmark mutation again. With no retryable failure it returns an error.
+    BookmarkResult RetryLastBookmarkMutation();
+    void DismissBookmarkStatus();
+    // Shows the favorite's virtual tab in the focused content slot. The selected ordinary tab is
+    // unchanged and returns when the virtual tab closes. False when the favorite is not in that
+    // list, or it is a scoped list of a space that is not the active one (global favorites are
+    // reachable from any space).
+    bool ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Developer capture (`favorite:global:<i>` / `favorite:space:<i>`): activates the i-th favorite
+    // of the sidebar's global strip or the active space's list, as a click on its row would.
+    bool ActivateFavoriteForDev(bool global, std::size_t index);
+    // Developer capture (`focus:global_favorite:<i>`): keyboard focus to a global strip icon.
+    bool FocusGlobalFavoriteForDev(std::size_t index);
+    // Developer capture (`focus:new_tab`): keyboard focus to the drawn New tab control.
+    bool FocusNewTabForDev();
+    // Closes the displayed virtual tab: its record returns to the favorite URL and the content slot
+    // shows the selected ordinary tab again. Does nothing when no favorite is displayed.
+    void CloseFavoriteTab();
+    [[nodiscard]] std::optional<FavoriteTabKey> displayed_favorite() const noexcept {
+        return displayed_favorite_;
+    }
+    // The tab the person sees and that page commands, the address field and the agent target: the
+    // displayed favorite's virtual tab, else the selected ordinary tab. Empty without a tab.
+    [[nodiscard]] std::optional<TabId> shown_tab_id() const noexcept;
+    // The tabs the content slot shows: the single shown tab, or the split pair. While a favorite
+    // covers one split pane, the favorite takes that pane and the other pane keeps its tab.
+    struct ShownPanes {
+        TabId first;
+        std::optional<TabId> second;  // engaged only while a split is shown
+        bool operator==(const ShownPanes&) const = default;
+    };
+    [[nodiscard]] std::optional<ShownPanes> ShownPanesForTest() const { return ShownPanesFor(); }
+    [[nodiscard]] std::vector<TabSleepInput> SleepInputsForTest() const {
+        return CollectSleepInputs();
+    }
+    // The URL a tab recreates from (ordinary or virtual). Empty when the tab is unknown.
+    [[nodiscard]] std::optional<std::string> TabStartupUrlForTest(TabId id) const;
+    // Agent ownership: only an ordinary tab the agent opened belongs to the agent. A favorite's
+    // virtual tab is the person's, whether it is shown or hidden.
+    [[nodiscard]] bool AgentOwnsTab(TabId id) const;
+    // Deletes a bookmark everywhere it is referenced (folder and every favorite list). Its
+    // favorites' virtual tabs go with it, and a displayed one returns the slot to its ordinary tab.
+    BookmarkResult DeleteBookmark(std::uint64_t bookmark_id);
+    // Peek of a favorite: the bookmark's URL, when the favorite is listed here (the global strip or
+    // the active space's list). Peek never touches the favorite's virtual tab.
+    [[nodiscard]] std::optional<std::string> FavoritePeekUrl(FavoriteScope scope,
+                                                             std::uint64_t bookmark_id) const;
+    bool PeekFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    [[nodiscard]] const FavoriteTabRecord* FavoriteTabRecordFor(const FavoriteTabKey& key) const {
+        return favorite_tabs_.Find(key);
+    }
+    // The sidebar collection for the current state: global favorites, the active space's
+    // favorites, its tab rows and the bookmark status. Built on demand; UpdateChromeCollections
+    // pushes it to the chrome.
+    [[nodiscard]] SidebarCollectionSnapshot BuildSidebarCollection() const;
+    [[nodiscard]] const BookmarkStore& bookmarks() const noexcept { return bookmarks_; }
+
     void RequestClose();
     // Opens the Cmd/Ctrl+K search palette, creating it on first use. Public so the
     // macOS main menu can reach it: CefWindow::SetAccelerator never dispatches on
@@ -640,6 +808,8 @@ class BrowserWindow : public CefClient,
     // creating it on first use. The Phase 3 design fixes Cmd/Ctrl+K on the
     // command palette; the later search palette keeps Cmd/Ctrl+Shift+K.
     void ShowCommandPalette();
+    // Developer capture only (`palette_query:<text>`): opens the palette and types `query` into it.
+    void ShowCommandPaletteWithQueryForDev(std::string_view query);
     // Reopens the palette listing only the space icons (and None) for the active space.
     void ShowSpaceIconPicker();
     // Queues ShowSpaceIconPicker on the next UI task. The palette's own submit runs inside its
@@ -650,6 +820,16 @@ class BrowserWindow : public CefClient,
     // Opens the rename overlay for the active space. Menu-driven on macOS (no
     // key equivalent); F2 is the cross-platform accelerator.
     void BeginSpaceRenaming();
+    // Opens the active space's menu (space_menu.h) as a palette listing: rename, change icon,
+    // colour presets, new space, delete space. Shown only while open, like the icon picker. A
+    // click on the active space's segment reaches it through ShowSpaceMenu; the dev action
+    // `space_menu` and the macOS dev selector reach it directly.
+    void OpenSpaceMenu();
+    // Runs a chosen menu row. Rename and icon hand the focus to their own overlay.
+    void RunSpaceMenuCommand(const SpaceMenuCommand& command);
+    // Queues RunSpaceMenuCommand on the next UI task: the palette's submit has just released its
+    // overlay, and rename/icon must show theirs after it (same FIFO as ScheduleSpaceIconPicker).
+    void ScheduleSpaceMenuCommand(SpaceMenuCommand command);
     // Find in page: opens the find bar on the active tab (or reselects its field when it is open),
     // optionally running `query` at once. Headless windows keep only the model, so tests and
     // dev actions can drive it.
@@ -685,6 +865,7 @@ class BrowserWindow : public CefClient,
     void SelectTab(std::size_t index) override;
     void CloseTab(std::size_t index) override;
     void SelectSpace(std::size_t index) override;
+    void ShowSpaceMenu(std::size_t index) override;
     void BeginAddressEditing() override;
     void SetAddressFocusRingSuppressed(bool suppressed) override;
     // What the last address focus change repainted: nothing, the three focus colors only, or a
@@ -703,6 +884,13 @@ class BrowserWindow : public CefClient,
     void SubmitAddressDraft(std::string_view draft) override;
     void FocusBrowserView() override;
     void SetTabPinned(std::size_t index, bool pinned) override;
+    // Bookmarks 0.9 sidebar collection (BrowserChromeHost). OpenMoreGlobalFavorites is a stub until
+    // the Bookmarks page exists; it logs and does nothing.
+    void ActivateFavoriteFromSidebar(FavoriteScope scope, std::uint64_t bookmark_id) override;
+    void OpenMoreGlobalFavorites() override;
+    void AddCurrentPageToGlobalFavorites() override;
+    void RetryFailedBookmarkMutation() override;
+    void DismissFailedBookmarkStatus() override;
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
 
     [[nodiscard]] CefRefPtr<CefBrowser> ActiveBrowser() override;
@@ -800,6 +988,9 @@ class BrowserWindow : public CefClient,
     void OnWindowCreated(CefRefPtr<CefWindow> window) override;
     void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
     void OnWindowBoundsChanged(CefRefPtr<CefWindow> window, const CefRect& new_bounds) override;
+    // macOS fullscreen hides the traffic lights, so the frameless titlebar inset is dropped while
+    // fullscreen and restored on exit (ResolvedTokens reads fullscreen_).
+    void OnWindowFullscreenTransition(CefRefPtr<CefWindow> window, bool is_completed) override;
     void OnThemeColorsChanged(CefRefPtr<CefWindow> window, bool chrome_theme) override;
     CefSize GetMinimumSize(CefRefPtr<CefView> view) override;
     bool CanClose(CefRefPtr<CefWindow> window) override;
@@ -851,6 +1042,16 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] Tab* FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept;
     [[nodiscard]] Tab* active_tab() noexcept;
     [[nodiscard]] const Tab* active_tab() const noexcept;
+    // The displayed virtual tab when one is shown, else active_tab(). Page commands, find, the
+    // address field and the agent read this; tab selection, sessions and sleep keep active_tab().
+    [[nodiscard]] Tab* DisplayedTab() noexcept;
+    [[nodiscard]] const Tab* DisplayedTab() const noexcept;
+    [[nodiscard]] const Tab* FocusTargetTab() const noexcept { return DisplayedTab(); }
+    // Clears the navigation observer of both candidate tabs, so only the tab on screen reports.
+    void ClearShownTabObservers();
+    // True when a favicon finished for |id| changes what the sidebar shows: an ordinary tab of the
+    // active space, or a virtual tab in global scope or the active space's scope.
+    [[nodiscard]] bool FaviconAffectsCollections(TabId id) const noexcept;
     // Creates the tab's CefBrowserView on first use (same creation path as
     // kNewTab: the active space's request context and the tab's startup URL).
     // False when headless; true when the tab already had a view. Only valid
@@ -959,6 +1160,10 @@ class BrowserWindow : public CefClient,
     // startup page) and makes it active; kNewTab and OpenNewTab share it.
     // `opened_by_agent` marks the tab as one the agent opened (see Tab::opened_by_agent).
     void AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent = false);
+    // The one creation path for a new selected tab: places it, creates its browser view and
+    // moves the tab observers to it. AppendTabToActiveSpace and the link and Peek opens use it.
+    void AddTabToActiveSpace(std::string startup_url, TabPlacement placement,
+                             bool opened_by_agent = false);
     // Adds an empty space (next palette color) at the end and returns it; the caller gives it
     // a tab and makes it active.
     Space& AppendSpace(std::string name);
@@ -1044,6 +1249,9 @@ class BrowserWindow : public CefClient,
     // Pushes StartPageStateJson to every tab currently showing the start page
     // (and each open report page its report and theme).
     void RenderStartPages();
+    [[nodiscard]] bool RenderSettingsPages();
+    [[nodiscard]] bool RenderSettingsFrame(Tab& tab, CefRefPtr<CefFrame> frame);
+    [[nodiscard]] std::optional<std::string> SettingsRenderState(const Tab& tab) const;
     void RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const;
     // The plan page's fixed data: URL, and the Plan tab's rendering.
     [[nodiscard]] const std::string& PlanPageUrl() const;
@@ -1119,8 +1327,11 @@ class BrowserWindow : public CefClient,
     void ReportPageResult(CefRefPtr<CefBrowser> source, std::string_view kind,
                           std::string_view text) const;
     [[nodiscard]] json::Value ReportsListJson() const;
+    [[nodiscard]] bool HandleSettingsBridgeMessage(std::string_view frame_url,
+                                                   const json::Value& message);
     void HandleSettingsMessage(const json::Value& message);
     void HandleOverviewMessage(const json::Value& message);
+    void HandleBookmarksMessage(const json::Value& message);
     // Settings > Updates: the page's update messages, the state it renders,
     // the deferred startup check, and the updater's change notifications.
     [[nodiscard]] bool HandleUpdateMessage(std::string_view type, const json::Value& message);
@@ -1129,6 +1340,9 @@ class BrowserWindow : public CefClient,
     void OnUpdaterChanged();
     void HideInternalPage();
     [[nodiscard]] LocalPage* InternalPageFor(LocalPageKind kind) const;
+    [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>> SettingsTabLocation() const;
+    void OpenSettingsTab();
+    [[nodiscard]] bool CloseSettingsTab();
     void UpdateAddressBarForNavigation(const NavigationSnapshot& snapshot);
     void UpdateAddressBarForCurrentPage();
     [[nodiscard]] json::Value ThemeJson() const;
@@ -1153,6 +1367,45 @@ class BrowserWindow : public CefClient,
     // and an empty window recreates a single fresh default space. Returns the
     // removed space so its browsers can be closed after the model mutation.
     Space RemoveSpaceAtIndex(std::size_t index);
+    // The one path for bookmark mutations (see the favorites methods above). Reconciles virtual
+    // tabs with the library afterwards and reprojects the sidebar.
+    BookmarkResult RunBookmarkMutation(std::function<BookmarkResult()> mutation);
+    BookmarkResult ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id);
+    // Each command resolves the page (and any add-or-remove or position decision) when it is run,
+    // then hands RunBookmarkMutation a lambda that only applies that decision. A Retry therefore
+    // repeats the same change to the same page, however the displayed page has changed since.
+    BookmarkResult ToggleFavoriteForCurrentPage(FavoriteScope scope);
+    BookmarkResult AddCurrentPageBookmark();
+    // Moves the current page's favorite by `step` (-1 or +1) within its list.
+    BookmarkResult MoveCurrentPageFavorite(FavoriteScope scope, int step);
+    // The page the bookmark commands act on: the displayed favorite's virtual tab when one is
+    // shown, else the selected ordinary tab. Empty while a local page fills the slot or the page is
+    // not http(s).
+    struct BookmarkablePage {
+        std::string url;
+        std::string title;
+    };
+    [[nodiscard]] std::optional<BookmarkablePage> CurrentBookmarkablePage() const;
+    [[nodiscard]] const std::vector<std::uint64_t>* FavoriteIdsFor(FavoriteScope scope) const;
+    [[nodiscard]] bool IsFavorite(FavoriteScope scope, std::uint64_t bookmark_id) const;
+    struct BookmarkImportResult {
+        bool ok = false;
+        // A failed durable mutation has already populated the Retry-capable
+        // bookmark status, so local pages must not repeat it as transient feedback.
+        bool durable_failure = false;
+        std::string text;
+    };
+    [[nodiscard]] BookmarkImportResult ImportBookmarksFromBrowser(std::string_view source_id);
+    // Disposes the records and virtual tabs of favorites the library no longer lists. Returns true
+    // when the displayed virtual tab was one of them, so the caller re-attaches the content slot.
+    bool ReconcileFavoriteTabs();
+    [[nodiscard]] bool FavoriteListContains(const FavoriteTabKey& key) const;
+    // Destroys a virtual tab and closes its browser. Its record is left to the caller.
+    void DropVirtualTab(const FavoriteTabKey& key);
+    [[nodiscard]] Tab* FindVirtualTab(const FavoriteTabKey& key) noexcept;
+    [[nodiscard]] std::optional<ShownPanes> ShownPanesFor() const;
+    // Returns the content slot to the selected ordinary tab when a virtual tab is displayed.
+    void ReturnToOrdinaryTab();
     // Closes every CefBrowser owned by |space|'s tabs. Must run after the
     // model mutation, never while iterating spaces_.
     void CloseSpaceBrowsers(Space& space);
@@ -1215,6 +1468,9 @@ class BrowserWindow : public CefClient,
     void TouchActiveTabs();
     void RestoreSavedScroll(Tab& tab, CefRefPtr<CefFrame> frame);
     void DeferPeek(const std::string& url);
+    // Runs the decision made by DecideLinkOpen for a new-tab open a page requested.
+    void HandleLinkOpen(CefRefPtr<CefBrowser> browser, const std::string& url,
+                        LinkOpenAction action);
     [[nodiscard]] PeekOverlay& EnsurePeek();
     [[nodiscard]] bool IsPeekLinkSource(CefRefPtr<CefBrowser> browser) const;
 
@@ -1237,11 +1493,18 @@ class BrowserWindow : public CefClient,
     std::map<std::string, TabId> plan_node_tabs_;
     // True while the command palette is the space-icon picker (no tabs, no history rows).
     bool space_icon_picker_open_ = false;
+    // True while the command palette is the active space's menu (space_menu.h).
+    bool space_menu_open_ = false;
+    // True from a completed fullscreen transition until the window leaves fullscreen.
+    bool fullscreen_ = false;
     // The agent's most recent page during a research (runtime only; never persisted).
     std::optional<TabId> agent_tab_id_;
     bool space_icon_picker_scheduled_ = false;
     bool ui_tasks_enabled_for_test_ = true;
     std::size_t space_icon_picker_shows_ = 0;
+    std::size_t space_menu_shows_ = 0;
+    // Mutable: SaveSession is const; the counter is test bookkeeping only.
+    mutable std::size_t session_save_requests_ = 0;
     bool closing_plan_after_confirmation_ = false;
     // Why the last plan action was refused (depth limit, agent busy); empty when none.
     std::string plan_notice_;
@@ -1350,6 +1613,32 @@ class BrowserWindow : public CefClient,
     // In-memory until the persisted path is set in the constructor (headless and smoke shapes
     // never touch bookmarks.json).
     BookmarkStore bookmarks_;
+    // Virtual ("phantom") favorite tabs: live Tabs kept outside spaces_, one per favorite that has
+    // been activated, keyed like their session records. Their TabIds are fresh each run.
+    std::map<FavoriteTabKey, Tab> virtual_tabs_;
+    FavoriteTabRegistry favorite_tabs_;
+    std::optional<FavoriteTabKey> displayed_favorite_;
+    // The split member the displayed favorite covers: the focused pane when it was activated.
+    std::optional<TabId> favorite_pane_;
+    // The last failed bookmark mutation (or the load problem) and how to run it again. A null retry
+    // means the status cannot be retried, only dismissed.
+    struct FailedBookmarkMutation {
+        std::string message;
+        std::function<BookmarkResult()> retry;
+    };
+    std::optional<FailedBookmarkMutation> failed_bookmark_mutation_;
+    // The success notice of the last bookmark change that has one (a reorder announces its new
+    // place). Any later mutation or a dismiss clears it, and it never coexists with a failure.
+    std::optional<std::string> bookmark_notice_;
+    // Transient page feedback (such as an unsupported saved URL or import outcome). It never
+    // replaces the durable mutation status above, because that status may carry Retry.
+    struct BookmarksPageStatus {
+        std::string kind;
+        std::string message;
+    };
+    std::optional<BookmarksPageStatus> bookmarks_page_status_;
+    // The local library's transient filter is deliberately not persisted in the session.
+    std::optional<std::uint64_t> selected_bookmark_folder_;
     std::unique_ptr<HistoryRecorder> history_;
     std::unique_ptr<WelcomeFlow> welcome_;
     // Agent integration: the MCP tools endpoint and its DevTools bridge.
@@ -1358,8 +1647,8 @@ class BrowserWindow : public CefClient,
     AddressValidator address_validator_;
     // The sidebar agent: its panel view and the ACP session behind it.
     std::unique_ptr<LocalPage> agent_panel_;
-    std::unique_ptr<LocalPage> settings_page_;
     std::unique_ptr<LocalPage> overview_page_;
+    std::unique_ptr<LocalPage> bookmarks_page_;
     std::optional<LocalPageKind> internal_page_;
     // Set while an overview action mutates tabs, so the re-attach that
     // follows keeps the overview on screen instead of the active tab.
@@ -1407,6 +1696,7 @@ class BrowserWindow : public CefClient,
     // The Settings section requested by ShowSettingsSection; its sequence tells the page a
     // request is new even when the section name repeats.
     SettingsFocus settings_focus_;
+    std::string settings_page_url_;
     std::unique_ptr<update::Updater> updater_;
     CefRefPtr<CefContentBlocker> content_blocker_;
     // Most recent closed tabs, newest last (reopenable URLs), capped at

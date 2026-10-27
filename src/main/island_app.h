@@ -34,6 +34,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void BeginAddressEditing();
     void ShowSearchPalette();
     void ShowCommandPalette();
+    // Developer capture only (`palette_query:<text>`).
+    void ShowCommandPaletteWithQueryForDev(std::string_view query);
     void ToggleSidebar();
     // Developer-capture entry points (--island-dev-actions): set the persistent sidebar state
     // and load an address in the active tab through the address bar's own submit path.
@@ -44,6 +46,13 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     // and report counts for the dev log.
     std::size_t SleepInactiveTabsNow();
     bool OpenPeek(const std::string& address);
+    // Shows the favorite at `index` of the global strip (or of the active space's list) the way a
+    // click on its sidebar row does (`favorite:global:<i>`, `favorite:space:<i>`).
+    bool ActivateFavoriteForDev(bool global, std::size_t index);
+    // Moves keyboard focus to the i-th global strip icon (`focus:global_favorite:<i>`).
+    bool FocusGlobalFavoriteForDev(std::size_t index);
+    // Moves keyboard focus to the New tab control that is drawn (`focus:new_tab`).
+    bool FocusNewTabForDev();
     [[nodiscard]] std::size_t SleepingTabCount() const;
     // One-line state for the dev log: tab, sleeping-tab and peek state.
     [[nodiscard]] std::string DevStateReport() const;
@@ -73,10 +82,13 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
-    void ToggleSettings();
+    void OpenSettings();
+    void OpenBookmarksPage();
     void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
     void BeginSpaceRenaming();
+    // Opens the active space's menu (the palette listing of space_menu.h).
+    void OpenSpaceMenu();
     void SetActiveSpaceIcon(const std::string& icon_id);
     void SetSpaceIconForDev(std::size_t index, const std::string& icon_id);
     [[nodiscard]] std::string ActiveSpaceIconId() const;

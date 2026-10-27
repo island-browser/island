@@ -61,6 +61,14 @@ int ControlHeight(const ChromeTokens& tokens) { return tokens.control_height_dip
 constexpr int kHairlineDip = 1;
 // Native paints focus as a 2 DIP accent ring; the row inset is that ring.
 constexpr int kNativeFocusRingDip = 2;
+// Room around a strip icon for its keyboard focus ring (2 DIP ring plus a pixel of air).
+constexpr int kStripFocusInsetDip = 4;
+// Room around the expanded "+ New tab" row for its keyboard focus ring. The row is a
+// CefLabelButton, whose ring is drawn just outside its bounds, so the row sits in a wrapper that
+// keeps this inset on every side; the row itself keeps the tab rows' height. The ring is drawn
+// about 4 DIP outside the row, so a 2 DIP inset drew only the top and bottom edges (no ring pixels
+// at the left or right sides in the capture); the row uses the strip icons' 4 DIP inset.
+constexpr int kNewTabFocusInsetDip = kStripFocusInsetDip;
 
 // Gap between the address outline and the textfield. Native's field already sits inside a 2 DIP
 // accent ring. Arc and Graphite put the field straight on their 1 DIP outline, and Chromium's
@@ -148,7 +156,7 @@ CefBoxLayoutSettings FloatingCanvasLayout(const BrowserChrome::CardInsets& inset
 }
 
 // The rail uses a dedicated layout: a top inset (RailTopInsetDip), the shared
-// between-section step (RailSectionSpacingDip), and spacing_3 side and bottom
+// between-section step (RailSectionSpacingDip), and the density-owned side and bottom
 // insets so the whole column sits on one gutter.
 CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
@@ -157,8 +165,8 @@ CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     const int top = tokens.look == LookPreset::kNative && tokens.titlebar_band_dip > 0
                         ? tokens.titlebar_band_dip
                         : BrowserChrome::RailTopInsetDip(tokens);
-    settings.inside_border_insets =
-        CefInsets(top, tokens.spacing_3_dip, tokens.spacing_3_dip, tokens.spacing_3_dip);
+    settings.inside_border_insets = CefInsets(
+        top, tokens.sidebar_padding_dip, tokens.sidebar_padding_dip, tokens.sidebar_padding_dip);
     return settings;
 }
 
@@ -566,7 +574,10 @@ ArgbColor BrowserChrome::TextfieldFocusRingColor(const ChromeTokens& tokens, boo
         // TextfieldFocusRingBackdrop). The plate fill makes that ring vanish into the plate.
         return AddressPlateStyleFor(tokens).fill;
     }
-    return tokens.accent;
+    // Every other keyboard focus ring (sidebar icons, rows, footer and status buttons) is the
+    // neutral text_secondary ring, never the accent (DESIGN.md §8). Only the address field keeps
+    // the accent ring.
+    return tokens.text_secondary;
 }
 
 ArgbColor BrowserChrome::TextfieldFocusRingBackdrop(const ChromeTokens& tokens,
@@ -583,6 +594,25 @@ ArgbColor BrowserChrome::TextfieldOutlineColor(const ChromeTokens& tokens, bool 
         return AddressPlateStyleFor(tokens).fill;
     }
     return tokens.border;
+}
+
+ArgbColor BrowserChrome::NewTabRowFill(const ChromeTokens& tokens, bool hovered) {
+    return TabRowFill(tokens, /*active=*/false, /*pinned=*/false, hovered,
+                      /*behind_favorite=*/false)
+        .value_or(tokens.canvas);
+}
+
+std::optional<CornerPatch> BrowserChrome::NewTabCornerPatch(const DipRect& bounds, bool hovered) {
+    if (!hovered || bounds.width <= 0 || bounds.height <= 0) {
+        return std::nullopt;
+    }
+    return CornerPatch{
+        .x = bounds.x, .y = bounds.y, .width = bounds.width, .height = bounds.height,
+        .radius = kRowFillRadiusDip};
+}
+
+BrowserChrome::SpaceSegmentClick BrowserChrome::SpaceSegmentClickFor(bool is_active_space) {
+    return is_active_space ? SpaceSegmentClick::kOpenMenu : SpaceSegmentClick::kSelectSpace;
 }
 
 std::optional<CornerPatch> BrowserChrome::AddressCornerPatch(const ChromeTokens& tokens,
@@ -1337,7 +1367,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
     address_field_->SetID(static_cast<int>(ChromeViewId::kAddress));
     address_field_->SetAccessibleName("Address");
-    address_field_->SetPlaceholderText("Enter address");
+    address_field_->SetPlaceholderText(std::string(kAddressPlaceholderText));
     address_field_->SetFocusable(true);
     // The native textfield paints its own rounded corners; the surface-colored holder
     // behind it fills those corners so the field reads as one flat, square-edged cell
@@ -1533,6 +1563,49 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     new_space_button_->SetFocusable(true);
     new_space_button_->SetMinimumSize(CefSize(RowHeight(), RowHeight()));
     rail_footer_->AddChildView(new_space_button_);
+    // Bookmarks 0.9: the failure status row sits directly above the fixed footer, hidden until a
+    // bookmark change fails. It stays outside the scrolling collection.
+    bookmark_status_row_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
+    bookmark_status_row_->SetID(static_cast<int>(ChromeViewId::kBookmarkStatusRow));
+    CefBoxLayoutSettings status_settings;
+    status_settings.horizontal = static_cast<int>(true);
+    status_settings.between_child_spacing = tokens_.spacing_1_dip;
+    status_settings.inside_border_insets = CefInsets(tokens_.spacing_1_dip, tokens_.spacing_2_dip,
+                                                     tokens_.spacing_1_dip, tokens_.spacing_2_dip);
+    CefRefPtr<CefBoxLayout> status_layout = bookmark_status_row_->SetToBoxLayout(status_settings);
+    const auto status_delegate = [this](CollectionButtonAction action) {
+        CefRefPtr<CollectionButtonDelegate> delegate =
+            new CollectionButtonDelegate(this, action, 0);
+        status_button_delegates_.push_back(delegate);
+        return delegate;
+    };
+    bookmark_status_text_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
+    bookmark_status_text_->SetID(static_cast<int>(ChromeViewId::kBookmarkStatusText));
+    bookmark_status_text_->SetAccessibleName("Bookmark status");
+    bookmark_status_text_->SetFocusable(false);
+    bookmark_status_text_->SetInkDropEnabled(false);
+    bookmark_status_text_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    bookmark_status_text_->SetFontList(FontList(12, ChromeFontWeight::kRegular));
+    bookmark_status_row_->AddChildView(bookmark_status_text_);
+    status_layout->SetFlexForView(bookmark_status_text_, 1);
+    bookmark_status_retry_ = CefLabelButton::CreateLabelButton(
+        status_delegate(CollectionButtonAction::kRetryBookmarkStatus), "Retry");
+    bookmark_status_retry_->SetID(static_cast<int>(ChromeViewId::kBookmarkStatusRetry));
+    bookmark_status_retry_->SetAccessibleName("Retry bookmark change");
+    bookmark_status_retry_->SetFocusable(true);
+    bookmark_status_retry_->SetInkDropEnabled(false);
+    bookmark_status_retry_->SetFontList(FontList(12, ChromeFontWeight::kMedium));
+    bookmark_status_row_->AddChildView(bookmark_status_retry_);
+    bookmark_status_dismiss_ = CefLabelButton::CreateLabelButton(
+        status_delegate(CollectionButtonAction::kDismissBookmarkStatus), "\xC3\x97");
+    bookmark_status_dismiss_->SetID(static_cast<int>(ChromeViewId::kBookmarkStatusDismiss));
+    bookmark_status_dismiss_->SetAccessibleName("Dismiss bookmark status");
+    bookmark_status_dismiss_->SetTooltipText("Dismiss");
+    bookmark_status_dismiss_->SetFocusable(true);
+    bookmark_status_dismiss_->SetInkDropEnabled(false);
+    bookmark_status_row_->AddChildView(bookmark_status_dismiss_);
+    bookmark_status_row_->SetVisible(false);
+    sidebar_->AddChildView(bookmark_status_row_);
     sidebar_->AddChildView(rail_footer_);
 
     // The active-page card is a compact pill: a bounded single-row height so it reads
@@ -1615,17 +1688,9 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     collapsed_rail_->AddChildView(collapsed_scroll);
     collapsed_layout_->SetFlexForView(collapsed_scroll, 1);
 
-    // Bottom group: the "+" button, a hairline, then the space dots.
+    // Bottom group: a hairline, then the space dots. The rail has no New Tab control.
     collapsed_bottom_group_ = make_surface_panel(SurfaceSlot::kRail, CefSize(), /*id=*/0);
     collapsed_bottom_group_->SetToBoxLayout(CollapsedColumnLayout(kCollapsedRailButtonSpacingDip));
-    collapsed_new_tab_button_ = CefLabelButton::CreateLabelButton(button_delegate_, "");
-    collapsed_new_tab_button_->SetID(static_cast<int>(ChromeViewId::kCollapsedRailNewTab));
-    collapsed_new_tab_button_->SetAccessibleName("New Tab");
-    collapsed_new_tab_button_->SetTooltipText("New Tab");
-    collapsed_new_tab_button_->SetFocusable(true);
-    collapsed_new_tab_button_->SetMinimumSize(
-        CefSize(kCollapsedRailButtonDip, kCollapsedRailButtonDip));
-    collapsed_bottom_group_->AddChildView(collapsed_new_tab_button_);
     collapsed_divider_wrapper_ = make_surface_panel(
         SurfaceSlot::kRail, CefSize(kCollapsedRailButtonDip, kCollapsedRailSeparatorHeightDip),
         static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
@@ -2031,26 +2096,127 @@ std::string BrowserChrome::SpaceSegmentLabel(const SpaceSwitcherEntrySnapshot& e
                                                 : SpacePillLabel(initial_only);
 }
 
-std::string BrowserChrome::ActiveSpaceSectionTitle() const {
+std::string BrowserChrome::ActiveSpaceHeaderName() const {
     for (const SpaceSwitcherEntrySnapshot& entry : space_entries_) {
         if (entry.active && !entry.name.empty()) {
-            return TruncateCollectionTitle(entry.name) + " \xC2\xB7 Tabs";
+            return TruncateCollectionTitle(entry.name);
         }
     }
-    return "Tabs";
+    return {};
+}
+
+int BrowserChrome::GlobalStripWidthDip(const ChromeTokens& tokens) {
+    // The rail's own gutter (sidebar_padding_dip, structural per density) minus the scroll gutter.
+    return std::max(0,
+                    tokens.rail_width_dip - 2 * tokens.sidebar_padding_dip - TabListScrollGutterDip());
+}
+
+int BrowserChrome::GlobalStripContentWidthDip(const ChromeTokens& tokens) {
+    return std::max(0, GlobalStripWidthDip(tokens) - 2 * kStripFocusInsetDip);
+}
+
+CefRefPtr<CefLabelButton> BrowserChrome::AddNewTabRow() {
+    CEF_REQUIRE_UI_THREAD();
+    CefRefPtr<CollectionButtonDelegate> delegate =
+        new CollectionButtonDelegate(this, CollectionButtonAction::kNewTab, 0);
+    tab_button_delegates_.push_back(delegate);
+    CefRefPtr<CefLabelButton> row = CefLabelButton::CreateLabelButton(delegate, "New tab");
+    row->SetID(static_cast<int>(ChromeViewId::kTabsNewTabRow));
+    row->SetAccessibleName(std::string(kNewTabAccessibleName));
+    row->SetTooltipText("New tab");
+    row->SetFocusable(true);
+    row->SetInkDropEnabled(false);
+    row->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    row->SetMinimumSize(CefSize(0, RowHeight()));
+    row->SetFontList(FontList(13, ChromeFontWeight::kRegular));
+    CefRefPtr<CefPanel> wrapper = CefPanel::CreatePanel(
+        new PanelDelegate(this, CefSize(0, RowHeight() + 2 * kNewTabFocusInsetDip)));
+    CefBoxLayoutSettings wrapper_settings;
+    wrapper_settings.horizontal = static_cast<int>(false);
+    wrapper_settings.inside_border_insets = CefInsets(kNewTabFocusInsetDip, kNewTabFocusInsetDip,
+                                                      kNewTabFocusInsetDip, kNewTabFocusInsetDip);
+    wrapper->SetToBoxLayout(wrapper_settings);
+    wrapper->AddChildView(row);
+    tab_strip_->AddChildView(wrapper);
+    ApplyNewTabVisual(row, /*hovered=*/false);
+    return row;
+}
+
+CefRefPtr<CefLabelButton> BrowserChrome::AddCollapsedNewTab() {
+    CEF_REQUIRE_UI_THREAD();
+    CefRefPtr<CollectionButtonDelegate> delegate =
+        new CollectionButtonDelegate(this, CollectionButtonAction::kNewTab, 0);
+    collapsed_tab_delegates_.push_back(delegate);
+    CefRefPtr<CefLabelButton> button = CefLabelButton::CreateLabelButton(delegate, "");
+    button->SetID(static_cast<int>(ChromeViewId::kCollapsedRailNewTab));
+    button->SetAccessibleName(std::string(kNewTabAccessibleName));
+    button->SetTooltipText("New tab");
+    button->SetFocusable(true);
+    button->SetInkDropEnabled(false);
+    button->SetMinimumSize(CefSize(kCollapsedRailButtonDip, kCollapsedRailButtonDip));
+    // The focus ring is drawn just outside the button, so a wrapper keeps air above and below it.
+    const CefSize wrapper_size(kCollapsedRailButtonDip,
+                               kCollapsedRailButtonDip + kCollapsedRailNewTabPadDip);
+    CefRefPtr<CefPanel> wrapper = CefPanel::CreatePanel(new PanelDelegate(this, wrapper_size));
+    CefBoxLayoutSettings wrapper_settings;
+    wrapper_settings.horizontal = static_cast<int>(false);
+    wrapper_settings.inside_border_insets =
+        CefInsets(kCollapsedRailNewTabRingInsetDip, 0, kCollapsedRailNewTabRingInsetDip, 0);
+    wrapper->SetToBoxLayout(wrapper_settings);
+    wrapper->AddChildView(button);
+    collapsed_tab_list_->AddChildView(wrapper);
+    ApplyNewTabVisual(button, /*hovered=*/false);
+    return button;
+}
+
+void BrowserChrome::ApplyNewTabVisual(const CefRefPtr<CefLabelButton>& button, bool hovered) {
+    CEF_REQUIRE_UI_THREAD();
+    if (button == nullptr) {
+        return;
+    }
+    // The plate a tab row takes for the same hover state, so the New tab row and the tab rows
+    // below it match. The label keeps the secondary text color (no accent).
+    button->SetBackgroundColor(NewTabRowFill(tokens_, hovered).argb);
+    button->SetEnabledTextColors(tokens_.text_secondary.argb);
+    for (const cef_button_state_t state :
+         {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED}) {
+        button->SetTextColor(state, tokens_.text_secondary.argb);
+    }
+    if (const std::optional<CefRefPtr<CefImage>> plus =
+            icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+        plus.has_value()) {
+        button->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
+    }
+}
+
+CefRefPtr<CefLabelButton> BrowserChrome::AddSectionHeader(const std::string& text, ChromeViewId id,
+                                                          const std::string& accessible_name) {
+    CefRefPtr<CefLabelButton> header = CefLabelButton::CreateLabelButton(button_delegate_, text);
+    header->SetID(static_cast<int>(id));
+    header->SetFocusable(false);
+    header->SetInkDropEnabled(false);
+    header->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+    header->SetMinimumSize(CefSize(0, NativeSectionHeaderHeightDip()));
+    header->SetAccessibleName(accessible_name);
+    header->SetFontList(SectionHeaderFontList(tokens_));
+    tab_strip_->AddChildView(header);
+    return header;
 }
 
 void BrowserChrome::UpdateTabStripPreferredSize() {
     const int count = static_cast<int>(tab_entries_.size());
+    // The global header row is already in favorite_block_height_dip_; only scope headers count.
     const int headers =
         (favorites_section_header_ != nullptr ? 1 : 0) + (tabs_section_header_ != nullptr ? 1 : 0);
     const int kickers = static_cast<int>(group_kickers_.size());
     const int spacing = TabListLayout(tokens_).between_child_spacing;
-    const int children = count + headers + kickers;
+    const int new_tab_rows = new_tab_button_ != nullptr ? 1 : 0;
+    const int children = count + headers + kickers + favorite_block_children_ + new_tab_rows;
     const int height = count * RowHeight() + headers * NativeSectionHeaderHeightDip() +
-                       kickers * GroupedTabKickerHeightDip() + std::max(0, children - 1) * spacing;
-    const int width =
-        std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
+                       kickers * GroupedTabKickerHeightDip() + favorite_block_height_dip_ +
+                       new_tab_rows * (RowHeight() + 2 * kNewTabFocusInsetDip) +
+                       std::max(0, children - 1) * spacing;
+    const int width = GlobalStripWidthDip(tokens_);
     if (tab_strip_delegate_ != nullptr) {
         tab_strip_delegate_->SetPreferredSize(CefSize(width, height));
     }
@@ -2058,6 +2224,430 @@ void BrowserChrome::UpdateTabStripPreferredSize() {
         tab_strip_->SetSize(CefSize(width, height));
         tab_strip_->Layout();
     }
+}
+
+void BrowserChrome::SetSidebarCollection(const SidebarCollectionSnapshot& snapshot) {
+    CEF_REQUIRE_UI_THREAD();
+    sidebar_collection_ = snapshot;
+    SetTabStripEntries(snapshot.tabs);
+    UpdateBookmarkStatusRow();
+}
+
+void BrowserChrome::UpdateBookmarkStatusRow() {
+    CEF_REQUIRE_UI_THREAD();
+    if (bookmark_status_row_ == nullptr) {
+        return;
+    }
+    const std::optional<BookmarkStatusSnapshot>& status = sidebar_collection_.bookmark_status;
+    bookmark_status_row_->SetVisible(status.has_value());
+    if (status.has_value()) {
+        // A failure is warning-colored; a success notice is neutral, so the two read differently.
+        bookmark_status_text_->SetText(status->text);
+        bookmark_status_text_->SetTooltipText(status->text);
+        const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens_, status->ok);
+        bookmark_status_text_->SetEnabledTextColors(colors.text.argb);
+        bookmark_status_retry_->SetVisible(status->retryable);
+        bookmark_status_retry_->SetEnabledTextColors(colors.retry.argb);
+        bookmark_status_dismiss_->SetEnabledTextColors(colors.dismiss.argb);
+        for (const CefRefPtr<CefLabelButton>& button :
+             {bookmark_status_text_, bookmark_status_retry_, bookmark_status_dismiss_}) {
+            button->SetBackgroundColor(colors.row.argb);
+        }
+        bookmark_status_row_->SetBackgroundColor(colors.row.argb);
+    }
+    sidebar_->Layout();
+}
+
+namespace {
+bool FavoriteHovered(const CefRefPtr<CefButton>& button) {
+    const cef_button_state_t state = button->GetState();
+    return state == CEF_BUTTON_STATE_HOVERED || state == CEF_BUTTON_STATE_PRESSED;
+}
+}  // namespace
+
+void BrowserChrome::AddFavoriteSections() {
+    CEF_REQUIRE_UI_THREAD();
+    favorite_block_height_dip_ = 0;
+    favorite_block_children_ = 0;
+    const SidebarCollectionSnapshot& collection = sidebar_collection_;
+    const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
+    const std::vector<FavoriteEntrySnapshot>& spaces = collection.space_favorites;
+    // Ruling a: min(6, count) icons then "+N"; the plate and gap shrink to fit the width.
+    const GlobalStripLayout layout = ComputeGlobalStripLayout(
+        globals.size(), GlobalStripContentWidthDip(tokens_));
+    const int plate = layout.plate_dip;
+    const int header_row = GlobalHeaderRowHeightDip();
+    const std::optional<CefRefPtr<CefImage>> fallback_icon =
+        icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
+
+    if (GlobalHeaderRowVisible(layout, collection.add_current_page_available)) {
+        global_header_row_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, header_row)));
+        global_header_row_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesHeaderRow));
+        CefBoxLayoutSettings row_settings;
+        row_settings.horizontal = static_cast<int>(true);
+        row_settings.between_child_spacing = 0;
+        CefRefPtr<CefBoxLayout> row_layout = global_header_row_->SetToBoxLayout(row_settings);
+        global_header_ = CefLabelButton::CreateLabelButton(
+            button_delegate_, GlobalFavoritesHeaderTitle(tokens_.look));
+        global_header_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesHeader));
+        global_header_->SetFocusable(false);
+        global_header_->SetInkDropEnabled(false);
+        global_header_->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+        global_header_->SetMinimumSize(CefSize(0, NativeSectionHeaderHeightDip()));
+        global_header_->SetAccessibleName("Global favorites section");
+        global_header_->SetFontList(SectionHeaderFontList(tokens_));
+        global_header_row_->AddChildView(global_header_);
+        row_layout->SetFlexForView(global_header_, 1);
+        if (collection.add_current_page_available) {
+            CefRefPtr<CollectionButtonDelegate> delegate = new CollectionButtonDelegate(
+                this, CollectionButtonAction::kAddCurrentPageAsGlobalFavorite, 0);
+            tab_button_delegates_.push_back(delegate);
+            global_add_ = CefLabelButton::CreateLabelButton(delegate, "");
+            global_add_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesAdd));
+            global_add_->SetAccessibleName(std::string(AddGlobalFavoriteAccessibleName()));
+            global_add_->SetTooltipText(std::string(AddGlobalFavoriteAccessibleName()));
+            global_add_->SetFocusable(true);
+            global_add_->SetInkDropEnabled(false);
+            global_add_->SetMinimumSize(CefSize(header_row, header_row));
+            if (const std::optional<CefRefPtr<CefImage>> plus = icon_catalog_.Load(
+                    ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+                plus.has_value()) {
+                SetAllStateImages(global_add_, *plus);
+            }
+            global_header_row_->AddChildView(global_add_);
+        }
+        tab_strip_->AddChildView(global_header_row_);
+        favorite_block_height_dip_ += header_row;
+        favorite_block_children_ += 1;
+    }
+
+    if (GlobalStripVisible(layout)) {
+        // The keyboard focus ring is drawn just outside the icon and the strip clips it, so the
+        // strip keeps a ring-wide inset on every side and the ring is centred on the plate.
+        const int strip_height = plate + 2 * kStripFocusInsetDip;
+        global_strip_ = CefPanel::CreatePanel(new PanelDelegate(this, CefSize(0, strip_height)));
+        global_strip_->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesStrip));
+        CefBoxLayoutSettings strip_settings;
+        strip_settings.horizontal = static_cast<int>(true);
+        strip_settings.between_child_spacing = layout.gap_dip;
+        strip_settings.inside_border_insets = CefInsets(kStripFocusInsetDip, kStripFocusInsetDip,
+                                                        kStripFocusInsetDip, kStripFocusInsetDip);
+        strip_settings.cross_axis_alignment = CEF_AXIS_ALIGNMENT_CENTER;
+        global_strip_->SetToBoxLayout(strip_settings);
+        tab_strip_->AddChildView(global_strip_);
+        favorite_block_height_dip_ += strip_height;
+        favorite_block_children_ += 1;
+        for (std::size_t index = 0; index < layout.icons; ++index) {
+            const FavoriteEntrySnapshot& entry = globals[index];
+            const std::string name =
+                GlobalFavoriteAccessibleName(entry.title, index + 1, globals.size());
+            CefRefPtr<CollectionButtonDelegate> delegate = new CollectionButtonDelegate(
+                this, CollectionButtonAction::kActivateGlobalFavorite, index);
+            tab_button_delegates_.push_back(delegate);
+            CefRefPtr<CefLabelButton> icon = CefLabelButton::CreateLabelButton(delegate, "");
+            icon->SetID(static_cast<int>(ChromeViewId::kGlobalFavoriteIcon));
+            icon->SetAccessibleName(name);
+            icon->SetTooltipText(name);
+            icon->SetFocusable(true);
+            icon->SetInkDropEnabled(false);
+            icon->SetMinimumSize(CefSize(plate, plate));
+            if (entry.favicon != nullptr) {
+                SetAllStateImages(icon, entry.favicon);
+            } else if (fallback_icon.has_value()) {
+                SetAllStateImages(icon, *fallback_icon);
+            }
+            global_strip_->AddChildView(icon);
+        }
+        if (layout.hidden > 0) {
+            CefRefPtr<CollectionButtonDelegate> delegate = new CollectionButtonDelegate(
+                this, CollectionButtonAction::kShowMoreGlobalFavorites, 0);
+            tab_button_delegates_.push_back(delegate);
+            CefRefPtr<CefLabelButton> more = CefLabelButton::CreateLabelButton(
+                delegate, MoreGlobalFavoritesLabel(layout.hidden));
+            more->SetID(static_cast<int>(ChromeViewId::kGlobalFavoritesMore));
+            more->SetAccessibleName(MoreGlobalFavoritesAccessibleName(layout.hidden));
+            more->SetTooltipText(MoreGlobalFavoritesAccessibleName(layout.hidden));
+            more->SetFocusable(true);
+            more->SetInkDropEnabled(false);
+            more->SetMinimumSize(CefSize(plate, plate));
+            global_strip_->AddChildView(more);
+        }
+    }
+
+    if (!spaces.empty()) {
+        const std::string title = SpaceFavoritesHeaderTitle(tokens_.look, ActiveSpaceHeaderName());
+        favorites_section_header_ =
+            AddSectionHeader(title, ChromeViewId::kFavoritesSectionHeader, title + " section");
+        const int row_height = SpaceFavoriteRowHeightDip(tokens_.look, tokens_.density);
+        const std::optional<CefRefPtr<CefImage>> fallback = icon_catalog_.Load(
+            ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
+        for (std::size_t index = 0; index < spaces.size(); ++index) {
+            const FavoriteEntrySnapshot& entry = spaces[index];
+            CefRefPtr<CollectionButtonDelegate> delegate = new CollectionButtonDelegate(
+                this, CollectionButtonAction::kActivateSpaceFavorite, index);
+            tab_button_delegates_.push_back(delegate);
+            CefRefPtr<CefLabelButton> row =
+                CefLabelButton::CreateLabelButton(delegate, entry.title);
+            row->SetID(static_cast<int>(ChromeViewId::kSpaceFavoriteRow));
+            row->SetAccessibleName(SpaceFavoriteAccessibleName(entry.title));
+            row->SetTooltipText(entry.title);
+            row->SetFocusable(true);
+            row->SetInkDropEnabled(false);
+            row->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+            row->SetMinimumSize(CefSize(0, row_height));
+            row->SetFontList(FontList(
+                13, entry.displayed ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
+            row->SetEnabledTextColors(FavoriteTextColor(tokens_).argb);
+            if (entry.favicon != nullptr) {
+                SetAllStateImages(row, entry.favicon);
+            } else if (fallback.has_value()) {
+                SetAllStateImages(row, *fallback);
+            }
+            tab_strip_->AddChildView(row);
+            space_favorite_rows_.push_back(row);
+        }
+        favorite_block_height_dip_ += static_cast<int>(spaces.size()) * row_height;
+        favorite_block_children_ += static_cast<int>(spaces.size());
+    }
+}
+
+std::vector<std::pair<CefRefPtr<CefButton>, bool>> BrowserChrome::FavoriteSurfaces() const {
+    std::vector<std::pair<CefRefPtr<CefButton>, bool>> surfaces;
+    const std::vector<FavoriteEntrySnapshot>& globals = sidebar_collection_.global_favorites;
+    const std::vector<FavoriteEntrySnapshot>& spaces = sidebar_collection_.space_favorites;
+    if (global_add_ != nullptr) {
+        surfaces.emplace_back(global_add_, false);
+    }
+    if (global_strip_ != nullptr) {
+        std::size_t icon = 0;
+        for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
+            const CefRefPtr<CefView> view = global_strip_->GetChildViewAt(static_cast<int>(child));
+            const CefRefPtr<CefButton> button = view->AsButton();
+            if (button == nullptr) {
+                continue;
+            }
+            bool displayed = false;
+            if (view->GetID() == static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
+                displayed = icon < globals.size() && globals[icon].displayed;
+                ++icon;
+            }
+            surfaces.emplace_back(button, displayed);
+        }
+    }
+    for (std::size_t index = 0; index < space_favorite_rows_.size() && index < spaces.size();
+         ++index) {
+        surfaces.emplace_back(space_favorite_rows_[index], spaces[index].displayed);
+    }
+    for (std::size_t index = 0; index < collapsed_favorite_buttons_.size(); ++index) {
+        // The rail lists every global favorite, then every space favorite.
+        const FavoriteEntrySnapshot* entry = nullptr;
+        if (index < globals.size()) {
+            entry = &globals[index];
+        } else if (index - globals.size() < spaces.size()) {
+            entry = &spaces[index - globals.size()];
+        }
+        surfaces.emplace_back(collapsed_favorite_buttons_[index],
+                              entry != nullptr && entry->displayed);
+    }
+    return surfaces;
+}
+
+void BrowserChrome::ApplyFavoriteVisuals() {
+    CEF_REQUIRE_UI_THREAD();
+    for (const auto& [button, displayed] : FavoriteSurfaces()) {
+        button->SetBackgroundColor(
+            FavoriteFillColor(tokens_, displayed, FavoriteHovered(button)).argb);
+    }
+}
+
+// Re-asserts the favorites' ink. Runs from the theme path only (ApplyCollectionTheme), never from
+// hover: it reloads tinted glyphs. What it paints is FavoriteInkPlan, which the style tests pin.
+void BrowserChrome::ApplyFavoriteInk() {
+    CEF_REQUIRE_UI_THREAD();
+    const auto set_text = [](const CefRefPtr<CefLabelButton>& button, ArgbColor color) {
+        for (const cef_button_state_t state :
+             {CEF_BUTTON_STATE_NORMAL, CEF_BUTTON_STATE_HOVERED, CEF_BUTTON_STATE_PRESSED}) {
+            button->SetTextColor(state, color.argb);
+        }
+        button->SetEnabledTextColors(color.argb);
+    };
+    const auto tinted = [this](ArgbColor color) {
+        return icon_catalog_.LoadTinted(ChromeIcon::kLocation, color, ChromeIconSize::k16);
+    };
+    for (const FavoriteInkEntry& entry : FavoriteInkPlan(tokens_)) {
+        switch (entry.target) {
+            case FavoriteInkTarget::kRowText:
+                for (const CefRefPtr<CefLabelButton>& row : space_favorite_rows_) {
+                    set_text(row, entry.color);
+                }
+                break;
+            case FavoriteInkTarget::kMoreText:
+                if (global_strip_ != nullptr) {
+                    for (std::size_t child = 0; child < global_strip_->GetChildViewCount();
+                         ++child) {
+                        const CefRefPtr<CefView> view =
+                            global_strip_->GetChildViewAt(static_cast<int>(child));
+                        if (view->GetID() == static_cast<int>(ChromeViewId::kGlobalFavoritesMore)) {
+                            set_text(view->AsButton()->AsLabelButton(), entry.color);
+                        }
+                    }
+                }
+                break;
+            case FavoriteInkTarget::kAddGlyph:
+                if (global_add_ != nullptr) {
+                    if (const auto plus = icon_catalog_.LoadTinted(
+                            ChromeIcon::kPlus, entry.color, ChromeIconSize::k16);
+                        plus.has_value()) {
+                        SetAllStateImages(global_add_, *plus);
+                    }
+                }
+                break;
+            case FavoriteInkTarget::kFallbackGlyph:
+                if (const auto fallback = tinted(entry.color); fallback.has_value()) {
+                    // Favorites without a favicon show the generic glyph for the current theme.
+                    const auto& globals = sidebar_collection_.global_favorites;
+                    const auto& spaces = sidebar_collection_.space_favorites;
+                    for (std::size_t index = 0;
+                         index < space_favorite_rows_.size() && index < spaces.size(); ++index) {
+                        if (spaces[index].favicon == nullptr) {
+                            SetAllStateImages(space_favorite_rows_[index], *fallback);
+                        }
+                    }
+                    if (global_strip_ != nullptr) {
+                        std::size_t icon = 0;
+                        for (std::size_t child = 0; child < global_strip_->GetChildViewCount();
+                             ++child) {
+                            const CefRefPtr<CefView> view =
+                                global_strip_->GetChildViewAt(static_cast<int>(child));
+                            if (view->GetID() !=
+                                static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
+                                continue;
+                            }
+                            if (icon < globals.size() && globals[icon].favicon == nullptr) {
+                                SetAllStateImages(view->AsButton()->AsLabelButton(), *fallback);
+                            }
+                            ++icon;
+                        }
+                    }
+                    for (std::size_t index = 0; index < collapsed_favorite_buttons_.size();
+                         ++index) {
+                        const FavoriteEntrySnapshot* fav = nullptr;
+                        if (index < globals.size()) {
+                            fav = &globals[index];
+                        } else if (index - globals.size() < spaces.size()) {
+                            fav = &spaces[index - globals.size()];
+                        }
+                        if (fav != nullptr && fav->favicon == nullptr) {
+                            SetAllStateImages(collapsed_favorite_buttons_[index], *fallback);
+                        }
+                    }
+                }
+                break;
+        }
+    }
+    if (collapsed_favorite_separator_wrapper_ != nullptr) {
+        collapsed_favorite_separator_wrapper_->SetBackgroundColor(
+            ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kRail).argb);
+        collapsed_favorite_separator_->SetBackgroundColor(
+            ChromeSurfaceRoleForResolvedTokens(SurfaceSlot::kHairline).argb);
+    }
+}
+
+void BrowserChrome::AddCollapsedFavorites() {
+    CEF_REQUIRE_UI_THREAD();
+    collapsed_favorite_buttons_.clear();
+    collapsed_favorite_separator_wrapper_ = nullptr;
+    collapsed_favorite_separator_ = nullptr;
+    const std::vector<FavoriteEntrySnapshot>& globals = sidebar_collection_.global_favorites;
+    const std::vector<FavoriteEntrySnapshot>& spaces = sidebar_collection_.space_favorites;
+    const int button = kCollapsedRailButtonDip;
+    const std::optional<CefRefPtr<CefImage>> fallback_icon =
+        icon_catalog_.Load(ChromeIcon::kLocation, FallbackFaviconIconTone(), ChromeIconSize::k16);
+    // Each icon carries its own scope's name: a space favorite is never announced as global.
+    const auto add_icon = [&](CollectionButtonAction action, std::size_t index,
+                              const FavoriteEntrySnapshot& entry, ChromeViewId id,
+                              const std::string& name) {
+        CefRefPtr<CollectionButtonDelegate> delegate =
+            new CollectionButtonDelegate(this, action, index);
+        collapsed_tab_delegates_.push_back(delegate);
+        CefRefPtr<CefLabelButton> icon = CefLabelButton::CreateLabelButton(delegate, "");
+        icon->SetID(static_cast<int>(id));
+        icon->SetAccessibleName(name);
+        icon->SetTooltipText(name);
+        icon->SetFocusable(true);
+        icon->SetInkDropEnabled(false);
+        icon->SetMinimumSize(CefSize(button, button));
+        if (entry.favicon != nullptr) {
+            SetAllStateImages(icon, entry.favicon);
+        } else if (fallback_icon.has_value()) {
+            SetAllStateImages(icon, *fallback_icon);
+        }
+        collapsed_tab_list_->AddChildView(icon);
+        collapsed_favorite_buttons_.push_back(icon);
+    };
+    for (std::size_t index = 0; index < globals.size(); ++index) {
+        add_icon(CollectionButtonAction::kActivateGlobalFavorite, index, globals[index],
+                 ChromeViewId::kCollapsedRailGlobalFavorite,
+                 GlobalFavoriteAccessibleName(globals[index].title, index + 1, globals.size()));
+    }
+    if (CollapsedRailSeparatorVisible(globals.size(), !spaces.empty() || !tab_entries_.empty())) {
+        // The hairline between the global icons and everything below them.
+        CefRefPtr<SurfacePanelDelegate> wrapper_delegate = new SurfacePanelDelegate(
+            this, SurfaceSlot::kRail, CefSize(button, kCollapsedRailSeparatorHeightDip),
+            CefSize(button, kCollapsedRailSeparatorHeightDip),
+            CefSize(button, kCollapsedRailSeparatorHeightDip));
+        surface_delegates_.push_back(wrapper_delegate);
+        collapsed_favorite_separator_wrapper_ = CefPanel::CreatePanel(wrapper_delegate);
+        collapsed_favorite_separator_wrapper_->SetID(
+            static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
+        collapsed_favorite_separator_wrapper_->SetToBoxLayout(CenteredLayout());
+        const CefSize line(kCollapsedRailSeparatorWidthDip, DividerHeight(tokens_));
+        CefRefPtr<SurfacePanelDelegate> line_delegate =
+            new SurfacePanelDelegate(this, SurfaceSlot::kHairline, line, line, line);
+        surface_delegates_.push_back(line_delegate);
+        collapsed_favorite_separator_ = CefPanel::CreatePanel(line_delegate);
+        collapsed_favorite_separator_->SetID(
+            static_cast<int>(ChromeViewId::kCollapsedRailSeparator));
+        collapsed_favorite_separator_wrapper_->AddChildView(collapsed_favorite_separator_);
+        collapsed_tab_list_->AddChildView(collapsed_favorite_separator_wrapper_);
+    }
+    for (std::size_t index = 0; index < spaces.size(); ++index) {
+        add_icon(CollectionButtonAction::kActivateSpaceFavorite, index, spaces[index],
+                 ChromeViewId::kCollapsedRailSpaceFavorite,
+                 SpaceFavoriteAccessibleName(spaces[index].title));
+    }
+}
+
+bool BrowserChrome::FocusGlobalFavoriteIcon(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    if (global_strip_ == nullptr) {
+        return false;
+    }
+    std::size_t icon = 0;
+    for (std::size_t child = 0; child < global_strip_->GetChildViewCount(); ++child) {
+        const CefRefPtr<CefView> view = global_strip_->GetChildViewAt(static_cast<int>(child));
+        if (view->GetID() != static_cast<int>(ChromeViewId::kGlobalFavoriteIcon)) {
+            continue;
+        }
+        if (icon++ == index) {
+            view->RequestFocus();
+            return true;
+        }
+    }
+    return false;
+}
+
+bool BrowserChrome::FocusNewTab() {
+    CEF_REQUIRE_UI_THREAD();
+    // The collapsed rail and the expanded tab list are never drawn together; take whichever
+    // "+" is on screen.
+    for (const CefRefPtr<CefLabelButton>& button : {new_tab_button_, collapsed_new_tab_button_}) {
+        if (button != nullptr && button->IsDrawn()) {
+            button->RequestFocus();
+            return true;
+        }
+    }
+    return false;
 }
 
 void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries) {
@@ -2071,34 +2661,35 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
     tab_button_delegates_.clear();
     tab_entry_views_.clear();
     tab_entries_ = entries;
+    sidebar_collection_.tabs = entries;
     group_kicker_panels_.clear();
     group_kickers_.clear();
     favorites_section_header_ = nullptr;
     tabs_section_header_ = nullptr;
+    new_tab_button_ = nullptr;
+    global_header_ = nullptr;
+    global_header_row_ = nullptr;
+    global_add_ = nullptr;
+    global_strip_ = nullptr;
+    space_favorite_rows_.clear();
     tab_strip_->RemoveAllChildViews();
 
-    const auto add_section_header = [this](std::string text, ChromeViewId id) {
-        CefRefPtr<CefLabelButton> header =
-            CefLabelButton::CreateLabelButton(button_delegate_, std::move(text));
-        header->SetID(static_cast<int>(id));
-        header->SetFocusable(false);
-        header->SetInkDropEnabled(false);
-        header->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
-        header->SetMinimumSize(CefSize(0, NativeSectionHeaderHeightDip()));
-        header->SetAccessibleName(header->GetText().ToString() + " section");
-        header->SetFontList(SectionHeaderFontList(tokens_));
-        tab_strip_->AddChildView(header);
-        return header;
-    };
     const bool native = tokens_.look == LookPreset::kNative;
-    const bool has_favorites =
-        native &&
-        std::any_of(entries.begin(), entries.end(), [](const auto& entry) { return entry.pinned; });
-    if (has_favorites) {
-        favorites_section_header_ =
-            add_section_header("Favorites", ChromeViewId::kFavoritesSectionHeader);
+    // The global strip and the current space's favorites come first, then the tabs header, then
+    // the tabs (pinned or not). The header sits before the first tab row (spec §6): a pinned tab
+    // never reads as a favorite, and no header trails an empty list.
+    AddFavoriteSections();
+    const bool favorites_precede = FavoritesPrecedeTabs(sidebar_collection_.global_favorites.size(),
+                                                        sidebar_collection_.space_favorites.size());
+    if (TabsHeaderBeforeFirstRow(tokens_.look, favorites_precede, !entries.empty())) {
+        const std::string title = TabsHeaderTitle(tokens_.look, ActiveSpaceHeaderName());
+        tabs_section_header_ =
+            AddSectionHeader(title, ChromeViewId::kTabsSectionHeader, title + " section");
     }
-    bool tabs_header_added = false;
+    // The New tab row sits directly under the tabs header, before the first tab row.
+    // The rebuilt row starts unhovered; a stale flag would keep the old hover fill and patch.
+    new_tab_hovered_ = false;
+    new_tab_button_ = AddNewTabRow();
 
     const int row_height = RowHeight();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
@@ -2109,11 +2700,6 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         icon_catalog_.Load(ChromeIcon::kPin, ChromeIconTone::kSecondary, ChromeIconSize::k13);
     for (std::size_t index = 0; index < entries.size(); ++index) {
         const TabStripEntrySnapshot& entry = entries[index];
-        if (native && !entry.pinned && !tabs_header_added) {
-            tabs_section_header_ =
-                add_section_header(ActiveSpaceSectionTitle(), ChromeViewId::kTabsSectionHeader);
-            tabs_header_added = true;
-        }
         if (native && NeedsGroupKicker(entries, index)) {
             // The branch label is its own line above the run, indented like the child rows.
             CefRefPtr<CefPanel> panel = CefPanel::CreatePanel(new PanelDelegate(this, CefSize()));
@@ -2157,13 +2743,20 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
 
         views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
-        views.favicon->SetAccessibleName(entry.favicon != nullptr ? "Tab favicon"
-                                                                  : "Tab favicon placeholder");
+        views.favicon->SetAccessibleName(entry.favicon != nullptr || entry.fallback_icon.has_value()
+                                             ? "Tab favicon"
+                                             : "Tab favicon placeholder");
         views.favicon->SetFocusable(false);
         views.favicon->SetMinimumSize(CefSize(slot, slot));
         views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
             views.favicon_source = entry.favicon;
+        } else if (entry.fallback_icon.has_value()) {
+            const std::optional<CefRefPtr<CefImage>> semantic_icon = icon_catalog_.Load(
+                *entry.fallback_icon, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+            if (semantic_icon.has_value()) {
+                views.favicon_source = *semantic_icon;
+            }
         } else if (fallback_icon.has_value()) {
             views.favicon_source = *fallback_icon;
         }
@@ -2216,10 +2809,6 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
         tab_entry_views_.push_back(views);
         tab_strip_->AddChildView(views.row);
     }
-    if (native && !tabs_header_added) {
-        tabs_section_header_ =
-            add_section_header(ActiveSpaceSectionTitle(), ChromeViewId::kTabsSectionHeader);
-    }
     UpdateTabStripPreferredSize();
     RebuildCollapsedTabs();
     ApplyCollectionTheme();
@@ -2236,6 +2825,8 @@ void BrowserChrome::RebuildCollapsedTabs() {
     collapsed_tab_list_->RemoveAllChildViews();
     collapsed_pinned_separator_ = nullptr;
     collapsed_pinned_separator_wrapper_ = nullptr;
+    collapsed_new_tab_button_ = nullptr;
+    AddCollapsedFavorites();
 
     const CollapsedRailTabLayout layout = CollapsedRailLayout(tab_entries_);
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
@@ -2293,6 +2884,12 @@ void BrowserChrome::RebuildCollapsedTabs() {
         views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
             views.favicon_source = entry.favicon;
+        } else if (entry.fallback_icon.has_value()) {
+            const std::optional<CefRefPtr<CefImage>> semantic_icon = icon_catalog_.Load(
+                *entry.fallback_icon, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+            if (semantic_icon.has_value()) {
+                views.favicon_source = *semantic_icon;
+            }
         } else if (fallback_icon.has_value()) {
             views.favicon_source = *fallback_icon;
         }
@@ -2302,12 +2899,20 @@ void BrowserChrome::RebuildCollapsedTabs() {
         collapsed_tab_views_.push_back(views);
         collapsed_tab_list_->AddChildView(views.row);
     }
+    // The "+" New tab icon comes after the tab favicons, at the end of the rail's list.
+    collapsed_new_tab_hovered_ = false;
+    collapsed_new_tab_button_ = AddCollapsedNewTab();
     UpdateCollapsedTabListSize();
 }
 
 void BrowserChrome::UpdateCollapsedTabListSize() {
-    const bool separator = collapsed_pinned_separator_wrapper_ != nullptr;
-    const int height = CollapsedRailTabListHeightDip(tab_entries_.size(), separator);
+    const std::size_t separators = (collapsed_pinned_separator_wrapper_ != nullptr ? 1 : 0) +
+                                   (collapsed_favorite_separator_wrapper_ != nullptr ? 1 : 0);
+    const std::size_t new_tab_icons = collapsed_new_tab_button_ != nullptr ? 1 : 0;
+    const std::size_t buttons =
+        tab_entries_.size() + collapsed_favorite_buttons_.size() + new_tab_icons;
+    const int height = CollapsedRailListHeightDip(buttons, separators) +
+                       static_cast<int>(new_tab_icons) * kCollapsedRailNewTabPadDip;
     if (collapsed_tab_list_delegate_ != nullptr) {
         collapsed_tab_list_delegate_->SetPreferredSize(CefSize(kCollapsedRailButtonDip, height));
     }
@@ -2430,8 +3035,15 @@ void BrowserChrome::SetSpaceSwitcherEntries(
             }
         }
     }
+    // A rename changes both scope headers in place.
+    const std::string space_name = ActiveSpaceHeaderName();
+    if (favorites_section_header_ != nullptr) {
+        const std::string title = SpaceFavoritesHeaderTitle(tokens_.look, space_name);
+        favorites_section_header_->SetText(title);
+        favorites_section_header_->SetAccessibleName(title + " section");
+    }
     if (tabs_section_header_ != nullptr) {
-        const std::string title = ActiveSpaceSectionTitle();
+        const std::string title = TabsHeaderTitle(tokens_.look, space_name);
         tabs_section_header_->SetText(title);
         tabs_section_header_->SetAccessibleName(title + " section");
     }
@@ -2820,6 +3432,7 @@ void BrowserChrome::ApplyLayoutTokens() {
                             std::to_string(static_cast<int>(tokens_.sidebar_side)) + "/" +
                             std::to_string(tokens_.control_height_dip) + "/" +
                             std::to_string(tokens_.row_gap_dip) + "/" +
+                            std::to_string(tokens_.sidebar_padding_dip) + "/" +
                             std::to_string(content.left) + "," + std::to_string(content.top) + "," +
                             std::to_string(content.right) + "," + std::to_string(content.bottom) +
                             "/" + std::to_string(agent.left) + "," + std::to_string(agent.top) +
@@ -3080,6 +3693,9 @@ void BrowserChrome::Detach() {
     for (const CefRefPtr<CollectionButtonDelegate>& delegate : collapsed_space_delegates_) {
         delegate->Detach();
     }
+    for (const CefRefPtr<CollectionButtonDelegate>& delegate : status_button_delegates_) {
+        delegate->Detach();
+    }
     for (const CefRefPtr<SurfacePanelDelegate>& surface_delegate : surface_delegates_) {
         surface_delegate->Detach();
     }
@@ -3138,11 +3754,6 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
         case ChromeViewId::kActiveTab:
             host_->FocusBrowserView();
             return;
-        case ChromeViewId::kCollapsedRailNewTab:
-            // The new tab opens on the start page, which focuses its own search field, so the
-            // collapsed rail stays collapsed instead of expanding for the address bar.
-            host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
-            return;
         case ChromeViewId::kRailAgentButton:
         case ChromeViewId::kRailAgentMeta:
         case ChromeViewId::kRailAgentKeycap:
@@ -3159,7 +3770,7 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ToggleTabOverview();
             return;
         case ChromeViewId::kRailSettingsButton:
-            host_->ToggleSettings();
+            host_->OpenSettings();
             return;
         default:
             return;
@@ -3215,10 +3826,44 @@ void BrowserChrome::DispatchCollectionAction(CollectionButtonAction action, std:
             host_->CloseTab(index);
             return;
         case CollectionButtonAction::kActivateSpace:
-            host_->SelectSpace(index);
+            // The active space's segment opens its menu; any other space is selected.
+            if (SpaceSegmentClickFor(index < space_entries_.size() &&
+                                     space_entries_[index].active) ==
+                SpaceSegmentClick::kOpenMenu) {
+                host_->ShowSpaceMenu(index);
+            } else {
+                host_->SelectSpace(index);
+            }
+            return;
+        case CollectionButtonAction::kNewTab:
+            host_->ExecuteBrowserCommand(BrowserCommand::kNewTab);
             return;
         case CollectionButtonAction::kUnpinTab:
             host_->SetTabPinned(index, false);
+            return;
+        case CollectionButtonAction::kActivateGlobalFavorite:
+            if (index < sidebar_collection_.global_favorites.size()) {
+                const FavoriteEntrySnapshot& entry = sidebar_collection_.global_favorites[index];
+                host_->ActivateFavoriteFromSidebar(entry.scope, entry.bookmark_id);
+            }
+            return;
+        case CollectionButtonAction::kActivateSpaceFavorite:
+            if (index < sidebar_collection_.space_favorites.size()) {
+                const FavoriteEntrySnapshot& entry = sidebar_collection_.space_favorites[index];
+                host_->ActivateFavoriteFromSidebar(entry.scope, entry.bookmark_id);
+            }
+            return;
+        case CollectionButtonAction::kShowMoreGlobalFavorites:
+            host_->OpenMoreGlobalFavorites();
+            return;
+        case CollectionButtonAction::kAddCurrentPageAsGlobalFavorite:
+            host_->AddCurrentPageToGlobalFavorites();
+            return;
+        case CollectionButtonAction::kRetryBookmarkStatus:
+            host_->RetryFailedBookmarkMutation();
+            return;
+        case CollectionButtonAction::kDismissBookmarkStatus:
+            host_->DismissFailedBookmarkStatus();
             return;
     }
 }
@@ -3279,7 +3924,14 @@ void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     address_editing_ = editing;
     const bool native_idle = tokens_.look == LookPreset::kNative && !editing;
     const std::string& text = editing ? snapshot.edit_text : snapshot.display_text;
-    address_idle_label_->SetText(snapshot.display_text);
+    // Native projects the resting address through the label. An empty address shows the placeholder
+    // there, in the placeholder colour; the textfield itself keeps its empty text.
+    address_idle_showing_placeholder_ = native_idle && snapshot.display_text.empty();
+    address_idle_label_->SetText(address_idle_showing_placeholder_
+                                     ? std::string(kAddressPlaceholderText)
+                                     : snapshot.display_text);
+    address_idle_label_->SetEnabledTextColors(
+        (address_idle_showing_placeholder_ ? tokens_.text_secondary : tokens_.text).argb);
     address_idle_label_->SetVisible(native_idle);
     address_field_->SetVisible(!native_idle);
     address_field_->SetReadOnly(!editing);
@@ -3405,7 +4057,8 @@ void BrowserChrome::ApplyControlTheme() {
     address_field_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     address_idle_label_->SetBackgroundColor(address_well.argb);
     address_idle_label_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
-    address_idle_label_->SetEnabledTextColors(tokens_.text.argb);
+    address_idle_label_->SetEnabledTextColors(
+        (address_idle_showing_placeholder_ ? tokens_.text_secondary : tokens_.text).argb);
     active_tab_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);
@@ -3517,9 +4170,17 @@ void BrowserChrome::ApplyRailButtonTheme() {
 // which changes independently of the theme.
 void BrowserChrome::ApplyCollectionTheme() {
     CEF_REQUIRE_UI_THREAD();
+    ApplyNewTabVisual(new_tab_button_, new_tab_hovered_);
+    ApplyNewTabVisual(collapsed_new_tab_button_, collapsed_new_tab_hovered_);
     ApplyCollapsedRailTheme();
+    ApplyFavoriteVisuals();
+    ApplyFavoriteInk();
+    UpdateBookmarkStatusRow();
+    if (global_header_row_ != nullptr) {
+        global_header_row_->SetBackgroundColor(tokens_.canvas.argb);
+    }
     for (const CefRefPtr<CefLabelButton>& header :
-         {favorites_section_header_, tabs_section_header_}) {
+         {global_header_, favorites_section_header_, tabs_section_header_}) {
         if (header != nullptr) {
             header->SetBackgroundColor(tokens_.canvas.argb);
             header->SetEnabledTextColors(tokens_.text_secondary.argb);
@@ -3563,34 +4224,23 @@ void BrowserChrome::ApplyCollectionTheme() {
     }
 }
 
-// The row's fill: `selected` for the active tab, `hover` under the pointer, none otherwise.
-namespace {
-std::optional<ArgbColor> RowFill(const ChromeTokens& tokens, bool active, bool pinned,
-                                 bool hovered) {
-    if (active) {
-        return ResolveRowColors(tokens, /*selected=*/true, hovered, /*slept=*/false).fill;
-    }
-    if (hovered) {
-        return ResolveRowColors(tokens, /*selected=*/false, /*hovered=*/true, /*slept=*/false).fill;
-    }
-    if (pinned && tokens.look != LookPreset::kNative) {
-        return MixColor(tokens.canvas, tokens.selected, 0.5);
-    }
-    return std::nullopt;
-}
-}  // namespace
-
 void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
     if (index >= tab_entry_views_.size() || index >= tab_entries_.size()) {
         return;
     }
     const TabStripEntrySnapshot& entry = tab_entries_[index];
     const TabEntryViews& views = tab_entry_views_[index];
-    const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+    // R15: a favorite on screen takes the accent away from the space's active ordinary tab.
+    const bool accent_selected = entry.active && !entry.behind_favorite;
+    EntryColors colors = TabRowColors(tokens_, accent_selected, entry.pinned);
+    if (entry.behind_favorite) {
+        colors.title = tokens_.text;
+    }
     const ArgbColor bg =
-        RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+        TabRowFill(tokens_, entry.active, entry.pinned, views.hovered, entry.behind_favorite)
+            .value_or(tokens_.canvas);
     const RowColors row_colors =
-        ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
+        ResolveRowColors(tokens_, accent_selected, views.hovered, entry.sleeping);
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
     views.favicon->SetBackgroundColor(bg.argb);
@@ -3603,7 +4253,7 @@ void BrowserChrome::ApplyTabRowVisual(std::size_t index) {
             .argb);
     // Native's selected row is a blue fill with white text, so its glyphs turn white too; the
     // close × is 70% white, the generic globe is full white.
-    const bool on_selection = tokens_.look == LookPreset::kNative && entry.active;
+    const bool on_selection = tokens_.look == LookPreset::kNative && accent_selected;
     views.close->SetEnabledTextColors(
         (on_selection ? MixColor(bg, {.argb = 0xFFFFFFFFU}, kSelectedCloseOpacity)
                       : colors.trailing)
@@ -3634,14 +4284,19 @@ void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
         return;
     }
     const TabStripEntrySnapshot& entry = tab_entries_[views.source_index];
-    const EntryColors colors = TabRowColors(tokens_, entry.active, entry.pinned);
+    const bool accent_selected = entry.active && !entry.behind_favorite;
+    EntryColors colors = TabRowColors(tokens_, accent_selected, entry.pinned);
+    if (entry.behind_favorite) {
+        colors.title = tokens_.text;
+    }
     const ArgbColor bg =
-        RowFill(tokens_, entry.active, entry.pinned, views.hovered).value_or(tokens_.canvas);
+        TabRowFill(tokens_, entry.active, entry.pinned, views.hovered, entry.behind_favorite)
+            .value_or(tokens_.canvas);
     views.row->SetBackgroundColor(bg.argb);
     views.inner->SetBackgroundColor(bg.argb);
     views.button->SetBackgroundColor(bg.argb);
     const RowColors row_colors =
-        ResolveRowColors(tokens_, entry.active, views.hovered, entry.sleeping);
+        ResolveRowColors(tokens_, accent_selected, views.hovered, entry.sleeping);
     views.button->SetEnabledTextColors(
         (tokens_.look == LookPreset::kNative
              ? row_colors.title
@@ -3652,7 +4307,7 @@ void BrowserChrome::ApplyCollapsedTabVisual(std::size_t position) {
                                          ? DimmedImage(views.favicon_source, kSleepingIconAlpha)
                                          : views.favicon_source;
         // Match the expanded selected row: the generic globe is white on Native's blue plate.
-        if (tokens_.look == LookPreset::kNative && entry.active && !views.favicon_is_page) {
+        if (tokens_.look == LookPreset::kNative && accent_selected && !views.favicon_is_page) {
             source = WhiteGlyphImage(source, 1.0);
         }
         SetAllStateImages(views.button,
@@ -3695,8 +4350,16 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
         }
     };
     const auto filled = [this](const TabStripEntrySnapshot& entry, bool hovered) {
-        return RowFill(tokens_, entry.active, entry.pinned, hovered).has_value();
+        return TabRowFill(tokens_, entry.active, entry.pinned, hovered, entry.behind_favorite)
+            .has_value();
     };
+    for (const auto& [button, displayed] : FavoriteSurfaces()) {
+        const bool filled = FavoriteFillColor(tokens_, displayed, FavoriteHovered(button)).argb !=
+                            tokens_.canvas.argb;
+        if (filled) {
+            add(InWindow(button));
+        }
+    }
     const WindowRect address = InWindow(address_row_);
     if (const std::optional<CornerPatch> patch = AddressCornerPatch(
             tokens_,
@@ -3760,6 +4423,16 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
     }
     if (sidebar_expanded_) {
         const WindowRect viewport = InWindow(tab_list_scroll_);
+        if (new_tab_button_ != nullptr) {
+            const WindowRect row = InWindow(new_tab_button_);
+            if (Contains(viewport, row)) {
+                if (const std::optional<CornerPatch> patch = NewTabCornerPatch(
+                        {.x = row.x, .y = row.y, .width = row.width, .height = row.height},
+                        new_tab_hovered_)) {
+                    patches.push_back(*patch);
+                }
+            }
+        }
         for (std::size_t index = 0; index < tab_entry_views_.size() && index < tab_entries_.size();
              ++index) {
             if (!filled(tab_entries_[index], tab_entry_views_[index].hovered)) {
@@ -3772,6 +4445,17 @@ std::vector<CornerPatch> BrowserChrome::ComputeCornerPatches() const {
         }
     } else {
         const WindowRect viewport = InWindow(collapsed_tab_scroll_);
+        if (collapsed_new_tab_button_ != nullptr) {
+            const WindowRect button = InWindow(collapsed_new_tab_button_);
+            if (Contains(viewport, button)) {
+                if (const std::optional<CornerPatch> patch = NewTabCornerPatch(
+                        {.x = button.x, .y = button.y, .width = button.width,
+                         .height = button.height},
+                        collapsed_new_tab_hovered_)) {
+                    patches.push_back(*patch);
+                }
+            }
+        }
         for (const CollapsedTabViews& views : collapsed_tab_views_) {
             if (views.source_index >= tab_entries_.size() ||
                 !filled(tab_entries_[views.source_index], views.hovered)) {
@@ -3872,6 +4556,17 @@ void BrowserChrome::RefreshRowHover() {
             ApplyCollapsedTabVisual(position);
         }
     }
+    const bool new_tab_hovered = new_tab_button_ != nullptr && over(new_tab_button_);
+    if (new_tab_hovered != new_tab_hovered_) {
+        new_tab_hovered_ = new_tab_hovered;
+        ApplyNewTabVisual(new_tab_button_, new_tab_hovered_);
+    }
+    const bool collapsed_new_tab_hovered =
+        collapsed_new_tab_button_ != nullptr && over(collapsed_new_tab_button_);
+    if (collapsed_new_tab_hovered != collapsed_new_tab_hovered_) {
+        collapsed_new_tab_hovered_ = collapsed_new_tab_hovered;
+        ApplyNewTabVisual(collapsed_new_tab_button_, collapsed_new_tab_hovered_);
+    }
     // Button state callbacks can arrive while the sidebar is still being built, before the
     // Agent entry exists; it has no hover to track until then.
     const bool agent_hovered =
@@ -3882,6 +4577,7 @@ void BrowserChrome::RefreshRowHover() {
         agent_hovered_ = agent_hovered;
         ApplyRailButtonTheme();
     }
+    ApplyFavoriteVisuals();
     PushCornerPatches();
 }
 
@@ -3902,14 +4598,6 @@ void BrowserChrome::ApplyCollapsedRailTheme() {
     if (collapsed_pinned_separator_wrapper_ != nullptr) {
         collapsed_pinned_separator_wrapper_->SetBackgroundColor(rail.argb);
         collapsed_pinned_separator_->SetBackgroundColor(hairline.argb);
-    }
-    collapsed_new_tab_button_->SetBackgroundColor(rail.argb);
-    collapsed_new_tab_button_->SetInkDropEnabled(true);
-    collapsed_new_tab_button_->SetEnabledTextColors(tokens_.text_secondary.argb);
-    if (const std::optional<CefRefPtr<CefImage>> plus =
-            icon_catalog_.Load(ChromeIcon::kPlus, ChromeIconTone::kSecondary, ChromeIconSize::k16);
-        plus.has_value()) {
-        collapsed_new_tab_button_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
     }
     for (const CollapsedTabViews& views : collapsed_tab_views_) {
         if (views.source_index >= tab_entries_.size()) {

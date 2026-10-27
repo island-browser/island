@@ -112,11 +112,26 @@ void IslandApp::ShowCommandPalette() {
     }
 }
 
+void IslandApp::ShowCommandPaletteWithQueryForDev(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCommandPaletteWithQueryForDev(query);
+    }
+}
+
 void IslandApp::BeginSpaceRenaming() {
     CEF_REQUIRE_UI_THREAD();
 
     if (browser_window_ != nullptr) {
         browser_window_->BeginSpaceRenaming();
+    }
+}
+
+void IslandApp::OpenSpaceMenu() {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenSpaceMenu();
     }
 }
 
@@ -198,6 +213,22 @@ bool IslandApp::OpenPeek(const std::string& address) {
     CEF_REQUIRE_UI_THREAD();
 
     return browser_window_ != nullptr && browser_window_->OpenPeek(address);
+}
+
+bool IslandApp::ActivateFavoriteForDev(bool global, std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+
+    return browser_window_ != nullptr && browser_window_->ActivateFavoriteForDev(global, index);
+}
+
+bool IslandApp::FocusNewTabForDev() {
+    CEF_REQUIRE_UI_THREAD();
+    return browser_window_ != nullptr && browser_window_->FocusNewTabForDev();
+}
+
+bool IslandApp::FocusGlobalFavoriteForDev(std::size_t index) {
+    CEF_REQUIRE_UI_THREAD();
+    return browser_window_ != nullptr && browser_window_->FocusGlobalFavoriteForDev(index);
 }
 
 std::size_t IslandApp::SleepingTabCount() const {
@@ -318,11 +349,18 @@ void IslandApp::ToggleAgentPanel() {
     }
 }
 
-void IslandApp::ToggleSettings() {
+void IslandApp::OpenSettings() {
     CEF_REQUIRE_UI_THREAD();
 
     if (browser_window_ != nullptr) {
-        browser_window_->ToggleSettings();
+        browser_window_->OpenSettings();
+    }
+}
+
+void IslandApp::OpenBookmarksPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenBookmarksPage();
     }
 }
 

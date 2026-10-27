@@ -42,6 +42,15 @@ TEST(Tab, HoldsItsIdAndAFreshNavigationState) {
     EXPECT_EQ(tab.navigation_state().snapshot().display_title, "Island");
 }
 
+TEST(Tab, SettingsDocumentReadinessIsPerTabAndClearsWithAReplacementView) {
+    Tab tab(NextTabId());
+    EXPECT_FALSE(tab.settings_document_ready());
+    tab.SetSettingsDocumentReady(true);
+    EXPECT_TRUE(tab.settings_document_ready());
+    tab.SetBrowserView(nullptr);
+    EXPECT_FALSE(tab.settings_document_ready());
+}
+
 TEST(Tab, IsMoveOnlySoItsNavigationStateCannotBeDuplicated) {
     static_assert(!std::is_copy_constructible_v<Tab>);
     static_assert(!std::is_copy_assignable_v<Tab>);

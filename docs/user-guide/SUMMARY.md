@@ -10,6 +10,7 @@
 ## Basics
 
 * [Tabs and spaces](basics/tabs-and-spaces.md)
+* [Bookmarks and favorites](basics/bookmarks-and-favorites.md)
 * [The sidebar](basics/sidebar.md)
 * [Split view](basics/split-view.md)
 

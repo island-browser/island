@@ -23,6 +23,10 @@ void AddressBarModel::UpdateInternalPage(std::string display_url) {
     UpdateCommittedText(std::move(display_url));
 }
 
+void AddressBarModel::UpdateSearchQuery(std::string query) {
+    UpdateCommittedText(std::move(query));
+}
+
 void AddressBarModel::UpdateCommittedText(std::string text) {
     committed_text_ = std::move(text);
     snapshot_.display_text = committed_text_;

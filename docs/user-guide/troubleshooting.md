@@ -10,5 +10,5 @@ Fixes for the problems people hit most.
 * SmartScreen warns on Windows
 * The agent does not start or is not installed
 * A page is broken and I suspect the blocker
-* A shortcut does nothing, or the menu bar shows the old key (restart on macOS)
+* A shortcut does nothing after it was changed
 * Where to find logs and data, and how to report a bug

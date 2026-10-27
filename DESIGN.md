@@ -101,8 +101,12 @@ values.
       "card_radius_dip": 10,
       "card_radius_choices": [0, 6, 10, 14],
       "card_inset_dip": 8,
-      "control_height_dip": 32,
-      "compact_control_height_dip": 26,
+      "control_height_dip": 36,
+      "compact_control_height_dip": 28,
+      "row_gap_dip": 6,
+      "compact_row_gap_dip": 2,
+      "sidebar_padding_dip": 16,
+      "compact_sidebar_padding_dip": 8,
       "collapsed_rail_width_dip": 52,
       "titlebar_band_dip": 40,
       "font": "geist",
@@ -299,11 +303,20 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   26 compact) and 16px icons on a 4/8/12 DIP rhythm: back/forward, then the address as one soft
   `well` pill (the outline turns `--accent` while the field has focus), then the tab list — rows
   on the canvas, the selected tab a soft `selected` fill, the hovered one `hover`, no outline — and
-  a footer with a quiet space chip and icon buttons. There is no New Tab row in any look: ⌘T
-  (Ctrl+T), the Browser menu on macOS and the command palette open tabs. In Arc and Graphite the
-  footer's Agent button is a neutral plate at the row radius (8 DIP) and the control height,
-  centered with the icon buttons and spaced like them: `hover` on hover, `segment_selected` while
-  the panel is open, the label `text` and the sparkle `text_2`, never an accent fill or label.
+  a footer with a quiet space chip and icon buttons. A "+ New tab" row sits directly under the
+  "<Space> · Tabs" header, before the first tab row, in every look (owner decision 2026-10-26; it
+  supersedes the 0.9 spec §9-4 removal). It is a row of the tab list (the same height and neutral
+  `hover` plate as a tab row, no accent) and opens a tab exactly like ⌘T. Its keyboard focus ring
+  sits in a 4 DIP inset around the row (a wrapper panel; the ring is drawn about 4 DIP outside the
+  row, so a 2 DIP inset clipped its sides), so the ring is neutral, rounded and not clipped by the
+  tab list; the collapsed rail's "+" sits after the tab icons in a wrapper with 4 DIP above and
+  below it, so its ring keeps air from the favicon above. Clicking the active
+  space's segment (or its rail icon) opens the space menu: Rename, Change icon, the five colour
+  presets, New space and, with another space present, Delete space. It is a palette listing shown
+  only while open, not a persistent overlay. In Arc and Graphite the footer's Agent button is a
+  neutral plate at the row radius (8 DIP) and the control height, centered with the icon buttons and
+  spaced like them: `hover` on hover, `segment_selected` while the panel is open, the label `text`
+  and the sparkle `text_2`, never an accent fill or label.
   Favicons sit on a 22 DIP rounded plate (`plate`) so dark favicons such as GitHub's stay visible on
   a dark sidebar. Chrome text uses the interface font (Geist, the system font, or an installed
   family). CEF `cef_views` has no corner-radius API and clips button images to the button's insets,
@@ -314,6 +327,10 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   custom view colors on every theme change, so each chrome view reports the reset and the chrome
   repaints from the resolved tokens (`BrowserChrome::ReapplyThemeColors`, `TabRowColors`,
   `SpaceChipColors`).
+  - *Keyboard focus (R16):* every sidebar control (the global strip icons, `+N`, `+`, favorite and tab
+    rows, rail icons, footer and status buttons) shows a rounded neutral 2 DIP `text_secondary` ring
+    (`BrowserChrome::TextfieldFocusRingColor`, `address_focused=false`), in every look and theme. Only the
+    address field keeps the accent focus ring. Tests: `BrowserChromeFocusRingStyleTest`.
 - **Collapsed rail, Arc and Graphite:** the rail shows only tabs and spaces (no Back, Forward or
   address controls). This is the intended toolbar-less rail for those looks, not a defect.
 - **Collapsed icon rail (native):** Cmd/Ctrl+B swaps the 286 DIP sidebar for a 52 DIP rail on the
@@ -343,6 +360,11 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   row is one radius-10 neutral `segment_selected` plate, never blue. The focused query field uses
   the shared neutral overlay ring. Arc and Graphite keep the earlier card-sized overlay without a
   full-window click blocker.
+- **Palette bookmark rows and the Bookmarks group:** a bookmark row keeps its title in `--text`. Its
+  folder path and favorite scope ("Global, Work") follow as secondary text in `--text-secondary`
+  (12 DIP Native, 13 DIP Arc/Graphite), never in the title color. The bookmark and favorite commands
+  sit under one sentence-case "Bookmarks" header, after the general commands and before the bookmark
+  rows, and use the same kind label as a bookmark ("Bookmark"). An empty query keeps that order. Page-changing rows are hidden when the page cannot be bookmarked.
 - **Start page:** `src/main/pages/start.html`, a local page loaded as the tab's own `data:`
   document: `--surface` page, one `--bg` input with a 1px `--border` (outline turns `--accent`
   on focus), a two-segment Search / Ask agent switch (selected = `--surface` with a hairline),
@@ -355,6 +377,15 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   macOS a mouse-transparent native frame view lays a canvas-colored ring (the hole carries the
   rounded corners) and the shadow over the card (`ApplyPageCardStyle`); other platforms keep a
   square card.
+- **Address-field placeholder:** an empty, resting address field shows "Search or enter address". In
+  Native it is drawn through the label in `text_secondary`. Arc and Graphite use the textfield's
+  placeholder in CEF's default colour: the pinned CEF has no placeholder colour setter
+  (`SetPlaceholderTextColor` is behind `CEF_API_REMOVED(15000)`), so this is an accepted limit. It
+  is never the field's text. A search engine's results page shows its query at rest instead of the
+  URL, unless the query would read as an address, holds a control, is not valid UTF-8, or has a
+  non-ASCII character that is not a letter, mark, number or space separator (only letters, numbers
+  and spaces outside ASCII; anything else shows the URL);
+  focusing the field keeps the query.
 - **Address-field indicators (Native):** 20 DIP glyph buttons inside the 30 DIP address field, at
   its edges, in `text_secondary`, each shown only when it has something to say (spec §3).
   Left: a shield with the count of blocked requests, hidden at 0 and capped at `9999+`; click opens
@@ -379,20 +410,33 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   "Joins A + B". Report pages use the same Native sentence-case treatment for their kicker and
   table headers; Arc and Graphite retain their mono uppercase tone.
 - **Bookmarks page:** a local content-slot library with a labelled search field and a compact Import /
-  New folder toolbar. A neutral raised folder row marks the current folder (`aria-current`), while
-  bookmark rows expose title, host, folder move, scoped-favorite controls and edit/delete actions.
-  It collapses from folders-and-results columns into one reading-order column. Failed native saves
-  remain an inline live status directly below the toolbar with Retry; deleting a non-empty folder
+  New folder toolbar. A neutral raised folder row marks the current folder (`aria-current`) and keeps
+  its `...` action inside the folder column. Each bookmark row shows a favicon plate, title, host and
+  scope badges (`Global` and space names); its title and row Enter open the bookmark, while one `...`
+  menu contains Open in new tab, favorite, move, edit and delete actions. Escape closes that menu and
+  returns focus to its trigger. It collapses from folders-and-results columns into one reading-order
+  column. Failed native saves remain an inline live status directly below the toolbar with Retry;
+  separate transient page outcomes never replace that retryable status. Deleting a non-empty folder
   offers Move bookmarks to Unfiled and requires an in-page confirmation before permanent deletion.
   It uses ThemeJson tokens only: neutral raised hover, selection and non-address focus states, with
   the danger token reserved for destructive confirmation.
-- **Internal pages (agent, Settings, All tabs):** flat `--surface` cards with 1px hairlines,
+- **Internal surfaces (agent panel, Settings tab, All tabs):** flat `--surface` cards with 1px hairlines,
   `--radius-md`; controls at `--radius-sm`; section labels in mono uppercase `--text-2`; primary
   buttons use `--text` as background with `--surface` foreground. The accent is used only for the
   active tab, the address focus ring, the agent's own message bubble and its send button; selected
   states (a selected row, segment, node, radio, swatch or "on" switch) are neutral: a `--text`
   mark or a `--fill` plate, in every look. Settings' range slider takes `--text` too. The agent panel's focus ring is a neutral
   2 px `--text-2` ring (see below), never the accent.
+- **Settings tab:** Settings is one ordinary, closable and reorderable tab per window, opened in
+  the active space. Reopening it focuses that tab and routes the requested section through the
+  existing `focus_seq` contract. Its title and address label are `Settings`, its sidebar fallback
+  is the gear icon, and only the exact embedded Settings document may use its native message
+  bridge. Agent tools refuse the Settings tab before navigation or page actions reach it. Form
+  fields and other controls use a neutral 2 px `--text-2` focus ring that follows each control's
+  own shape. The tab is omitted from session persistence and is not restored after restart.
+- **Sidebar density:** in every look, Comfortable uses 36 DIP rows, 6 DIP row gaps and 16 DIP rail
+  padding; Compact uses 28 DIP rows, 2 DIP gaps and 8 DIP rail padding. Density is structural, not
+  a color-preset detail, so the same metrics apply to Native, Arc and Graphite.
 - **Agent panel (native, `pages/agent.html`):**
   - *Header:* a 52 px row with a hairline bottom border. The title (the agent's name, 15 px 600)
     opens the provider menu; a status pill sits beside it. The pill reads "Waiting for approval"
@@ -450,6 +494,31 @@ between the groups; the active tab is the same soft `selected` fill as the selec
 - **Status chips:** mono uppercase label plus a 6px dot; meaning is carried by the label, never by
   color alone.
 
+### Sidebar favorites (Bookmarks 0.9)
+
+- Order: global strip, `<Space> · Favorites` rows (Graphite: "Favorites"), the tabs header, tab
+  rows, fixed footer. The tabs header sits before the first tab row (pinned or not) in Native; Arc
+  and Graphite show a small "Tabs" label only when favorites come first. No header trails an empty
+  list. The collapsed rail uses the same order with 32 DIP icon buttons and one hairline after the
+  globals.
+- Global strip: exactly `min(6, count)` icons then `+N`, never more. The "+" (add current page) is
+  not in the strip: it trails the "Global favorites" header row. `ComputeGlobalStripLayout` fits the
+  strip into the inner width (`rail_width − 2·spacing_3 − 10`): the plate shrinks from 28 toward
+  24 DIP and the gap from 4 toward 2 DIP. Native 248 (inner 214) shows six icons with a 28-DIP plate
+  and a 3-DIP gap. Arc/Graphite 286 (inner 252) keep 28/4. Native compact (200, inner 166) cannot
+  hold six icons and "+N" at the 24/2 floors, so it shows five icons and "+N" (ruling R14, accepted:
+  Native compact shows 5 icons plus `+N`).
+- Space favorite rows: Native 28 DIP compact, 34 comfortable; Arc and Graphite 32 DIP in both.
+- A displayed favorite uses `segment_selected` (neutral raised), never `accent`. Hover uses `hover`.
+- While a favorite is on screen, the space's selected ordinary tab is not the tab the person sees
+  (ruling R15). It takes the neutral `segment_selected` plate with `text` (no accent fill, selection
+  or white glyphs) until the favorite closes; the accent returns when the ordinary tab is shown
+  again. `TabRowFill` and `TabStripEntrySnapshot::behind_favorite` carry this rule.
+- Status row: `warning_bg` fill with `warning_text`, directly above the footer, hidden when no
+  bookmark change failed.
+- No new color tokens were added: the feature reuses `canvas`, `hover`, `segment_selected`, `text`,
+  `warning_bg` and `warning_text`, which already carry light and dark values.
+
 ## 6. Motion & Interaction
 
 - `--motion-fast: 160ms`; `--motion-enter: 480ms`; `--motion-reveal: 700ms`; `--ease-out:
@@ -468,7 +537,8 @@ the window margin on macOS, optional in Settings). No glass stacks, no glow, no 
 
 ### Constraints
 - WCAG 2.2 AA: 4.5:1 body contrast (every text token on every surface), 3:1 large text and UI,
-  keyboard reachability, semantic landmarks, visible 2–3px accent focus rings, no color-only
+  keyboard reachability, semantic landmarks, visible 2–3px focus rings (accent on the address field
+  only; neutral `text_secondary` on sidebar controls, see Sidebar above), no color-only
   information, no auto-playing media.
 - Status is stated in text, never by color alone. Decorative product mockups are `aria-hidden`.
 - Motion is optional under `prefers-reduced-motion`; no action depends on hover, motion, or JS.
@@ -481,3 +551,13 @@ the window margin on macOS, optional in Settings). No glass stacks, no glow, no 
 | Native Graphite pass partly verified | `src/main/browser_chrome.cc`, `src/main/welcome_flow.cc`, `src/main/pages/start.html` | The macOS light-theme sidebar was inspected in a running build through an in-process window capture (the sandbox cannot use screen recording), up to the theme-reset repaint. The final address-field holder, space-chip widths, the restyled welcome card, and the styled start page were built and unit-tested but not looked at; dark theme, Windows, and Linux were verified only through the token tests. | Visual pass of the welcome card, start page, dark theme, and the other platforms. |
 | Arc corners are native patches, not view radii | `src/main/macos/page_card_mac.mm`, `src/main/browser_chrome.cc` | CEF 150 `cef_views` exposes no corner radius, clips button images to the button insets, and the Views compositor is opaque, so rounded fills and the rounded page card are drawn by a native macOS overlay (corner patches and a ring frame) on top of square views. Windows/Linux keep square corners and the platform frame. The interface-font choice applies to the sidebar and the internal pages; the palettes and the welcome card keep Geist. | Close if CEF exposes view corner radii or custom-drawn views. |
 | Focus ring on the address pill stays square | `src/main/browser_chrome.cc` | The 1 px accent ring is a panel behind the pill, so its square corners show beside the rounded fill while the field has focus. | Same exit. |
+
+### Peek card (0.9)
+
+- The card is sized from the content area: 80% of its width and 85% of its height, centered, with
+  minimums of 360 by 280 DIP (`peek_layout.h`), and it follows window resizes while open.
+- Its two title-bar buttons sit on neutral `fill` plates (one step off the `surface_secondary`
+  title bar, as the address well is): "Open as tab" carries a `plus` icon in the text tone with
+  its label, and the close is an icon-only `×` named "Close Peek". They use the native hover and
+  pressed ink and a neutral focus ring (the overlay ring, never the accent). No button in the card
+  is filled with `text` or `accent`. CEF buttons cannot round their plate, which is accepted debt.

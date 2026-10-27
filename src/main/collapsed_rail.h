@@ -33,6 +33,12 @@ inline constexpr int kCollapsedRailGutterDip =
 // in a wrapper that adds breathing room above and below it.
 inline constexpr int kCollapsedRailSeparatorWidthDip = kCollapsedRailButtonDip - 12;
 inline constexpr int kCollapsedRailSeparatorHeightDip = 9;
+// The rail's "+" sits in a wrapper that keeps this much room above and below it. Its focus ring
+// is drawn about 4 DIP outside the 32 DIP button (a 2 DIP stroke in a 4 DIP halo), so 4 DIP
+// keeps the ring inside the list and leaves about 2 DIP of air above it, below the favicon.
+inline constexpr int kCollapsedRailNewTabRingInsetDip = 4;
+// Extra list height the "+" wrapper adds (its inset above and below).
+inline constexpr int kCollapsedRailNewTabPadDip = 2 * kCollapsedRailNewTabRingInsetDip;
 
 static_assert(kCollapsedRailButtonDip + kCollapsedRailScrollbarAllowanceDip <=
                   kCollapsedRailWidthDip,
@@ -48,6 +54,18 @@ static_assert(kCollapsedRailButtonDip + kCollapsedRailScrollbarAllowanceDip <=
     }
     return n * kCollapsedRailButtonDip + (with_separator ? kCollapsedRailSeparatorHeightDip : 0) +
            (children - 1) * kCollapsedRailButtonSpacingDip;
+}
+
+// Height of a rail list with `buttons` icon buttons and `separators` hairlines, gaps included.
+[[nodiscard]] constexpr int CollapsedRailListHeightDip(std::size_t buttons,
+                                                       std::size_t separators) {
+    const std::size_t children = buttons + separators;
+    if (children == 0) {
+        return 0;
+    }
+    return static_cast<int>(buttons) * kCollapsedRailButtonDip +
+           static_cast<int>(separators) * kCollapsedRailSeparatorHeightDip +
+           (static_cast<int>(children) - 1) * kCollapsedRailButtonSpacingDip;
 }
 
 // The pixel buffer of one space dot, premultiplied BGRA, row-major, `size_px` square.

@@ -35,6 +35,30 @@ void Space::AppendTab(Tab tab) {
     active_tab_index_ = tabs_.size() - 1;
 }
 
+TabId Space::InsertTabAfterActive(Tab tab, bool activate) {
+    const TabId id = tab.id();
+    std::size_t insert_at = tabs_.size();
+    if (has_active_tab()) {
+        const Tab& current = tabs_[active_tab_index_];
+        const TabId anchor = current.group_parent().value_or(current.id());
+        insert_at = IndexOfTab(anchor).value_or(active_tab_index_) + 1;
+        while (insert_at < tabs_.size() && tabs_[insert_at].group_parent() == anchor) {
+            ++insert_at;
+        }
+    }
+    insert_at = std::max(insert_at, pinned_count());
+    const bool had_active = has_active_tab();
+    const std::size_t previous_active = had_active ? active_tab_index_ : 0;
+    tabs_.insert(tabs_.begin() + static_cast<std::vector<Tab>::difference_type>(insert_at),
+                 std::move(tab));
+    if (activate || !had_active) {
+        active_tab_index_ = insert_at;
+    } else if (insert_at <= previous_active) {
+        active_tab_index_ = previous_active + 1;
+    }
+    return id;
+}
+
 TabId Space::AppendChildTab(TabId parent, Tab tab, bool activate) {
     const TabId id = tab.id();
     const std::optional<std::size_t> parent_index = IndexOfTab(parent);

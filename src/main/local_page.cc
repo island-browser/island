@@ -191,7 +191,7 @@ std::string_view LocalPage::DisplayUrl(LocalPageKind kind) noexcept {
         case LocalPageKind::kAgent:
             return "island://agent";
         case LocalPageKind::kSettings:
-            return "island://settings";
+            return "Settings";
         case LocalPageKind::kTabOverview:
             return "island://tabs";
         case LocalPageKind::kBookmarks:

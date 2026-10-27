@@ -19,9 +19,7 @@ A shortcut needs ⌘/Ctrl or ⌥/Alt, except function keys. Plain typing keys ar
 
 Click **Reset all** to restore every default.
 
-{% hint style="info" %}
-**macOS only:** the menu bar picks up your changes after you restart Island.
-{% endhint %}
+Changes take effect immediately, including the macOS menu bar.
 
 ## Default shortcuts
 

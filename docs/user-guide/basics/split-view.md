@@ -31,5 +31,6 @@ On macOS, the same actions are in the Browser menu: **Move Split Divider Left** 
 ## Good to know
 
 * Tabs in a split pair never go to sleep.
+* A favorite opened from the sidebar fills only the pane you are in. Select the other pane and activate the favorite again to move it there. The other pane keeps its tab.
 * A quit keeps your split pairs, and Island restores them on the next launch.
 * You can change the shortcuts in [Shortcuts](../settings/shortcuts.md).

@@ -103,6 +103,21 @@ void WriteSpaceState(json::Writer& w, const SpaceState& space) {
     w.EndObject();
 }
 
+void WriteFavoriteTabState(json::Writer& w, const FavoriteTabState& favorite) {
+    w.StartObject();
+    if (favorite.space_id.has_value()) {
+        w.Key("space_id");
+        w.Uint64Value(favorite.space_id->value);
+    }
+    w.Key("bookmark_id");
+    w.Uint64Value(favorite.bookmark_id);
+    w.Key("reset_url");
+    w.StringValue(favorite.reset_url);
+    w.Key("last_url");
+    w.StringValue(favorite.last_url);
+    w.EndObject();
+}
+
 std::string SerializeToJson(const SessionState& state) {
     std::ostringstream oss;
     json::Writer w(oss);
@@ -123,6 +138,15 @@ std::string SerializeToJson(const SessionState& state) {
         WriteSpaceState(w, space);
     }
     w.EndArray();
+    if (!state.favorite_tabs.empty()) {
+        w.Key("favorite_tabs");
+        w.StartArray();
+        for (const auto& favorite : state.favorite_tabs) {
+            w.ArrayElement();
+            WriteFavoriteTabState(w, favorite);
+        }
+        w.EndArray();
+    }
     w.EndObject();
 
     // Trailing newline for human-readability; also helps with the
@@ -259,6 +283,32 @@ LoadResult ParseSessionState(const json::Value& root) {
         }
 
         state.spaces.push_back(std::move(space_state));
+    }
+
+    // Optional favorite virtual-tab records; a wrong type is a schema error like the rest.
+    if (const json::Value* favorites = root.FindMember("favorite_tabs")) {
+        if (!favorites->IsArray()) {
+            return {SessionState::Default(), SessionError::kSchemaError};
+        }
+        for (const auto& favorite_val : favorites->array_val) {
+            if (!favorite_val.IsObject() || !favorite_val.HasRequiredInt("bookmark_id") ||
+                !favorite_val.HasRequiredString("reset_url") ||
+                !favorite_val.HasRequiredString("last_url")) {
+                return {SessionState::Default(), SessionError::kSchemaError};
+            }
+            FavoriteTabState favorite;
+            favorite.bookmark_id =
+                static_cast<std::uint64_t>(favorite_val.FindMember("bookmark_id")->int_val);
+            favorite.reset_url = favorite_val.FindMember("reset_url")->string_val;
+            favorite.last_url = favorite_val.FindMember("last_url")->string_val;
+            if (const json::Value* space = favorite_val.FindMember("space_id")) {
+                if (!space->IsInt() || space->int_val <= 0) {
+                    return {SessionState::Default(), SessionError::kSchemaError};
+                }
+                favorite.space_id = SpaceId{static_cast<std::uint64_t>(space->int_val)};
+            }
+            state.favorite_tabs.push_back(std::move(favorite));
+        }
     }
 
     return {std::move(state), SessionError::kNone};

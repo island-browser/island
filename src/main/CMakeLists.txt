@@ -1,4 +1,5 @@
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
+find_package(SQLite3 QUIET)
 
 add_library(island_browser_core STATIC
     ${ISLAND_LOCAL_PAGE_SOURCES}
@@ -11,6 +12,8 @@ add_library(island_browser_core STATIC
     app_resources.cc
     bookmark_import.cc
     bookmark_store.cc
+    favorite_tabs.cc
+    sidebar_collection.cc
     browser_import.cc
     app_runtime.cc
     browser_chrome.cc
@@ -52,6 +55,8 @@ add_library(island_browser_core STATIC
     sidebar_state.cc
     space.cc
     peek_overlay.cc
+    space_menu.cc
+    link_open_policy.cc
     space_rename_overlay.cc
     startup_options.cc
     dev_capture.cc
@@ -66,12 +71,21 @@ target_compile_features(island_browser_core PUBLIC cxx_std_20)
 target_compile_options(island_browser_core PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_include_directories(island_browser_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(island_browser_core PRIVATE libcef_dll_wrapper)
+if(SQLite3_FOUND)
+    target_compile_definitions(island_browser_core PRIVATE ISLAND_HAS_SQLITE3=1)
+    target_link_libraries(island_browser_core PRIVATE SQLite::SQLite3)
+endif()
 target_link_libraries(island_browser_core PUBLIC island_agent island_search island_content_blocker_ffi)
 SET_LIBRARY_TARGET_PROPERTIES(island_browser_core)
 
 if(APPLE)
 
-    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm macos/clipboard_mac.mm macos/font_registry_mac.mm macos/mouse_down_mac.mm macos/page_card_mac.mm)
+    target_sources(island_browser_core PRIVATE macos/bookmark_import_mac.mm
+                                               macos/clipboard_mac.mm
+                                               macos/font_registry_mac.mm
+                                               macos/keymap_menu_mac.mm
+                                               macos/mouse_down_mac.mm
+                                               macos/page_card_mac.mm)
     set_source_files_properties(macos/mouse_down_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_source_files_properties(macos/page_card_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     target_link_libraries(island_browser_core PRIVATE "-framework CoreFoundation" "-framework CoreText"

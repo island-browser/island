@@ -21,10 +21,10 @@ platform executable links.
 | `chrome_snapshot.h` | Observable snapshot struct + `ChromeObserver` seam used by tests |
 | `browser_command.h` | The Back / Forward / Reload command enum |
 | `navigation_state.{h,cc}` | Back/forward/reload availability and navigation snapshot |
-| `address_bar_model.{h,cc}` | Address field text/editing state |
+| `address_bar_model.{h,cc}` | Address field text/editing state. `kAddressPlaceholderText` is drawn (textfield placeholder; Native's idle label) only while the field is empty and at rest, never stored as text. `UpdateSearchQuery` shows a search engine's query as the resting text |
 | `address_policy.{h,cc}` | Validates an already-parsed absolute http/https address (allowed schemes, hosts, ports) |
 | `address_input.{h,cc}` | CEF-free address-bar heuristic: explicit scheme / host-like text becomes a URL (bare hosts get `https://`), everything else is a web search. Used only by `BrowserWindow::ResolveAddressInput` |
-| `search_engine.{h,cc}` | CEF-free table of web search engines (Google default, DuckDuckGo, Yandex), `BuildSearchUrl`, and the start page's remembered mode |
+| `search_engine.{h,cc}` | CEF-free table of web search engines (Google default, DuckDuckGo, Yandex), `BuildSearchUrl`, `SearchQueryFromResultsUrl`, and the start page's remembered mode. Address display rule: `BrowserWindow::UpdateAddressBarForNavigation` shows the query, not the URL, when `SearchQueryFromResultsUrl` matches the committed URL (https, the row's host or one of its `extra_results_hosts` (Yandex: yandex.ru, ya.ru), the exact path, its query parameter; other parameters ignored). The helper returns nullopt, so the URL shows, when the decoded query classifies as a URL (`ClassifyAddressInput`), holds a control, is not valid UTF-8 (`IsShowableQuery`), or has a non-ASCII code point that is not a letter, mark, number or space separator (`IsDisplayShownNonAscii` over the generated `query_display_ranges.h`; regenerate with `scripts/gen_query_display_ranges.py`). The URL stays in the tab (Copy URL, the agent, bookmarks). To recognise another engine, add its row to the table; the match is derived from `url_prefix`, so no second list exists, and `GivenEveryEngineRow...` checks each row's shape. Bing is not in the table, so its results URLs are shown as they are |
 | `start_tiles.{h,cc}` | CEF-free speed-dial model for the start page: `BuildStartTiles` turns the most-visited history into at most six `{title, url, host}` tiles (http/https only, no credentials, one per host, host as the label fallback); `IsWebTileUrl` guards `open_tile`. `BrowserWindow` refreshes them on the page's `ready` message from `HistoryRecorder::MostVisitedAsync`, which groups visits by `WebUrlHost` before its limit of six applies |
 | `cef_address_parser.{h,cc}` | CEF-dependent URL parsing behind the policy seam |
 | `design_tokens.{h,cc}` | `ArgbColor`, the token palette shared with `tests/design/`, the Arc `canvas/selected/hover/well/plate` surfaces, `AppearanceSettings` and `ChromeTokens::Customized` (tint, density, radius, inset, shadow, side, font) |
@@ -38,15 +38,16 @@ platform executable links.
 | `lifecycle_config.h` | Shutdown/lifecycle constants |
 | `sidebar_state.{h,cc}`, `collapsed_rail.h` | CEF-free expand/collapse state (persistent choice in prefs `sidebar_collapsed`, transient expansion while editing the address from the icon rail) and the icon rail's metrics plus the space-dot raster |
 | `favicon_policy.h` | CEF-free favicon rules: web pages only, 16 DIP downloads, stale-result and clear-on-navigation checks (bookkeeping lives on `Tab`) |
-| `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam |
+| `tab.{h,cc}`, `tab_id.h` | Move-only tab model identified by `TabId`, holding the per-tab `CefBrowserView`/`CefBrowser` seam and the Settings-document-ready bit that clears on navigation/view replacement |
 | `space.{h,cc}`, `space_icon.h` | Named, colored space with an optional validated Lucide icon id, ordered tabs, active selection, `SplitPairing`, and the space's `CefRequestContext`. `space_icon.h` owns `kSpaceIconChoices` (24 ids) and `SpaceIconPaletteCommands()` |
 | `space_icon_cache.h` | Template cache of rasterized space icons keyed by id, size and color (`SpaceIconCache<Image>`); a failed load is retried and `Clear()` drops entries. Used by `IconCatalog::LoadSpaceIcon` so switchers do not reread PNGs on each update |
 | `session_store.{h,cc}` | Session JSON round-trip with a `SessionError` taxonomy; not yet called by any lifecycle code |
 | `window_agent_host.{h,cc}`, `devtools_bridge.{h,cc}`, `agent_navigation.{h,cc}` | `AgentBrowserHost` implementation behind the MCP tools in `src/agent/` (tabs, spaces, page text/screenshot via DevTools) |
-| `pages/settings.html` | Settings shell: a section list (`data-pane` items, `aria-current`) over one `<section id=...>` pane at a time, sidebar search over rows, version footer. `settings.appearance.base_look` decides whether Space colors and Sidebar tint show (hidden for Native). Native-side focus requests (`ShowSettingsSection`, dev `settings:<section>`) carry a `focus_seq` from `SettingsFocus` (`settings_focus.h`), so the page opens a repeated section again; they wait until the page has loaded (`LocalPage::loaded()`) |
-| `pages/bookmarks.html` | Managed local bookmark library. `islandRender` receives `theme`, `folders[{id,name,count}]`, `bookmarks[{id,title,url,host,folder_id,folder_path,global,spaces[{id,name}]}]`, `current_space`, `selected_folder`, `import_sources`, `status`, and optional `agent_naming`. It posts only the documented `bookmarks:*`, `folder:*`, `favorite:*`, `import`, `retry`, and `select-folder` messages; add a message by documenting it in the page's top comment/table, emitting only scalar IDs/strings, validating it in the native allow-list, and adding a static page test. Task 6b owns the BrowserWindow dispatch and state producer. |
-| `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | In-window HTML pages (agent panel, Settings, All tabs) loaded as `data:` URLs; `pages/agent.html` renders sent page and quote chips from each user transcript item's optional `context` object above its bubble, with neutral token-only chips; sent quotes reuse the composer's one-line ellipsis span. `pages/start.html` (`LocalPageKind::kStart`) is the exception: it is the document each new tab loads, and `BrowserWindow::OnConsoleMessage` accepts its `search` / `ask_agent` / `research` / `set_start_mode` / `open_tile` / `ready` messages only from a tab whose main frame is exactly that URL; page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)` |
-| `keymap.{h,cc}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping, keycap glyphs (`FormatKeyGlyphs`) and the ten `CheatsheetRows` |
+| `query_display_ranges.h` | Generated by `scripts/gen_query_display_ranges.py` (do not edit): sorted ranges of the non-ASCII code points a search query may show in the address field; read by `search_engine.cc` |
+| `pages/settings.html` | Settings shell, loaded in one ordinary tab per window: a section list (`data-pane` items, `aria-current`) over one `<section id=...>` pane at a time, sidebar search over rows, version footer. `settings.appearance.base_look` decides whether Space colors and Sidebar tint show (hidden for Native). `ShowSettingsSection` and dev `settings:<section>` focus the existing tab and carry a `focus_seq` from `SettingsFocus` (`settings_focus.h`), so a repeated section opens again; the request remains pending until that tab's current document is ready. The tab is not session-restored; only a tab whose main frame is exactly `SettingsPageUrl()` may send Settings messages, and agent tools refuse it before navigation or DevTools calls. |
+| `pages/bookmarks.html` | Managed local bookmark library. `islandRender` receives `theme`, `folders[{id,name,count}]`, `bookmarks[{id,title,url,host,folder_id,folder_path,global,spaces[{id,name}]}]`, `current_space`, `selected_folder`, bookmark-only `import_sources`, durable `status` (including Retry), separate transient `page_status`, and optional `agent_naming`. `page_status` clears when another page action starts or the page closes/reopens; a durable failure never duplicates it. Its rows open from the title/Enter and keep all secondary actions in one `...` menu; it uses menuitem roles, arrow/Home/End navigation, and Escape or an outside click closes the menu and returns focus to that trigger (also after favorite toggles). Its native dispatcher is `BrowserWindow::HandleBookmarksMessage`: `bookmarks:open`, `bookmarks:open-new-tab`, `bookmarks:edit`, `bookmarks:delete`, `bookmarks:move`, `folder:create`, `folder:rename`, `folder:delete`, `favorite:toggle-global`, `favorite:toggle-space`, `import`, `retry`, and `select-folder`. Add a message by documenting it in the page's top comment/table, emitting only scalar IDs/strings, validating it before a `RunBookmarkMutation`, and adding a page/window test. |
+| `local_page.{h,cc}`, `local_pages_html.h`, `pages/*.html` | Embedded HTML surfaces loaded as `data:` URLs. Settings and Start are ordinary tab documents; their messages are accepted only when the hosting tab's main frame is the exact generated URL. The agent panel, All tabs and Bookmarks remain content-slot surfaces. `pages/agent.html` renders sent page and quote chips from each user transcript item's optional `context` object above its bubble, with neutral token-only chips; sent quotes reuse the composer's one-line ellipsis span. Page→native messages travel as `\x01island:` console messages, native→page state through `islandRender(state)`. |
+| `keymap.{h,cc}`, `macos/keymap_menu_mac.{h,mm}` | Configurable shortcuts: `KeyAction` ids, `Mod+Shift+K` binding text, defaults, conflicts, VK and macOS key-equivalent mapping, keycap glyphs (`FormatKeyGlyphs`) and the ten `CheatsheetRows`. An override reapplies both CEF accelerators and macOS NSMenu key equivalents immediately. |
 | `cheatsheet_overlay.{h,cc}` | The ⌘/ shortcut cheatsheet: CEF-free `CheatsheetLifetime` (toggle, detach, `OutsideMouseDownCloses` → `OverlayStep`) and the 320 DIP bottom-right card, created on show and destroyed on hide (see `overlay_lifetime.h`). A mouse press outside the card closes it through `mouse_down_monitor.h`; focus and window activation never do. Escape reaches it through the stop-loading route, where the cheatsheet comes before a peek |
 | `mouse_down_monitor.h`, `macos/mouse_down_mac.mm` | Reports every mouse press the app receives (an `NSEvent` local monitor, passed through unchanged), installed only while an overlay that closes on an outside click is shown; no-op elsewhere |
 | `native_handle.h` | `NativeHandlePointer`: turns `cef_window_handle_t` (a pointer on macOS and Windows, an X11 id on Linux) into the `void*` the native helpers take |
@@ -63,15 +64,17 @@ platform executable links.
 | `cef_update_fetcher.{h,cc}` | `UpdateFetcher` over `CefURLRequest` (manual, allow-listed redirects; capped, hashed streaming) |
 | `content_blocker.{h,cc}`, `content_blocker_policy.{h,cc}` | RAII wrapper for the Rust engine plus CEF-free request-type, bypass, allowlist, and four-day refresh policy |
 | `cef_content_blocker.{h,cc}` | Background EasyList/EasyPrivacy cache loading, `CefURLRequest` refreshes, atomic engine publication, and request checks |
-| `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers, Safari, Firefox (`.jsonlz4` bookmark backups) and Arc (spaces + pinned tabs) |
+| `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers (one source row imports the union of readable `Default`, `Profile N`, and `Local State`-named profiles, and reports profile parse failures after a partial import), Safari, Firefox (`[Install*] Default` wins over `[Profile*] Default=1`, otherwise newest `places.sqlite`; the temporary SQLite copy includes WAL sidecars while Firefox may be running; `.jsonlz4` backups are the fallback when optional SQLite3 is unavailable or fails), and Arc (spaces + pinned tabs). Add a source by giving it a stable `ImportSource`/id, a profile-root detector that distinguishes absent from unreadable, an importer, fixtures for every probe path, and a Welcome description. |
 | `bookmark_store.{h,cc}` | CEF-free bookmark library, schema 2 in `bookmarks.json`: bookmarks with IDs, folders holding ordered bookmark IDs, one global favorite list and one favorite list per SpaceId (decimal keys). `BookmarkStore` is the single mutation seam. Each operation (`AddOrFindByUrl`, folder create/rename/move/delete, `MoveBookmark`, `EditBookmark`, `DeleteBookmark`, `AddFavorite`/`AddFavoriteByUrl`/`RemoveFavorite`/`ReorderFavorite`, `RemoveSpaceFavorites`, `Import`) applies to a copy, saves atomically and commits only on success, and returns a `BookmarkResult` (`BookmarkError`, a short message, the affected ID, the import count). A default-constructed store is in-memory. `Load()` migrates schema 1 (original bytes to `bookmarks.json.v1.bak` first; a failed write leaves the v1 file and makes the store read-only for the run). Migration collapses duplicate and case-variant URLs: the first occurrence in folder-then-item order wins, keeping its title and folder; later copies are dropped from the live library (their bytes stay in `.v1.bak`); empty and same-named folders are kept. Read-only runs carry their own reason message; edits that change nothing still succeed. Load also backs up an invalid file to `bookmarks.json.invalid.bak` before the first save; an existing file that cannot be read makes the store read-only, so it is never overwritten. `Flattened()` is the read-only (folder, title, URL) projection the palette uses; `MaxSpaceKey()` lets the window reserve SpaceIds above it. Extension points: a new record field goes into the struct, `SerializeToJson`, `ParseSchemaTwo`, `IsConsistent`; a new operation is a `Commit` lambda over the copy, so it inherits rollback and atomic save |
+| `favorite_tabs.{h,cc}` | CEF-free registry of favorite virtual-tab records: `FavoriteTabKey` (scope plus bookmark ID, defaulted `<=>`), `FavoriteTabRecord` (reset URL, last URL), `Ensure`/`Find`/`SetLastUrl`/`ResetToFavorite`/`Dispose`/`DisposeBookmark`/`DisposeScope`, and `ToSessionFavoriteTabs`/`FavoriteTabsFromSession` for `session.json`. The window pairs records with live `Tab`s; see "Favorites and virtual tabs" below |
 | `tab_sleep_policy.h`, `peek_state.h` | CEF-free models: tab sleep decisions (injected clock, per-tab last-active time, exclusions as inputs; `Expired` for the timed sweep, `AllEligible` for "Sleep inactive tabs now") and the peek card's state (open/replace/close/open-as-tab/Escape, generation counter for stale callbacks) |
+| `link_open_policy.{h,cc}`, `peek_layout.h` | CEF-free decisions: `DecideLinkOpen(disposition, user_gesture)` → `kPeek` / `kForegroundTab` / `kReject` for every page new-tab open (table in the header); `PeekCardBounds` sizes the card from the content area (80% by 85%, centered, minimums 360 by 280 DIP) |
 | `peek_overlay.{h,cc}` | The peek card: an overlay of the one `CefWindow`, created in `Open` and released in `Close` (see `overlay_lifetime.h`), covering only the card, holding a title bar and its own `CefBrowserView` with its own client (popups load in the card, Escape claimed in `OnPreKeyEvent`) |
 | `overlay_lifetime.h`, `overlay_card.h` | CEF-free overlay rule (an overlay exists only while its surface is shown, because a live `CefWindow` overlay blocks mouse input on macOS) and the solid-color `OverlayFillDelegate` that re-asserts its color on theme change |
 | `browser_window_research.cc`, `research_prompt.{h,cc}`, `report_store.{h,cc}` | Research mode in `BrowserWindow` (start, cancel and finish, the Plan hub, the Report tab with save/copy/continue/export); the CEF-free prompt, research space name and report extraction; and the Reports list persisted as `reports.json` (schema 2: each report has a `kind`, "research" or "collection"; version 1 loads as research) |
 | `collect_prompt.{h,cc}`, `table_export.{h,cc}` | "Collect from tabs": the CEF-free prompt that lists the chosen tabs as untrusted web content and asks for one table between the Research report markers; `FirstMarkdownTable` reads a report's table (link cells become URLs, with a title column when the texts differ) and `TableToCsv` / `TableToJson` export it. CSV cells that start with `= + - @` TAB or CR get a leading quote (formula neutralization); JSON keys de-duplicate with ` 2`, ` 3`. The sheet sends `{index, url}` per checked tab and `CollectFromTabs` takes a choice only while the active space still has its URL (`CollectChoice` in `collect_prompt.h`). Sent by `CollectFromTabs` as a `kCollect` task whose context is the prompt; `FinishCollectTurn` stores the table before the queue moves on. Panel state key `collect`, message `collect`; dev actions `agent_fixture:collect` and `report_fixture:collection` |
 | `plan_dev_fixture.h` | The developer capture's sample research plan (`--island-dev-actions=plan_fixture`), kept equal to the test fixture by a unit test |
-| `dev_capture.{h,cc}` (agent fixtures) | Developer capture fixtures for the agent panel, each a dev action: `agent_fixture:confirm` (a confirmation card), `agent_fixture:queue` (one running and two queued tasks), `agent_fixture:quote` (a page chip and a quote chip), `agent_fixture:collect` (the Collect sheet), `agent_fixture:thread` (a sample conversation: a user message with a page chip and long quote, three tool rows (two done, one failed, one long MCP-prefixed name), a Markdown reply, and one queued message; `ShowThreadFixtureForDev` feeds the session through `AgentSession::AddDevUserPrompt` / `ApplyDevEvent`, so no agent starts). `main_mac.mm` maps the names to `IslandApp::Show*Fixture` through the `kAgentFixtures` table; add a fixture there and to this list. Captures with a fresh HOME open on the Welcome sheet, which covers the page: write a valid `prefs.json` with `"onboarding_completed":true` and a `theme` string in the capture HOME (under `Library/Application Support/Island/`) before the run, or the sheet stays on top. The status pill can read "Not running" while a fixture task shows Running; the fixtures never start an agent. |
+| `dev_capture.{h,cc}` (agent fixtures) | Developer capture fixtures for the agent panel, each a dev action: `agent_fixture:confirm` (a confirmation card), `agent_fixture:queue` (one running and two queued tasks), `agent_fixture:quote` (a page chip and a quote chip), `agent_fixture:collect` (the Collect sheet), `agent_fixture:thread` (a sample conversation: a user message with a page chip and long quote, three tool rows (two done, one failed, one long MCP-prefixed name), a Markdown reply, and one queued message; `ShowThreadFixtureForDev` feeds the session through `AgentSession::AddDevUserPrompt` / `ApplyDevEvent`, so no agent starts). `main_mac.mm` maps the names to `IslandApp::Show*Fixture` through the `kAgentFixtures` table; add a fixture there and to this list. Captures with a fresh HOME open on the Welcome sheet, which covers the page: write a valid `prefs.json` with `"onboarding_completed":true` and a `theme` string in the capture HOME (under `Library/Application Support/Island/`) before the run, or the sheet stays on top. The status pill can read "Not running" while a fixture task shows Running; the fixtures never start an agent. The palette capture `palette_query:<text>` (`main_mac.mm` → `IslandApp::ShowCommandPaletteWithQueryForDev` → `CommandPaletteView::SetQueryForDev`) opens ⌘K with the text typed in; it is how the bookmark rows are captured with a matching query. |
 | `pages/plan.html`, `pages/report.html`, `pages/markdown.js` | The Plan tab's graph and list page, the Report tab page (its view drops a first H1 that repeats the report title; Copy and Export keep it), and the shared safe Markdown renderer both use (inlined where a page carries `// @@ISLAND_MARKDOWN@@`) |
 | `main_mac.mm`, `process_helper_mac.cc` | macOS main and helper-process entrypoints |
 | `Info.plist.in`, `Helper-Info.plist.in` | Templated bundle plists configured per helper suffix |
@@ -88,6 +91,59 @@ platform executable links.
 
 ### Working In This Directory
 
+- Sidebar collections (Bookmarks 0.9): `SidebarCollectionSnapshot` (`browser_chrome.h`) carries the
+  global favorites, the current space's favorites, the tab rows and the failure status. To add a
+  collection: add its field to the snapshot, build it in `BrowserWindow::BuildSidebarCollection`,
+  render it in `BrowserChrome::AddFavoriteSections` (expanded) or `AddCollapsedFavorites` (rail), and
+  route clicks through a `CollectionButtonAction` plus a `BrowserChromeHost` virtual. Pure rules
+  (strip fit, names, headers, the Tabs-header placement, row heights, fills, favorite ink) live in
+  `sidebar_collection.{h,cc}`. Favorite text and glyph colors repaint only on a theme change:
+  `BrowserChrome::ApplyFavoriteInk` (from `ApplyCollectionTheme`, never hover) paints
+  `FavoriteInkPlan`; add a themed favorite surface as a plan target plus an `ApplyFavoriteInk` case. The contract tests project the tab strip with
+  `BrowserChrome::SidebarCollectionContract` (its tabs part is `TabStripContract`, shared with
+  `CollectionCountContract`), the rail with `CollapsedRailOrder` and the failure row with
+  `BookmarkStatusContract`. The header-row, strip, "tabs follow favorites" and rail-separator
+  conditions are the functions `GlobalHeaderRowVisible`, `GlobalStripVisible`,
+  `FavoritesPrecedeTabs` and `CollapsedRailSeparatorVisible`, called by both the builders and the
+  projections; button names come from the same `*AccessibleName` helpers. Tab row fills (R15) go
+  through `TabRowFill`, and the failure row's colors through `BookmarkStatusRowColors`. The
+  new `ChromeViewId`s are `1081`–`1093` (`1093` is the global header row holding the label and the
+  trailing "+"); `1052` (collapsed New Tab) is retired and never reused. The New tab row returned
+  on 2026-10-26 with two new ids: `1094` (`kTabsNewTabRow`, the expanded row directly under the
+  tabs header, built by `AddNewTabRow` and projected by `TabStripContract`) and `1095`
+  (`kCollapsedRailNewTab`, the rail's "+" after the tab icons, built by `AddCollapsedNewTab` and
+  listed last by `CollapsedRailOrder`). Both run `CollectionButtonAction::kNewTab`, which calls
+  `ExecuteBrowserCommand(BrowserCommand::kNewTab)`; `ApplyNewTabVisual` paints them with the
+  neutral `FooterAgentPlate` plate and is hover-tracked in `RefreshRowHover`.
+  Space menu (`space_menu.h/.cc`): a click on the ACTIVE space's segment or rail icon runs
+  `kActivateSpace`, which calls `BrowserChromeHost::ShowSpaceMenu` (any other space is selected
+  as before). `BrowserWindow::OpenSpaceMenu` shows `SpaceMenuPaletteCommands(can_delete)` on the
+  command palette in a `space_menu_open_` mode (the palette is created lazily, like Cmd+K).
+  Submitting a row goes through `ParseSpaceMenuCommandId` and `ScheduleSpaceMenuCommand`, which runs
+  `RunSpaceMenuCommand` on the next UI task after the palette releases its overlay. Rename calls
+  `BeginSpaceRenaming`, Change icon `ShowSpaceIconPicker`, a colour `SetSpaceColorFromHex` then
+  `SaveSession` and `ApplyAppearance`, New space `kNewSpace`, Delete space `kCloseSpace` (no
+  confirmation, the same as the existing command). The colour presets live in
+  `kSpaceMenuColorChoices`, shared with New Space. To add a row, extend `SpaceMenuAction`, the
+  builder, the parser and `RunSpaceMenuCommand`. Dev capture: `space_menu` opens it (the macOS
+  selector is `openSpaceMenu:`, `IslandApp::OpenSpaceMenu`).
+  `BrowserChrome::SpaceSegmentClickFor` decides the routing (active → menu, other → select).
+  Hover fills of the New tab row use `NewTabRowFill` (the tab row's `TabRowFill`) and
+  `NewTabCornerPatch` (the tab rows' 8 DIP radius), both listed in `ComputeCornerPatches`.
+  Fullscreen: `OnWindowFullscreenTransition` tracks `fullscreen_`; `ResolvedTokens` drops the
+  frameless `titlebar_band_dip` (the traffic-light inset) while fullscreen, so the rail and the
+  navigation row stop reserving room for hidden buttons, and restores it on exit. Tests read it
+  through `TitlebarBandDipForTest`.
+  The expanded New tab row sits in a wrapper panel that keeps `kNewTabFocusInsetDip` (4 DIP, the
+  ring's outset) on every side, so its keyboard focus ring is not clipped by the tab list;
+  `ComputeTabStrip` height counts the wrapper. The collapsed rail's "+" sits in a wrapper that
+  keeps `kCollapsedRailNewTabRingInsetDip` (4 DIP) above and below it (`collapsed_rail.h`);
+  `UpdateCollapsedTabListSize` adds `kCollapsedRailNewTabPadDip` to the list height.
+  Dev capture: `favorite:global:<i>` and
+  `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`), and
+  `focus:global_favorite:<i>` moves keyboard focus to the i-th global strip icon
+  (`IslandApp::FocusGlobalFavoriteForDev`); `focus:new_tab` moves it to the New tab control that
+  is drawn (`IslandApp::FocusNewTabForDev`, the expanded row or the collapsed rail's "+").
 - `ChromeViewId` values `1001`–`1027` are a hard invariant. Never renumber them; allocate new IDs
   after `1027`.
 - Keep genuinely CEF-free logic (`design_tokens`, `navigation_state`, `address_bar_model`,
@@ -188,7 +244,98 @@ kind switch of `BrowserWindow::TasksStateJson`.
 
 - **Sleeping a tab** (`BrowserWindow::SleepTab`): set the model first (startup URL = committed web URL, saved scroll, `sleeping`), then `Tab::SetBrowser(nullptr)`/`SetBrowserView(nullptr)`, then `CloseBrowser(true)`. The order is load-bearing: `OnBrowserDestroyed` runs `DetachChromeAndObservers()` for any browser it can still map to a tab. The closed browser's id goes into `sleep_closing_browser_ids_` so its `OnBeforeClose` is never read as the window's final close during shutdown. Waking is `EnsureTabBrowserView`; scroll is replayed from `OnLoadEnd`.
 - **The probe** (`SleepProbeScript`) answers scroll offset, unsaved input and playing media in one console message `\x01island-sleep:<token>:x,y,dirty,playing`, accepted only with a live token from the probed browser (500 ms timeout) and routed before the start-page bridge. Web Audio and iframes are not inspected.
-- **Peek** entry points: `OnBeforePopup` (new-tab dispositions with a user gesture; popups and windows stay rejected), `OnOpenURLFromTab`, and the context-menu item (`MENU_ID_USER_FIRST`). Opening is deferred one UI task. Escape reaches the card through the `Stop Loading (Escape)` menu item (`CanStopLoadingWithEscape`) and the card's own key handler. Selection changes close the peek. Dev actions: `peek:<url>`, `sleep_tabs`, `sleep_report`, `wait:<s>`; with `--island-dev-keep-open`, SIGUSR1 saves another capture and SIGUSR2 logs tab/sleep/peek state.
+- **Link opens** go through `DecideLinkOpen` (link_open_policy.h) in `OnBeforePopup` and `OnOpenURLFromTab`; `HandleLinkOpen` runs the result. Only an explicit gesture opens anything: Cmd/Ctrl+click or middle-click (`NEW_BACKGROUND_TAB`) → Peek (CEF reports both alike, so middle-click peeks too); Shift+click (`NEW_WINDOW`) and a plain target=_blank or a gestured window.open (`NEW_FOREGROUND_TAB`) → `OpenLinkTab(url)`, which calls `AddTabToActiveSpace(url, TabPlacement::kAfterActive)`: the tab goes after the current tab's group and is selected. Popups with window features and gesture-less opens are rejected. CEF's popup callbacks carry no modifier flags, so the disposition is the modifier.
+- **Peek** entry points: the Cmd/Ctrl+click (and middle-click) decision above, the context-menu item `Open in peek` (`MENU_ID_USER_FIRST`), and the agent's "Summarize linked page" (`DeferPeek`). Opening is deferred one UI task. An open card takes the neutral overlay focus ring (`OverlayFocusRingShown`). The card's size comes from `PeekCardBounds` on every content-bounds update. Escape reaches the card through the `Stop Loading (Escape)` menu item (`CanStopLoadingWithEscape`) and the card's own key handler. Selection changes close the peek. Dev actions: `peek:<url>`, `sleep_tabs`, `sleep_report`, `wait:<s>`; with `--island-dev-keep-open`, SIGUSR1 saves another capture and SIGUSR2 logs tab/sleep/peek state.
+
+### Favorites and virtual tabs (0.9)
+
+- **Library first.** The constructor loads `bookmarks_` before any space exists, then calls
+  `ReserveSpaceIdsUpTo(bookmarks_.MaxSpaceKey())`, so a fresh or discarded session never reuses a
+  SpaceId that still owns a favorite list. A load problem is kept as the status (`kFileReadError` on
+  a missing file is the normal first run and shows nothing; a read-only or invalid library shows
+  why). Lists whose space does not exist are kept but not projected.
+- **One mutation seam.** Every bookmark mutation goes through `RunBookmarkMutation(std::function)`,
+  including the two `Import` calls. A failure stores `{message, retry}` as `failed_bookmark_mutation_`;
+  a success clears it. Either way it reconciles virtual tabs with the library and reprojects.
+  `retry` is kept only for I/O failures (`kFileReadError`, `kFileWriteError`): invalid input or a
+  missing item fails the same way again, so its status has no Retry. `RetryLastBookmarkMutation()`
+  re-runs the stored closure (an empty one returns an error); `DismissBookmarkStatus()` clears it.
+  Load problems have no retry closure. A failed import is reported once, on the status row, so
+  `ImportFromBrowser` returns an empty settings message for it.
+- **Projection.** `BuildSidebarCollection()` (const, test-callable) returns a
+  `SidebarCollectionSnapshot`: `global_favorites`, then the active space's `space_favorites`, then
+  `tabs` (the existing rows), then `bookmark_status`. Each `FavoriteEntrySnapshot` carries scope,
+  bookmark ID, title (the bookmark's), URL, `displayed` and the virtual tab's favicon. Identical
+  favorites never collapse across scopes. `UpdateChromeCollections` pushes the result through
+  `BrowserChrome::SetSidebarCollection`, which forwards `tabs` to `SetTabStripEntries`; the chrome
+  keeps the snapshot for Task 3's drawing. Projection is rebuilt by every existing
+  `UpdateChromeCollections` call (mutations, selection, title and favicon changes).
+- **Virtual tabs.** `virtual_tabs_` (`std::map<FavoriteTabKey, Tab>`) holds live `Tab`s outside
+  `spaces_`; their `TabId`s come from `NextTabId()` and are never persisted. `displayed_favorite_`
+  names the one shown. `ActivateFavorite` ensures the record, creates the tab (its startup URL is
+  the record's last URL when that validates, else the favorite URL) and calls
+  `AttachActiveTabObservers`; the selected ordinary tab
+  and its list are not touched. `AttachActiveTabBrowserView` shows a displayed favorite ahead of the
+  split and ordinary paths. `FindTabById`, `FindTabByBrowser` and `FindTabByBrowserView` search the
+  virtual tabs too, so CEF callbacks and view swaps resolve them. A favicon finished for a virtual
+  tab reprojects only when that tab is global or in the active space (`FaviconAffectsCollections`).
+- **The shown tab.** `DisplayedTab()` is the displayed virtual tab, else `active_tab()`; `shown_tab_id()`
+  is its public form. Page commands (back, forward, reload, reload ignoring cache, zoom, stop, copy
+  URL, Enter in the address field, the palette's URL), find, the reader state, the address shield and
+  reader indicators, the agent's current page and context chip (`ActiveBrowser`), and the
+  pending-confirmation check all use it. Cmd+W while a favorite is shown calls `CloseFavoriteTab`
+  and returns (it never closes the hidden ordinary tab). Tab selection, sessions, sleep, split and
+  the tab strip keep `active_tab()`. Only the shown tab's navigation observer is set
+  (`ClearShownTabObservers` runs before any change of the shown tab), so the address field follows
+  the favorite and never the hidden tab.
+- **Lifecycle rules.** Any `DetachActiveTabObservers` (every selection change, space removal) ends a
+  displayed favorite; re-selecting the already-selected tab or space does too (`ReturnToOrdinaryTab`).
+  `ActivateFavorite` accepts global favorites and the active space's list only; another live
+  space's list opens after switching to that space.
+  `CloseFavoriteTab` drops the virtual tab and resets its record to the favorite URL. Removing a
+  favorite (or deleting its bookmark) drops its records through `ReconcileFavoriteTabs`. Really
+  deleting a space (`RemoveSpaceAtIndex`, never the reorder in `MoveSpace`) drops that scope's
+  records and virtual tabs and removes its favorite list when one exists.
+- **Session.** `SessionState::favorite_tabs` is optional in `session.json` (`space_id` absent means
+  global); the schema version is still 1 and an old file loads with none. `BuildSessionState` writes
+  each live virtual tab's current URL as its last URL. `RestoreSessionState` restores records before
+  anything else (they belong to the library) and drops those whose favorite is gone. The display is
+  never restored. Older builds ignore the key, so they drop these records only when they save.
+- **Virtual-tab lifecycle (Task 7).**
+  - *Split.* `favorite_pane_` is the focused split member (the active tab) at activation. The favorite
+    fills that pane and the other pane keeps its tab. `ShownPanesFor()` is the one place that decides
+    the slots: `AttachActiveTabBrowserView` and `AttachedViewWillRemain` both use it, and
+    `ShownPanesForTest()` exposes it. Selecting any tab ends the display (as before), so a favorite
+    moves to the other pane by selecting that pane's tab and activating the favorite again. It is
+    never in both panes. Cmd+W returns only that pane.
+  - *Sleep.* `CollectSleepInputs` includes the virtual tabs: the displayed one is `active` (never
+    eligible), a hidden one follows `TabSleepPolicy`. `SleepTab` refuses the displayed one. The idle
+    clock of the displayed tab is touched on every tick. A slept virtual tab keeps its record;
+    `ActivateFavorite` reuses the same `TabId`, and its startup URL is the last URL.
+  - *Invalid stored URL.* `ActivateFavorite` validates the record's last URL first. If it does not
+    validate, the record is reset (`ResetToFavorite`) and a hidden existing tab's startup URL is
+    reset, so the favorite opens at its favorite URL. Only an invalid favorite URL is a no-op: it
+    returns false before it creates a record or a tab, and it sets `failed_bookmark_mutation_` with
+    no retry. That status is written only into an empty slot, so a pending Retry or a library status
+    is never replaced by an activation failure (activation is not a library write).
+  - *Peek.* `FavoritePeekUrl` returns the bookmark URL of a listed favorite (global, or the active
+    space's list); `PeekFavorite` opens it with `OpenPeek`. It never touches the virtual tab or the
+    displayed favorite. The sidebar's Cmd/middle-click wiring is not in this layer yet.
+  - *Agent.* `AgentOwnsTab(TabId)` is true only for an ordinary tab the agent opened. Virtual tabs are
+    never agent-owned, so a displayed favorite is the person's tab. The agent bridge still lists
+    spaces only.
+  - *Removal.* `DeleteBookmark` runs through `RunBookmarkMutation`; `ReconcileFavoriteTabs` then
+    drops every record of the bookmark, clears the displayed one's observer, and returns the slot to
+    the selected ordinary tab. A failed mutation rolls back, so the display and its record survive.
+  - *Still limited.* `RecordBlockedRequest(int)` searches the virtual tabs by browser identifier, but
+    headless tests cannot create a browser, so only the `TabId` path (`RecordBlockedRequestForTab`) is
+    unit-tested. `SetSidebarCollection` needs CEF and is not unit-tested. The tab strip's active entry
+    is still the selected ordinary tab while a favorite is shown (the `displayed` flag is the mark).
+- **Extension points.** A new favorite list kind goes into `FavoriteScope`'s users and
+  `FavoriteListContains`. A new per-tab record field goes into `FavoriteTabRecord`,
+  `ToSessionFavoriteTabs`/`FavoriteTabsFromSession`, and `FavoriteTabState` (session store). A new
+  bookmark mutation is a lambda passed to `RunBookmarkMutation`. Any new `Tab` lookup must consult
+  `virtual_tabs_` as well.
 
 ### Testing Requirements
 
@@ -271,7 +418,7 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   complete run, and `MoveTab` reports whether its final position changed. `BrowserWindow` maps
   the running `BuildPlanGraph` node id to the opened `TabId`. `NavigateTab` and the agent's
   back/forward/reload refuse the Plan tab
-  (`IsPlanTabIndex`; `IsAgentPlanTab` for the agent's targets). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
+  (`IsPlanTabIndex`; `IsAgentPrivilegedTab` also refuses Settings for the agent's targets). The sidebar draws a branch kicker line (`kTabGroupKicker`) above each run;
   every row keeps the fixed row height. Closing the Plan tab while `research_` is active is
   deferred to the in-content Stop / Keep running confirmation, or stops the research at once when
   the page has no live frame; removing the Plan's space stops the research (no dialog).
@@ -298,12 +445,34 @@ this directory's `session_store.cc`, which is not compiled anywhere yet.
   The command palette's picker (`kSpaceIconCommandPrefix`, `space_icon_picker_open_`) and the
   switchers read that list, so they need no edit. Sessions store only the id; unknown ids load as
   none.
+- Palette commands: `BrowserWindow::PaletteCommands(const BookmarkCommandState&)` is the registry for
+  ordinary palette action rows. `CurrentBookmarkCommandState()` supplies the space name, whether the
+  page on screen can be bookmarked, and the page's position in the global and space lists, so favorite
+  labels say Add or Remove and the reorder rows (`move_global_favorite_left/right`,
+  `move_space_favorite_up/down`) appear only for a favorite that can move that way. Add a
+  `PaletteCommandEntry` there, route its stable id in `RunPaletteCommand`, and add a window test.
+  Bookmark and favorite commands set `PaletteCommandEntry::bookmark_group`: they list under the
+  "Bookmarks" header (`PaletteGroupHeader`) after the general "Commands", then the bookmark rows under
+  the same header. `ComposePaletteResults` keeps that order for an empty query too.
+  Bookmark results remain `kBookmark`; `PaletteBookmarkEntries()` gives one row per library bookmark
+  in folder order, with its folder and every presented favorite scope joined into one label
+  ("Global, Work"; a removed space's list is skipped). The view prints folder and scope as muted
+  text after the title (`result_details_`).
+- Bookmark commands that change the page resolve it through `CurrentBookmarkablePage()` when the
+  command runs: the displayed favorite's virtual tab when one is shown, else the selected tab, and
+  nothing while a local page fills the slot or the URL is not http(s). The page and the add-or-remove
+  or position decision are captured before `RunBookmarkMutation`, and the lambda only applies them. So
+  a Retry repeats the same change to the same page, even after the displayed page has changed. A refusal
+  ("Only web pages can be favorites.") reaches the status. A successful move sets `bookmark_notice_`,
+  and the sidebar status row shows it as "Moved <title> to position N of M" (`BookmarkStatusSnapshot::ok`,
+  neutral colors). Any later mutation or Dismiss clears it.
 - Palette sub-picker: `ShowSpaceIconPicker` reopens the palette with only the icon rows
   (`SpaceIconPaletteCommands`) and a `space_icon_picker_open_` flag that makes the next submit set
   the icon. Each command submit must reach the host after the palette released its overlay, so the
   picker is scheduled with `ScheduleSpaceIconPicker` (a posted task). To add another palette command,
-  append a `PaletteCommandEntry` to the command list in `BrowserWindow::ShowCommandPalette` and
-  handle its id in `OnCommandPaletteSubmitted`. Return re-applies the field's text through
+  append a `PaletteCommandEntry` to the list `BrowserWindow::PaletteCommands` returns and handle its
+  id in `BrowserWindow::RunPaletteCommand` (a command selection reaches it through
+  `OnCommandPaletteSubmitted`). Return re-applies the field's text through
   `CommandPaletteModel::SetQuery`, which is a no-op for an unchanged query: resetting the highlight
   there once made Return submit row 0 whatever the arrow keys chose (so the icon picker never
   opened).

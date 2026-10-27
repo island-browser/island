@@ -18,7 +18,6 @@
 #include "agent/plan_fixture.h"
 #include "agent_context.h"
 #include "browser_window.h"
-#include "window_agent_host.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
@@ -31,9 +30,10 @@
 #include "research_prompt.h"
 #include "session_store.h"
 #include "sha256.h"
-#include "table_export.h"
 #include "start_tiles.h"
+#include "table_export.h"
 #include "updater.h"
+#include "window_agent_host.h"
 
 namespace island {
 namespace {
@@ -54,6 +54,47 @@ CefRefPtr<BrowserWindow> MakeWindow() {
     return window;
 }
 
+class ScopedHome {
+  public:
+    explicit ScopedHome(const std::filesystem::path& home) {
+#if defined(_WIN32)
+        static_cast<void>(home);
+#else
+        const char* const saved = std::getenv("HOME");
+        if (saved != nullptr) saved_ = saved;
+        setenv("HOME", home.string().c_str(), 1);
+#endif
+    }
+
+    ~ScopedHome() {
+#if !defined(_WIN32)
+        if (saved_.has_value()) {
+            setenv("HOME", saved_->c_str(), 1);
+        } else {
+            unsetenv("HOME");
+        }
+#endif
+    }
+
+  private:
+    std::optional<std::string> saved_;
+};
+
+std::filesystem::path ChromeBookmarksPath() {
+#if defined(_WIN32)
+    return "AppData/Local/Google/Chrome/User Data/Default/Bookmarks";
+#elif defined(__APPLE__)
+    return "Library/Application Support/Google/Chrome/Default/Bookmarks";
+#else
+    return ".config/google-chrome/Default/Bookmarks";
+#endif
+}
+
+void WriteFile(const std::filesystem::path& path, std::string_view content) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::binary | std::ios::trunc) << content;
+}
+
 const Space& SpaceAt(const BrowserWindow& window, std::size_t index) {
     return window.spaces()[index];
 }
@@ -62,6 +103,197 @@ TEST(LocalPageRegistryTest, BookmarksUsesItsOwnLocalUrlAndDocument) {
     EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kBookmarks), "island://bookmarks");
     EXPECT_NE(LocalPageHtml(LocalPageKind::kBookmarks).find("<title>Bookmarks</title>"),
               std::string_view::npos);
+}
+
+TEST(BrowserWindowPagesTest, BookmarksStateProjectsFoldersScopesAndCurrentSpace) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BookmarkResult bookmark =
+        window->AddFavoriteByUrl(std::nullopt, "Island", "https://island.test/docs");
+    ASSERT_TRUE(bookmark.ok());
+    ASSERT_TRUE(window
+                    ->AddFavoriteByUrl(FavoriteScope{window->active_space_id().value}, "Island",
+                                       "https://island.test/docs")
+                    .ok());
+
+    const std::optional<Value> state = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(state.has_value());
+    ASSERT_NE(state->FindMember("theme"), nullptr);
+    ASSERT_EQ(state->FindMember("folders")->array_val.size(), 1U);
+    ASSERT_EQ(state->FindMember("bookmarks")->array_val.size(), 1U);
+    const Value& item = state->FindMember("bookmarks")->array_val[0];
+    EXPECT_EQ(item.StringOr("host", ""), "island.test");
+    EXPECT_TRUE(item.BoolOr("global", false));
+    ASSERT_EQ(item.FindMember("spaces")->array_val.size(), 1U);
+    EXPECT_EQ(state->FindMember("current_space")->StringOr("name", ""), "Default");
+    EXPECT_EQ(state->StringOr("selected_folder", ""), "all");
+    EXPECT_TRUE(state->FindMember("status")->IsNull());
+}
+
+TEST(BrowserWindowPagesTest, BookmarksDispatcherRejectsBadFieldsAndMutatesKnownRecords) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const BookmarkResult bookmark =
+        window->AddFavoriteByUrl(std::nullopt, "Before", "https://before.test/");
+    ASSERT_TRUE(bookmark.ok());
+    const Bookmark* before = window->bookmarks().FindBookmark(bookmark.id);
+    ASSERT_NE(before, nullptr);
+
+    Value wrong_page = Value::MakeObject()
+                           .Set("type", Value::String("bookmarks:delete"))
+                           .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)));
+    Value empty_edit = Value::MakeObject()
+                           .Set("type", Value::String("bookmarks:edit"))
+                           .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
+                           .Set("title", Value::String(""))
+                           .Set("url", Value::String(""));
+    window->HandleSettingsMessageForTest(wrong_page);
+    window->OnLocalPageMessage(LocalPageKind::kBookmarks, empty_edit);
+    const Bookmark* unchanged = window->bookmarks().FindBookmark(bookmark.id);
+    ASSERT_NE(unchanged, nullptr);
+    EXPECT_EQ(unchanged->title, "Before");
+
+    Value edit = Value::MakeObject()
+                     .Set("type", Value::String("bookmarks:edit"))
+                     .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
+                     .Set("title", Value::String("After"))
+                     .Set("url", Value::String("https://after.test/"));
+    window->OnLocalPageMessage(LocalPageKind::kBookmarks, edit);
+    const Bookmark* after = window->bookmarks().FindBookmark(bookmark.id);
+    ASSERT_NE(after, nullptr);
+    EXPECT_EQ(after->title, "After");
+    EXPECT_EQ(after->url, "https://after.test/");
+    window->OnLocalPageMessage(LocalPageKind::kBookmarks,
+                               *json::Parse(R"({"type":"folder:delete","id":1,"mode":"bad"})"));
+    EXPECT_NE(window->bookmarks().FindFolder(1), nullptr);
+}
+
+TEST(BrowserWindowPagesTest, BookmarksDispatcherHandlesLibraryActionsAndTransientErrors) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const auto send = [&window](std::string_view text) {
+        const std::optional<Value> message = json::Parse(text);
+        ASSERT_TRUE(message.has_value()) << text;
+        window->OnLocalPageMessage(LocalPageKind::kBookmarks, *message);
+    };
+    send(R"({"type":"folder:create","name":"Work"})");
+    send(R"({"type":"folder:create","name":"Archive"})");
+    const std::optional<Value> initial = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(initial.has_value());
+    const Value* folders = initial->FindMember("folders");
+    ASSERT_NE(folders, nullptr);
+    ASSERT_EQ(folders->array_val.size(), 2U);
+    const std::uint64_t work = static_cast<std::uint64_t>(folders->array_val[0].IntOr("id", 0));
+    const std::uint64_t archive = static_cast<std::uint64_t>(folders->array_val[1].IntOr("id", 0));
+    const BookmarkResult added =
+        window->AddFavoriteByUrl(std::nullopt, "Docs", "https://docs.test/");
+    ASSERT_TRUE(added.ok());
+    const std::uint64_t bookmark = added.id;
+    send("{\"type\":\"bookmarks:move\",\"id\":" + std::to_string(bookmark) +
+         ",\"folder_id\":" + std::to_string(work) + "}");
+
+    send("{\"type\":\"select-folder\",\"id\":" + std::to_string(work) + "}");
+    const std::optional<Value> selected = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(selected.has_value());
+    EXPECT_EQ(selected->IntOr("selected_folder", 0), static_cast<std::int64_t>(work));
+
+    send("{\"type\":\"bookmarks:move\",\"id\":" + std::to_string(bookmark) +
+         ",\"folder_id\":" + std::to_string(archive) + "}");
+    ASSERT_NE(window->bookmarks().FindBookmark(bookmark), nullptr);
+    EXPECT_EQ(window->bookmarks().FindFolder(archive)->bookmark_ids,
+              (std::vector<std::uint64_t>{bookmark}));
+    send("{\"type\":\"favorite:toggle-global\",\"id\":" + std::to_string(bookmark) + "}");
+    EXPECT_TRUE(window->bookmarks().state().global_favorite_ids.empty());
+    send("{\"type\":\"favorite:toggle-global\",\"id\":" + std::to_string(bookmark) + "}");
+    send("{\"type\":\"favorite:toggle-space\",\"id\":" + std::to_string(bookmark) + "}");
+    EXPECT_EQ(window->bookmarks().state().global_favorite_ids,
+              (std::vector<std::uint64_t>{bookmark}));
+    EXPECT_EQ(window->bookmarks().state().space_favorite_ids.at(window->active_space_id().value),
+              (std::vector<std::uint64_t>{bookmark}));
+
+    send("{\"type\":\"folder:delete\",\"id\":" + std::to_string(archive) + ",\"mode\":\"move\"}");
+    EXPECT_EQ(window->bookmarks().FindFolder(archive), nullptr);
+    send("{\"type\":\"bookmarks:delete\",\"id\":" + std::to_string(bookmark) + "}");
+    EXPECT_EQ(window->bookmarks().FindBookmark(bookmark), nullptr);
+
+    send(R"({"type":"folder:create","name":"Discard"})");
+    const std::optional<Value> with_discard_folder = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(with_discard_folder.has_value());
+    const Value* discard_folders = with_discard_folder->FindMember("folders");
+    ASSERT_NE(discard_folders, nullptr);
+    const std::uint64_t discard =
+        static_cast<std::uint64_t>(discard_folders->array_val.back().IntOr("id", 0));
+    const BookmarkResult discarded =
+        window->AddFavoriteByUrl(std::nullopt, "Discard", "https://discard.test/");
+    ASSERT_TRUE(discarded.ok());
+    send("{\"type\":\"bookmarks:move\",\"id\":" + std::to_string(discarded.id) +
+         ",\"folder_id\":" + std::to_string(discard) + "}");
+    send("{\"type\":\"folder:delete\",\"id\":" + std::to_string(discard) + ",\"mode\":\"delete\"}");
+    EXPECT_EQ(window->bookmarks().FindFolder(discard), nullptr);
+    EXPECT_EQ(window->bookmarks().FindBookmark(discarded.id), nullptr);
+
+    const BookmarkResult invalid_added =
+        window->AddFavoriteByUrl(std::nullopt, "Old", "https://old.test/");
+    ASSERT_TRUE(invalid_added.ok());
+    const std::uint64_t invalid = invalid_added.id;
+    const AddressBarSnapshot before_open = window->address_bar_snapshot();
+    send("{\"type\":\"bookmarks:edit\",\"id\":" + std::to_string(invalid) +
+         ",\"title\":\"Old\",\"url\":\"javascript:alert(1)\"}");
+    ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
+    send("{\"type\":\"bookmarks:open\",\"id\":" + std::to_string(invalid) + "}");
+    const std::optional<Value> with_error = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(with_error.has_value());
+    ASSERT_NE(with_error->FindMember("page_status"), nullptr);
+    EXPECT_EQ(with_error->FindMember("page_status")->StringOr("kind", ""), "error");
+    EXPECT_EQ(window->address_bar_snapshot().edit_text, before_open.edit_text);
+    EXPECT_EQ(window->address_bar_snapshot().mode, before_open.mode);
+    send(R"({"type":"import","source_id":"unknown"})");
+    ASSERT_NE(window->bookmarks().FindBookmark(invalid), nullptr);
+    const Bookmark* unchanged_invalid = window->bookmarks().FindBookmark(invalid);
+    ASSERT_NE(unchanged_invalid, nullptr);
+    EXPECT_EQ(unchanged_invalid->url, "javascript:alert(1)");
+    const std::optional<Value> rejected_import = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(rejected_import.has_value());
+    EXPECT_TRUE(rejected_import->FindMember("page_status")->IsNull());
+}
+
+TEST(BrowserWindowPagesTest, BookmarkPageClearsTransientFeedbackAndKeepsRetryableSaveFailures) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    const auto send = [&window](std::string_view text) {
+        const std::optional<Value> message = json::Parse(text);
+        ASSERT_TRUE(message.has_value()) << text;
+        window->OnLocalPageMessage(LocalPageKind::kBookmarks, *message);
+    };
+    const BookmarkResult invalid =
+        window->AddFavoriteByUrl(std::nullopt, "Old", "https://old.test/");
+    ASSERT_TRUE(invalid.ok());
+    send("{\"type\":\"bookmarks:edit\",\"id\":" + std::to_string(invalid.id) +
+         ",\"title\":\"Old\",\"url\":\"javascript:alert(1)\"}");
+    send("{\"type\":\"bookmarks:open\",\"id\":" + std::to_string(invalid.id) + "}");
+    ASSERT_FALSE(json::Parse(window->BookmarksStateJson())->FindMember("page_status")->IsNull());
+    send(R"({"type":"select-folder","id":"all"})");
+    EXPECT_TRUE(json::Parse(window->BookmarksStateJson())->FindMember("page_status")->IsNull());
+
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "island_bookmarks_page_retry" / "bookmarks.json";
+    std::error_code error;
+    std::filesystem::remove_all(path.parent_path(), error);
+    std::filesystem::create_directories(path.parent_path(), error);
+    BookmarkStore library(path);
+    static_cast<void>(library.Load());
+    std::filesystem::create_directories(std::filesystem::path(path.string() + ".tmp"), error);
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    send(R"({"type":"folder:create","name":"Cannot save"})");
+    const std::optional<Value> failed = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(failed.has_value());
+    EXPECT_TRUE(failed->FindMember("status")->BoolOr("retry", false));
+    EXPECT_TRUE(failed->FindMember("page_status")->IsNull());
+    EXPECT_TRUE(window->bookmarks().state().folders.empty());
+    std::filesystem::remove_all(std::filesystem::path(path.string() + ".tmp"), error);
+    send(R"({"type":"retry"})");
+    const std::optional<Value> retried = json::Parse(window->BookmarksStateJson());
+    ASSERT_TRUE(retried.has_value());
+    EXPECT_TRUE(retried->FindMember("status")->IsNull());
+    ASSERT_EQ(window->bookmarks().state().folders.size(), 1U);
+    EXPECT_EQ(window->bookmarks().state().folders[0].name, "Cannot save");
+    std::filesystem::remove_all(path.parent_path(), error);
 }
 
 TEST(BrowserWindowPagesTest, KeymapEditsTakeEffectAndShortcutsRunActions) {
@@ -136,23 +368,34 @@ TEST(BrowserWindowPagesTest, SettingsStateCarriesTheVersionAndTheBaseLook) {
 
 TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_look","look":"native"})"));
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_theme","value":"light"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_look","look":"native"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_theme","value":"light"})"));
 
     const std::optional<Value> state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
     const Value* theme = state->FindMember("theme");
     ASSERT_NE(theme, nullptr);
     const std::pair<std::string_view, std::string_view> expected[] = {
-        {"bg", "#ebebef"},          {"surface", "#ffffff"},   {"surface_2", "#f6f6f8"},
-        {"fill", "#e8e8ed"},        {"text", "#1d1d1f"},      {"text_2", "#636366"},
-        {"text_3", "#8e8e93"},      {"border", "#e5e5ea"},    {"border_2", "#d2d2d7"},
-        {"accent", "#0a64d8"},      {"selection", "#0a64d8"}, {"accent_soft", "#dfe9f8"},
-        {"accent_text", "#0a4fa8"}, {"warn_bg", "#fff8e6"},   {"warn_border", "#f5d38a"},
-        {"warn_text", "#6a4a00"},   {"success", "#248a3d"},   {"danger", "#d70015"},
-        {"segment_selected", "#e3e3e8"},                         {"canvas", "#ebebef"},
+        {"bg", "#ebebef"},
+        {"surface", "#ffffff"},
+        {"surface_2", "#f6f6f8"},
+        {"fill", "#e8e8ed"},
+        {"text", "#1d1d1f"},
+        {"text_2", "#636366"},
+        {"text_3", "#8e8e93"},
+        {"border", "#e5e5ea"},
+        {"border_2", "#d2d2d7"},
+        {"accent", "#0a64d8"},
+        {"selection", "#0a64d8"},
+        {"accent_soft", "#dfe9f8"},
+        {"accent_text", "#0a4fa8"},
+        {"warn_bg", "#fff8e6"},
+        {"warn_border", "#f5d38a"},
+        {"warn_text", "#6a4a00"},
+        {"success", "#248a3d"},
+        {"danger", "#d70015"},
+        {"segment_selected", "#e3e3e8"},
+        {"canvas", "#ebebef"},
     };
     for (const auto& [key, value] : expected) {
         EXPECT_EQ(theme->StringOr(key, ""), value) << key;
@@ -179,16 +422,14 @@ TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenIsNeutralForEveryLook) {
     ASSERT_TRUE(state.has_value());
     EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_look","look":"arc"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_look","look":"arc"})"));
     state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
     const Value* theme = state->FindMember("theme");
     ASSERT_NE(theme, nullptr);
     EXPECT_EQ(theme->StringOr("segment_selected", ""), "#e3e3e8");
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_look","look":"graphite"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_look","look":"graphite"})"));
     state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
     EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
@@ -196,37 +437,43 @@ TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenIsNeutralForEveryLook) {
 
 TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject()
-                                   .Set("type", Value::String("set_theme"))
-                                   .Set("value", Value::String("dark")));
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_theme"))
+                                             .Set("value", Value::String("dark")));
     EXPECT_EQ(window->theme_preference(), ThemePreference::kDark);
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject()
-                                   .Set("type", Value::String("set_binding"))
-                                   .Set("action", Value::String("new_tab"))
-                                   .Set("binding", Value::String("Mod+Alt+T")));
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_binding"))
+                                             .Set("action", Value::String("new_tab"))
+                                             .Set("binding", Value::String("Mod+Alt+T")));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Alt+T"));
     // An invalid binding leaves the shortcut alone and surfaces a notice.
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject()
-                                   .Set("type", Value::String("set_binding"))
-                                   .Set("action", Value::String("new_tab"))
-                                   .Set("binding", Value::String("T")));
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_binding"))
+                                             .Set("action", Value::String("new_tab"))
+                                             .Set("binding", Value::String("T")));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Alt+T"));
     EXPECT_NE(
         json::Parse(window->SettingsStateJson())->FindMember("settings")->StringOr("message", ""),
         "");
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject().Set("type", Value::String("reset_shortcuts")));
+    window->HandleSettingsMessageForTest(
+        Value::MakeObject().Set("type", Value::String("reset_shortcuts")));
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
+}
+
+TEST(BrowserWindowPagesTest, ContentSlotSettingsMessagesAreDeadAndCannotChangePreferences) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               Value::MakeObject()
+                                   .Set("type", Value::String("set_theme"))
+                                   .Set("value", Value::String("dark")));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
 }
 
 TEST(BrowserWindowPagesTest, RecordReplaceAndResetShortcutMessages) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
-                                            R"("binding":"Mod+B"})"));
+    window->HandleSettingsMessageForTest(
+        *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
+                     R"("binding":"Mod+B"})"));
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
     auto state = json::Parse(window->SettingsStateJson());
     const Value* pending = state->FindMember("settings")->FindMember("shortcut_conflict");
@@ -236,32 +483,29 @@ TEST(BrowserWindowPagesTest, RecordReplaceAndResetShortcutMessages) {
     EXPECT_EQ(pending->StringOr("binding", ""), "Mod+B");
 
     // A free chord binds at once and clears any pending conflict.
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
-                                            R"("binding":"Mod+Shift+Y"})"));
+    window->HandleSettingsMessageForTest(
+        *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
+                     R"("binding":"Mod+Shift+Y"})"));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Shift+Y"));
     state = json::Parse(window->SettingsStateJson());
     EXPECT_EQ(state->FindMember("settings")->FindMember("shortcut_conflict"), nullptr);
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"replace_shortcut","action":"new_tab",)"
-                                            R"("binding":"Mod+B"})"));
+    window->HandleSettingsMessageForTest(
+        *json::Parse(R"({"type":"replace_shortcut","action":"new_tab",)"
+                     R"("binding":"Mod+B"})"));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+B"));
     EXPECT_FALSE(window->keymap().Binding(KeyAction::kToggleSidebar).has_value());
     EXPECT_TRUE(window->keymap().Conflicts().empty());
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"reset_shortcuts"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"reset_shortcuts"})"));
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
 }
 
 TEST(BrowserWindowPagesTest, SettingsPrivacyMessagesUpdateNativeBlockerPolicy) {
     CefRefPtr<BrowserWindow> window = BrowserWindow::CreateHeadlessForTest("");
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"set_content_blocker_pref","key":"ads","value":false})"));
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"add_content_blocker_site","site":" HTTPS://Example.COM/path "})"));
 
     std::optional<Value> state = json::Parse(window->SettingsStateJson());
@@ -275,8 +519,7 @@ TEST(BrowserWindowPagesTest, SettingsPrivacyMessagesUpdateNativeBlockerPolicy) {
     ASSERT_EQ(privacy->FindMember("allowlist")->array_val.size(), 1U);
     EXPECT_EQ(privacy->FindMember("allowlist")->array_val[0].string_val, "example.com");
 
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"remove_content_blocker_site","site":"example.com"})"));
     state = json::Parse(window->SettingsStateJson());
     privacy = state->FindMember("settings")->FindMember("privacy");
@@ -350,6 +593,30 @@ TEST(BrowserWindowPagesTest, ArcSpacesImportAsPinnedSpaces) {
     EXPECT_EQ(window->ImportFromBrowser("netscape"), "Unknown import source.");
 }
 
+TEST(BrowserWindowPagesTest, ChromeImportReportsUnreadableProfileAfterPartialSuccess) {
+#if defined(_WIN32)
+    GTEST_SKIP() << "This fixture changes HOME, which Windows import does not use.";
+#else
+    const std::filesystem::path home =
+        std::filesystem::temp_directory_path() / "island_chrome_partial_import";
+    std::error_code error;
+    std::filesystem::remove_all(home, error);
+    const std::filesystem::path user_data =
+        (home / ChromeBookmarksPath()).parent_path().parent_path();
+    WriteFile(
+        user_data / "Default/Bookmarks",
+        R"({"roots":{"bookmark_bar":{"children":[{"type":"url","url":"https://good.test/"}]}}})");
+    WriteFile(user_data / "Profile 1/Bookmarks", "not a Bookmarks file");
+
+    const ScopedHome scoped_home(home);
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    EXPECT_EQ(window->ImportFromBrowser("chrome"),
+              "Imported 1 bookmarks from Google Chrome. Find them in the command palette. "
+              "1 Chrome profile could not be read.");
+    std::filesystem::remove_all(home, error);
+#endif
+}
+
 // Answers updater requests from canned bodies keyed by a URL substring.
 class CannedFetcher final : public update::UpdateFetcher {
   public:
@@ -389,7 +656,7 @@ Value UpdateState(const BrowserWindow& window) {
 void SendSettings(BrowserWindow& window, std::string_view json_text) {
     const std::optional<Value> message = json::Parse(json_text);
     ASSERT_TRUE(message.has_value()) << json_text;
-    window.OnLocalPageMessage(LocalPageKind::kSettings, *message);
+    window.HandleSettingsMessageForTest(*message);
 }
 
 TEST(BrowserWindowPagesTest, SettingsUpdatesStateAndPreferences) {
@@ -1518,42 +1785,118 @@ TEST(BrowserWindowPagesTest, AViewYoungerThanOneHundredMillisecondsHoldsTheSwap)
     EXPECT_FALSE(window->ViewSwapPendingForTest());
 }
 
-TEST(BrowserWindowPagesTest, OpeningSettingsWaitsForTheYoungTabToSettle) {
+TEST(BrowserWindowPagesTest, SettingsIsOneOrdinaryClosableTabWithItsOwnChromeIdentity) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    const TabId attached = window->active_tab_id();
-    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
-    window->SetAttachedViewForSwapTest(attached);
-    window->BrowserCreatedForViewSwapTest(attached);
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
 
-    const std::size_t swaps_before = window->ViewSwapCountForTest();
-    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+    window->OpenSettings();
+    ASSERT_EQ(window->spaces()[window->active_space_index()].tab_count(), 2U);
+    const TabId settings = window->active_tab_id();
+    EXPECT_FALSE(window->internal_page().has_value());
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "Settings");
+    const SidebarCollectionSnapshot sidebar = window->BuildSidebarCollection();
+    ASSERT_EQ(sidebar.tabs.size(), 2U);
+    EXPECT_EQ(sidebar.tabs.back().title, "Settings");
+    EXPECT_EQ(sidebar.tabs.back().fallback_icon, ChromeIcon::kSettings);
+    EXPECT_FALSE(sidebar.add_current_page_available);
+    window->RunPaletteCommand("add_bookmark");
+    window->AddCurrentPageToGlobalFavorites();
+    EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
+    EXPECT_TRUE(window->bookmarks().state().global_favorite_ids.empty());
 
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
-    EXPECT_TRUE(window->ViewSwapPendingForTest());
-    const std::uint64_t generation = window->AttachedViewGenerationForTest();
-    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
-    window->RecheckPendingViewSwapForTest(generation);
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
-    EXPECT_FALSE(window->ViewSwapPendingForTest());
-    EXPECT_EQ(window->internal_page(), LocalPageKind::kSettings);
+    ASSERT_TRUE(window->CreateSpace("Other"));
+    ASSERT_EQ(window->space_count(), 2U);
+    window->OpenSettings();
+    EXPECT_EQ(window->active_space_index(), 0U);
+    EXPECT_EQ(window->spaces()[0].tab_count(), 2U);
+    EXPECT_EQ(window->spaces()[1].tab_count(), 1U);
+    EXPECT_EQ(window->active_tab_id(), settings);
+    ASSERT_TRUE(window->MoveTabWithinSpace(0, 1, 0));
+    EXPECT_EQ(window->active_tab_id(), settings);
+    window->ExecuteCommand(BrowserCommand::kCloseTab);
+    EXPECT_EQ(window->spaces()[window->active_space_index()].tab_count(), 1U);
 }
 
-TEST(BrowserWindowPagesTest, HidingYoungSettingsWaitsForItToSettle) {
+TEST(BrowserWindowPagesTest, SettingsBridgeRequiresTheExactDocumentAndSessionDoesNotRestoreIt) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->SetViewSwapTimeForTest(std::chrono::milliseconds(1000));
-    window->SetAttachedInternalPageForSwapTest(LocalPageKind::kSettings);
+    constexpr std::string_view kSettings = "data:text/html,settings-document";
+    window->SetSettingsPageUrlForTest(std::string(kSettings));
+    EXPECT_TRUE(window->IsSettingsPageUrl(kSettings));
+    EXPECT_FALSE(window->IsSettingsPageUrl("https://example.test/"));
+    EXPECT_FALSE(window->IsSettingsPageUrl("data:text/html,settings-document#forged"));
 
-    const std::size_t swaps_before = window->ViewSwapCountForTest();
-    window->ToggleInternalPageForSwapTest(LocalPageKind::kSettings);
+    window->OpenSettingsSection("privacy");
+    ASSERT_EQ(window->spaces()[window->active_space_index()].tab_count(), 2U);
+    const std::optional<Value> settings_state = json::Parse(window->SettingsStateJson());
+    ASSERT_TRUE(settings_state.has_value());
+    EXPECT_EQ(settings_state->FindMember("settings")->StringOr("focus", ""), "privacy");
+    const SessionState session = window->BuildSessionState();
+    ASSERT_EQ(session.spaces.size(), 1U);
+    ASSERT_EQ(session.spaces[0].tabs.size(), 1U);
+    EXPECT_NE(session.spaces[0].tabs[0].url, kSettings);
+}
 
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 0U);
-    EXPECT_TRUE(window->ViewSwapPendingForTest());
-    const std::uint64_t generation = window->AttachedViewGenerationForTest();
-    window->AdvanceViewSwapTimeForTest(std::chrono::milliseconds(100));
-    window->RecheckPendingViewSwapForTest(generation);
-    EXPECT_EQ(window->ViewSwapCountForTest() - swaps_before, 1U);
-    EXPECT_FALSE(window->ViewSwapPendingForTest());
-    EXPECT_FALSE(window->internal_page().has_value());
+TEST(BrowserWindowPagesTest, SettingsBridgeRejectsForeignAndForgedFramesBeforeChangingPrefs) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    constexpr std::string_view kSettings = "data:text/html,settings-document";
+    window->SetSettingsPageUrlForTest(std::string(kSettings));
+    const Value set_dark = Value::MakeObject()
+                               .Set("type", Value::String("set_theme"))
+                               .Set("value", Value::String("dark"));
+
+    EXPECT_FALSE(window->HandleSettingsBridgeMessageForTest("https://example.test/", set_dark));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
+    EXPECT_FALSE(window->HandleSettingsBridgeMessageForTest(
+        "data:text/html,settings-document#forged", set_dark));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
+
+    EXPECT_TRUE(window->HandleSettingsBridgeMessageForTest(kSettings, set_dark));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kDark);
+}
+
+TEST(BrowserWindowPagesTest, SettingsFocusWaitsForTheReloadedDocumentAndKeepsItsSequence) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
+    window->OpenSettingsSection("privacy");
+    const TabId settings = window->active_tab_id();
+
+    EXPECT_FALSE(window->DeliverSettingsRenderStateForTest(settings).has_value());
+    EXPECT_EQ(
+        json::Parse(window->SettingsStateJson())->FindMember("settings")->StringOr("focus", ""),
+        "privacy");
+    window->SetSettingsDocumentReadyForTest(settings, true);
+    const std::optional<std::string> first_json =
+        window->DeliverSettingsRenderStateForTest(settings);
+    ASSERT_TRUE(first_json.has_value());
+    const std::optional<Value> first = json::Parse(*first_json);
+    ASSERT_TRUE(first.has_value());
+    const std::int64_t first_sequence = first->FindMember("settings")->IntOr("focus_seq", 0);
+    EXPECT_EQ(first->FindMember("settings")->StringOr("focus", ""), "privacy");
+
+    // A reload/wake makes the same tab unready. A second section request stays pending until its
+    // replacement document is ready and carries a fresh sequence to islandRender.
+    window->SetSettingsDocumentReadyForTest(settings, false);
+    window->OpenSettingsSection("appearance");
+    EXPECT_FALSE(window->DeliverSettingsRenderStateForTest(settings).has_value());
+    window->SetSettingsDocumentReadyForTest(settings, true);
+    const std::optional<std::string> second_json =
+        window->DeliverSettingsRenderStateForTest(settings);
+    ASSERT_TRUE(second_json.has_value());
+    const std::optional<Value> second = json::Parse(*second_json);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->FindMember("settings")->StringOr("focus", ""), "appearance");
+    EXPECT_GT(second->FindMember("settings")->IntOr("focus_seq", 0), first_sequence);
+}
+
+TEST(BrowserWindowPagesTest, HeadlessRenderSchedulingDoesNotStayLatched) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
+    window->OpenSettingsSection("privacy");
+    EXPECT_FALSE(window->LocalPagesRenderScheduledForTest());
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_theme"))
+                                             .Set("value", Value::String("dark")));
+    EXPECT_FALSE(window->LocalPagesRenderScheduledForTest());
 }
 
 TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves) {
@@ -2183,8 +2526,9 @@ TEST(BrowserWindowPagesTest, TrustAndTaskAnswersAreCancelWhenTheCardDidNotOfferT
     }
     SendAgent(*window, R"({"type":"confirm","id":"c1","answer":"trust"})");
     SendAgent(*window, R"({"type":"confirm","id":"c2","answer":"task"})");
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
-                                                              agent::ConfirmationAnswer::kCancel}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kCancel,
+                                                      agent::ConfirmationAnswer::kCancel}));
     EXPECT_TRUE(window->trusted_sites().empty());
     SendAgent(*window, R"({"type":"confirm","id":"nope","answer":"once"})");
     SendAgent(*window, R"({"type":"confirm","answer":"once"})");
@@ -2202,7 +2546,8 @@ TEST(BrowserWindowPagesTest, ConfirmationTimesOutAndWithdrawsTheCard) {
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kWaitingForYou);
 
     window->AdvanceConfirmationClockForTest(std::chrono::seconds(1));
-    EXPECT_EQ(answers, (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kTimeout}));
+    EXPECT_EQ(answers,
+              (std::vector<agent::ConfirmationAnswer>{agent::ConfirmationAnswer::kTimeout}));
     EXPECT_TRUE(ListedConfirmationIds(*window).empty());
     EXPECT_FALSE(window->HasPendingConfirmation());
     EXPECT_EQ(window->address_indicators().agent, AgentTabState::kIdle);
@@ -2403,8 +2748,7 @@ TEST(BrowserWindowPagesTest, RemoveTrustedSiteMessagePersists) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->AddTrustedSite("shop.test");
     window->AddTrustedSite("docs.test");
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"remove_trusted_site","host":"WWW.Shop.test"})"));
     EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"docs.test"}));
     const std::optional<Value> state = json::Parse(window->SettingsStateJson());
@@ -3017,7 +3361,6 @@ TEST(BrowserWindowPagesTest, PaletteSummarizePageEnqueuesWithPageContext) {
                             [](const auto& c) { return c.id == "ask_about_page"; }));
 }
 
-
 constexpr std::string_view kCollectTable =
     "# Grinders\n\n| Source | Price |\n|---|---|\n| [Shop](https://a.test/one) | 189 |\n";
 
@@ -3028,7 +3371,7 @@ TEST(BrowserWindowPagesTest, CollectTaskOpensACollectionReport) {
     BrowserWindow& window = *qw.window;
     window.SetReportPageUrlForTest(std::string(kReportUrl));
     ASSERT_TRUE(window.SetTabAddressForTest(0, 0, "https://a.test/one"));
-    EXPECT_FALSE(window.CollectFromTabs("price", {}));  // nothing to collect
+    EXPECT_FALSE(window.CollectFromTabs("price", {}));                        // nothing to collect
     EXPECT_FALSE(window.CollectFromTabs("  ", {{0, "https://a.test/one"}}));  // no question
 
     ASSERT_TRUE(window.CollectFromTabs("price", {{0, "https://a.test/one"}}));

@@ -28,9 +28,29 @@ Hover a tab button to see the page title. Island remembers the choice across lau
 
 When you focus the address field from the rail with ⌘L (Ctrl+L), the sidebar expands for the length of the edit.
 
+## Open a new tab
+
+A **+ New tab** row sits under the space's tabs header, above your first tab. Click it to open a tab, the same as ⌘T (Ctrl+T). In the collapsed rail, the **+** button sits after the tab icons.
+
+## Use the space menu
+
+Click the space you are already in (its segment in the bottom bar, or its icon in the collapsed rail) to open its menu:
+
+* **Rename space** names the space.
+* **Change icon** picks one of the bundled icons.
+* **Colour** sets the space colour: Blue, Green, Amber, Red or Violet.
+* **New space** creates a space.
+* **Delete space** closes this space. It is offered only when another space remains. It does not ask first.
+
+Click a different space to switch to it.
+
 ## Move the sidebar to the right
 
 Open **Settings > Appearance > Layout** and set **Sidebar position** to **Left** or **Right**.
+
+## Fullscreen (macOS)
+
+In fullscreen the window's traffic lights are hidden, so the sidebar stops reserving room for them. When you leave fullscreen, the room comes back.
 
 ## Change density, corners and shadow
 

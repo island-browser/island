@@ -9,18 +9,24 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "bookmark_store.h"
 #include "browser_chrome.h"
 #include "browser_command.h"
 #include "design_tokens.h"
+#include "favorite_tabs.h"
+#include "include/cef_image.h"
 #include "include/views/cef_overlay_controller.h"
 #include "include/views/cef_panel.h"
 #include "include/views/cef_window.h"
+#include "json_util.h"
 #include "navigation_state.h"
 #include "row_raster.h"
 #include "runtime_style.h"
@@ -155,7 +161,7 @@ TEST(BrowserWindowTest, GivenNativeAppearanceWhenLaidOutThenItHasTheSourceListAn
         BrowserChrome::LayoutForBounds({.x = 0, .y = 0, .width = 1440, .height = 900}, tokens);
 
     EXPECT_EQ(tokens.rail_width_dip, 248);
-    EXPECT_EQ(tokens.control_height_dip, 34);
+    EXPECT_EQ(tokens.control_height_dip, 36);
     EXPECT_EQ(BrowserChrome::NativeToolbarHeightDip(), 52);
     EXPECT_EQ(BrowserChrome::NativeToolbarButtonDip(), 28);
     EXPECT_EQ(BrowserChrome::NativeAddressHeightDip(), 30);
@@ -232,7 +238,9 @@ TEST(BrowserWindowTest, GivenAddressFocusWhenTextfieldRingResolvedThenItIsThePla
               (ArgbColor{.argb = 0xFF000000U}));
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingBackdrop(dark, /*address_focused=*/false),
               dark.canvas);
-    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false), dark.accent);
+    // Non-address focus rings (sidebar controls) are neutral, never the accent.
+    EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(dark, /*address_focused=*/false),
+              dark.text_secondary);
     // Arc and Graphite: the inner textfield ring is the well it sits on (one ring, the outer
     // pill's accent), and the outer ring stays the accent.
     EXPECT_EQ(BrowserChrome::TextfieldFocusRingColor(arc, /*address_focused=*/true), arc.well);
@@ -338,11 +346,13 @@ TEST(BrowserWindowTest, GivenNativeCollectionsWhenProjectedThenSectionHeadersAre
     const ChromeViewTreeNode* tab_strip = FindChromeView(tree, ChromeViewId::kTabStrip);
 
     ASSERT_NE(tab_strip, nullptr);
-    // The list holds its headers and tab rows only; there is no New Tab row.
+    // The list holds its headers, the New tab row (directly under the tabs header, 0.9 owner
+    // feedback 2026-10-26) and the tab rows. With no favorites above them, the tabs header leads
+    // the pinned rows too (spec §6): a pinned tab never sits under a favorites header.
     ASSERT_EQ(tab_strip->children.size(), 4U);
-    EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kFavoritesSectionHeader);
-    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabStripEntry);
-    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabsNewTabRow);
+    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabStripEntry);
     EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabStripEntry);
 }
 
@@ -368,10 +378,11 @@ TEST(BrowserWindowTest, GivenGroupedTabsWhenProjectedThenKickersSitUnderTheTabsH
     }
     const ChromeViewId entry = ChromeViewId::kTabStripEntry;
     const ChromeViewId kicker = ChromeViewId::kTabGroupKicker;
-    // The children stay out of Favorites and the header precedes the first kicker.
-    EXPECT_EQ(ids, (std::vector<ChromeViewId>{ChromeViewId::kFavoritesSectionHeader, entry, entry,
-                                              ChromeViewId::kTabsSectionHeader, kicker, entry,
-                                              entry, kicker, entry, entry}));
+    // The tabs header comes before the first (pinned) row, so the pinned rows read as tabs, and
+    // every kicker sits under it.
+    EXPECT_EQ(ids, (std::vector<ChromeViewId>{ChromeViewId::kTabsSectionHeader,
+                                              ChromeViewId::kTabsNewTabRow, entry, entry, kicker,
+                                              entry, entry, kicker, entry, entry}));
 }
 
 TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesFirst) {
@@ -387,7 +398,9 @@ TEST(BrowserWindowTest, GivenOnlyGroupedUnpinnedTabsThenTheTabsHeaderStillComesF
 
     ASSERT_NE(tab_strip, nullptr);
     ASSERT_EQ(tab_strip->children.size(), 5U);
-    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[0].id, ChromeViewId::kTabsSectionHeader);
+    EXPECT_EQ(tab_strip->children[1].id, ChromeViewId::kTabsNewTabRow);
+    EXPECT_EQ(tab_strip->children[2].id, ChromeViewId::kTabStripEntry);
     EXPECT_EQ(tab_strip->children[3].id, ChromeViewId::kTabGroupKicker);
     EXPECT_EQ(tab_strip->children[4].id, ChromeViewId::kTabStripEntry);
 }
@@ -1338,5 +1351,1194 @@ TEST(BrowserWindowTest, GivenTabsWithDifferentBlockedCountsWhenSelectingThenTheI
     EXPECT_EQ(window->address_indicators().shield_label, "6");
 }
 
+// Favorites: the sidebar projection, virtual favorite tabs and their session record (Task 2 of
+// 0.9). Headless windows keep their bookmarks in memory, so no test touches bookmarks.json.
+TEST(BrowserWindowTest, GivenGlobalAndSpaceFavoritesThenTheProjectionFollowsTheActiveSpace) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const SpaceId first = window->active_space_id();
+    ASSERT_TRUE(window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/").ok());
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    const SpaceId second = window->active_space_id();
+    ASSERT_TRUE(
+        window->AddFavoriteByUrl(FavoriteScope{second.value}, "Docs", "https://docs.test/").ok());
+    ASSERT_TRUE(
+        window->AddFavoriteByUrl(FavoriteScope{first.value}, "Notes", "https://n.test/").ok());
+
+    SidebarCollectionSnapshot snapshot = window->BuildSidebarCollection();
+    ASSERT_EQ(snapshot.global_favorites.size(), 1U);
+    EXPECT_EQ(snapshot.global_favorites[0].title, "Mail");
+    EXPECT_EQ(snapshot.global_favorites[0].url, "https://mail.test/");
+    EXPECT_FALSE(snapshot.global_favorites[0].scope.has_value());
+    ASSERT_EQ(snapshot.space_favorites.size(), 1U);
+    EXPECT_EQ(snapshot.space_favorites[0].title, "Docs");
+    EXPECT_EQ(snapshot.space_favorites[0].scope, FavoriteScope{second.value});
+    EXPECT_EQ(snapshot.tabs.size(), ActiveSpaceTabIds(*window).size());
+
+    // Switching spaces changes the scoped list only; the global strip stays put.
+    window->SelectSpace(0);
+    snapshot = window->BuildSidebarCollection();
+    ASSERT_EQ(snapshot.global_favorites.size(), 1U);
+    ASSERT_EQ(snapshot.space_favorites.size(), 1U);
+    EXPECT_EQ(snapshot.space_favorites[0].title, "Notes");
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteSpaceWhenItIsDeletedThenOnlyItsListAndVirtualTabGoAway) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const SpaceId first = window->active_space_id();
+    ASSERT_TRUE(window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/").ok());
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    const SpaceId second = window->active_space_id();
+    const BookmarkResult docs =
+        window->AddFavoriteByUrl(FavoriteScope{second.value}, "Docs", "https://docs.test/");
+    ASSERT_TRUE(docs.ok());
+    ASSERT_TRUE(
+        window->AddFavoriteByUrl(FavoriteScope{first.value}, "Notes", "https://n.test/").ok());
+    ASSERT_TRUE(window->ActivateFavorite(FavoriteScope{second.value}, docs.id));
+    ASSERT_NE(window->FavoriteTabRecordFor(FavoriteTabKey{FavoriteScope{second.value}, docs.id}),
+              nullptr);
+
+    // Cmd+W closes the shown favorite first; the space's only ordinary tab then goes, and with it
+    // the space, for real.
+    window->CloseFavoriteTab();
+    window->ExecuteCommand(BrowserCommand::kCloseTab);
+    ASSERT_EQ(window->FindSpace(second), nullptr);
+    const BookmarkState& state = window->bookmarks().state();
+    EXPECT_EQ(state.space_favorite_ids.count(second.value), 0U);
+    EXPECT_EQ(state.space_favorite_ids.count(first.value), 1U);
+    EXPECT_EQ(state.global_favorite_ids.size(), 1U);
+    EXPECT_EQ(window->FavoriteTabRecordFor(FavoriteTabKey{FavoriteScope{second.value}, docs.id}),
+              nullptr);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenItsVirtualTabShowsWithoutTouchingTabs) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    AppendTabs(*window, 1);
+    const std::vector<TabId> before = ActiveSpaceTabIds(*window);
+    const TabId selected = window->active_tab_id();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    // A scoped list of a space that does not exist cannot open either.
+    EXPECT_FALSE(window->ActivateFavorite(FavoriteScope{999999}, mail.id));
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->displayed_favorite().has_value());
+    EXPECT_EQ(*window->displayed_favorite(), (FavoriteTabKey{std::nullopt, mail.id}));
+    EXPECT_EQ(ActiveSpaceTabIds(*window), before);
+    EXPECT_EQ(window->active_tab_id(), selected);
+    const SidebarCollectionSnapshot snapshot = window->BuildSidebarCollection();
+    ASSERT_EQ(snapshot.global_favorites.size(), 1U);
+    EXPECT_TRUE(snapshot.global_favorites[0].displayed);
+    // R15: the selected ordinary tab is the one behind the shown favorite, so it is not accented.
+    ASSERT_FALSE(snapshot.tabs.empty());
+    for (const TabStripEntrySnapshot& tab : snapshot.tabs) {
+        EXPECT_FALSE(tab.behind_favorite && !tab.active);
+    }
+    EXPECT_TRUE(std::any_of(
+        snapshot.tabs.begin(), snapshot.tabs.end(),
+        [](const TabStripEntrySnapshot& tab) { return tab.active && tab.behind_favorite; }));
+
+    // Activating again keeps one virtual tab; closing it returns the slot to the ordinary tab.
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(ActiveSpaceTabIds(*window), before);
+    window->CloseFavoriteTab();
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->active_tab_id(), selected);
+    EXPECT_FALSE(window->BuildSidebarCollection().global_favorites[0].displayed);
+    // Closing clears the R15 flag on the selected tab.
+    for (const TabStripEntrySnapshot& tab : window->BuildSidebarCollection().tabs) {
+        EXPECT_FALSE(tab.behind_favorite);
+    }
+    const FavoriteTabRecord* record =
+        window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id});
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->last_url, record->reset_url);
+    EXPECT_EQ(record->reset_url, "https://mail.test/");
+}
+
+TEST(BrowserWindowTest, GivenADisplayedFavoriteWhenSettingsOpensThenTheSettingsTabReplacesItAndTheAddressLeavesIt) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    window->DisplayedNavigationForTest()->SetAddress("https://mail.test/inbox");
+
+    // The public snapshot and the observer's initial push describe the favorite, not the tab
+    // hidden behind it.
+    EXPECT_EQ(window->navigation_snapshot().url, "https://mail.test/inbox");
+    RecordingNavigationObserver observer;
+    window->SetNavigationObserver(&observer);
+    ASSERT_EQ(observer.snapshots().size(), 1U);
+    EXPECT_EQ(observer.snapshots()[0].url, "https://mail.test/inbox");
+    window->SetNavigationObserver(nullptr);
+
+    // Settings is an ordinary tab: selecting it ends the favorite's display, and neither the
+    // favorite's address nor the tab hidden behind it stays in the address field.
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
+    window->OpenSettings();
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_NE(window->address_bar_snapshot().display_text, "https://mail.test/inbox");
+    EXPECT_NE(window->address_bar_snapshot().display_text, "https://hidden.test/");
+    EXPECT_NE(window->navigation_snapshot().url, "https://mail.test/inbox");
+}
+
+TEST(BrowserWindowTest,
+     GivenADisplayedFavoriteWhenTheAgentPanelStateIsBuiltThenItNamesTheFavorite) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    window->DisplayedNavigationForTest()->SetAddress("https://mail.test/inbox");
+
+    const std::optional<json::Value> state = json::Parse(window->AgentPanelStateJson());
+    ASSERT_TRUE(state.has_value());
+    const json::Value* context = state->FindMember("context");
+    ASSERT_NE(context, nullptr);
+    ASSERT_TRUE(context->IsObject());
+    EXPECT_EQ(context->StringOr("url", ""), "https://mail.test/inbox");
+}
+
+TEST(BrowserWindowTest,
+     GivenADisplayedFavoriteWhenTheCurrentPageIsAddedThenTheFavoritesPageIsUsed) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    window->DisplayedNavigationForTest()->SetAddress("https://mail.test/inbox");
+    window->DisplayedNavigationForTest()->OnTitleChange("Inbox");
+
+    // Whatever the library does with the shown page, the hidden tab's URL never reaches it.
+    window->AddCurrentPageToGlobalFavorites();
+    for (const FavoriteEntrySnapshot& entry : window->BuildSidebarCollection().global_favorites) {
+        EXPECT_EQ(entry.url.find("hidden.test"), std::string::npos) << entry.url;
+    }
+}
+
+TEST(BrowserWindowTest, GivenADisplayedFavoriteWhenAnOrdinaryTabIsSelectedThenItReturns) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    AppendTabs(*window, 1);
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->displayed_favorite().has_value());
+
+    // Choosing the tab that is already selected still brings the ordinary page back.
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(1));
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+}
+
+TEST(BrowserWindowTest, GivenADisplayedFavoriteWhenItIsRemovedThenTheSlotReturnsToTheTab) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const TabId selected = window->active_tab_id();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+
+    ASSERT_TRUE(window->RemoveFavorite(std::nullopt, mail.id).ok());
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id}), nullptr);
+    EXPECT_EQ(window->active_tab_id(), selected);
+    EXPECT_TRUE(window->BuildSidebarCollection().global_favorites.empty());
+}
+
+TEST(BrowserWindowTest, GivenAVirtualFavoriteTabWhenSessionIsSavedAndRestoredThenItsRecordReturns) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    const SessionState saved = window->BuildSessionState();
+    ASSERT_EQ(saved.favorite_tabs.size(), 1U);
+    EXPECT_FALSE(saved.favorite_tabs[0].space_id.has_value());
+    EXPECT_EQ(saved.favorite_tabs[0].bookmark_id, mail.id);
+    EXPECT_EQ(saved.favorite_tabs[0].reset_url, "https://mail.test/");
+
+    // A fresh window has the same favorite (the same bookmark ID in a new in-memory library).
+    const CefRefPtr<BrowserWindow> restored = MakeWebWindow();
+    const BookmarkResult again =
+        restored->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_EQ(again.id, mail.id);
+    ASSERT_TRUE(restored->RestoreSessionStateForTest(saved));
+    const FavoriteTabRecord* record =
+        restored->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id});
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->reset_url, "https://mail.test/");
+    EXPECT_EQ(record->last_url, "https://mail.test/");
+    // The display itself is not persisted: the restored window shows its ordinary tab.
+    EXPECT_FALSE(restored->displayed_favorite().has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteScopedToAnotherLiveSpaceThenItOpensOnlyAfterSwitchingBack) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const SpaceId first = window->active_space_id();
+    const BookmarkResult notes =
+        window->AddFavoriteByUrl(FavoriteScope{first.value}, "Notes", "https://n.test/");
+    ASSERT_TRUE(notes.ok());
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    ASSERT_NE(window->active_space_id(), first);
+    ASSERT_NE(window->FindSpace(first), nullptr);
+
+    // The first space is alive, but its list is not the one the sidebar shows here.
+    EXPECT_FALSE(window->ActivateFavorite(FavoriteScope{first.value}, notes.id));
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+
+    window->SelectSpace(0);
+    ASSERT_EQ(window->active_space_id(), first);
+    ASSERT_TRUE(window->ActivateFavorite(FavoriteScope{first.value}, notes.id));
+    EXPECT_TRUE(window->displayed_favorite().has_value());
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteThenCloseTabClosesOnlyTheVirtualTab) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    AppendTabs(*window, 1);
+    const std::vector<TabId> before = ActiveSpaceTabIds(*window);
+    const TabId ordinary = window->active_tab_id();
+    EXPECT_EQ(window->shown_tab_id(), std::optional<TabId>(ordinary));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+
+    // The person sees the favorite, so the shown tab is its virtual tab, not the ordinary one.
+    ASSERT_TRUE(window->shown_tab_id().has_value());
+    EXPECT_NE(*window->shown_tab_id(), ordinary);
+
+    window->ExecuteCommand(BrowserCommand::kCloseTab);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->shown_tab_id(), std::optional<TabId>(ordinary));
+    EXPECT_EQ(window->active_tab_id(), ordinary);
+    EXPECT_EQ(ActiveSpaceTabIds(*window), before);
+    // The favorite stays in the sidebar, and its record returns to the favorite URL.
+    const FavoriteTabRecord* record =
+        window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id});
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->last_url, record->reset_url);
+    EXPECT_EQ(window->BuildSidebarCollection().global_favorites.size(), 1U);
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsSpaceIsChosenAgainThenTheOrdinaryTabReturns) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const TabId ordinary = window->active_tab_id();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->displayed_favorite().has_value());
+
+    window->SelectSpace(0);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->shown_tab_id(), std::optional<TabId>(ordinary));
+}
+
+// A favicon image without the CEF runtime: CefImage::CreateImage() needs an initialized CEF.
+namespace {
+class StubFavicon final : public CefImage {
+  public:
+    bool IsEmpty() override { return false; }
+    bool IsSame(CefRefPtr<CefImage> that) override { return that.get() == this; }
+    bool AddBitmap(float, int, int, cef_color_type_t, cef_alpha_type_t, const void*,
+                   size_t) override {
+        return false;
+    }
+    bool AddPNG(float, const void*, size_t) override { return false; }
+    bool AddJPEG(float, const void*, size_t) override { return false; }
+    size_t GetWidth() override { return 16; }
+    size_t GetHeight() override { return 16; }
+    bool HasRepresentation(float) override { return false; }
+    bool RemoveRepresentation(float) override { return false; }
+    bool GetRepresentationInfo(float, float&, int&, int&) override { return false; }
+    CefRefPtr<CefBinaryValue> GetAsBitmap(float, cef_color_type_t, cef_alpha_type_t, int&,
+                                          int&) override {
+        return nullptr;
+    }
+    CefRefPtr<CefBinaryValue> GetAsPNG(float, bool, int&, int&) override { return nullptr; }
+    CefRefPtr<CefBinaryValue> GetAsJPEG(float, int, int&, int&) override { return nullptr; }
+
+  private:
+    IMPLEMENT_REFCOUNTING(StubFavicon);
+};
 }  // namespace
+
+TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsIconArrivesThenTheSidebarProjectsIt) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    const std::optional<TabId> virtual_tab = window->shown_tab_id();
+    ASSERT_TRUE(virtual_tab.has_value());
+
+    // The download resolves through the virtual tab (it is in no space), then the sidebar shows it.
+    CefRefPtr<CefImage> image = new StubFavicon();
+    window->CompleteFaviconDownloadForTest(*virtual_tab, "https://mail.test/icon.png", image);
+    const SidebarCollectionSnapshot snapshot = window->BuildSidebarCollection();
+    ASSERT_EQ(snapshot.global_favorites.size(), 1U);
+    EXPECT_NE(snapshot.global_favorites[0].favicon.get(), nullptr);
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenTheAddressFieldShowsItsUrlThroughAFailedLoad) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://example.net/"));
+    ASSERT_TRUE(window->SelectActiveSpaceTabIndex(0));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(window->navigation_snapshot().url, "https://mail.test/");
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/");
+
+    // A failed load reports no address of its own; the field keeps the favorite's URL.
+    NavigationState* shown = window->DisplayedNavigationForTest();
+    ASSERT_NE(shown, nullptr);
+    shown->OnLoadError(-105);
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/");
+
+    // The hidden ordinary tab navigating meanwhile does not reach the field.
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://example.org/"));
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://mail.test/");
+
+    window->CloseFavoriteTab();
+    EXPECT_EQ(window->address_bar_snapshot().display_text, "https://example.org/");
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteThenFocusAndBadgeFollowTheVirtualTab) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const TabId selected = window->active_tab_id();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    const std::optional<TabId> shown = window->shown_tab_id();
+    ASSERT_TRUE(shown.has_value());
+    ASSERT_NE(*shown, selected);
+
+    // FocusBrowserView must reach the virtual tab's view, never the hidden selected tab's.
+    EXPECT_EQ(window->FocusTargetTabIdForTest(), shown);
+
+    window->RecordBlockedRequestForTab(*shown);
+    window->RecordBlockedRequestForTab(*shown);
+    EXPECT_TRUE(window->address_indicators().show_shield);
+    EXPECT_EQ(window->address_indicators().shield_label, "2");
+
+    window->CloseFavoriteTab();
+    EXPECT_EQ(window->FocusTargetTabIdForTest(), std::optional<TabId>(selected));
+    EXPECT_FALSE(window->address_indicators().show_shield);
+}
+
+TEST(BrowserWindowTest, GivenAFailedBookmarkMutationThenItIsRetryableUntilDismissedOrSucceeds) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    // A missing item fails the same way every time, so its status is shown without Retry.
+    const BookmarkResult failed = window->RemoveFavorite(std::nullopt, 999);
+    ASSERT_FALSE(failed.ok());
+    std::optional<BookmarkStatusSnapshot> status = window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(status->text, failed.message);
+    EXPECT_FALSE(status->retryable);
+    EXPECT_FALSE(window->RetryLastBookmarkMutation().ok());
+    EXPECT_TRUE(window->BuildSidebarCollection().bookmark_status.has_value());
+
+    window->DismissBookmarkStatus();
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+
+    // A later successful mutation clears a status it does not own.
+    ASSERT_FALSE(window->RemoveFavorite(std::nullopt, 999).ok());
+    ASSERT_TRUE(window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/").ok());
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+}
+
+TEST(BrowserWindowTest, GivenCurrentWebPageWhenFavoriteTogglesThenScopesUseOneCanonicalBookmark) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://Example.test/path"));
+
+    ASSERT_TRUE(window->ToggleGlobalFavoriteForCurrentPage().ok());
+    const std::optional<std::uint64_t> id =
+        window->bookmarks().FindBookmarkByUrl("https://example.test/path");
+    ASSERT_TRUE(id.has_value());
+    EXPECT_EQ(window->bookmarks().state().global_favorite_ids, (std::vector<std::uint64_t>{*id}));
+    ASSERT_TRUE(window->ToggleSpaceFavoriteForCurrentPage().ok());
+    ASSERT_EQ(window->BuildSidebarCollection().space_favorites.size(), 1U);
+
+    ASSERT_TRUE(window->ToggleGlobalFavoriteForCurrentPage().ok());
+    EXPECT_TRUE(window->bookmarks().state().global_favorite_ids.empty());
+    ASSERT_TRUE(window->ToggleSpaceFavoriteForCurrentPage().ok());
+    EXPECT_TRUE(window->BuildSidebarCollection().space_favorites.empty());
+}
+
+TEST(BrowserWindowTest, GivenALocalPageWhenFavoriteToggleRunsThenItDoesNotAddABookmark) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+
+    const BookmarkResult result = window->ToggleGlobalFavoriteForCurrentPage();
+
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
+}
+
+std::optional<PaletteCommandEntry> FindCommand(const std::vector<PaletteCommandEntry>& commands,
+                                               std::string_view id) {
+    const auto found =
+        std::find_if(commands.begin(), commands.end(),
+                     [id](const PaletteCommandEntry& command) { return command.id == id; });
+    return found == commands.end() ? std::nullopt : std::optional<PaletteCommandEntry>(*found);
+}
+
+BookmarkCommandState BookmarkStateFor(std::string space_name, bool page_bookmarkable) {
+    return BookmarkCommandState{.space_name = std::move(space_name),
+                                .page_bookmarkable = page_bookmarkable};
+}
+
+std::vector<std::uint64_t> GlobalFavorites(const BrowserWindow& window) {
+    return window.bookmarks().state().global_favorite_ids;
+}
+
+std::vector<std::uint64_t> SpaceFavoriteIds(const BrowserWindow& window, SpaceId space) {
+    const auto& lists = window.bookmarks().state().space_favorite_ids;
+    const auto found = lists.find(space.value);
+    return found == lists.end() ? std::vector<std::uint64_t>{} : found->second;
+}
+
+TEST(BrowserWindowTest, GivenBookmarkPaletteCommandsThenTheyIncludeLibraryActionsAndScopeLabels) {
+    BookmarkCommandState state = BookmarkStateFor("Work", /*page_bookmarkable=*/true);
+    state.global_position = 0;
+    state.global_count = 1;
+    const std::vector<PaletteCommandEntry> commands = BrowserWindow::PaletteCommands(state);
+
+    const std::optional<PaletteCommandEntry> open = FindCommand(commands, "open_bookmarks");
+    ASSERT_TRUE(open.has_value());
+    EXPECT_EQ(open->title, "Open Bookmarks");
+    ASSERT_TRUE(FindCommand(commands, "add_bookmark").has_value());
+    const auto global = FindCommand(commands, "toggle_global_favorite");
+    ASSERT_TRUE(global.has_value());
+    EXPECT_EQ(global->title, "Remove global favorite");
+    const auto space = FindCommand(commands, "toggle_space_favorite");
+    ASSERT_TRUE(space.has_value());
+    EXPECT_EQ(space->title, "Add Work favorite");
+    EXPECT_TRUE(FindCommand(commands, "new_bookmark_folder").has_value());
+    EXPECT_TRUE(FindCommand(commands, "import_bookmarks").has_value());
+    // The "show all" promise was dropped: nothing here opens a view it cannot focus.
+    EXPECT_FALSE(FindCommand(commands, "show_global_favorites").has_value());
+    // Every bookmark command is in the Bookmarks group, not the general Commands group.
+    for (const PaletteCommandEntry& command : commands) {
+        if (command.id == "sleep_inactive_tabs" || command.id == "agent_tasks" ||
+            command.id == "summarize_page" || command.id == "ask_about_page" ||
+            command.id == "collect_from_tabs" ||
+            command.id == std::string(kChangeSpaceIconCommandId)) {
+            EXPECT_FALSE(command.bookmark_group) << command.id;
+        } else {
+            EXPECT_TRUE(command.bookmark_group) << command.id;
+        }
+    }
+}
+
+TEST(BrowserWindowTest, GivenAPageThatCannotBeBookmarkedThenThePageRowsAreLeftOut) {
+    const std::vector<PaletteCommandEntry> commands =
+        BrowserWindow::PaletteCommands(BookmarkStateFor("Work", /*page_bookmarkable=*/false));
+
+    EXPECT_FALSE(FindCommand(commands, "add_bookmark").has_value());
+    EXPECT_FALSE(FindCommand(commands, "toggle_global_favorite").has_value());
+    EXPECT_FALSE(FindCommand(commands, "toggle_space_favorite").has_value());
+    // The library commands do not depend on the page.
+    EXPECT_TRUE(FindCommand(commands, "open_bookmarks").has_value());
+    EXPECT_TRUE(FindCommand(commands, "new_bookmark_folder").has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteNotAtAnEndThenOnlyTheMoveRowsThatCanRunAreListed) {
+    BookmarkCommandState state = BookmarkStateFor("Work", /*page_bookmarkable=*/true);
+    state.global_position = 0;
+    state.global_count = 3;
+    state.space_position = 1;
+    state.space_count = 2;
+    const std::vector<PaletteCommandEntry> middle = BrowserWindow::PaletteCommands(state);
+    EXPECT_FALSE(FindCommand(middle, "move_global_favorite_left").has_value());
+    EXPECT_TRUE(FindCommand(middle, "move_global_favorite_right").has_value());
+    EXPECT_TRUE(FindCommand(middle, "move_space_favorite_up").has_value());
+    EXPECT_FALSE(FindCommand(middle, "move_space_favorite_down").has_value());
+    ASSERT_TRUE(FindCommand(middle, "move_space_favorite_up").has_value());
+    EXPECT_EQ(FindCommand(middle, "move_space_favorite_up")->title, "Move Work favorite up");
+
+    // A page that is not a favorite has no reorder rows at all.
+    const std::vector<PaletteCommandEntry> none =
+        BrowserWindow::PaletteCommands(BookmarkStateFor("Work", /*page_bookmarkable=*/true));
+    EXPECT_FALSE(FindCommand(none, "move_global_favorite_right").has_value());
+    EXPECT_FALSE(FindCommand(none, "move_space_favorite_up").has_value());
+}
+
+TEST(BrowserWindowTest, GivenTheDisplayedFavoriteWhenBookmarkCommandsRunThenTheyActOnThatPage) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    // The ordinary tab stays on its own page while a favorite's virtual tab is displayed.
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+
+    // Add bookmark finds the displayed page's bookmark, not the hidden ordinary tab.
+    window->RunPaletteCommand("add_bookmark");
+    EXPECT_FALSE(window->bookmarks().FindBookmarkByUrl("https://ordinary.test/").has_value());
+    EXPECT_EQ(window->bookmarks().FindBookmarkByUrl("https://mail.test/"), mail.id);
+
+    // The state the palette shows describes the displayed page too.
+    const BookmarkCommandState state = window->CurrentBookmarkCommandState();
+    EXPECT_TRUE(state.page_bookmarkable);
+    EXPECT_TRUE(state.global_favorite());
+    EXPECT_FALSE(state.space_favorite());
+
+    // Removing the displayed favorite drops its virtual tab; the slot returns to the ordinary tab.
+    window->RunPaletteCommand("toggle_global_favorite");
+    EXPECT_TRUE(GlobalFavorites(*window).empty());
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_FALSE(window->bookmarks().FindBookmarkByUrl("https://ordinary.test/").has_value());
+}
+
+TEST(BrowserWindowTest, GivenALocalPageOnScreenWhenBookmarkCommandRunsThenTheStatusSaysWhy) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    window->ToggleInternalPageForSwapTest(LocalPageKind::kBookmarks);
+
+    EXPECT_FALSE(window->CurrentBookmarkCommandState().page_bookmarkable);
+    const BookmarkResult result = window->ToggleGlobalFavoriteForCurrentPage();
+    EXPECT_FALSE(result.ok());
+    EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(status->text, "Only web pages can be favorites.");
+    EXPECT_FALSE(status->retryable);
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWhenMovedThenTheListOrderChangesAndTheEndsRefuse) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult first = window->AddFavoriteByUrl(std::nullopt, "A", "https://a.test/");
+    const BookmarkResult second = window->AddFavoriteByUrl(std::nullopt, "B", "https://b.test/");
+    ASSERT_TRUE(first.ok());
+    ASSERT_TRUE(second.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, second.id));
+    ASSERT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{first.id, second.id}));
+
+    window->RunPaletteCommand("move_global_favorite_left");
+    EXPECT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{second.id, first.id}));
+    // B is now at the front, so a second left move is refused and reported.
+    window->RunPaletteCommand("move_global_favorite_left");
+    EXPECT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{second.id, first.id}));
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(status->text, "This favorite is already at that end.");
+}
+
+TEST(BrowserWindowTest, GivenAMoveThenTheStatusAnnouncesTheNewPlaceUntilDismissed) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult first = window->AddFavoriteByUrl(std::nullopt, "A", "https://a.test/");
+    const BookmarkResult second = window->AddFavoriteByUrl(std::nullopt, "B", "https://b.test/");
+    ASSERT_TRUE(first.ok());
+    ASSERT_TRUE(second.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, second.id));
+
+    window->RunPaletteCommand("move_global_favorite_left");
+    std::optional<BookmarkStatusSnapshot> status = window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_TRUE(status->ok);
+    EXPECT_FALSE(status->retryable);
+    EXPECT_EQ(status->text, "Moved b.test to position 1 of 2");
+
+    window->DismissFailedBookmarkStatus();
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFailedFavoriteWhenThePageChangesThenRetryActsOnTheFailedPage) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_bookmark_retry_page_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://a.test/"));
+    window->RunPaletteCommand("toggle_global_favorite");
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    // The person goes to another page before pressing Retry; the retry still favorites A.
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://b.test/"));
+    std::filesystem::remove_all(dir / "bookmarks.json.tmp");
+    EXPECT_TRUE(window->RetryLastBookmarkMutation().ok());
+
+    EXPECT_TRUE(window->bookmarks().FindBookmarkByUrl("https://a.test/").has_value());
+    EXPECT_FALSE(window->bookmarks().FindBookmarkByUrl("https://b.test/").has_value());
+    EXPECT_EQ(GlobalFavorites(*window).size(), 1U);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(BrowserWindowTest, GivenAFailedRemovalThenRetryRepeatsTheRemovalNotTheOppositeChange) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_bookmark_retry_direction_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+    ASSERT_TRUE(library.AddFavoriteByUrl(std::nullopt, "A", "https://a.test/").ok());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://a.test/"));
+    ASSERT_EQ(GlobalFavorites(*window).size(), 1U);
+
+    // The removal cannot be saved, so it fails and offers Retry.
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+    window->RunPaletteCommand("toggle_global_favorite");
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    std::filesystem::remove_all(dir / "bookmarks.json.tmp");
+    EXPECT_TRUE(window->RetryLastBookmarkMutation().ok());
+    EXPECT_TRUE(GlobalFavorites(*window).empty());
+    std::filesystem::remove_all(dir);
+}
+
+TEST(BrowserWindowTest, GivenEachBookmarkPaletteCommandWhenRunThenItRunsItsAction) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    const SpaceId space = window->active_space_id();
+
+    window->RunPaletteCommand("add_bookmark");
+    const std::optional<std::uint64_t> id =
+        window->bookmarks().FindBookmarkByUrl("https://ordinary.test/");
+    ASSERT_TRUE(id.has_value());
+
+    window->RunPaletteCommand("toggle_global_favorite");
+    EXPECT_EQ(GlobalFavorites(*window), (std::vector<std::uint64_t>{*id}));
+    window->RunPaletteCommand("toggle_global_favorite");
+    EXPECT_TRUE(GlobalFavorites(*window).empty());
+
+    window->RunPaletteCommand("toggle_space_favorite");
+    EXPECT_EQ(SpaceFavoriteIds(*window, space), (std::vector<std::uint64_t>{*id}));
+    window->RunPaletteCommand("toggle_space_favorite");
+    EXPECT_TRUE(SpaceFavoriteIds(*window, space).empty());
+
+    window->RunPaletteCommand("new_bookmark_folder");
+    const BookmarkState& state = window->bookmarks().state();
+    EXPECT_TRUE(
+        std::any_of(state.folders.begin(), state.folders.end(),
+                    [](const BookmarkFolder& folder) { return folder.name == "New folder"; }));
+
+    // A headless window has no chrome to show the Bookmarks page in, so opening it is a no-op
+    // here; the page itself is checked by the captures. Neither command touches the library.
+    const std::size_t folders = window->bookmarks().state().folders.size();
+    window->RunPaletteCommand("open_bookmarks");
+    window->RunPaletteCommand("import_bookmarks");
+    EXPECT_EQ(window->bookmarks().state().folders.size(), folders);
+}
+
+TEST(BrowserWindowTest, GivenTwoBookmarksThenThePaletteRowsKeepTheLibraryFolderOrder) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    static_cast<void>(window->AddFavoriteByUrl(std::nullopt, "Second", "https://second.test/"));
+    static_cast<void>(window->AddFavoriteByUrl(std::nullopt, "First", "https://first.test/"));
+
+    const std::vector<PaletteBookmarkEntry> rows = window->PaletteBookmarkEntries();
+    const std::vector<FlatBookmark> flat = window->bookmarks().Flattened();
+    ASSERT_EQ(rows.size(), 2U);
+    ASSERT_EQ(flat.size(), 2U);
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        EXPECT_EQ(rows[index].title, flat[index].title);
+        EXPECT_EQ(rows[index].folder_path, flat[index].folder_name);
+        EXPECT_NE(rows[index].id, 0U);
+    }
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteInTwoListsThenItIsOneRowLabelledWithEachListOnce) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    const std::string space_name = ActiveSpace(*window).name();
+    ASSERT_TRUE(window
+                    ->AddFavoriteByUrl(FavoriteScope{window->active_space_id().value}, "Mail",
+                                       "https://mail.test/")
+                    .ok());
+    // A list of a space that no longer exists is kept in the library but not presented.
+    ASSERT_TRUE(window->AddFavoriteByUrl(FavoriteScope{999999}, "Mail", "https://mail.test/").ok());
+
+    const std::vector<PaletteBookmarkEntry> rows = window->PaletteBookmarkEntries();
+    ASSERT_EQ(rows.size(), 1U);
+    EXPECT_EQ(rows[0].scope_label, "Global, " + space_name);
+}
+
+TEST(BrowserWindowTest, GivenABookmarkTheAllowListRejectsThenThePaletteLeavesTheTabUnchanged) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://ordinary.test/"));
+    const BookmarkResult plain =
+        window->AddFavoriteByUrl(std::nullopt, "Plain", "http://plain.test/");
+    ASSERT_TRUE(plain.ok());
+
+    // The selected bookmark still goes through the one validator, which rejects it.
+    int validations = 0;
+    window->SetAddressValidatorForTest([&validations](std::string_view text) {
+        ++validations;
+        return AcceptHttps(text);
+    });
+    window->OpenPaletteBookmarkForTest(window->PaletteBookmarkEntries().front());
+
+    EXPECT_EQ(validations, 1);
+    EXPECT_EQ(window->spaces()[0].tabs()[0].navigation_state().snapshot().url,
+              "https://ordinary.test/");
+}
+
+TEST(BrowserWindowTest, GivenAFailedWriteThenItIsRetryableUntilTheLibraryCanBeSaved) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_bookmark_write_retry_test";
+    std::filesystem::remove_all(dir);
+    // A directory where the atomic write's temporary file goes makes every save fail.
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    const BookmarkResult failed =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_EQ(failed.error, BookmarkError::kFileWriteError);
+    std::optional<BookmarkStatusSnapshot> status = window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_TRUE(status->retryable);
+
+    EXPECT_FALSE(window->RetryLastBookmarkMutation().ok());
+    EXPECT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    // Once the library can be written, the retry saves the favorite and clears the status.
+    std::filesystem::remove_all(dir / "bookmarks.json.tmp");
+    EXPECT_TRUE(window->RetryLastBookmarkMutation().ok());
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+    EXPECT_EQ(window->BuildSidebarCollection().global_favorites.size(), 1U);
+    std::filesystem::remove_all(dir);
+}
+
+TEST(BrowserWindowTest, GivenALibraryWithAHighSpaceKeyThenNewSpaceIdsStayAboveIt) {
+    // The counter only goes up, so the key is past whatever this process has already handed out.
+    const std::uint64_t key = NextSpaceId().value + 1000;
+    BookmarkStore library;
+    ASSERT_TRUE(library.AddFavoriteByUrl(FavoriteScope{key}, "Docs", "https://docs.test/").ok());
+    ASSERT_TRUE(library.AddFavoriteByUrl(FavoriteScope{key + 1}, "Gone", "https://g.test/").ok());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    EXPECT_GT(NextSpaceId().value, key);
+    const SessionState saved = window->BuildSessionState();
+    ASSERT_TRUE(window->RestoreSessionStateForTest(saved));
+    EXPECT_GT(NextSpaceId().value, key);
+}
+
+TEST(BrowserWindowTest, GivenAScopedListOfAnAbsentSpaceThenItIsKeptButNotProjected) {
+    const std::uint64_t absent = NextSpaceId().value + 1000;
+    BookmarkStore library;
+    const BookmarkResult docs =
+        library.AddFavoriteByUrl(FavoriteScope{absent}, "Docs", "https://docs.test/");
+    ASSERT_TRUE(docs.ok());
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    // The library keeps the list, but no space is shown with it.
+    EXPECT_EQ(window->bookmarks().state().space_favorite_ids.count(absent), 1U);
+    EXPECT_EQ(window->FindSpace(SpaceId{absent}), nullptr);
+    const SidebarCollectionSnapshot snapshot = window->BuildSidebarCollection();
+    EXPECT_TRUE(snapshot.space_favorites.empty());
+    EXPECT_TRUE(snapshot.global_favorites.empty());
+    EXPECT_FALSE(window->ActivateFavorite(FavoriteScope{absent}, docs.id));
+}
+
+// Favorite virtual tabs under sleep, split, invalid URLs, Peek, ownership and removal failures.
+
+TabSleepInput SleepInputFor(const BrowserWindow& window, TabId id) {
+    for (const TabSleepInput& input : window.SleepInputsForTest()) {
+        if (input.id == id) {
+            return input;
+        }
+    }
+    ADD_FAILURE() << "no sleep input for tab " << id.value;
+    return {};
+}
+
+TEST(BrowserWindowTest, GivenASplitWhenAFavoriteIsShownThenItFillsOnlyTheFocusedPane) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    AppendTabs(*window, 1);
+    const std::vector<TabId> tabs = ActiveSpaceTabIds(*window);
+    ASSERT_EQ(tabs.size(), 2U);
+    const TabId first = tabs[0];
+    const TabId second = tabs[1];
+    ASSERT_TRUE(window->SplitTabs(first, second));
+    window->SelectTab(0);  // the focused pane is the first one
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+
+    std::optional<BrowserWindow::ShownPanes> panes = window->ShownPanesForTest();
+    ASSERT_TRUE(panes.has_value());
+    EXPECT_EQ(panes->first, first);
+    ASSERT_TRUE(panes->second.has_value());
+    EXPECT_EQ(*panes->second, second);
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->shown_tab_id().has_value());
+    const TabId shown = *window->shown_tab_id();
+    panes = window->ShownPanesForTest();
+    ASSERT_TRUE(panes.has_value());
+    EXPECT_EQ(panes->first, shown);     // the focused pane shows the favorite
+    EXPECT_EQ(*panes->second, second);  // the other pane keeps its ordinary tab
+
+    // Selecting the other pane's tab ends the display; activating there moves the favorite.
+    window->SelectTab(1);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    panes = window->ShownPanesForTest();
+    ASSERT_TRUE(panes.has_value());
+    EXPECT_EQ(panes->first, first);
+    EXPECT_EQ(*panes->second, second);
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(window->shown_tab_id(), std::optional<TabId>(shown));
+    panes = window->ShownPanesForTest();
+    ASSERT_TRUE(panes.has_value());
+    EXPECT_EQ(panes->first, first);  // never in both panes
+    EXPECT_EQ(*panes->second, shown);
+
+    // Cmd+W resets the favorite and returns only its pane; the split and both tabs stay.
+    const std::vector<TabId> before_close = ActiveSpaceTabIds(*window);
+    window->ExecuteCommand(BrowserCommand::kCloseTab);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(ActiveSpaceTabIds(*window), before_close);
+    panes = window->ShownPanesForTest();
+    ASSERT_TRUE(panes.has_value());
+    EXPECT_EQ(panes->first, first);
+    EXPECT_EQ(*panes->second, second);
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteWhenSleepRunsThenItIsNotEligibleButAHiddenOneSleeps) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->shown_tab_id().has_value());
+    const TabId virtual_tab = *window->shown_tab_id();
+
+    EXPECT_TRUE(SleepInputFor(*window, virtual_tab).active);
+    EXPECT_FALSE(window->SleepTab(virtual_tab));
+    EXPECT_FALSE(SleepInputFor(*window, virtual_tab).sleeping);
+
+    // Choosing the ordinary tab hides the favorite; now the virtual tab follows the sleep policy.
+    window->SelectTab(0);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_FALSE(SleepInputFor(*window, virtual_tab).active);
+    EXPECT_TRUE(window->SleepTab(virtual_tab));
+    EXPECT_TRUE(SleepInputFor(*window, virtual_tab).sleeping);
+    // Sleep releases the browser but keeps the session record and the last URL.
+    ASSERT_NE(window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id}), nullptr);
+    EXPECT_EQ(window->TabStartupUrlForTest(virtual_tab), "https://mail.test/");
+
+    // Activation after sleep reuses the same virtual tab, which restores from its last URL.
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(window->shown_tab_id(), std::optional<TabId>(virtual_tab));
+    EXPECT_EQ(window->TabStartupUrlForTest(virtual_tab), "https://mail.test/");
+}
+
+ValidatedAddress AcceptHttpsExceptBadTest(std::string_view text) {
+    if (text.find("bad.test") != std::string_view::npos) {
+        return {.url = {}, .error = AddressError::kNotAbsolute};
+    }
+    return AcceptHttps(text);
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWithAnInvalidStoredUrlWhenActivatedThenItResetsAndOpens) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    SessionState state = window->BuildSessionState();
+    state.favorite_tabs.push_back(FavoriteTabState{.space_id = std::nullopt,
+                                                   .bookmark_id = mail.id,
+                                                   .reset_url = "https://mail.test/",
+                                                   .last_url = "not a url"});
+    ASSERT_TRUE(window->RestoreSessionStateForTest(state));
+
+    // The stored last URL does not validate, so the record goes back to the favorite URL and the
+    // favorite opens there. A favorite that could never open again would be lost to the person.
+    const FavoriteTabKey key{std::nullopt, mail.id};
+    EXPECT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    EXPECT_EQ(window->displayed_favorite(), std::optional<FavoriteTabKey>(key));
+    ASSERT_TRUE(window->shown_tab_id().has_value());
+    EXPECT_EQ(window->TabStartupUrlForTest(*window->shown_tab_id()), "https://mail.test/");
+    const FavoriteTabRecord* record = window->FavoriteTabRecordFor(key);
+    ASSERT_NE(record, nullptr);
+    EXPECT_EQ(record->last_url, "https://mail.test/");
+    EXPECT_FALSE(window->BuildSidebarCollection().bookmark_status.has_value());
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWithAnInvalidBookmarkUrlWhenActivatedThenItIsANoOp) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult bad = window->AddFavoriteByUrl(std::nullopt, "Bad", "https://bad.test/");
+    ASSERT_TRUE(bad.ok());
+    window->SetAddressValidatorForTest(&AcceptHttpsExceptBadTest);
+    const FavoriteTabKey key{std::nullopt, bad.id};
+
+    EXPECT_FALSE(window->ActivateFavorite(std::nullopt, bad.id));
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    // Nothing is created: no record and no virtual tab. The person is told, without a retry.
+    EXPECT_EQ(window->FavoriteTabRecordFor(key), nullptr);
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_FALSE(status->text.empty());
+    EXPECT_FALSE(status->retryable);
+}
+
+TEST(BrowserWindowTest, GivenAPendingRetryWhenAnInvalidFavoriteIsActivatedThenTheRetryIsKept) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_favorite_activation_keeps_retry_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+    const BookmarkResult mail =
+        library.AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    const BookmarkResult bad = library.AddFavoriteByUrl(std::nullopt, "Bad", "https://bad.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(bad.ok());
+    // A directory where the atomic write's temporary file goes makes the next save fail.
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    window->SetAddressValidatorForTest(&AcceptHttpsExceptBadTest);
+    const BookmarkResult failed = window->RemoveFavorite(std::nullopt, mail.id);
+    ASSERT_EQ(failed.error, BookmarkError::kFileWriteError);
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status.has_value());
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    // An activation failure is not a library write: the pending Retry must survive it.
+    EXPECT_FALSE(window->ActivateFavorite(std::nullopt, bad.id));
+    const std::optional<BookmarkStatusSnapshot> status =
+        window->BuildSidebarCollection().bookmark_status;
+    ASSERT_TRUE(status.has_value());
+    EXPECT_TRUE(status->retryable);
+
+    std::filesystem::remove_all(dir);
+}
+
+TEST(BrowserWindowTest, GivenAFavoriteWhenPeekedThenItsUrlOpensWithoutTouchingItsVirtualTab) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    const BookmarkResult docs =
+        window->AddFavoriteByUrl(std::nullopt, "Docs", "https://docs.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(docs.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, docs.id));
+    const FavoriteTabKey shown{std::nullopt, docs.id};
+    const std::optional<TabId> shown_id = window->shown_tab_id();
+    const FavoriteTabRecord before = *window->FavoriteTabRecordFor(shown);
+
+    EXPECT_EQ(window->FavoritePeekUrl(std::nullopt, mail.id),
+              std::optional<std::string>("https://mail.test/"));
+    EXPECT_FALSE(window->FavoritePeekUrl(FavoriteScope{999999}, mail.id).has_value());
+    EXPECT_FALSE(window->FavoritePeekUrl(std::nullopt, 999999).has_value());
+    // Peek is its own card: the displayed favorite, its tab and its record are unchanged, and the
+    // peeked favorite gets no virtual tab of its own.
+    EXPECT_EQ(window->displayed_favorite(), std::optional<FavoriteTabKey>(shown));
+    EXPECT_EQ(window->shown_tab_id(), shown_id);
+    EXPECT_EQ(*window->FavoriteTabRecordFor(shown), before);
+    EXPECT_EQ(window->FavoriteTabRecordFor(FavoriteTabKey{std::nullopt, mail.id}), nullptr);
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteThenItIsThePersonsTabNotTheAgentsOne) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    ASSERT_TRUE(window->CreateSpace("Agent", /*opened_by_agent=*/true));
+    const TabId agent_tab = window->active_tab_id();
+    ASSERT_TRUE(window->AgentOwnsTab(agent_tab));
+
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    ASSERT_TRUE(window->shown_tab_id().has_value());
+    EXPECT_FALSE(window->AgentOwnsTab(*window->shown_tab_id()));
+    // The agent's ordinary tab, hidden behind the favorite, keeps its ownership.
+    EXPECT_TRUE(window->AgentOwnsTab(agent_tab));
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsBookmarkIsDeletedThenEveryVirtualTabOfItGoes) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const TabId ordinary = window->active_tab_id();
+    const SpaceId space = window->active_space_id();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    // The same page in the space list is the same bookmark, so it has two virtual tabs.
+    const BookmarkResult scoped =
+        window->AddFavoriteByUrl(FavoriteScope{space.value}, "Mail", "https://mail.test/");
+    ASSERT_EQ(scoped.id, mail.id);
+    ASSERT_TRUE(window->ActivateFavorite(FavoriteScope{space.value}, mail.id));
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    const FavoriteTabKey global_key{std::nullopt, mail.id};
+    const FavoriteTabKey space_key{FavoriteScope{space.value}, mail.id};
+    ASSERT_NE(window->FavoriteTabRecordFor(space_key), nullptr);
+
+    ASSERT_TRUE(window->DeleteBookmark(mail.id).ok());
+    EXPECT_EQ(window->FavoriteTabRecordFor(global_key), nullptr);
+    EXPECT_EQ(window->FavoriteTabRecordFor(space_key), nullptr);
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->shown_tab_id(), std::optional<TabId>(ordinary));
+    EXPECT_TRUE(window->BuildSidebarCollection().global_favorites.empty());
+    EXPECT_TRUE(window->BuildSidebarCollection().space_favorites.empty());
+}
+
+TEST(BrowserWindowTest, GivenAShownFavoriteWhenItsRemovalFailsThenItStaysShownAndRetryable) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "island_favorite_remove_retry_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    BookmarkStore library(dir / "bookmarks.json");
+    static_cast<void>(library.Load());
+    const BookmarkResult mail =
+        library.AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    // A directory where the atomic write's temporary file goes makes the next save fail.
+    std::filesystem::create_directories(dir / "bookmarks.json.tmp");
+
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    window->ReplaceBookmarkLibraryForTest(std::move(library));
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    const FavoriteTabKey key{std::nullopt, mail.id};
+    const std::optional<TabId> shown = window->shown_tab_id();
+
+    const BookmarkResult failed = window->RemoveFavorite(std::nullopt, mail.id);
+    EXPECT_EQ(failed.error, BookmarkError::kFileWriteError);
+    // The rollback keeps the favorite, its displayed tab and its record.
+    EXPECT_EQ(window->displayed_favorite(), std::optional<FavoriteTabKey>(key));
+    EXPECT_EQ(window->shown_tab_id(), shown);
+    EXPECT_NE(window->FavoriteTabRecordFor(key), nullptr);
+    ASSERT_TRUE(window->BuildSidebarCollection().bookmark_status.has_value());
+    EXPECT_TRUE(window->BuildSidebarCollection().bookmark_status->retryable);
+
+    std::filesystem::remove_all(dir / "bookmarks.json.tmp");
+    EXPECT_TRUE(window->RetryLastBookmarkMutation().ok());
+    EXPECT_FALSE(window->displayed_favorite().has_value());
+    EXPECT_EQ(window->FavoriteTabRecordFor(key), nullptr);
+    EXPECT_TRUE(window->BuildSidebarCollection().global_favorites.empty());
+    std::filesystem::remove_all(dir);
+}
+
+TEST(BrowserWindowTest, GivenASpaceMenuFlagLeftOverWhenTheCommandPaletteOpensThenItsRowsRun) {
+    // Regression (OF-C): the menu's mode flag outlived the menu, so a normal palette submit was
+    // read as a menu row and dropped. Opening the palette now clears the flag first.
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId first_tab = window->active_tab_id();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    ASSERT_NE(window->active_tab_id(), first_tab);
+
+    window->SetSpaceMenuOpenForTest(true);
+    window->ShowCommandPalette();
+    PaletteSelection selection;
+    selection.kind = PaletteEntryKind::kTab;
+    selection.tab.id = first_tab;
+    window->OnCommandPaletteSubmitted(selection, "");
+
+    EXPECT_EQ(window->active_tab_id(), first_tab);
+}
+
+TEST(BrowserWindowTest, GivenASpaceMenuOpenWhenAnOrdinarySelectionIsSubmittedThenItFailsClosed) {
+    // While the menu is up, only its rows act: a tab row or a typed address is swallowed.
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId first_tab = window->active_tab_id();
+    window->ExecuteCommand(BrowserCommand::kNewTab);
+    const TabId second_tab = window->active_tab_id();
+
+    window->SetSpaceMenuOpenForTest(true);
+    PaletteSelection selection;
+    selection.kind = PaletteEntryKind::kTab;
+    selection.tab.id = first_tab;
+    window->OnCommandPaletteSubmitted(selection, "");
+    EXPECT_EQ(window->active_tab_id(), second_tab);
+
+    window->SetSpaceMenuOpenForTest(true);
+    window->OnCommandPaletteSubmitted(PaletteSelection{}, "https://example.com/");
+    EXPECT_EQ(window->active_tab_id(), second_tab);
+}
+
+TEST(BrowserWindowTest, GivenTheActiveSpaceSegmentWhenClickedThenItsMenuOpensNotAnotherSpace) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    ASSERT_EQ(window->space_count(), 2U);
+    ASSERT_EQ(window->active_space_index(), 1U);
+    const std::size_t shows_before = window->SpaceMenuShowsForTest();
+
+    window->ShowSpaceMenu(0);
+    EXPECT_EQ(window->SpaceMenuShowsForTest(), shows_before);
+    EXPECT_EQ(window->active_space_index(), 1U);
+
+    window->ShowSpaceMenu(1);
+    EXPECT_EQ(window->SpaceMenuShowsForTest(), shows_before + 1);
+}
+
+TEST(BrowserWindowTest, GivenASpaceMenuColourWhenChosenThenTheActiveSpaceTakesItAndSessionSaves) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    const std::size_t saves_before = window->SessionSaveRequestsForTest();
+    const SpaceMenuColorChoice& red = kSpaceMenuColorChoices[3];
+    ASSERT_EQ(red.name, "Red");
+
+    window->RunSpaceMenuCommand(SpaceMenuCommand{.action = SpaceMenuAction::kSetColor,
+                                                 .hex = std::string(red.hex)});
+
+    const Space* space = window->FindSpace(window->active_space_id());
+    ASSERT_NE(space, nullptr);
+    EXPECT_EQ(space->color(), red.color);
+    EXPECT_GT(window->SessionSaveRequestsForTest(), saves_before);
+}
+
+TEST(BrowserWindowTest, GivenOneSpaceWhenTheMenuDeletesItThenTheSameSpaceStays) {
+    // Closing the last space would replace it with a fresh default space (new id, no name), so
+    // the menu must not offer or run that: the space and its name survive.
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    ASSERT_TRUE(window->RenameSpace(0, "Work"));
+    const SpaceId before = window->active_space_id();
+
+    window->RunSpaceMenuCommand(SpaceMenuCommand{.action = SpaceMenuAction::kDeleteSpace});
+
+    EXPECT_EQ(window->space_count(), 1U);
+    EXPECT_EQ(window->active_space_id(), before);
+    EXPECT_EQ(window->FindSpace(before)->name(), "Work");
+}
+
+TEST(BrowserWindowTest, GivenTwoSpacesWhenTheMenuDeletesTheActiveOneThenItIsRemoved) {
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->ExecuteCommand(BrowserCommand::kNewSpace);
+    ASSERT_EQ(window->space_count(), 2U);
+
+    window->RunSpaceMenuCommand(SpaceMenuCommand{.action = SpaceMenuAction::kDeleteSpace});
+
+    EXPECT_EQ(window->space_count(), 1U);
+}
+
+TEST(BrowserWindowTest, GivenFullscreenWhenTheTitlebarInsetResolvesThenItIsZeroUntilExit) {
+    // The traffic-light inset follows fullscreen: macOS hides the lights there, so the tokens
+    // reserve no band; on exit the band returns (frameless platforms only).
+    const CefRefPtr<BrowserWindow> window = MakeWindow();
+#if defined(__APPLE__)
+    const int windowed = BrowserChrome::TrafficLightBandDip();
+#else
+    const int windowed = 0;  // no frameless titlebar off macOS, so no inset either way
+#endif
+
+    window->SetFullscreenForTest(true);
+    EXPECT_EQ(window->TitlebarBandDipForTest(), 0);
+
+    window->SetFullscreenForTest(false);
+    EXPECT_EQ(window->TitlebarBandDipForTest(), windowed);
+}
+
+}  // namespace
+
 }  // namespace island

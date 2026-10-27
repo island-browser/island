@@ -15,24 +15,102 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
-- Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with
-  title/URL editing, folder actions, favorite controls, import handoff, inline save status and
-  destructive folder confirmation. Browser-window state and command wiring land separately.
+- Bookmarks is a complete local library page: manage folders and bookmarks, move entries,
+  toggle global or current-space favorites, import detected browser data, and open saved URLs
+  through Island's normal address validation. Failed saves roll back and offer inline Retry.
 - Agent bookmark and favorite tools can list saved entries and, after an explicit confirmation,
   add or remove one bookmark or favorite. Persistent changes always ask, including on trusted
   sites; bulk, import, folder-mutation and reorder tools are not exposed.
+- The command palette searches the full bookmark library with folder and favorite-scope
+  metadata, and offers a "Bookmarks" group: Open Bookmarks, Add bookmark, add/remove global or
+  current-space favorite, move the current page's favorite (left/right in the global list, up/down
+  in a space list, only where it can move), `New folder`, and "Open Bookmarks to import…".
+  A successful move says where the favorite landed ("Moved … to position N of M") in the sidebar
+  status row. Retry on a failed bookmark change repeats that change on the page it was run for.
+  The bookmark commands act on the page on screen, including a displayed favorite, and a refusal
+  (for example a non-web page) shows in the bookmark status.
+- Sidebar favorites: a global favorites strip shows the first six favorites then "+N", and the "+"
+  that adds the current page sits at the end of the "Global favorites" header row. The strip's
+  plates and gaps shrink to fit the sidebar (down to 24 and 2 DIP). The current space's favorites
+  appear under "<Space> · Favorites" (Graphite: "Favorites"), and the tabs follow under a "Tabs"
+  header (Arc and Graphite show it only when favorites come first). Pinned tabs sit under the tabs
+  header. A failed save shows a warning status row above the footer, with Retry when the change can
+  run again; a success notice is neutral. The collapsed rail shows the same icons in order.
+- A favorite opens in its own tab without touching the selected tab. While it is shown, the
+  address field, navigation, find, zoom and the agent's current page act on it, and Cmd+W closes
+  it. While a favorite is shown, the space's selected tab keeps a neutral plate instead of the
+  accent until the favorite closes. In split view a favorite fills only the focused pane, and
+  selecting the other pane then activating the favorite moves it. A hidden favorite follows the tab
+  sleep policy and wakes at its last URL, while a shown one never sleeps. A favorite whose last URL
+  is no longer a valid web address opens at its favorite URL instead. A favorite whose own URL is
+  not valid does nothing and shows a status with no Retry, and a pending Retry is kept. Peek can
+  open a favorite's URL without touching its tab. Deleting a bookmark removes its tabs everywhere.
 
 ### Changed
 
+- The sidebar's "+ New tab" row is back: directly under the "<Space> · Tabs" header in every look,
+  and the collapsed rail's "+" after the tab icons. Both open a tab like ⌘T. Its keyboard focus
+  ring is neutral and not clipped.
+- Clicking the active space in the space switcher (or its rail icon) opens a menu: Rename space,
+  Change icon, the five colour presets, New space and Delete space. A click on another space still
+  switches to it. Colour can now be changed from the sidebar.
+- Arc hover: the sidebar row highlight is a subtle neutral plate instead of a heavy blue-white block.
+- macOS fullscreen: the traffic-light inset is removed while the window is fullscreen and restored
+  on exit, so the sidebar no longer leaves an empty band on the left and top.
+- Sidebar favorites repaint their text and generic icons on a theme switch, and keyboard focus on
+  sidebar controls (the global strip, favorite and tab rows, rail icons, footer and status buttons)
+  is a rounded neutral ring that is not clipped. Only the address field keeps the accent focus ring.
+- Settings now opens as one ordinary tab per window, with a Settings title and gear icon in the
+  sidebar. Opening a Settings command again focuses that tab and the requested section; it can be
+  reordered or closed with the normal tab controls, is not bookmarkable, and is not restored after
+  restart. Only the exact embedded Settings document may send Settings messages. Compact and
+  Comfortable now use visibly different row, gap and sidebar-padding tokens in every look, empty
+  lists are vertically centered, and shortcut changes update the macOS menu bar immediately.
+- Links from pages open the way you asked for them. Cmd/Ctrl+click a link to open it in the Peek
+  card; the middle button also opens Peek, because the browser reports it the same way. A plain
+  click on a link that opens in a new tab (target=_blank, or a page's window.open after a click)
+  and Shift+click open an ordinary tab in front, next to the current tab, and "Open as tab" places
+  its tab there too. Before this, plain new-tab links opened Peek. Script-initiated popups and
+  tabs without a click stay rejected.
+- The Peek card is sized from the window: 80% of the content area's width and 85% of its height,
+  centered, with minimums of 360 by 280 DIP, and it follows the window when the window resizes.
+- The Peek buttons are restyled as neutral toolbar-style controls: "Open as tab" with an icon and
+  label, and an icon-only close with the accessible name "Close Peek". Both use the native hover
+  and pressed states and a neutral focus ring, with no accent color.
 - The bookmarks library moves to schema 2 in `bookmarks.json`. Existing bookmarks, folders and
   imports carry over with stable IDs; the old file is kept as `bookmarks.json.v1.bak`. A damaged
   file is backed up as `bookmarks.json.invalid.bak` before it is next saved. A file that cannot be
   read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
   URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
   stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
+- The address field shows an empty address as a "Search or enter address" placeholder in every
+  look, so the start page reads as a field. The placeholder is never the field's text.
+- The start page's Ask Agent mode says "Ask the agent anything" instead of "Ask about this tab or
+  anything"; the agent panel keeps the tab wording because a page is its context.
+- After a search on Google, Yandex or DuckDuckGo the address field shows the query instead of the
+  results URL. Focusing the field keeps the query, and Enter searches again. The real URL is still
+  what Copy URL and the tab hold.
+- Results pages of Yandex's regional sites (yandex.ru, ya.ru) show their query too.
+- A search query that would read as an address (for example `q=https://bank.example/login`), that
+  holds a control character, that is not valid UTF-8, or that has a non-ASCII character other than
+  a letter, mark, number or space separator is not shown in the address field; the field keeps the
+  real URL. The rule is: only letters, numbers and spaces outside ASCII; anything else shows the full
+  address.
+  A link to a results page cannot make the field show another address. Such characters include
+  look-alike punctuation and symbols (`∶`, `ː`, `／`), format and invisible characters, emoji, and
+  fullwidth forms. Queries in Cyrillic, CJK, accented Latin or Devanagari still show. Accepted cost:
+  quotes and dashes (such as `«island»` or an em dash) also show the URL, and so does a Persian
+  query with a zero-width non-joiner.
 
 ### Fixed
 
+- Settings tabs now refuse agent navigation, page actions, text reads and screenshots before any
+  page message can run. Requested sections survive a Settings reload or wake, Settings fields keep
+  a visible neutral focus ring, and stale content-slot Settings messages are ignored.
+- The Welcome card now imports the union of Chrome's Default, numbered and Local State-listed profiles. Browser import feedback says when a profile could not be read after a partial import. Firefox gives a modern `[Install*] Default` precedence over a `[Profile*] Default=1` profile (or uses the newest database), copies its WAL changes into the temporary `places.sqlite` import, and skips smart, script and tag bookmarks. Browsers with no bookmarks are no longer misleadingly called “Not readable,” and real read failures say why. The selected Appearance plate and its separate neutral focus ring now move together.
+- The Bookmarks page now keeps bookmark actions in one keyboard-accessible `...` menu, names
+  current-space favorites, omits favorites for removed spaces, clears transient open/import
+  feedback at the next interaction or page visit, and keeps it separate from a failed-save Retry.
 - Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
   long selection chips stay on one ellipsized line.
 

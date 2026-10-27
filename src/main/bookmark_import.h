@@ -12,7 +12,8 @@ namespace island {
 
 // Browsers Island can import from. The Chromium family shares one
 // `Bookmarks` JSON schema; Safari is a macOS plist read behind the platform
-// seam; Firefox bookmarks come from its compressed JSON backups (no SQLite);
+// seam; Firefox bookmarks come from places.sqlite when SQLite is available,
+// otherwise from compressed JSON backups;
 // Arc contributes spaces and pinned tabs (browser_import.h).
 enum class ImportSource : std::uint8_t {
     kChrome,
@@ -33,11 +34,17 @@ enum class ImportSource : std::uint8_t {
 struct ImportSourceInfo {
     ImportSource id;
     std::string display_name;
+    // True when a profile or source file was found. Sources with no local
+    // profile are omitted from the Welcome card rather than called unreadable.
+    bool detected = false;
     // True when the source's bookmarks file exists and this build can read it.
     bool available = false;
     // The bookmarks file that was probed (exists or not); empty for sources
     // whose path does not apply on this platform.
     std::filesystem::path bookmarks_path;
+    // A short, user-facing reason when a detected source is unavailable. It
+    // is empty for absent and readable sources.
+    std::string unavailable_reason;
 };
 
 // Probes the well-known bookmark locations under |base_home| (the user's home
@@ -56,9 +63,12 @@ std::optional<std::vector<BookmarkItem>> ParseChromiumBookmarks(std::string_view
 
 // Reads and parses one source. nullopt when the file is missing, unreadable,
 // unrecognized, or the platform seam cannot read this source (Safari off
-// macOS). Never throws.
-std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
-                                                          const std::filesystem::path& base_home);
+// macOS). When supplied, |unreadable_chromium_profiles| receives the number
+// of Chrome-family profile files that existed but could not be read or parsed.
+// Never throws.
+std::optional<std::vector<BookmarkItem>> ImportFromSource(
+    ImportSource source, const std::filesystem::path& base_home,
+    std::size_t* unreadable_chromium_profiles = nullptr);
 
 // Platform seam, mirroring the sidebar-hover seam: a macOS implementation in
 // src/main/macos/bookmark_import_mac.mm reads the Safari bookmarks plist via

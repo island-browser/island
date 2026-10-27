@@ -14,7 +14,7 @@ layout structure, and token-derived styling stable across changes to `src/main/b
 |------|-------------|
 | `browser_chrome_contract_test.cpp` | Structural contract: view hierarchy and `ChromeViewId` assignments |
 | `browser_chrome_style_test.cpp` | Styling derived from `design_tokens` (colors, insets, tint, per-row color resolution, contrast) |
-| `welcome_flow_style_test.cpp` | Welcome card: note wrapping, overlay height, button color roles and contrast |
+| `welcome_flow_style_test.cpp` | Welcome card: note wrapping, overlay height, theme-segment mapping, button color roles and contrast |
 
 ## For AI Agents
 

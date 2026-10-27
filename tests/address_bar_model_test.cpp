@@ -108,5 +108,47 @@ TEST(AddressBarModel, BlurAndEscapeCancelToTheLatestCommittedState) {
     EXPECT_EQ(model.snapshot().edit_text, "https://navigated.example.test/");
 }
 
+TEST(AddressBarModel, ASearchQueryShowsInsteadOfTheResultsUrlAndEditingKeepsIt) {
+    AddressBarModel model;
+    model.UpdateCommittedUrl(kCommittedUrl);
+    model.UpdateSearchQuery("island browser");
+
+    EXPECT_EQ(model.snapshot().display_text, "island browser");
+    EXPECT_EQ(model.snapshot().edit_text, "island browser");
+
+    model.Focus();
+    EXPECT_EQ(model.snapshot().mode, AddressBarMode::kEditing);
+    EXPECT_EQ(model.snapshot().edit_text, "island browser");
+
+    model.Blur();
+    EXPECT_EQ(model.snapshot().display_text, "island browser");
+    EXPECT_EQ(model.snapshot().edit_text, "island browser");
+}
+
+TEST(AddressBarModel, ASubmittedSearchReplacesTheQueryWithTheRealUrl) {
+    AddressBarModel model;
+    model.UpdateSearchQuery("island browser");
+    model.Focus();
+    model.SetEditText("island browser");
+
+    const std::optional<std::string> url =
+        model.Submit({.url = "https://www.google.com/search?q=island%20browser"});
+    EXPECT_EQ(url, "https://www.google.com/search?q=island%20browser");
+    EXPECT_EQ(model.snapshot().display_text, "https://www.google.com/search?q=island%20browser");
+}
+
+// The placeholder is painted by BrowserChrome::ProjectAddress, which this unit test does not reach.
+// Here the model side is checked: an empty start page keeps an empty field, and focusing it does
+// not turn the placeholder into edit text.
+TEST(AddressBarModel, GivenAnEmptyStartPageWhenFocusedThenThePlaceholderIsNotTheFieldText) {
+    EXPECT_EQ(kAddressPlaceholderText, "Search or enter address");
+
+    AddressBarModel model;
+    model.UpdateInternalPage("");
+    EXPECT_EQ(model.snapshot().display_text, "");
+    model.Focus();
+    EXPECT_EQ(model.snapshot().edit_text, "");
+}
+
 }  // namespace
 }  // namespace island

@@ -1,7 +1,9 @@
 #ifndef ISLAND_SEARCH_ENGINE_H_
 #define ISLAND_SEARCH_ENGINE_H_
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -27,6 +29,9 @@ struct SearchEngine {
     std::string_view display_name;
     // HTTPS URL up to and including "<param>=", with no query value.
     std::string_view url_prefix;
+    // Regional hosts whose results pages use the same path and parameter as url_prefix ("" = unused
+    // slot). A results page on one of them still shows its query in the address field.
+    std::array<std::string_view, 2> extra_results_hosts = {};
 
     bool operator==(const SearchEngine&) const = default;
 };
@@ -45,6 +50,19 @@ struct SearchEngine {
 // encoded per RFC 3986 with PercentEncodeQuery, e.g.
 // "https://www.google.com/search?q=hello%20world".
 [[nodiscard]] std::string BuildSearchUrl(const SearchEngine& engine, std::string_view query);
+
+// The query a results page of one of SearchEngines() was opened for, or nullopt when `url` is not
+// such a page. A match needs https, the engine's host or one of its extra_results_hosts (ASCII
+// case ignored), the exact path, and the engine's query parameter (the part of url_prefix after
+// '?', "q" or "text"). Other parameters and the fragment are ignored, the first occurrence of the
+// parameter wins, and '+' and %XX decode. nullopt also comes back for a blank query, and for a
+// query the address field must not show as text: one that reads as an address rather than a
+// search (ClassifyAddressInput), that has an ASCII control, that is not valid UTF-8, or that has a
+// non-ASCII code point outside the allowlist: only letters, numbers and spaces outside ASCII
+// (general categories L*, M*, N*, Zs; table generated into query_display_ranges.h). Anything else
+// outside ASCII shows the full address. The address field then shows the real URL. While a results
+// page shows its query, the real URL stays in the tab.
+[[nodiscard]] std::optional<std::string> SearchQueryFromResultsUrl(std::string_view url);
 
 // What the start page's three-mode switch does with Enter, persisted as the
 // last-used mode.

@@ -44,10 +44,10 @@ bool EndpointDisabled() {
 }
 
 // Names the tab the caller meant: the agent's own page, or the one it gave an index for.
-std::string PlanTabError(std::optional<std::size_t> tab) {
+std::string PrivilegedTabError(std::optional<std::size_t> tab) {
     return std::string(tab.has_value() ? "That tab" : "The agent's page") +
-           " is the research Plan tab, Island's own page. Open a page with browser_open_tab, or "
-           "address a page tab.";
+           " is Island's own Settings or research Plan tab. Open a page with browser_open_tab, "
+           "or address a web page tab.";
 }
 
 // Why a page has no browser to act on. In a research the page sits in the Plan's space, which the
@@ -158,19 +158,20 @@ std::vector<agent::AgentTabInfo> WindowAgentHost::ListTabs() {
     for (std::size_t index = 0; index < space.tab_count(); ++index) {
         const Tab& tab = space.tabs()[index];
         const NavigationSnapshot& nav = tab.navigation_state().snapshot();
-        tabs.push_back(
-            {.index = index,
-             .title = tab.DisplayTitle(),
-             .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
-             // During research the agent's page may be in a background space. Mark the logical
-             // default target, not the page visible to the person, so no-index tools and the
-             // action gate agree about which tab they address.
-             .active = default_tab.tab.has_value() && default_tab.tab->space == space_index &&
-                       default_tab.tab->tab == index,
-             .loading = nav.load_phase == LoadPhase::kLoading,
-             .pinned = tab.pinned(),
-             .opened_by_agent = tab.opened_by_agent(),
-             .refusal = window_->IsAgentPlanTab(index) ? PlanTabError(index) : std::string()});
+        tabs.push_back({.index = index,
+                        .title = tab.DisplayTitle(),
+                        .url = AgentVisibleUrl(nav.url.empty() ? tab.startup_url() : nav.url),
+                        // During research the agent's page may be in a background space. Mark the
+                        // logical default target, not the page visible to the person, so no-index
+                        // tools and the action gate agree about which tab they address.
+                        .active = default_tab.tab.has_value() &&
+                                  default_tab.tab->space == space_index &&
+                                  default_tab.tab->tab == index,
+                        .loading = nav.load_phase == LoadPhase::kLoading,
+                        .pinned = tab.pinned(),
+                        .opened_by_agent = tab.opened_by_agent(),
+                        .refusal = window_->IsAgentPrivilegedTab(index) ? PrivilegedTabError(index)
+                                                                        : std::string()});
     }
     return tabs;
 }
@@ -197,8 +198,8 @@ agent::HostStatus WindowAgentHost::Navigate(std::optional<std::size_t> tab, std:
     if (!lookup.tab.has_value()) {
         return agent::HostStatus::Error(AgentTabErrorText(lookup.error, tab));
     }
-    if (window_->IsAgentPlanTab(tab)) {
-        return agent::HostStatus::Error(PlanTabError(tab));
+    if (window_->IsAgentPrivilegedTab(tab)) {
+        return agent::HostStatus::Error(PrivilegedTabError(tab));
     }
     return StatusFor(window_->NavigateAgentTab(tab, url),
                      "Could not navigate: unknown tab or an address Island does not allow.");
@@ -253,8 +254,8 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
         if (!lookup.tab.has_value()) {
             return agent::HostStatus::Error(AgentTabErrorText(lookup.error, std::nullopt));
         }
-        if (window_->IsAgentPlanTab(std::nullopt)) {
-            return agent::HostStatus::Error(PlanTabError(std::nullopt));
+        if (window_->IsAgentPrivilegedTab(std::nullopt)) {
+            return agent::HostStatus::Error(PrivilegedTabError(std::nullopt));
         }
         CefRefPtr<CefBrowser> browser = window_->AgentBrowser(*lookup.tab);
         if (browser == nullptr) {
@@ -293,13 +294,14 @@ agent::HostStatus WindowAgentHost::RunAction(agent::AgentBrowserAction action) {
 void WindowAgentHost::DevToolsCall(std::optional<std::size_t> tab, std::string_view method,
                                    json::Value params, agent::DevToolsCallback done) {
     // Every page tool (read, snapshot, click, type, evaluate, screenshot) comes through here.
-    // The Plan tab is Island's own page: an agent could press Run on it and approve its own plan.
+    // Island-owned privileged pages stay outside DevTools: an agent could approve its own Plan or
+    // change browser preferences by operating Settings.
     const BrowserWindow::AgentTabLookup lookup = window_->ResolveAgentTab(tab);
-    if (!lookup.tab.has_value() || window_->IsAgentPlanTab(tab)) {
+    if (!lookup.tab.has_value() || window_->IsAgentPrivilegedTab(tab)) {
         agent::DevToolsReply reply;
         reply.ok = false;
         reply.error =
-            lookup.tab.has_value() ? PlanTabError(tab) : AgentTabErrorText(lookup.error, tab);
+            lookup.tab.has_value() ? PrivilegedTabError(tab) : AgentTabErrorText(lookup.error, tab);
         done(std::move(reply));
         return;
     }

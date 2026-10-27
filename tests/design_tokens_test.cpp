@@ -24,6 +24,26 @@ TEST(ChromeTokens, MixesAndMeasuresContrastLikeWcag) {
     EXPECT_NEAR(ContrastRatio({0xFF777777U}, {0xFF777777U}), 1.0, 1e-9);
 }
 
+TEST(ChromeTokens, ArcTintedHoverIsASubtleNeutralPlate) {
+    // 0.9 owner feedback (2026-10-26): the tinted hover was a heavy, blue-white block. It is now a
+    // step off the tinted canvas: visible, but close enough that it reads as a plate, not a fill.
+    const ArgbColor spaces[] = {{0xFF0090FFU}, {0xFF30A46CU}, {0xFFFFB224U}, {0xFFE5484DU},
+                                {0xFF8E4EC6U}, {0xFFFFF7AEU}, {0xFFFAFAFAU}, {0xFF111111U}};
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens base = ChromeTokens::ForTheme(theme);
+        for (const ArgbColor space : spaces) {
+            const ChromeTokens tinted = base.TintedForSpace(space, theme);
+            SCOPED_TRACE(testing::Message()
+                         << std::hex << space.argb << " dark=" << (theme == ChromeTheme::kDark));
+            EXPECT_NE(tinted.hover, tinted.canvas);
+            const double contrast = ContrastRatio(tinted.hover, tinted.canvas);
+            EXPECT_GT(contrast, 1.02);
+            EXPECT_LT(contrast, 1.35);
+            EXPECT_GE(ContrastRatio(tinted.text, tinted.hover), 4.5);
+        }
+    }
+}
+
 TEST(ChromeTokens, SpaceTintKeepsTextReadableAndTheAccentVisible) {
     // The window's space palette plus deliberately hard cases (pale yellow,
     // near-white, near-black).
@@ -174,7 +194,9 @@ TEST(ChromeTokens, ProvidesTheArcCardAndDensityDefaultsInEveryTheme) {
 
         EXPECT_EQ(tokens.card_radius_dip, 10);
         EXPECT_EQ(tokens.card_inset_dip, 8);
-        EXPECT_EQ(tokens.control_height_dip, 32);
+        EXPECT_EQ(tokens.control_height_dip, 36);
+        EXPECT_EQ(tokens.row_gap_dip, 6);
+        EXPECT_EQ(tokens.sidebar_padding_dip, 16);
         EXPECT_EQ(tokens.titlebar_band_dip, 0);
         EXPECT_TRUE(tokens.card_shadow);
         EXPECT_EQ(tokens.sidebar_side, SidebarSide::kLeft);

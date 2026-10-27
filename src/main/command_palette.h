@@ -41,12 +41,17 @@ struct PaletteSpaceEntry {
     bool operator==(const PaletteSpaceEntry&) const = default;
 };
 
-// Read-only snapshot of one bookmark from the window's bookmark store. No
-// identity beyond the URL: selecting one navigates the active tab through the
-// single address path, exactly like a kUrl row.
+// Read-only snapshot of one bookmark from the window's bookmark store. Its
+// id is retained for metadata consumers, while selecting it still navigates
+// through the single address path, exactly like a kUrl row.
 struct PaletteBookmarkEntry {
+    std::uint64_t id = 0;
     std::string title;
     std::string url;
+    // Presentation metadata: the folder is the bookmark row's secondary text;
+    // a favorite may additionally name its scope ("Global" or a space).
+    std::string folder_path;
+    std::string scope_label;
 
     bool operator==(const PaletteBookmarkEntry&) const = default;
 };
@@ -93,6 +98,9 @@ struct PaletteCommandEntry {
     // resolves the person's current binding at palette-open time; the view never hard-codes keys.
     std::string shortcut_action_id;
     std::string shortcut;
+    // Bookmark and favorite commands sit in the "Bookmarks" group, before the bookmark rows, and
+    // not in the general "Commands" group. They still run through the command dispatch.
+    bool bookmark_group = false;
 
     bool operator==(const PaletteCommandEntry&) const = default;
 };
@@ -146,6 +154,9 @@ struct PaletteEntry;
 [[nodiscard]] std::span<const PaletteKindStyle> PaletteKindStyles() noexcept;
 [[nodiscard]] const PaletteKindStyle& PaletteKindStyleFor(PaletteEntryKind kind) noexcept;
 [[nodiscard]] std::string PaletteKindLabel(const PaletteEntry& entry, bool sentence_case);
+// The group a row is listed under: its kind's header, except that bookmark commands share the
+// Bookmarks header with the bookmark rows.
+[[nodiscard]] std::string_view PaletteGroupHeader(const PaletteEntry& entry) noexcept;
 
 // One row of palette results. `tab`, `space`, `url_query`, and `bookmark` are
 // meaningful for their kind only; the unused members stay defaulted so rows
@@ -215,8 +226,10 @@ enum class PaletteMatchRank : std::uint8_t {
 //      ties preserve input order. History is already ranked by SearchIndex.
 //   2. A non-empty query appends exactly one kUrl row after every section,
 //      carrying the raw query text.
-//   3. An empty (or all-whitespace) query lists every tab, space, and bookmark
-//      in canonical input order and omits the kUrl row.
+//   3. An empty (or all-whitespace) query lists every tab, space, command, and
+//      bookmark in canonical order and omits the kUrl row. Inside the commands,
+//      the general commands come before the Bookmarks group, and that group's
+//      commands come before the bookmark rows, so the group has one header.
 // Non-matching entries are excluded; the kUrl row is the only unconditional
 // row for a non-empty query.
 [[nodiscard]] std::vector<PaletteEntry> ComposePaletteResults(

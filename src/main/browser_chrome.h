@@ -18,11 +18,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "address_bar_model.h"
 #include "address_indicators.h"
 #include "agent_task_queue.h"
+#include "bookmark_store.h"
 #include "browser_command.h"
 #include "chrome_snapshot.h"
 #include "collapsed_rail.h"
@@ -33,6 +35,7 @@
 #include "overlay_card.h"
 #include "page_card.h"
 #include "row_raster.h"
+#include "sidebar_collection.h"
 #include "sidebar_state.h"
 #include "tab_id.h"
 
@@ -119,7 +122,9 @@ enum class ChromeViewId : int {
     kCollapsedRailTabList = 1049,
     kCollapsedRailTab = 1050,
     kCollapsedRailSeparator = 1051,
-    kCollapsedRailNewTab = 1052,
+    // Retired 2026-10-24: the collapsed rail's "+" New Tab button is gone (no New Tab control
+    // anywhere in the sidebar). The id is never reused.
+    kCollapsedRailNewTabRetired = 1052,
     kCollapsedRailSpaceList = 1053,
     kCollapsedRailSpace = 1054,
     // The peek card (a floating page over the current one). Overlay-only, like the palettes,
@@ -161,6 +166,30 @@ enum class ChromeViewId : int {
     kRailAgentRow = 1078,
     kRailAgentMeta = 1079,
     kRailAgentKeycap = 1080,
+    // Bookmarks 0.9 sidebar collection (appended after 1080). The global strip, the current
+    // space's favorites and the failure status row. The space favorites header reuses
+    // kFavoritesSectionHeader (1072).
+    kGlobalFavoritesHeader = 1081,
+    kGlobalFavoritesStrip = 1082,
+    kGlobalFavoriteIcon = 1083,
+    kGlobalFavoritesMore = 1084,
+    kGlobalFavoritesAdd = 1085,
+    kSpaceFavoriteRow = 1086,
+    kBookmarkStatusRow = 1087,
+    kBookmarkStatusText = 1088,
+    kBookmarkStatusRetry = 1089,
+    kBookmarkStatusDismiss = 1090,
+    kCollapsedRailGlobalFavorite = 1091,
+    kCollapsedRailSpaceFavorite = 1092,
+    // The header row above the global strip: the "Global favorites" label with the "+" add control
+    // at its trailing end (ruling a).
+    kGlobalFavoritesHeaderRow = 1093,
+    // 0.9 owner feedback (2026-10-26): the "+ New tab" row returns. kTabsNewTabRow is the expanded
+    // list's row, directly after the tabs header (or first when there is none);
+    // kCollapsedRailNewTab is the rail's "+" icon after the tab favicons. Both open a tab exactly
+    // like ⌘T. 1052 stays retired and is not reused.
+    kTabsNewTabRow = 1094,
+    kCollapsedRailNewTab = 1095,
 };
 
 // What the Agent entry's status dot shows, from the agent state the window already tracks.
@@ -182,6 +211,9 @@ struct AgentEntryStatus {
 struct ChromeViewTreeNode {
     ChromeViewId id;
     std::vector<ChromeViewTreeNode> children;
+    // The accessible name the runtime view carries, when the contract pins one (favorite icons,
+    // "+N", "+", space favorite rows). Empty when the view has no contract name.
+    std::string name;
 
     bool operator==(const ChromeViewTreeNode&) const = default;
 };
@@ -198,6 +230,8 @@ struct TabStripEntrySnapshot {
     bool pinned = false;
     // The page's favicon once downloaded; null shows the globe fallback.
     CefRefPtr<CefImage> favicon;
+    // Island-owned documents can supply a semantic fallback instead of the globe.
+    std::optional<ChromeIcon> fallback_icon;
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;
@@ -205,6 +239,10 @@ struct TabStripEntrySnapshot {
     // names the plan branch and is drawn as a kicker line above the first row of a run.
     std::optional<TabId> group_parent;
     std::string group_label;
+    // R15: the space's active ordinary tab while a favorite tab is on screen. It is not the tab the
+    // person sees, so it takes the neutral selected plate, not the accent, until the favorite
+    // closes. `active` keeps its meaning (the space's selected tab).
+    bool behind_favorite = false;
 
     bool operator==(const TabStripEntrySnapshot&) const = default;
 };
@@ -220,6 +258,44 @@ struct SpaceSwitcherEntrySnapshot {
     bool active = false;
 
     bool operator==(const SpaceSwitcherEntrySnapshot&) const = default;
+};
+
+// One favorite as the sidebar shows it. |scope| is std::nullopt for the global strip, otherwise the
+// space's SpaceId value. |displayed| marks the favorite whose virtual tab fills the content slot;
+// it gets a neutral marker, never the tab accent. |favicon| is the virtual tab's favicon when that
+// tab exists (null otherwise, drawn as the globe fallback).
+struct FavoriteEntrySnapshot {
+    FavoriteScope scope;
+    std::uint64_t bookmark_id = 0;
+    std::string title;
+    std::string url;
+    bool displayed = false;
+    CefRefPtr<CefImage> favicon;
+
+    bool operator==(const FavoriteEntrySnapshot&) const = default;
+};
+
+// The last bookmark outcome shown inline: a failed mutation, or a success notice when |ok|.
+// |retryable| means RetryLastBookmarkMutation can run it again; DismissBookmarkStatus clears it.
+struct BookmarkStatusSnapshot {
+    std::string text;
+    bool retryable = false;
+    bool ok = false;
+
+    bool operator==(const BookmarkStatusSnapshot&) const = default;
+};
+
+// The expanded sidebar's collection, top to bottom: global favorites, the active space's favorites,
+// then its tab rows. The collapsed rail uses the same order for its icons.
+struct SidebarCollectionSnapshot {
+    std::vector<FavoriteEntrySnapshot> global_favorites;
+    std::vector<FavoriteEntrySnapshot> space_favorites;
+    std::vector<TabStripEntrySnapshot> tabs;
+    std::optional<BookmarkStatusSnapshot> bookmark_status;
+    // The "+" add control is shown only when the active page has an acceptable URL.
+    bool add_current_page_available = false;
+
+    bool operator==(const SidebarCollectionSnapshot&) const = default;
 };
 
 struct ChromeGeometrySnapshot {
@@ -261,7 +337,19 @@ enum class CollectionButtonAction : std::uint8_t {
     kCloseTab,
     kActivateSpace,
     kUnpinTab,
+    // Bookmarks 0.9 sidebar collection; the index is into the matching snapshot list.
+    kActivateGlobalFavorite,
+    kActivateSpaceFavorite,
+    kShowMoreGlobalFavorites,
+    kAddCurrentPageAsGlobalFavorite,
+    kRetryBookmarkStatus,
+    kDismissBookmarkStatus,
+    // The expanded "+ New tab" row and the collapsed rail's "+": both run kNewTab.
+    kNewTab,
 };
+
+// The accessible name of both New tab controls (the expanded row and the collapsed "+").
+inline constexpr std::string_view kNewTabAccessibleName = "New tab";
 
 // What the collapsed rail draws for a tab projection: the tab order (source indices into
 // the projection, pinned tabs first and otherwise in list order) and the position in that
@@ -298,6 +386,9 @@ class BrowserChromeHost {
     virtual void SelectTab(std::size_t index) = 0;
     virtual void CloseTab(std::size_t index) = 0;
     virtual void SelectSpace(std::size_t index) = 0;
+    // A click on the active space's segment (or rail icon) opens its menu (space_menu.h); a
+    // click on any other space selects it through SelectSpace.
+    virtual void ShowSpaceMenu(std::size_t index) = 0;
     virtual void BeginAddressEditing() = 0;
     virtual void SetAddressFocusRingSuppressed(bool suppressed) = 0;
     virtual void CancelAddressEditing() = 0;
@@ -307,9 +398,15 @@ class BrowserChromeHost {
     virtual void SetTabPinned(std::size_t index, bool pinned) = 0;
     virtual void ToggleAgentPanel() = 0;
     virtual void ToggleTabOverview() = 0;
-    virtual void ToggleSettings() = 0;
+    virtual void OpenSettings() = 0;
     // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
     virtual void OpenBlockerSettings() = 0;
+    // Bookmarks 0.9 sidebar collection. Favorites are addressed by scope and bookmark id.
+    virtual void ActivateFavoriteFromSidebar(FavoriteScope scope, std::uint64_t bookmark_id) = 0;
+    virtual void OpenMoreGlobalFavorites() = 0;
+    virtual void AddCurrentPageToGlobalFavorites() = 0;
+    virtual void RetryFailedBookmarkMutation() = 0;
+    virtual void DismissFailedBookmarkStatus() = 0;
 };
 
 // The Agent entry's label for the task queue: the live task's plan progress when it has one
@@ -428,6 +525,17 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static std::optional<CornerPatch> AddressCornerPatch(const ChromeTokens& tokens,
                                                                        const DipRect& bounds,
                                                                        bool sidebar_expanded);
+    // The "+ New tab" row's fill: the plate a tab row takes for the same hover state (TabRowFill),
+    // so the two rows never differ. Idle, it is the canvas the rows sit on.
+    [[nodiscard]] static ArgbColor NewTabRowFill(const ChromeTokens& tokens, bool hovered);
+    // The rounded corner patch for a hovered "+ New tab" row at `bounds` (window DIP), with the
+    // tab rows' radius. Nullopt while the row is idle or has no area.
+    [[nodiscard]] static std::optional<CornerPatch> NewTabCornerPatch(const DipRect& bounds,
+                                                                      bool hovered);
+    // Where a click on a space segment (or its rail icon) goes: the active space opens its menu
+    // (space_menu.h); any other space is selected.
+    enum class SpaceSegmentClick : std::uint8_t { kOpenMenu, kSelectSpace };
+    [[nodiscard]] static SpaceSegmentClick SpaceSegmentClickFor(bool is_active_space);
     // A CEF font list ("Family, [Medium |Semi-Bold |Bold ]13px") for the resolved interface font.
     // The weight is explicit. The tokens are those gfx::FontList::ParseDescription accepts in
     // the pinned Chromium (150.0.7871.129); an unknown token ("SemiBold") fails the whole list.
@@ -873,6 +981,129 @@ class BrowserChrome final : public NavigationObserver {
         return {ChromeViewId::kRoot, std::move(root_children)};
     }
 
+    // The children of the expanded collection's tab strip, in the order SetTabStripEntries builds
+    // them (spec §3, §6): the global header row (label, then "+") and strip (icons, then "+N"),
+    // the current space's favorites header and rows, the tabs header, then one node per tab. The
+    // builders and this projection call the same decisions (GlobalHeaderRowVisible,
+    // GlobalStripVisible, FavoritesPrecedeTabs, TabsHeaderBeforeFirstRow) and the same accessible
+    // name functions, so a name here is the name the runtime button carries.
+    [[nodiscard]] static std::vector<ChromeViewTreeNode> TabStripContract(
+        const SidebarCollectionSnapshot& collection,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look) {
+        const bool native = look == LookPreset::kNative;
+        const ChromeTokens tokens = ChromeTokens::ForLook(look, ChromeTheme::kLight);
+        const GlobalStripLayout layout = ComputeGlobalStripLayout(
+            collection.global_favorites.size(), GlobalStripContentWidthDip(tokens));
+        const bool add_visible = collection.add_current_page_available;
+        const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
+        const std::vector<FavoriteEntrySnapshot>& space_favorites = collection.space_favorites;
+        std::vector<ChromeViewTreeNode> children;
+        if (GlobalHeaderRowVisible(layout, add_visible)) {
+            ChromeViewTreeNode row = {ChromeViewId::kGlobalFavoritesHeaderRow,
+                                      {{ChromeViewId::kGlobalFavoritesHeader, {}}}};
+            if (add_visible) {
+                row.children.push_back({ChromeViewId::kGlobalFavoritesAdd,
+                                        {},
+                                        std::string(AddGlobalFavoriteAccessibleName())});
+            }
+            children.push_back(std::move(row));
+        }
+        if (GlobalStripVisible(layout)) {
+            ChromeViewTreeNode strip = {ChromeViewId::kGlobalFavoritesStrip, {}};
+            for (std::size_t i = 0; i < layout.icons; ++i) {
+                strip.children.push_back(
+                    {ChromeViewId::kGlobalFavoriteIcon,
+                     {},
+                     GlobalFavoriteAccessibleName(globals[i].title, i + 1, globals.size())});
+            }
+            if (layout.hidden > 0) {
+                strip.children.push_back({ChromeViewId::kGlobalFavoritesMore,
+                                          {},
+                                          MoreGlobalFavoritesAccessibleName(layout.hidden)});
+            }
+            children.push_back(std::move(strip));
+        }
+        if (!space_favorites.empty()) {
+            children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
+            for (const FavoriteEntrySnapshot& entry : space_favorites) {
+                children.push_back({ChromeViewId::kSpaceFavoriteRow,
+                                    {},
+                                    SpaceFavoriteAccessibleName(entry.title)});
+            }
+        }
+        const bool tabs_precede = FavoritesPrecedeTabs(globals.size(), space_favorites.size());
+        const std::vector<TabStripEntrySnapshot>& tabs = collection.tabs;
+        if (TabsHeaderBeforeFirstRow(look, tabs_precede, !tabs.empty())) {
+            children.push_back({ChromeViewId::kTabsSectionHeader, {}});
+        }
+        children.push_back({ChromeViewId::kTabsNewTabRow, {}, std::string(kNewTabAccessibleName)});
+        for (std::size_t i = 0; i < tabs.size(); ++i) {
+            if (native && NeedsGroupKicker(tabs, i)) {
+                children.push_back({ChromeViewId::kTabGroupKicker, {}});
+            }
+            children.push_back({ChromeViewId::kTabStripEntry,
+                                {{ChromeViewId::kTabStripEntryFavicon, {}},
+                                 {ChromeViewId::kTabStripEntryTitle, {}},
+                                 {ChromeViewId::kTabStripEntryClose, {}}}});
+        }
+        return children;
+    }
+
+    // The whole expanded collection as one tree node (the tab strip with its favorites).
+    [[nodiscard]] static ChromeViewTreeNode SidebarCollectionContract(
+        const SidebarCollectionSnapshot& collection,
+        const std::vector<SpaceSwitcherEntrySnapshot>& spaces, LookPreset look) {
+        return {ChromeViewId::kTabStrip, TabStripContract(collection, spaces, look)};
+    }
+
+    // The collapsed rail's icons, top to bottom (spec §3): global favorites, the hairline when
+    // anything follows them, space favorites, then the tab icons. Each favorite carries the name
+    // AddCollapsedFavorites gives its button.
+    [[nodiscard]] static std::vector<ChromeViewTreeNode> CollapsedRailOrder(
+        const SidebarCollectionSnapshot& collection) {
+        std::vector<ChromeViewTreeNode> order;
+        const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
+        const std::vector<FavoriteEntrySnapshot>& spaces = collection.space_favorites;
+        for (std::size_t i = 0; i < globals.size(); ++i) {
+            order.push_back(
+                {ChromeViewId::kCollapsedRailGlobalFavorite,
+                 {},
+                 GlobalFavoriteAccessibleName(globals[i].title, i + 1, globals.size())});
+        }
+        if (CollapsedRailSeparatorVisible(globals.size(),
+                                          !spaces.empty() || !collection.tabs.empty())) {
+            order.push_back({ChromeViewId::kCollapsedRailSeparator, {}});
+        }
+        for (const FavoriteEntrySnapshot& entry : spaces) {
+            order.push_back({ChromeViewId::kCollapsedRailSpaceFavorite,
+                             {},
+                             SpaceFavoriteAccessibleName(entry.title)});
+        }
+        for (std::size_t i = 0; i < collection.tabs.size(); ++i) {
+            order.push_back({ChromeViewId::kCollapsedRailTab, {}});
+        }
+        // The rail's "+" New tab icon closes the list, after the tab favicons.
+        order.push_back(
+            {ChromeViewId::kCollapsedRailNewTab, {}, std::string(kNewTabAccessibleName)});
+        return order;
+    }
+
+    // The failure row's children: the status text, "Retry" only when the failed write can run
+    // again, and "Dismiss". Absent when there is no status (spec §5).
+    [[nodiscard]] static std::vector<ChromeViewId> BookmarkStatusContract(
+        const std::optional<BookmarkStatusSnapshot>& status) {
+        if (!status.has_value()) {
+            return {};
+        }
+        std::vector<ChromeViewId> row = {ChromeViewId::kBookmarkStatusRow,
+                                         ChromeViewId::kBookmarkStatusText};
+        if (status->retryable) {
+            row.push_back(ChromeViewId::kBookmarkStatusRetry);
+        }
+        row.push_back(ChromeViewId::kBookmarkStatusDismiss);
+        return row;
+    }
+
     // Projects the collection regions the way U4/U5 wire them at runtime: one
     // entry node per tab/space snapshot, each with the fixed sub-shape the
     // design requires (tab: favicon-or-fallback, truncating title, close
@@ -901,29 +1132,8 @@ class BrowserChrome final : public NavigationObserver {
         };
         if (ChromeViewTreeNode* tab_strip = find(tree, ChromeViewId::kTabStrip, find);
             tab_strip != nullptr) {
-            tab_strip->children.reserve(tabs.size() + 3);
-            bool favorites_header_added = false;
-            bool tabs_header_added = false;
-            for (std::size_t i = 0; i < tabs.size(); ++i) {
-                if (native && tabs[i].pinned && !favorites_header_added) {
-                    tab_strip->children.push_back({ChromeViewId::kFavoritesSectionHeader, {}});
-                    favorites_header_added = true;
-                }
-                if (native && !tabs[i].pinned && !tabs_header_added) {
-                    tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-                    tabs_header_added = true;
-                }
-                if (native && NeedsGroupKicker(tabs, i)) {
-                    tab_strip->children.push_back({ChromeViewId::kTabGroupKicker, {}});
-                }
-                tab_strip->children.push_back({ChromeViewId::kTabStripEntry,
-                                               {{ChromeViewId::kTabStripEntryFavicon, {}},
-                                                {ChromeViewId::kTabStripEntryTitle, {}},
-                                                {ChromeViewId::kTabStripEntryClose, {}}}});
-            }
-            if (native && !tabs_header_added) {
-                tab_strip->children.push_back({ChromeViewId::kTabsSectionHeader, {}});
-            }
+            tab_strip->children =
+                TabStripContract(SidebarCollectionSnapshot{.tabs = tabs}, spaces, look);
         }
         if (ChromeViewTreeNode* switcher = find(tree, ChromeViewId::kSpaceSwitcher, find);
             switcher != nullptr) {
@@ -966,6 +1176,18 @@ class BrowserChrome final : public NavigationObserver {
     // the space switcher from the window's space list. Rows are keyboard
     // focusable through their affordance buttons and announce active state.
     void SetTabStripEntries(const std::vector<TabStripEntrySnapshot>& entries);
+    // Stores the typed collection (favorites, status and tab rows). The tab rows are forwarded to
+    // SetTabStripEntries, so the existing tab list keeps its behavior.
+    void SetSidebarCollection(const SidebarCollectionSnapshot& snapshot);
+    // Developer capture (`focus:global_favorite:<i>`): moves keyboard focus to the i-th global
+    // strip icon so its focus ring can be captured. False when no such icon is shown.
+    bool FocusGlobalFavoriteIcon(std::size_t index);
+    // Developer capture (`focus:new_tab`): moves keyboard focus to the New tab control that is
+    // drawn (the expanded row, or the collapsed rail's "+") so its focus ring can be captured.
+    bool FocusNewTab();
+    [[nodiscard]] const SidebarCollectionSnapshot& sidebar_collection() const noexcept {
+        return sidebar_collection_;
+    }
     void SetSpaceSwitcherEntries(const std::vector<SpaceSwitcherEntrySnapshot>& entries);
     // Swaps the CefBrowserView living in the content slot when the active tab
     // or space changes. The previous view is detached, not destroyed; the new
@@ -1015,6 +1237,12 @@ class BrowserChrome final : public NavigationObserver {
     // right inset by this gutter so a classic scrollbar never forces a
     // horizontal one.
     [[nodiscard]] static constexpr int TabListScrollGutterDip() { return 10; }
+    // The global header row (label plus "+") is one plate tall, so the add control fits its row.
+    [[nodiscard]] static constexpr int GlobalHeaderRowHeightDip() { return 24; }
+    // The width the global strip and the header row share: the sidebar's inner width.
+    [[nodiscard]] static int GlobalStripWidthDip(const ChromeTokens& tokens);
+    // The width the strip's controls fit in: the strip minus the focus ring inset on each side.
+    [[nodiscard]] static int GlobalStripContentWidthDip(const ChromeTokens& tokens);
 
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
@@ -1082,6 +1310,19 @@ class BrowserChrome final : public NavigationObserver {
     void HandleButtonPressed(ChromeViewId view_id);
     void HandleCollectionButtonPressed(CollectionButtonAction action, std::size_t index);
     void UpdateTabStripPreferredSize();
+    // Bookmarks 0.9 collection builders. AddFavoriteSections appends the global strip and the
+    // current space's favorite rows to tab_strip_ ahead of the tabs; AddCollapsedFavorites does
+    // the same for the icon rail. Both read sidebar_collection_.
+    void AddFavoriteSections();
+    void AddCollapsedFavorites();
+    // Re-asserts the fill of every favorite plate and row (displayed, hovered, or neutral).
+    void ApplyFavoriteVisuals();
+    // Re-asserts the favorites' text and glyph ink from FavoriteInkPlan; theme path only.
+    void ApplyFavoriteInk();
+    // Every favorite plate (strip icons, the "+N"/"+" controls, space rows, rail icons) with
+    // whether it is the displayed favorite.
+    [[nodiscard]] std::vector<std::pair<CefRefPtr<CefButton>, bool>> FavoriteSurfaces() const;
+    void UpdateBookmarkStatusRow();
     void RebuildCollapsedTabs();
     void RebuildCollapsedSpaces();
     void UpdateCollapsedTabListSize();
@@ -1114,7 +1355,16 @@ class BrowserChrome final : public NavigationObserver {
         return tokens_.look == LookPreset::kNative ? NativeAddressHeightDip()
                                                    : tokens_.control_height_dip;
     }
-    [[nodiscard]] std::string ActiveSpaceSectionTitle() const;
+    // The active space's name as a header shows it (truncated), or empty when it has none.
+    [[nodiscard]] std::string ActiveSpaceHeaderName() const;
+    // The "+ New tab" row (expanded, after the tabs header) and the collapsed rail's "+" icon.
+    // Both use the neutral row plate: hover paints the tokens' hover fill, never the accent.
+    CefRefPtr<CefLabelButton> AddNewTabRow();
+    CefRefPtr<CefLabelButton> AddCollapsedNewTab();
+    void ApplyNewTabVisual(const CefRefPtr<CefLabelButton>& button, bool hovered);
+    // Creates one section header label (no focus, no ink) and appends it to tab_strip_.
+    CefRefPtr<CefLabelButton> AddSectionHeader(const std::string& text, ChromeViewId id,
+                                               const std::string& accessible_name);
     void ApplyCollectionTheme();
     // Re-renders the soft rounded fill (selected / hovered / none) of one row's edge buttons.
     void ApplyTabRowVisual(std::size_t index);
@@ -1175,6 +1425,8 @@ class BrowserChrome final : public NavigationObserver {
     // The inner panel holding every address control, inset by the ring (see BuildViews).
     CefRefPtr<CefPanel> address_inner_;
     CefRefPtr<CefLabelButton> address_idle_label_;
+    // True while the Native label shows kAddressPlaceholderText instead of an empty address.
+    bool address_idle_showing_placeholder_ = false;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;
@@ -1196,6 +1448,30 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> tab_strip_;
     CefRefPtr<CefLabelButton> favorites_section_header_;
     CefRefPtr<CefLabelButton> tabs_section_header_;
+    CefRefPtr<CefLabelButton> new_tab_button_;
+    bool new_tab_hovered_ = false;
+    CefRefPtr<CefLabelButton> collapsed_new_tab_button_;
+    bool collapsed_new_tab_hovered_ = false;
+    // Bookmarks 0.9: the global strip's header and strip, and the failure status row above the
+    // fixed footer. favorites_section_header_ names the current space's favorites.
+    CefRefPtr<CefLabelButton> global_header_;
+    // The header row holds the label and, at its trailing end, the "+" add control (ruling a).
+    CefRefPtr<CefPanel> global_header_row_;
+    CefRefPtr<CefLabelButton> global_add_;
+    CefRefPtr<CefPanel> global_strip_;
+    // Height and child count the favorite block adds to tab_strip_ (strip plus space rows), so
+    // UpdateTabStripPreferredSize can size the scroll content.
+    int favorite_block_height_dip_ = 0;
+    int favorite_block_children_ = 0;
+    std::vector<CefRefPtr<CefLabelButton>> space_favorite_rows_;
+    std::vector<CefRefPtr<CefLabelButton>> collapsed_favorite_buttons_;
+    CefRefPtr<CefPanel> collapsed_favorite_separator_wrapper_;
+    CefRefPtr<CefPanel> collapsed_favorite_separator_;
+    CefRefPtr<CefPanel> bookmark_status_row_;
+    CefRefPtr<CefLabelButton> bookmark_status_text_;
+    CefRefPtr<CefLabelButton> bookmark_status_retry_;
+    CefRefPtr<CefLabelButton> bookmark_status_dismiss_;
+    std::vector<CefRefPtr<CollectionButtonDelegate>> status_button_delegates_;
     // Branch labels of grouped tab runs and their indent panels (rebuilt with the tab strip).
     std::vector<CefRefPtr<CefPanel>> group_kicker_panels_;
     std::vector<CefRefPtr<CefLabelButton>> group_kickers_;
@@ -1210,7 +1486,6 @@ class BrowserChrome final : public NavigationObserver {
     CefRefPtr<CefPanel> collapsed_bottom_group_;
     CefRefPtr<CefPanel> collapsed_divider_wrapper_;
     CefRefPtr<CefPanel> collapsed_divider_;
-    CefRefPtr<CefLabelButton> collapsed_new_tab_button_;
     CefRefPtr<CefPanel> collapsed_space_list_;
     CefRefPtr<SurfacePanelDelegate> tab_strip_delegate_;
     CefRefPtr<CefView> tab_list_scroll_;
@@ -1273,6 +1548,7 @@ class BrowserChrome final : public NavigationObserver {
         CefRefPtr<CefLabelButton> name;
     };
     std::vector<TabStripEntrySnapshot> tab_entries_;
+    SidebarCollectionSnapshot sidebar_collection_;
     std::vector<SpaceSwitcherEntrySnapshot> space_entries_;
     std::vector<TabEntryViews> tab_entry_views_;
     std::vector<SpaceEntryViews> space_entry_views_;

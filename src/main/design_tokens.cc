@@ -290,7 +290,13 @@ ChromeTokens Tint(const ChromeTokens& base, ArgbColor space_color, ChromeTheme t
     const auto derive = [&](double mix) {
         tinted.canvas = MixColor(dark ? base.background : base.surface_secondary, space, mix);
         tinted.selected = MixColor(tinted.canvas, white, dark ? 0.14 : 0.62);
-        tinted.hover = MixColor(tinted.canvas, white, dark ? 0.07 : 0.34);
+        // The hover plate is a subtle neutral step off the tinted canvas: a faint lift toward the
+        // text colour in dark, a faint lift toward white in light (a step toward the text on a
+        // near-white canvas, which has no room to lighten). The old 34% white mix read as a heavy,
+        // blue-tinged block on the sidebar.
+        const bool near_white = RelativeLuminance(tinted.canvas) > 0.8;
+        tinted.hover = dark || near_white ? MixColor(tinted.canvas, base.text, dark ? 0.08 : 0.05)
+                                          : MixColor(tinted.canvas, white, 0.12);
         tinted.well = MixColor(tinted.canvas, white, dark ? 0.09 : 0.46);
     };
     const auto readable = [&]() {
@@ -390,9 +396,12 @@ ChromeTokens ChromeTokens::Customized(ArgbColor space_color, ChromeTheme theme,
     tokens.card_shadow = !bleed && appearance.card_shadow;
     const bool compact = appearance.density == Density::kCompact;
     tokens.rail_width_dip = appearance.look == LookPreset::kNative ? (compact ? 200 : 248) : 286;
-    tokens.control_height_dip =
-        appearance.look == LookPreset::kNative ? (compact ? 28 : 34) : (compact ? 26 : 32);
-    tokens.row_gap_dip = compact ? 0 : 2;
+    // Density is structural and therefore identical in every look: changing it must be plainly
+    // visible in the rows, the rhythm between them, and the rail gutter.
+    tokens.control_height_dip = compact ? 28 : 36;
+    tokens.row_gap_dip = compact ? 2 : 6;
+    tokens.sidebar_padding_dip = compact ? 8 : 16;
+    tokens.density = appearance.density;
     const std::string& family = appearance.font_family;
     if (family == "geist") {
         tokens.ui_font_family = "Geist";

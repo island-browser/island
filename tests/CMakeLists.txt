@@ -1,4 +1,5 @@
 include(FetchContent)
+find_package(SQLite3 QUIET)
 
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 # island_cef_tests links CEF, which forces the static CRT (/MT) on Windows.
@@ -22,6 +23,8 @@ add_executable(island_tests
     local_page_test.cpp
     bookmark_import_test.cpp
     bookmark_store_test.cpp
+    favorite_tabs_test.cpp
+    sidebar_collection_test.cpp
     browser_import_test.cpp
     browser_window_test.cpp
     browser_window_pages_test.cpp
@@ -44,6 +47,8 @@ add_executable(island_tests
     navigation_state_test.cpp
     overlay_lifetime_test.cpp
     peek_state_test.cpp
+    peek_layout_test.cpp
+    link_open_policy_test.cpp
     prefs_store_test.cpp
     reader_mode_test.cpp
     settings_focus_test.cpp
@@ -58,6 +63,7 @@ add_executable(island_tests
     session_store_test.cpp
     sidebar_state_test.cpp
     space_icon_cache_test.cpp
+    space_menu_test.cpp
     space_test.cpp
     startup_options_test.cpp
     dev_capture_test.cpp
@@ -77,6 +83,8 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/app_resources.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/bookmark_store.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/favorite_tabs.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/sidebar_collection.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_import.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_chrome.cc"
     "${CMAKE_SOURCE_DIR}/src/main/browser_window.cc"
@@ -102,6 +110,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/browser_window_find_reader.cc"
     "${CMAKE_SOURCE_DIR}/src/main/navigation_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/peek_overlay.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/link_open_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/prefs_store.cc"
     "${CMAKE_SOURCE_DIR}/src/main/collect_prompt.cc"
     "${CMAKE_SOURCE_DIR}/src/main/report_store.cc"
@@ -116,6 +125,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/sha256.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/space_menu.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space_rename_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/welcome_flow.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
@@ -131,6 +141,10 @@ target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main"
                            "${CMAKE_SOURCE_DIR}/tests" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
                       island_agent island_search island_content_blocker_ffi)
+if(SQLite3_FOUND)
+    target_compile_definitions(island_tests PRIVATE ISLAND_HAS_SQLITE3=1)
+    target_link_libraries(island_tests PRIVATE SQLite::SQLite3)
+endif()
 
 # Compile the exact same wrapper without the Rust definition to prove the
 # no-toolchain build remains an allow-all stub even when the main build has
@@ -148,6 +162,7 @@ gtest_discover_tests(island_content_blocker_stub_tests)
 if(APPLE)
     target_sources(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main/macos/bookmark_import_mac.mm"
                     "${CMAKE_SOURCE_DIR}/src/main/macos/clipboard_mac.mm"
+                    "${CMAKE_SOURCE_DIR}/src/main/macos/keymap_menu_mac.mm"
                     "${CMAKE_SOURCE_DIR}/src/main/macos/mouse_down_mac.mm"
                     "${CMAKE_SOURCE_DIR}/src/main/macos/page_card_mac.mm")
     target_link_libraries(island_tests PRIVATE "-framework QuartzCore")
