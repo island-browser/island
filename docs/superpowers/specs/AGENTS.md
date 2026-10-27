@@ -18,6 +18,7 @@ explicitly out of scope — before any code is written.
 | `2026-08-09-island-browser-phase3-design.md` | Phase 3 chrome |
 | `2026-08-10-island-search-phase-s0-design.md` | Search S0 primitives — code landed under `src/search/`, opt-in only |
 | `2026-08-12-island-sidebar-palette-design.md` | Sidebar + command palette — accepted spec, not yet implemented |
+| `2026-10-27-island-0.10-data-migration-design.md` | 0.10 "Data and migration": persistent per-space web data, CDP off by default, debounced session save, Arc import completion, space routing, backup/restore — draft, owner decisions open |
 
 ## For AI Agents
 
