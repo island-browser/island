@@ -25,19 +25,17 @@ void DisplayedTabModel::UpdateOrdinaryLayout(TabId focused, std::optional<Displa
 }
 
 void DisplayedTabModel::ClearOrdinary() {
+    // A shown favorite does not depend on an ordinary selection and stays shown (alone).
     ordinary_focused_.reset();
     ordinary_split_.reset();
-    static_cast<void>(DeactivateFavorite());
+    favorite_pane_.reset();
 }
 
-bool DisplayedTabModel::ActivateFavorite(FavoriteTabKey key, TabId virtual_tab) {
-    if (!ordinary_focused_.has_value()) {
-        return false;
-    }
+void DisplayedTabModel::ActivateFavorite(FavoriteTabKey key, TabId virtual_tab) {
+    // A favorite shows even when no ordinary tab is selected (it then fills the slot alone).
     favorite_ = std::move(key);
     favorite_tab_ = virtual_tab;
     favorite_pane_ = ordinary_split_.has_value() ? ordinary_focused_ : std::nullopt;
-    return true;
 }
 
 bool DisplayedTabModel::DeactivateFavorite() {
@@ -50,6 +48,18 @@ bool DisplayedTabModel::DeactivateFavorite() {
 
 std::optional<TabId> DisplayedTabModel::focused_tab() const noexcept {
     return favorite_tab_.has_value() ? favorite_tab_ : ordinary_focused_;
+}
+
+DisplayedShutdownPlan DisplayedTabModel::shutdown_plan() const {
+    DisplayedShutdownPlan plan;
+    plan.navigation_tab = ordinary_focused_;
+    if (ordinary_focused_.has_value()) {
+        plan.graceful_tabs.push_back(*ordinary_focused_);
+    }
+    if (favorite_tab_.has_value()) {
+        plan.graceful_tabs.push_back(*favorite_tab_);
+    }
+    return plan;
 }
 
 std::optional<DisplayedPanes> DisplayedTabModel::panes() const noexcept {
@@ -87,8 +97,18 @@ AttachDecision DisplayedTabModel::EvaluateReplacement(
     const std::vector<AttachedSurfaceState>& states, const std::vector<DisplayedSurface>& desired,
     Clock::time_point now, bool allow_uncreated) const {
     AttachDecision decision;
+    // A single pane keeps its view whatever slot it had (the attach does not remove it); in a
+    // split the slot is part of the identity, because a pane that changes slot is removed and
+    // re-added.
+    const bool single_pane = desired.size() == 1;
+    const auto remains = [&](const DisplayedSurface& attached) {
+        return std::any_of(desired.begin(), desired.end(), [&](const DisplayedSurface& want) {
+            return single_pane ? want.kind == attached.kind && want.id == attached.id
+                               : want == attached;
+        });
+    };
     for (const DisplayedSurface& attached : attached_surfaces_) {
-        if (std::find(desired.begin(), desired.end(), attached) != desired.end()) {
+        if (remains(attached)) {
             continue;
         }
         const auto state = std::find_if(states.begin(), states.end(), [&](const auto& candidate) {
@@ -105,8 +125,11 @@ AttachDecision DisplayedTabModel::EvaluateReplacement(
             continue;
         }
         if (!state->browser_created_at.has_value()) {
+            // Created but of unknown age: treated like an uncreated browser, so the one-shot
+            // fallback timer (not 100 ms polling) bounds the wait. allow_uncreated does not
+            // release it, as before.
             decision.can_replace = false;
-            decision.retry_after = std::max(decision.retry_after, kMinimumAttachedViewAge);
+            decision.waiting_for_creation = true;
             continue;
         }
         const Clock::duration age = now >= *state->browser_created_at

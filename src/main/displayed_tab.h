@@ -33,8 +33,9 @@ enum class DisplayedSurfaceKind {
     kLocalPage,
 };
 
-// CEF-free identity of one surface in the content slot. The slot is part of the identity because
-// moving a view between split slots removes and re-adds it.
+// CEF-free identity of one surface in the content slot. In a split the slot is part of the
+// identity because moving a view between split slots removes and re-adds it; in a single pane
+// EvaluateReplacement compares kind and id only.
 struct DisplayedSurface {
     DisplayedSurfaceKind kind = DisplayedSurfaceKind::kTab;
     std::uint64_t id = 0;
@@ -63,6 +64,17 @@ struct AttachDecision {
     bool operator==(const AttachDecision&) const = default;
 };
 
+// BrowserWindow's close lifecycle treats the selected ordinary tab and a favorite covering it as
+// separate live documents. NavigationState belongs to the stored ordinary selection; every listed
+// tab (the ordinary selection, then the shown favorite) gets the graceful TryCloseBrowser path
+// (beforeunload) instead of a forced close.
+struct DisplayedShutdownPlan {
+    std::optional<TabId> navigation_tab;
+    std::vector<TabId> graceful_tabs;
+
+    bool operator==(const DisplayedShutdownPlan&) const = default;
+};
+
 // Owns the answer to "what is shown?" and the gate that prevents a newly created CEF view from
 // being removed too early. Space remains the source of the stored ordinary selection; callers
 // report that selection here and use focused_tab()/panes() for every on-screen projection.
@@ -79,17 +91,21 @@ class DisplayedTabModel {
     void ClearOrdinary();
 
     // Covers the currently focused ordinary pane. False when there is no ordinary pane.
-    bool ActivateFavorite(FavoriteTabKey key, TabId virtual_tab);
+    void ActivateFavorite(FavoriteTabKey key, TabId virtual_tab);
     // Returns true only when a favorite display ended.
     bool DeactivateFavorite();
 
     [[nodiscard]] std::optional<TabId> focused_tab() const noexcept;
+    [[nodiscard]] std::optional<TabId> ordinary_focused() const noexcept {
+        return ordinary_focused_;
+    }
     [[nodiscard]] std::optional<DisplayedPanes> panes() const noexcept;
     [[nodiscard]] bool IsShown(TabId tab) const noexcept;
     [[nodiscard]] const std::optional<FavoriteTabKey>& favorite() const noexcept {
         return favorite_;
     }
     [[nodiscard]] std::optional<TabId> favorite_tab() const noexcept { return favorite_tab_; }
+    [[nodiscard]] DisplayedShutdownPlan shutdown_plan() const;
 
     // Records the identities just attached and advances the generation delayed work must match.
     std::uint64_t DidAttach(std::vector<DisplayedSurface> surfaces);

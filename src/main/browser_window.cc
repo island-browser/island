@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -4974,7 +4975,11 @@ bool BrowserWindow::GetTitlebarHeight(CefRefPtr<CefWindow>, float* titlebar_heig
 bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
     CEF_REQUIRE_UI_THREAD();
 
-    const Tab* shown = ShownTab();
+    const DisplayedShutdownPlan shutdown = displayed_tabs_.shutdown_plan();
+    const auto closes_gracefully = [&shutdown](TabId id) {
+        return std::find(shutdown.graceful_tabs.begin(), shutdown.graceful_tabs.end(), id) !=
+               shutdown.graceful_tabs.end();
+    };
     if (!closing_) {
         // The window close begins here (CanClose is re-entered as each browser
         // accepts the close), so every later OnBeforeClose is teardown, never a
@@ -5002,9 +5007,7 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         }
         for (Space& space : spaces_) {
             for (Tab& tab : space.tabs()) {
-                if (tab.browser() == nullptr ||
-                    (shown != nullptr && shown->browser() != nullptr &&
-                     tab.browser()->IsSame(shown->browser()))) {
+                if (tab.browser() == nullptr || closes_gracefully(tab.id())) {
                     continue;
                 }
                 tab.browser()->GetHost()->CloseBrowser(true);
@@ -5012,17 +5015,19 @@ bool BrowserWindow::CanClose(CefRefPtr<CefWindow>) {
         }
         // Virtual favorite tabs are not in a space, so they close here too.
         for (const auto& entry : virtual_tabs_) {
-            if (entry.second.browser() != nullptr &&
-                (shown == nullptr || shown->browser() == nullptr ||
-                 !entry.second.browser()->IsSame(shown->browser()))) {
+            if (entry.second.browser() != nullptr && !closes_gracefully(entry.second.id())) {
                 entry.second.browser()->GetHost()->CloseBrowser(true);
             }
         }
     }
-    if (shown == nullptr || shown->browser() == nullptr) {
-        return true;
+    bool can_close = true;
+    for (const TabId id : shutdown.graceful_tabs) {
+        const Tab* tab = FindTabById(id);
+        if (tab != nullptr && tab->browser() != nullptr) {
+            can_close = tab->browser()->GetHost()->TryCloseBrowser() && can_close;
+        }
     }
-    return shown->browser()->GetHost()->TryCloseBrowser();
+    return can_close;
 }
 
 bool BrowserWindow::OnAccelerator(CefRefPtr<CefWindow>, int command_id) {
@@ -5376,11 +5381,16 @@ void BrowserWindow::ClearShownTabObservers() {
 }
 
 Tab* BrowserWindow::ShownTab() noexcept {
-    const std::optional<TabId> shown = displayed_tabs_.focused_tab();
-    return shown.has_value() ? FindTabById(*shown) : nullptr;
+    return const_cast<Tab*>(std::as_const(*this).ShownTab());
 }
 
 const Tab* BrowserWindow::ShownTab() const noexcept {
+    // The model's copy of the stored selection must follow Space between mutation and attach.
+    assert(spaces_.empty() || active_space_index_ >= spaces_.size() ||
+           displayed_tabs_.ordinary_focused() ==
+               (active_space().has_active_tab()
+                    ? std::optional<TabId>(active_space().active_tab_id())
+                    : std::nullopt));
     const std::optional<TabId> shown = displayed_tabs_.focused_tab();
     return shown.has_value() ? FindTabById(*shown) : nullptr;
 }
@@ -5739,6 +5749,14 @@ void BrowserWindow::RecheckPendingViewSwapForTest(std::uint64_t generation) {
 
 void BrowserWindow::RunUncreatedViewFallbackForTest(std::uint64_t generation) {
     RunUncreatedViewFallback(generation);
+}
+
+void BrowserWindow::ClearActiveSpaceTabsForTest() {
+    Space& space = active_space();
+    while (!space.tabs().empty()) {
+        static_cast<void>(space.RemoveTab(space.tabs().back().id()));
+    }
+    UpdateDisplayedOrdinaryLayout();
 }
 
 std::size_t BrowserWindow::BrowserViewSizeChangeCountForDev() const noexcept {
@@ -6259,9 +6277,7 @@ bool BrowserWindow::ActivateFavorite(FavoriteScope scope, std::uint64_t bookmark
     // were, so no Detach here (a Detach would end the display we are about to start).
     ClearShownTabObservers();
     UpdateDisplayedOrdinaryLayout();
-    if (!displayed_tabs_.ActivateFavorite(key, virtual_tab->id())) {
-        return false;
-    }
+    displayed_tabs_.ActivateFavorite(key, virtual_tab->id());
     AttachActiveTabObservers();
     return true;
 }
@@ -6559,17 +6575,7 @@ CefRefPtr<CefBrowser> BrowserWindow::ActiveBrowser() {
 }
 
 Tab* BrowserWindow::FindTabById(TabId id) noexcept {
-    for (Space& space : spaces_) {
-        if (Tab* tab = space.FindTab(id)) {
-            return tab;
-        }
-    }
-    for (auto& [key, tab] : virtual_tabs_) {
-        if (tab.id() == id) {
-            return &tab;
-        }
-    }
-    return nullptr;
+    return const_cast<Tab*>(std::as_const(*this).FindTabById(id));
 }
 
 const Tab* BrowserWindow::FindTabById(TabId id) const noexcept {
@@ -8036,7 +8042,9 @@ void BrowserWindow::ApplyDragRegions() {
 }
 
 void BrowserWindow::CloseNavigationAndQuitMessageLoop() {
-    Tab* tab = ShownTab();
+    const DisplayedShutdownPlan shutdown = displayed_tabs_.shutdown_plan();
+    Tab* tab =
+        shutdown.navigation_tab.has_value() ? FindTabById(*shutdown.navigation_tab) : nullptr;
     if (tab != nullptr) {
         tab->navigation_state().Close();
     }

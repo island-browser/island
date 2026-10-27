@@ -290,7 +290,14 @@ kind switch of `BrowserWindow::TasksStateJson`.
   and returns (it never closes the hidden ordinary tab). Tab selection, sessions, sleep, split and
   the tab strip keep the stored `active_tab()`. Only the shown tab's navigation observer is set
   (`ClearShownTabObservers` runs before any change of the shown tab), so the address field follows
-  the favorite and never the hidden tab.
+  the favorite and never the hidden tab. A favorite also shows with no ordinary tab selected
+  (`ClearOrdinary` keeps it). Shutdown: `DisplayedTabModel::shutdown_plan()` names the stored
+  ordinary selection (its `NavigationState` closes last) and, with the shown favorite, both get
+  `TryCloseBrowser` (beforeunload) in `CanClose`; every other browser is force-closed.
+- **Attach gate.** `EvaluateReplacement` treats a single pane by kind and id only (the former split
+  slot is ignored) and a split by id plus slot. A created browser of unknown age waits like an
+  uncreated one (one-shot 2 s fallback, not released by `allow_uncreated`). `ShownTab()` asserts in
+  debug builds that the model's ordinary selection equals `Space`'s.
 - **Lifecycle rules.** Any `DetachActiveTabObservers` (every selection change, space removal) ends a
   displayed favorite; re-selecting the already-selected tab or space does too (`ReturnToOrdinaryTab`).
   `ActivateFavorite` accepts global favorites and the active space's list only; another live

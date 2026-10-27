@@ -436,6 +436,9 @@ class BrowserWindow : public CefClient,
     }
     void RecheckPendingViewSwapForTest(std::uint64_t generation);
     void RunUncreatedViewFallbackForTest(std::uint64_t generation);
+    // Leaves the active Space in the valid no-selection shape used by favorite-only lifecycle
+    // tests. Production closes the containing space instead of exposing this intermediate state.
+    void ClearActiveSpaceTabsForTest();
     [[nodiscard]] std::size_t BrowserViewSizeChangeCountForDev() const noexcept;
     [[nodiscard]] std::size_t ChromeRelayoutCountForDev() const noexcept;
     // Test seams: the plan page URL, the agent send path (research and plan turns go through

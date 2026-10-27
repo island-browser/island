@@ -1457,6 +1457,24 @@ TEST(BrowserWindowTest, GivenAFavoriteWhenActivatedThenItsVirtualTabShowsWithout
     EXPECT_EQ(record->reset_url, "https://mail.test/");
 }
 
+TEST(BrowserWindowTest, GivenNoOrdinaryTabWhenAFavoriteActivatesThenItsObserverStaysAttached) {
+    const CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const BookmarkResult mail =
+        window->AddFavoriteByUrl(std::nullopt, "Mail", "https://mail.test/");
+    ASSERT_TRUE(mail.ok());
+    window->ClearActiveSpaceTabsForTest();
+    RecordingNavigationObserver observer;
+    window->SetNavigationObserver(&observer);
+
+    ASSERT_TRUE(window->ActivateFavorite(std::nullopt, mail.id));
+    NavigationState* favorite = window->DisplayedNavigationForTest();
+    ASSERT_NE(favorite, nullptr);
+    favorite->SetAddress("https://mail.test/inbox");
+
+    ASSERT_FALSE(observer.snapshots().empty());
+    EXPECT_EQ(observer.snapshots().back().url, "https://mail.test/inbox");
+}
+
 TEST(BrowserWindowTest, GivenADisplayedFavoriteWhenSettingsOpensThenTheSettingsTabReplacesItAndTheAddressLeavesIt) {
     const CefRefPtr<BrowserWindow> window = MakeWebWindow();
     ASSERT_TRUE(window->SetTabAddressForTest(0, 0, "https://hidden.test/"));
