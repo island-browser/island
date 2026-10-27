@@ -64,6 +64,7 @@ add_library(island_browser_core STATIC
     startup_options.cc
     dev_capture.cc
     welcome_flow.cc
+    web_data.cc
     window_agent_host.cc
     tab.cc
     updater.cc

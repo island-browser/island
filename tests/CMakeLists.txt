@@ -74,6 +74,7 @@ add_executable(island_tests
     tab_sleep_policy_test.cpp
     tab_test.cpp
     updater_test.cpp
+    web_data_test.cpp
     window_agent_host_test.cpp
 
     "${CMAKE_SOURCE_DIR}/src/main/address_bar_model.cc"
@@ -138,6 +139,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/dev_capture.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
     "${CMAKE_SOURCE_DIR}/src/main/updater.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/web_data.cc"
     "${CMAKE_SOURCE_DIR}/src/main/window_agent_host.cc"
 )
 
