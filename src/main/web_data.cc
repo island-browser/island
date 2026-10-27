@@ -65,6 +65,7 @@ WebDataSweepResult SweepWebData(const std::filesystem::path& root,
 
     // Decide first and remove afterwards, so the iteration never changes the directory it reads.
     std::vector<std::string> to_remove;
+    std::vector<std::string> to_clear;
     std::filesystem::directory_iterator it(spaces, error);
     if (error) return result;
     for (const std::filesystem::directory_iterator end; it != end; it.increment(error)) {
@@ -75,14 +76,25 @@ WebDataSweepResult SweepWebData(const std::filesystem::path& root,
         const bool tombstoned = std::filesystem::exists(it->path() / kTombstoneName, error);
         const bool live = live_keys.contains(name);
         if (tombstoned) {
-            // A live key means the session still names the space, so keep the directory.
-            // With an unreadable session the live set is unknown, so nothing is removed.
-            if (!live && session_loaded_cleanly) to_remove.push_back(name);
+            // With an unreadable session the live set is unknown, so nothing changes.
+            if (!session_loaded_cleanly) continue;
+            if (live) {
+                // The session still names the space, so its marker is stale (R-D5 ruling):
+                // clear it and keep the directory.
+                to_clear.push_back(name);
+            } else {
+                to_remove.push_back(name);
+            }
             continue;
         }
         if (!live && session_loaded_cleanly) result.orphans.push_back(name);
     }
 
+    for (const std::string& name : to_clear) {
+        std::error_code remove_error;
+        std::filesystem::remove(spaces / name / kTombstoneName, remove_error);
+        if (!remove_error) result.tombstones_cleared.push_back(name);
+    }
     for (const std::string& name : to_remove) {
         std::error_code remove_error;
         std::filesystem::remove_all(spaces / name, remove_error);
@@ -90,6 +102,7 @@ WebDataSweepResult SweepWebData(const std::filesystem::path& root,
     }
     std::sort(result.removed.begin(), result.removed.end());
     std::sort(result.orphans.begin(), result.orphans.end());
+    std::sort(result.tombstones_cleared.begin(), result.tombstones_cleared.end());
     return result;
 }
 

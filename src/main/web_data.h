@@ -35,13 +35,15 @@ struct WebDataSweepResult {
     // Directories that are neither live nor tombstoned. They are kept and logged, never
     // deleted. Reported only after a cleanly loaded session.
     std::vector<std::string> orphans;
+    // Live directories whose stale .island-delete marker was removed (M1). The directory stays.
+    std::vector<std::string> tombstones_cleared;
 };
 
 // The startup sweep (R-D5). |live_keys| are the keys of the spaces in the session.
 //   - A tombstoned directory whose key is not live is removed.
-//   - A tombstoned directory whose key is still live is kept: the session still names it,
-//     so the deletion has not been saved yet.
-//   - When |session_loaded_cleanly| is false nothing is removed and no orphans are reported,
+//   - A tombstoned directory whose key is still live is kept and its stale marker is removed
+//     (reported in tombstones_cleared): the session still names the space.
+//   - When |session_loaded_cleanly| is false nothing is removed, cleared or reported,
 //     because the live set is unknown and a corrupt session must not erase sign-ins.
 //   - Directory names that are not valid keys are skipped and never deleted.
 WebDataSweepResult SweepWebData(const std::filesystem::path& root,

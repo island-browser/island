@@ -79,6 +79,35 @@ TEST(WebDataSweepTest, TombstonedButStillLiveDirectoryIsKept) {
     EXPECT_TRUE(std::filesystem::exists(root.path() / "Spaces" / kKeyA));
 }
 
+TEST(WebDataSweepTest, StaleTombstoneOfLiveDirectoryIsClearedAndReported) {
+    // M1 / controller ruling: the session names the space, so its stale .island-delete marker
+    // (left by a crash between the delete and the session save) must go. Otherwise the next
+    // session that drops this key would have the directory swept as a tombstone.
+    TempRoot root;
+    MakeSpaceDir(root.path(), kKeyA, /*tombstoned=*/true);
+
+    const WebDataSweepResult result =
+        SweepWebData(root.path(), {kKeyA}, /*session_loaded_cleanly=*/true);
+
+    EXPECT_TRUE(result.removed.empty());
+    EXPECT_TRUE(result.orphans.empty());
+    EXPECT_TRUE(std::filesystem::exists(root.path() / "Spaces" / kKeyA / "Cookies"));
+    EXPECT_FALSE(std::filesystem::exists(root.path() / "Spaces" / kKeyA / ".island-delete"));
+    EXPECT_EQ(result.tombstones_cleared, std::vector<std::string>{kKeyA});
+}
+
+TEST(WebDataSweepTest, StaleTombstoneKeptWhenSessionDidNotLoadCleanly) {
+    // A corrupt session says nothing about which keys are live, so no marker is touched.
+    TempRoot root;
+    MakeSpaceDir(root.path(), kKeyA, /*tombstoned=*/true);
+
+    const WebDataSweepResult result =
+        SweepWebData(root.path(), {kKeyA}, /*session_loaded_cleanly=*/false);
+
+    EXPECT_TRUE(result.tombstones_cleared.empty());
+    EXPECT_TRUE(std::filesystem::exists(root.path() / "Spaces" / kKeyA / ".island-delete"));
+}
+
 TEST(WebDataSweepTest, OrphanKeptAndLogged) {
     TempRoot root;
     MakeSpaceDir(root.path(), kKeyB, /*tombstoned=*/false);
