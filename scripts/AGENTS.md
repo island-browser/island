@@ -20,6 +20,7 @@ Every non-CMake entrypoint: vendoring the binary dependencies and packaging unsi
 | `release_assets.py` | Used by `build-release.yml`: verifies the downloaded per-target archives and installers against their own checksum lines, requires exactly one archive and one installer per target, and writes them plus a combined `SHA256SUMS.txt` (`<sha256>  <file name>` per line, sorted, LF) for the GitHub release; imports `SEMVER`/`release_files` from `package.py`; stdlib only |
 | `gen_query_display_ranges.py` | Generates `src/main/query_display_ranges.h`, the allowlist of non-ASCII code points the address field may show for a search query (general categories L*, M*, N*, Zs, minus the modifier-letter and fullwidth exclusions), from Python `unicodedata`; rerun after a Unicode upgrade; stdlib only |
 | `package_resources.py` | Declares the font/icon files staged into a packaged artifact and their digests. `EXPECTED_ICON_OUTPUTS` must equal the icon gate in the root `CMakeLists.txt`; `tests/package` checks that they agree, so adding icons means updating both |
+| `anonymize_arc_sidebar.py` | Anonymizes a real Arc `StorableSidebar.json` for a committed fixture (R-I5): keeps ids, structure and colours, replaces titles with `T<n>` and URLs with `https://example.test/<n>`, and writes the counts (spaces, pinned tabs, folders, favorites) counted by the same rules as `ParseArcSidebarStructure`; stdlib only. Its tests are `tests/scripts` |
 
 That table is the complete contents of this directory on `main`. A hybrid native/container build
 router (`island.py`, `container_runner.py`, `image_lock.py`, `task_model.py`, `report_writer.py`)
@@ -45,6 +46,7 @@ bash -n scripts/setup_deps.sh
 ./scripts/setup_deps.sh --dry-run
 python3 scripts/deps.py verify
 python3 -m pytest tests/package tests/deps tests/version
+python3 -m pytest tests/scripts
 ```
 
 - The archive name `island_browser-<version>-<target>.<zip|tar.gz>` (`package.archive_name`) and
