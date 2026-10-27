@@ -820,6 +820,8 @@ void BrowserWindow::RemoveStalePlanTabAt(std::size_t space_index, std::size_t ta
     Space& space = spaces_[space_index];
     const TabId stale = space.tabs()[tab_index].id();
     const bool active_space = space_index == active_space_index_;
+    // Removing the stored selection needs the observer transition; presentation is re-resolved
+    // after the model mutation.
     const bool active_tab = active_space && space.active_tab_id() == stale;
     if (active_tab) {
         DetachActiveTabObservers();

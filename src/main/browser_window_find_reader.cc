@@ -147,7 +147,7 @@ void BrowserWindow::FindInPage(std::string_view query) {
     if (closing_ || internal_page_.has_value()) {
         return;
     }
-    Tab* tab = DisplayedTab();
+    Tab* tab = ShownTab();
     if (tab == nullptr) {
         return;
     }
@@ -275,7 +275,7 @@ void BrowserWindow::UpdateReaderButton() {
     if (chrome_ == nullptr) {
         return;
     }
-    const Tab* tab = DisplayedTab();
+    const Tab* tab = ShownTab();
     if (tab == nullptr) {
         chrome_->SetReaderState(false, false);
         return;
@@ -292,7 +292,7 @@ void BrowserWindow::ToggleReaderMode() {
     if (closing_ || internal_page_.has_value()) {
         return;
     }
-    Tab* tab = DisplayedTab();
+    Tab* tab = ShownTab();
     if (tab == nullptr) {
         return;
     }

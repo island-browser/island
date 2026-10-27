@@ -37,6 +37,7 @@ add_executable(island_tests
     content_blocker_policy_test.cpp
     content_blocker_test.cpp
     design_tokens_test.cpp
+    displayed_tab_test.cpp
     download_path_test.cpp
     favicon_policy_test.cpp
     history_recorder_test.cpp
@@ -97,6 +98,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker.cc"
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/displayed_tab.cc"
     "${CMAKE_SOURCE_DIR}/src/main/row_raster.cc"
     "${CMAKE_SOURCE_DIR}/src/main/devtools_bridge.cc"
     "${CMAKE_SOURCE_DIR}/src/main/download_path.cc"

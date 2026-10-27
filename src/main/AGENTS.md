@@ -67,6 +67,7 @@ platform executable links.
 | `bookmark_import.{h,cc}`, `browser_import.{h,cc}` | Import from Chrome-family browsers (one source row imports the union of readable `Default`, `Profile N`, and `Local State`-named profiles, and reports profile parse failures after a partial import), Safari, Firefox (`[Install*] Default` wins over `[Profile*] Default=1`, otherwise newest `places.sqlite`; the temporary SQLite copy includes WAL sidecars while Firefox may be running; `.jsonlz4` backups are the fallback when optional SQLite3 is unavailable or fails), and Arc (spaces + pinned tabs). Add a source by giving it a stable `ImportSource`/id, a profile-root detector that distinguishes absent from unreadable, an importer, fixtures for every probe path, and a Welcome description. |
 | `bookmark_store.{h,cc}` | CEF-free bookmark library, schema 2 in `bookmarks.json`: bookmarks with IDs, folders holding ordered bookmark IDs, one global favorite list and one favorite list per SpaceId (decimal keys). `BookmarkStore` is the single mutation seam. Each operation (`AddOrFindByUrl`, folder create/rename/move/delete, `MoveBookmark`, `EditBookmark`, `DeleteBookmark`, `AddFavorite`/`AddFavoriteByUrl`/`RemoveFavorite`/`ReorderFavorite`, `RemoveSpaceFavorites`, `Import`) applies to a copy, saves atomically and commits only on success, and returns a `BookmarkResult` (`BookmarkError`, a short message, the affected ID, the import count). A default-constructed store is in-memory. `Load()` migrates schema 1 (original bytes to `bookmarks.json.v1.bak` first; a failed write leaves the v1 file and makes the store read-only for the run). Migration collapses duplicate and case-variant URLs: the first occurrence in folder-then-item order wins, keeping its title and folder; later copies are dropped from the live library (their bytes stay in `.v1.bak`); empty and same-named folders are kept. Read-only runs carry their own reason message; edits that change nothing still succeed. Load also backs up an invalid file to `bookmarks.json.invalid.bak` before the first save; an existing file that cannot be read makes the store read-only, so it is never overwritten. `Flattened()` is the read-only (folder, title, URL) projection the palette uses; `MaxSpaceKey()` lets the window reserve SpaceIds above it. Extension points: a new record field goes into the struct, `SerializeToJson`, `ParseSchemaTwo`, `IsConsistent`; a new operation is a `Commit` lambda over the copy, so it inherits rollback and atomic save |
 | `favorite_tabs.{h,cc}` | CEF-free registry of favorite virtual-tab records: `FavoriteTabKey` (scope plus bookmark ID, defaulted `<=>`), `FavoriteTabRecord` (reset URL, last URL), `Ensure`/`Find`/`SetLastUrl`/`ResetToFavorite`/`Dispose`/`DisposeBookmark`/`DisposeScope`, and `ToSessionFavoriteTabs`/`FavoriteTabsFromSession` for `session.json`. The window pairs records with live `Tab`s; see "Favorites and virtual tabs" below |
+| `displayed_tab.{h,cc}` | CEF-free presentation model: the stored ordinary selection/split plus a favorite activation become the tab IDs actually shown in each pane. It also owns attached-surface generations and the 100 ms removal gate. Code that means "the page on screen" asks `DisplayedTabModel::focused_tab()`/`panes()` (through `BrowserWindow::ShownTab()` where a `Tab*` is needed), never `Space::active_tab_id()` |
 | `tab_sleep_policy.h`, `peek_state.h` | CEF-free models: tab sleep decisions (injected clock, per-tab last-active time, exclusions as inputs; `Expired` for the timed sweep, `AllEligible` for "Sleep inactive tabs now") and the peek card's state (open/replace/close/open-as-tab/Escape, generation counter for stale callbacks) |
 | `link_open_policy.{h,cc}`, `peek_layout.h` | CEF-free decisions: `DecideLinkOpen(disposition, user_gesture)` → `kPeek` / `kForegroundTab` / `kReject` for every page new-tab open (table in the header); `PeekCardBounds` sizes the card from the content area (80% by 85%, centered, minimums 360 by 280 DIP) |
 | `peek_overlay.{h,cc}` | The peek card: an overlay of the one `CefWindow`, created in `Open` and released in `Close` (see `overlay_lifetime.h`), covering only the card, holding a title bar and its own `CefBrowserView` with its own client (popups load in the card, Escape claimed in `OnPreKeyEvent`) |
@@ -271,21 +272,23 @@ kind switch of `BrowserWindow::TasksStateJson`.
   keeps the snapshot for Task 3's drawing. Projection is rebuilt by every existing
   `UpdateChromeCollections` call (mutations, selection, title and favicon changes).
 - **Virtual tabs.** `virtual_tabs_` (`std::map<FavoriteTabKey, Tab>`) holds live `Tab`s outside
-  `spaces_`; their `TabId`s come from `NextTabId()` and are never persisted. `displayed_favorite_`
-  names the one shown. `ActivateFavorite` ensures the record, creates the tab (its startup URL is
+  `spaces_`; their `TabId`s come from `NextTabId()` and are never persisted.
+  `DisplayedTabModel::favorite()` names the one shown. `ActivateFavorite` ensures the record,
+  creates the tab (its startup URL is
   the record's last URL when that validates, else the favorite URL) and calls
   `AttachActiveTabObservers`; the selected ordinary tab
   and its list are not touched. `AttachActiveTabBrowserView` shows a displayed favorite ahead of the
   split and ordinary paths. `FindTabById`, `FindTabByBrowser` and `FindTabByBrowserView` search the
   virtual tabs too, so CEF callbacks and view swaps resolve them. A favicon finished for a virtual
   tab reprojects only when that tab is global or in the active space (`FaviconAffectsCollections`).
-- **The shown tab.** `DisplayedTab()` is the displayed virtual tab, else `active_tab()`; `shown_tab_id()`
-  is its public form. Page commands (back, forward, reload, reload ignoring cache, zoom, stop, copy
+- **The shown tab.** `DisplayedTabModel` owns the ordinary/favorite/split mapping;
+  `BrowserWindow::ShownTab()` resolves its focused `TabId` and `shown_tab_id()` is the public form.
+  Page commands (back, forward, reload, reload ignoring cache, zoom, stop, copy
   URL, Enter in the address field, the palette's URL), find, the reader state, the address shield and
   reader indicators, the agent's current page and context chip (`ActiveBrowser`), and the
   pending-confirmation check all use it. Cmd+W while a favorite is shown calls `CloseFavoriteTab`
   and returns (it never closes the hidden ordinary tab). Tab selection, sessions, sleep, split and
-  the tab strip keep `active_tab()`. Only the shown tab's navigation observer is set
+  the tab strip keep the stored `active_tab()`. Only the shown tab's navigation observer is set
   (`ClearShownTabObservers` runs before any change of the shown tab), so the address field follows
   the favorite and never the hidden tab.
 - **Lifecycle rules.** Any `DetachActiveTabObservers` (every selection change, space removal) ends a
@@ -302,12 +305,16 @@ kind switch of `BrowserWindow::TasksStateJson`.
   anything else (they belong to the library) and drops those whose favorite is gone. The display is
   never restored. Older builds ignore the key, so they drop these records only when they save.
 - **Virtual-tab lifecycle (Task 7).**
-  - *Split.* `favorite_pane_` is the focused split member (the active tab) at activation. The favorite
-    fills that pane and the other pane keeps its tab. `ShownPanesFor()` is the one place that decides
-    the slots: `AttachActiveTabBrowserView` and `AttachedViewWillRemain` both use it, and
+  - *Split.* `DisplayedTabModel` captures the focused split member (the stored active tab) at
+    favorite activation. `panes()` is the one place that decides the slots for view attachment and
     `ShownPanesForTest()` exposes it. Selecting any tab ends the display (as before), so a favorite
     moves to the other pane by selecting that pane's tab and activating the favorite again. It is
     never in both panes. Cmd+W returns only that pane.
+  - *Attach gate.* `DisplayedTabModel::DidAttach` owns the generation and attached surface/slot
+    identities. `EvaluateReplacement` lets a surface remain immediately, ignores dead surfaces,
+    and refuses to remove a live view until its browser exists and is at least 100 ms old; only the
+    generation-scoped 2 s fallback may pass an uncreated browser. BrowserWindow supplies CEF
+    lifecycle snapshots and performs the physical attach.
   - *Sleep.* `CollectSleepInputs` includes the virtual tabs: the displayed one is `active` (never
     eligible), a hidden one follows `TabSleepPolicy`. `SleepTab` refuses the displayed one. The idle
     clock of the displayed tab is touched on every tick. A slept virtual tab keeps its record;

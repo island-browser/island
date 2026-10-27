@@ -513,7 +513,8 @@ between the groups; the active tab is the same soft `selected` fill as the selec
 - While a favorite is on screen, the space's selected ordinary tab is not the tab the person sees
   (ruling R15). It takes the neutral `segment_selected` plate with `text` (no accent fill, selection
   or white glyphs) until the favorite closes; the accent returns when the ordinary tab is shown
-  again. `TabRowFill` and `TabStripEntrySnapshot::behind_favorite` carry this rule.
+  again. `DisplayedTabModel` is the single mapping from the stored selection/split to the pane IDs
+  on screen; `TabRowFill` and `TabStripEntrySnapshot::behind_favorite` carry its visual rule.
 - Status row: `warning_bg` fill with `warning_text`, directly above the footer, hidden when no
   bookmark change failed.
 - No new color tokens were added: the feature reuses `canvas`, `hover`, `segment_selected`, `text`,

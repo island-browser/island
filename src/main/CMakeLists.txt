@@ -27,6 +27,7 @@ add_library(island_browser_core STATIC
     content_blocker.cc
     content_blocker_policy.cc
     design_tokens.cc
+    displayed_tab.cc
     row_raster.cc
     devtools_bridge.cc
     download_path.cc

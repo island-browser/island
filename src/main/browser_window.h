@@ -35,6 +35,7 @@
 #include "collect_prompt.h"
 #include "command_palette.h"
 #include "command_palette_view.h"
+#include "displayed_tab.h"
 #include "favorite_tabs.h"
 #include "find_bar_model.h"
 #include "find_bar_overlay.h"
@@ -431,7 +432,7 @@ class BrowserWindow : public CefClient,
     void ToggleInternalPageForSwapTest(LocalPageKind kind);
     void BrowserCreatedForViewSwapTest(TabId tab);
     [[nodiscard]] std::uint64_t AttachedViewGenerationForTest() const noexcept {
-        return attached_view_generation_;
+        return displayed_tabs_.attachment_generation();
     }
     void RecheckPendingViewSwapForTest(std::uint64_t generation);
     void RunUncreatedViewFallbackForTest(std::uint64_t generation);
@@ -524,13 +525,13 @@ class BrowserWindow : public CefClient,
     }
     // The navigation state of the shown tab: the displayed favorite's, else the selected tab's.
     [[nodiscard]] NavigationState* DisplayedNavigationForTest() {
-        Tab* tab = DisplayedTab();
+        Tab* tab = ShownTab();
         return tab != nullptr ? &tab->navigation_state() : nullptr;
     }
     // The tab FocusBrowserView() hands keyboard focus to: the displayed favorite's, else the
     // selected tab's (never the hidden selected tab behind a favorite).
     [[nodiscard]] std::optional<TabId> FocusTargetTabIdForTest() const noexcept {
-        const Tab* tab = FocusTargetTab();
+        const Tab* tab = ShownTab();
         return tab != nullptr ? std::optional<TabId>(tab->id()) : std::nullopt;
     }
     // Marks a research task as running without sending anything, as if the
@@ -761,19 +762,17 @@ class BrowserWindow : public CefClient,
     // shows the selected ordinary tab again. Does nothing when no favorite is displayed.
     void CloseFavoriteTab();
     [[nodiscard]] std::optional<FavoriteTabKey> displayed_favorite() const noexcept {
-        return displayed_favorite_;
+        return displayed_tabs_.favorite();
     }
     // The tab the person sees and that page commands, the address field and the agent target: the
     // displayed favorite's virtual tab, else the selected ordinary tab. Empty without a tab.
     [[nodiscard]] std::optional<TabId> shown_tab_id() const noexcept;
     // The tabs the content slot shows: the single shown tab, or the split pair. While a favorite
     // covers one split pane, the favorite takes that pane and the other pane keeps its tab.
-    struct ShownPanes {
-        TabId first;
-        std::optional<TabId> second;  // engaged only while a split is shown
-        bool operator==(const ShownPanes&) const = default;
-    };
-    [[nodiscard]] std::optional<ShownPanes> ShownPanesForTest() const { return ShownPanesFor(); }
+    using ShownPanes = DisplayedPanes;
+    [[nodiscard]] std::optional<ShownPanes> ShownPanesForTest() const {
+        return displayed_tabs_.panes();
+    }
     [[nodiscard]] std::vector<TabSleepInput> SleepInputsForTest() const {
         return CollectSleepInputs();
     }
@@ -1042,11 +1041,11 @@ class BrowserWindow : public CefClient,
     [[nodiscard]] Tab* FindTabByBrowserView(CefRefPtr<CefBrowserView> browser_view) noexcept;
     [[nodiscard]] Tab* active_tab() noexcept;
     [[nodiscard]] const Tab* active_tab() const noexcept;
-    // The displayed virtual tab when one is shown, else active_tab(). Page commands, find, the
-    // address field and the agent read this; tab selection, sessions and sleep keep active_tab().
-    [[nodiscard]] Tab* DisplayedTab() noexcept;
-    [[nodiscard]] const Tab* DisplayedTab() const noexcept;
-    [[nodiscard]] const Tab* FocusTargetTab() const noexcept { return DisplayedTab(); }
+    // Resolves the tab identity owned by DisplayedTabModel. Page commands, find, the address field
+    // and the agent read this; tab selection, sessions and sleep keep active_tab().
+    [[nodiscard]] Tab* ShownTab() noexcept;
+    [[nodiscard]] const Tab* ShownTab() const noexcept;
+    void UpdateDisplayedOrdinaryLayout();
     // Clears the navigation observer of both candidate tabs, so only the tab on screen reports.
     void ClearShownTabObservers();
     // True when a favicon finished for |id| changes what the sidebar shows: an ordinary tab of the
@@ -1134,15 +1133,16 @@ class BrowserWindow : public CefClient,
         bool second_slot = false;
     };
     using ViewSwapClock = std::chrono::steady_clock;
-    static constexpr std::chrono::milliseconds kMinimumAttachedViewAge{100};
     static constexpr std::chrono::milliseconds kUncreatedViewFallbackDelay{2000};
     [[nodiscard]] ViewSwapClock::time_point ViewSwapNow() const;
     [[nodiscard]] Tab* TabForAttachedView(const AttachedView& attached) noexcept;
-    [[nodiscard]] bool AttachedViewWillRemain(const AttachedView& attached) const;
     [[nodiscard]] bool AttachedViewIsLive(const AttachedView& attached);
-    [[nodiscard]] bool AttachedViewBrowserWasCreated(const AttachedView& attached);
     [[nodiscard]] std::optional<ViewSwapClock::duration> AttachedViewAgeAt(
         const AttachedView& attached, ViewSwapClock::time_point now);
+    [[nodiscard]] DisplayedSurface SurfaceForAttachedView(const AttachedView& attached) const;
+    [[nodiscard]] std::vector<AttachedSurfaceState> AttachedSurfaceStates(
+        ViewSwapClock::time_point now);
+    [[nodiscard]] std::vector<DisplayedSurface> DesiredAttachedSurfaces() const;
     [[nodiscard]] bool AttachedBrowserStillCreating();
     void SetAttachedViews(std::vector<AttachedView> attached);
     void SchedulePendingViewSwap();
@@ -1403,7 +1403,6 @@ class BrowserWindow : public CefClient,
     // Destroys a virtual tab and closes its browser. Its record is left to the caller.
     void DropVirtualTab(const FavoriteTabKey& key);
     [[nodiscard]] Tab* FindVirtualTab(const FavoriteTabKey& key) noexcept;
-    [[nodiscard]] std::optional<ShownPanes> ShownPanesFor() const;
     // Returns the content slot to the selected ordinary tab when a virtual tab is displayed.
     void ReturnToOrdinaryTab();
     // Closes every CefBrowser owned by |space|'s tabs. Must run after the
@@ -1460,6 +1459,7 @@ class BrowserWindow : public CefClient,
     };
     [[nodiscard]] std::vector<TabSleepInput> CollectSleepInputs() const;
     [[nodiscard]] Tab* FindTabById(TabId id) noexcept;
+    [[nodiscard]] const Tab* FindTabById(TabId id) const noexcept;
     bool BeginSleepProbe(Tab& tab);
     void ExpireSleepProbe(const std::string& token);
     bool HandleSleepProbeMessage(CefRefPtr<CefBrowser> browser, const std::string& text);
@@ -1542,7 +1542,6 @@ class BrowserWindow : public CefClient,
     // The tab views in the content slot (one, or two in split view), as last attached. Every
     // replacement advances the generation so delayed work cannot act on a newer attachment.
     std::vector<AttachedView> attached_views_;
-    std::uint64_t attached_view_generation_ = 0;
     std::optional<ViewSwapClock::time_point> view_swap_time_for_test_;
     bool attached_view_for_test_ = false;
     ResearchStatus research_status_;
@@ -1617,9 +1616,7 @@ class BrowserWindow : public CefClient,
     // been activated, keyed like their session records. Their TabIds are fresh each run.
     std::map<FavoriteTabKey, Tab> virtual_tabs_;
     FavoriteTabRegistry favorite_tabs_;
-    std::optional<FavoriteTabKey> displayed_favorite_;
-    // The split member the displayed favorite covers: the focused pane when it was activated.
-    std::optional<TabId> favorite_pane_;
+    DisplayedTabModel displayed_tabs_;
     // The last failed bookmark mutation (or the load problem) and how to run it again. A null retry
     // means the status cannot be retried, only dismissed.
     struct FailedBookmarkMutation {
