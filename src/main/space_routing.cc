@@ -30,7 +30,9 @@ std::string LowerAscii(std::string_view text) {
 // A DNS-style name: at least one dot, labels of letters, digits and hyphens that do not
 // start or end with a hyphen, and an alphabetic top-level label of two or more characters
 // (so IPv4 literals such as 192.168.1.10 are rejected). The same last-label rule the address
-// bar uses to tell a host from a search (address_input.h).
+// bar uses to tell a host from a search (address_input.h). Consequence: a punycode top-level
+// label such as "xn--p1ai" is rejected, so a route cannot be set on such a domain. Accepting
+// "xn--" labels is a product decision and is not made here.
 bool IsRoutableHost(std::string_view host) {
     if (host.find('.') == std::string_view::npos) return false;
     std::size_t start = 0;
@@ -133,6 +135,11 @@ std::vector<RouteRule> RouteRulesFromSpaces(const std::vector<Space>& spaces) {
 
 RouteMove AssignRoute(std::vector<Space>& spaces, SpaceId target, std::string pattern) {
     RouteMove move;
+    // Without the target space nothing can receive the rule, so nothing may lose it.
+    const bool target_exists =
+        std::any_of(spaces.begin(), spaces.end(),
+                    [target](const Space& space) { return space.id() == target; });
+    if (!target_exists) return move;
     for (Space& space : spaces) {
         if (space.id() == target) continue;
         std::vector<std::string> routes = space.routes();

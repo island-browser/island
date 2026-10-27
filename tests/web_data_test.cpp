@@ -159,15 +159,39 @@ TEST(WebDataTest, TombstoneFileIsWritten) {
 TEST(WebDataTest, PrivateDirectoryIsOwnerOnly) {
     TempRoot root;
     const std::filesystem::path dir = root.path() / "Spaces";
-    // Created with the ordinary umask, so it starts out readable by others.
     std::filesystem::create_directories(dir);
-    EnsurePrivateDirectory(dir);
+    // Start readable by group and others, so the test shows that the call tightens the mode
+    // and does not depend on the runner's umask.
+    std::filesystem::permissions(
+        dir,
+        std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+            std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+            std::filesystem::perms::others_exec,
+        std::filesystem::perm_options::replace);
+#if !defined(_WIN32)
+    struct stat before{};
+    ASSERT_EQ(stat(dir.c_str(), &before), 0);
+    ASSERT_NE(before.st_mode & 077, 0u);
+#endif
+
+    EXPECT_TRUE(EnsurePrivateDirectory(dir));
+
     ASSERT_TRUE(std::filesystem::is_directory(dir));
 #if !defined(_WIN32)
     struct stat info{};
     ASSERT_EQ(stat(dir.c_str(), &info), 0);
-    EXPECT_EQ(info.st_mode & 077, 0);
+    EXPECT_EQ(info.st_mode & 077, 0u);
 #endif
+}
+
+TEST(WebDataTest, PrivateDirectoryReportsFailure) {
+    TempRoot root;
+    // A regular file where the parent should be: the directory cannot be created, and the
+    // caller must learn that instead of getting a silent success.
+    const std::filesystem::path blocker = root.path() / "blocker";
+    std::ofstream(blocker) << "not a directory";
+    EXPECT_FALSE(EnsurePrivateDirectory(blocker / "Spaces"));
+    EXPECT_FALSE(std::filesystem::exists(blocker / "Spaces"));
 }
 
 }  // namespace

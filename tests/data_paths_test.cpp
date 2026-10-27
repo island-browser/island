@@ -2,9 +2,8 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdlib>
 #include <filesystem>
-#include <string>
+#include <optional>
 
 #include "agent/agent_endpoint.h"
 #include "bookmark_store.h"
@@ -45,16 +44,16 @@ TEST(DataPathsTest, WebDataRootFollowsDevCacheDir) {
     EXPECT_EQ(IslandWebDataRoot(), home.home() / "web");
 
     // With the variable unset, the root sits beside the other stores.
-    const char* saved = std::getenv("ISLAND_DEV_CACHE_DIR");
-    const std::string saved_value = saved != nullptr ? saved : "";
-    unsetenv("ISLAND_DEV_CACHE_DIR");
+    // ScopedDataHome restores the variable when the test ends.
+    ScopedDataHome::SetEnv("ISLAND_DEV_CACHE_DIR", std::nullopt);
     const std::filesystem::path root = IslandWebDataRoot();
-    if (!saved_value.empty()) setenv("ISLAND_DEV_CACHE_DIR", saved_value.c_str(), 1);
 
-#if defined(__APPLE__)
-    EXPECT_EQ(root, IslandDataDirectory() / "Web Data");
-#else
+#if defined(_WIN32)
+    // The Windows root comes from LOCALAPPDATA or USERPROFILE, which ScopedDataHome also sets.
     EXPECT_FALSE(root.empty());
+#else
+    // macOS and Linux both use <data directory>/Web Data (data_paths.cc).
+    EXPECT_EQ(root, IslandDataDirectory() / "Web Data");
 #endif
 }
 

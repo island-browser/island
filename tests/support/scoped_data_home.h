@@ -52,24 +52,9 @@ class ScopedDataHome {
     [[nodiscard]] const std::filesystem::path& home() const { return home_; }
 
     // The Island data directory under this home (IslandDataDirectory()).
-    [[nodiscard]] static std::filesystem::path data_dir() { return IslandDataDirectory(); }
+    [[nodiscard]] std::filesystem::path data_dir() const { return IslandDataDirectory(); }
 
-  private:
-    static constexpr std::array<const char*, 6> kVariables = {
-        "HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "ISLAND_DEV_CACHE_DIR"};
-
-    static std::filesystem::path MakeUniqueHome() {
-        std::random_device device;
-        std::string suffix;
-        for (int i = 0; i < 8; ++i) {
-            suffix += "0123456789abcdef"[device() % 16];
-        }
-        std::filesystem::path path =
-            std::filesystem::temp_directory_path() / ("island-data-home-" + suffix);
-        std::filesystem::create_directories(path);
-        return path;
-    }
-
+    // Environment helpers that work on every platform. An unset value removes the variable.
     static std::optional<std::string> GetEnv(const char* name) {
         const char* const value = std::getenv(name);
         if (value == nullptr) return std::nullopt;
@@ -90,6 +75,22 @@ class ScopedDataHome {
 
     static void SetEnv(const char* name, const std::string& value) {
         SetEnv(name, std::optional<std::string>(value));
+    }
+
+  private:
+    static constexpr std::array<const char*, 6> kVariables = {
+        "HOME", "XDG_DATA_HOME", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "ISLAND_DEV_CACHE_DIR"};
+
+    static std::filesystem::path MakeUniqueHome() {
+        std::random_device device;
+        std::string suffix;
+        for (int i = 0; i < 8; ++i) {
+            suffix += "0123456789abcdef"[device() % 16];
+        }
+        std::filesystem::path path =
+            std::filesystem::temp_directory_path() / ("island-data-home-" + suffix);
+        std::filesystem::create_directories(path);
+        return path;
     }
 
     std::filesystem::path home_;

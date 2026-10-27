@@ -600,9 +600,15 @@ TEST(SessionStore, FavoriteTabRecordsRoundTripAndOldFilesLoad) {
 // 0.10 optional members (R-D3, R-D4, R-R1): web_data_key, import_key, routes
 // ---------------------------------------------------------------------------
 
+// The running test's name, so tests that ctest runs in parallel never share a file.
+std::string CurrentTestName() {
+    return ::testing::UnitTest::GetInstance()->current_test_info()->name();
+}
+
 // Saves |state| through the public writer and returns the bytes it wrote.
 std::string SaveToText(const SessionState& state) {
-    const auto path = std::filesystem::temp_directory_path() / "island_test_0_10_save.json";
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("island_test_" + CurrentTestName() + "_save.json");
     EXPECT_EQ(SessionStore::Save(path, state), SessionError::kNone);
     std::ifstream in(path, std::ios::binary);
     std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -612,7 +618,8 @@ std::string SaveToText(const SessionState& state) {
 
 // Loads |text| through the public reader.
 LoadResult LoadText(std::string_view text) {
-    const auto path = std::filesystem::temp_directory_path() / "island_test_0_10_load.json";
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("island_test_" + CurrentTestName() + "_load.json");
     WriteFile(path, text);
     LoadResult result = SessionStore::Load(path);
     std::filesystem::remove(path);

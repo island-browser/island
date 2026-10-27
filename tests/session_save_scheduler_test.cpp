@@ -27,14 +27,21 @@ TEST(SessionSaveScheduler, DebouncesBurstsIntoOneSave) {
 
 TEST(SessionSaveScheduler, MaxLatencyBoundsContinuousChange) {
     SessionSaveScheduler scheduler;
-    // A change every second from 0 s to 9 s keeps the debounce from ever expiring.
-    for (int second = 0; second <= 9; ++second) {
+    // A change every second from 0 s to 15 s keeps the debounce from ever expiring.
+    for (int second = 0; second <= 15; ++second) {
         scheduler.MarkDirty(At(std::chrono::seconds(second)));
-        EXPECT_FALSE(
-            scheduler.Due(At(std::chrono::seconds(second) + std::chrono::milliseconds(999))))
-            << "second " << second;
+        if (second <= 9) {
+            EXPECT_FALSE(
+                scheduler.Due(At(std::chrono::seconds(second) + std::chrono::milliseconds(999))))
+                << "second " << second;
+        }
+        // The first unsaved change was at 0 s, so the deadline is pinned at 10 s from the
+        // moment the debounce would have pushed it past that, and later changes do not move it.
+        if (second >= 8) {
+            ASSERT_TRUE(scheduler.deadline().has_value()) << "second " << second;
+            EXPECT_EQ(*scheduler.deadline(), At(std::chrono::seconds(10))) << "second " << second;
+        }
     }
-    // The first unsaved change was at 0 s, so the save is due at 10 s.
     EXPECT_FALSE(scheduler.Due(At(std::chrono::milliseconds(9999))));
     EXPECT_TRUE(scheduler.Due(At(std::chrono::milliseconds(10000))));
 }

@@ -55,6 +55,15 @@ TEST(SpaceRouting, OneSpacePerHost) {
     EXPECT_EQ(spaces[0].routes(), std::vector<std::string>{"linear.app"});
 }
 
+TEST(SpaceRouting, AssignToMissingSpaceLeavesTheRuleWhereItIs) {
+    std::vector<Space> spaces = TwoSpaces({"github.com"});
+    // Space 9 does not exist: the rule must not be taken from space 1 and lost.
+    const RouteMove move = AssignRoute(spaces, SpaceId{9}, "github.com");
+    EXPECT_FALSE(move.moved_from.has_value());
+    EXPECT_EQ(spaces[0].routes(), std::vector<std::string>{"github.com"});
+    EXPECT_TRUE(spaces[1].routes().empty());
+}
+
 TEST(SpaceRouting, RemoveRouteDropsTheRuleFromItsSpace) {
     std::vector<Space> spaces = TwoSpaces({"github.com"});
     EXPECT_TRUE(RemoveRoute(spaces, "github.com"));

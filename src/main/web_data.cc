@@ -93,13 +93,19 @@ WebDataSweepResult SweepWebData(const std::filesystem::path& root,
     return result;
 }
 
-void EnsurePrivateDirectory(const std::filesystem::path& path) {
+bool EnsurePrivateDirectory(const std::filesystem::path& path) {
     std::error_code error;
     std::filesystem::create_directories(path, error);
+    // create_directories() returns false for an existing directory, so the error code decides.
+    // is_directory() catches a regular file that is already at |path|.
+    if (error || !std::filesystem::is_directory(path, error)) return false;
 #if !defined(_WIN32)
     // Set the mode explicitly: create_directories() takes it from the umask.
     std::filesystem::permissions(path, std::filesystem::perms::owner_all,
                                  std::filesystem::perm_options::replace, error);
+    return !error;
+#else
+    return true;
 #endif
 }
 

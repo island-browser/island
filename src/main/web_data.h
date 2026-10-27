@@ -49,8 +49,11 @@ WebDataSweepResult SweepWebData(const std::filesystem::path& root,
                                 bool session_loaded_cleanly);
 
 // Creates |path| (and its parents) and sets it to owner-only (0700) on POSIX, so the
-// permissions do not depend on the umask. A no-op for the permission part on Windows.
-void EnsurePrivateDirectory(const std::filesystem::path& path);
+// permissions do not depend on the umask. The permission part is a no-op on Windows.
+// Returns false, and the caller must not write cookies there, when the directory cannot be
+// created or is not a directory, or when the mode cannot be set. A silent failure would leave
+// a context's cookies readable by other users.
+[[nodiscard]] bool EnsurePrivateDirectory(const std::filesystem::path& path);
 
 }  // namespace island
 
