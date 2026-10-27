@@ -14,7 +14,8 @@ Linux process entrypoint and the Linux implementation of the `font_registry.h` s
 | `main_linux.cc` | Linux `main()`; drives `CefInitialize` / `CefRunMessageLoop` / `CefShutdown` |
 | `font_registry_linux.cc` | Registers the bundled Geist faces through Fontconfig |
 | `island-browser.desktop` | Desktop entry the `.deb` installs (`scripts/installers.py`); launches `/opt/island-browser/island_browser` |
-| `island-browser.svg` | Application icon the `.deb` installs into the hicolor theme |
+| `island-browser.svg` | Application icon the `.deb` installs into the hicolor theme (generated copy of `resources/brand/app-icon.svg`) |
+| `icons/island-browser-<size>.png` | Generated 16-512 px PNGs the `.deb` installs under `hicolor/<size>x<size>/apps/` |
 
 ## For AI Agents
 

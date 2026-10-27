@@ -18,6 +18,8 @@ each artifact).
 | `test_package.py` | Archive layout, tar/zip contents, and hashing for each target |
 | `test_package_resources.py` | Resource manifest completeness and digests, plus bounded CMake icon staging |
 | `test_installers.py` | `scripts/installers.py`: installer names, checksum recording, Debian versions, the macOS signing order, the ISCC command, and a real `.deb` build when `dpkg-deb` is present |
+| `test_brand.py` | Brand sources on the macOS grid, generated `.icns`/`.ico`/PNG structure, icon wiring in the plist, CMake, Inno Setup and desktop entry, dmg background size/dpi/label contrast, `stage_dmg_look` |
+| `test_dmg_ds_store.py` | Reads back the `.DS_Store` that `scripts/dmg_ds_store.py` writes (records, bounds, positions, alias) |
 | `test_release_assets.py` | `scripts/release_assets.py`: the archive-plus-installer release set and the combined `SHA256SUMS.txt` the in-browser updater verifies against |
 
 ## For AI Agents

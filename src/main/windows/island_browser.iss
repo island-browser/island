@@ -35,13 +35,16 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
-UninstallDisplayIcon={app}\island_browser.exe
+SetupIconFile=island.ico
+UninstallDisplayIcon={app}\island.ico
 UninstallDisplayName=Island
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
+; Shortcuts and the uninstaller entry use this copy: the exe may be CEF's icon-less bootstrap.
+Source: "island.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [InstallDelete]
@@ -49,8 +52,8 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Type: filesandordirs; Name: "{app}\locales"
 
 [Icons]
-Name: "{autoprograms}\Island"; Filename: "{app}\island_browser.exe"
-Name: "{autodesktop}\Island"; Filename: "{app}\island_browser.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Island"; Filename: "{app}\island_browser.exe"; IconFilename: "{app}\island.ico"
+Name: "{autodesktop}\Island"; Filename: "{app}\island_browser.exe"; IconFilename: "{app}\island.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\island_browser.exe"; Description: "{cm:LaunchProgram,Island}"; Flags: nowait postinstall skipifsilent

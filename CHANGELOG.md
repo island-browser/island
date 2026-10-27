@@ -15,6 +15,10 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Added
 
+- An app icon on every platform (macOS `.icns` through `CFBundleIconFile`, Windows `.ico` in the exe
+  and the installer, Linux hicolor PNGs) and a designed macOS disk-image window: background picture,
+  positioned icons, a volume icon and a "Drag Island to Applications" hint, built without a Finder
+  session. The artwork is a placeholder concept; `scripts/brand_icons.py install-concept` swaps it.
 - Local Bookmarks page foundation: a token-themed, keyboard-accessible folder/library view with
   title/URL editing, folder actions, favorite controls, import handoff, inline save status and
   destructive folder confirmation. Browser-window state and command wiring land separately.

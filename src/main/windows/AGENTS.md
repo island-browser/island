@@ -16,6 +16,7 @@ application/compatibility manifests embedded in the executable.
 | `font_registry_win.cc` | Registers the bundled Geist faces via GDI |
 | `island_browser.exe.manifest` | Application manifest for the shipped executable |
 | `compatibility.manifest` | OS compatibility declarations merged into the app manifest |
+| `island.ico`, `island_browser.rc` | Generated multi-size icon and the resource script that embeds it in the exe (the Inno Setup script also installs it for shortcuts, because the sandboxed build ships CEF's icon-less bootstrap exe) |
 | `island_browser.iss` | Inno Setup script for the per-user `-setup.exe` that `scripts/installers.py` builds from the release `.zip` |
 
 ## For AI Agents

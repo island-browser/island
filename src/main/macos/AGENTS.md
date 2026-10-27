@@ -12,6 +12,7 @@ macOS implementation of the `font_registry.h` seam.
 | File | Description |
 |------|-------------|
 | `font_registry_mac.mm` | Registers the bundled Geist faces with CoreText at startup |
+| `island.icns` | Generated app icon (`scripts/brand_icons.py`); copied into `Contents/Resources` by `../CMakeLists.txt`, named by `CFBundleIconFile` in `../Info.plist.in`, and used as the dmg volume icon |
 
 ## For AI Agents
 

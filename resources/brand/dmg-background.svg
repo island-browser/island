@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 400" width="660" height="400">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0C1A44"/><stop offset="1" stop-color="#1E3F9A"/></linearGradient>
+<radialGradient id="halo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#9FC4FF" stop-opacity=".30"/><stop offset="1" stop-color="#9FC4FF" stop-opacity="0"/></radialGradient>
+<filter id="sh" x="-20%" y="-50%" width="140%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
+</defs>
+<rect width="660" height="400" fill="url(#bg)"/>
+<ellipse cx="330" cy="150" rx="330" ry="150" fill="url(#halo)"/>
+<g stroke="#9FC4FF" fill="none" opacity=".16"><ellipse cx="330" cy="352" rx="420" ry="46" stroke-width="1.5"/><ellipse cx="330" cy="360" rx="320" ry="32" stroke-width="1.5"/><ellipse cx="330" cy="368" rx="210" ry="20" stroke-width="1.5"/></g>
+<rect x="95" y="210" width="140" height="30" rx="15" fill="#000" opacity=".25" filter="url(#sh)"/>
+<rect x="425" y="210" width="140" height="30" rx="15" fill="#000" opacity=".25" filter="url(#sh)"/>
+<rect x="95" y="208" width="140" height="30" rx="15" fill="#6F788A"/>
+<rect x="425" y="208" width="140" height="30" rx="15" fill="#6F788A"/>
+<path d="M258 120 C 300 94 360 94 402 120" fill="none" stroke="#EAF2FF" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="1 9" opacity=".9"/><path d="M393.9 101.7 L 402 120 L 382.0 120.9" fill="none" stroke="#EAF2FF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity=".95"/>
+<text x="330" y="306" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif" font-size="21" font-weight="600" fill="#EAF2FF" letter-spacing=".2">Drag Island to Applications</text>
+<text x="330" y="332" text-anchor="middle" font-family="-apple-system, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif" font-size="13" fill="#EAF2FF" opacity=".62">Calm, private, local-first.</text>
+</svg>

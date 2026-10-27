@@ -14,6 +14,7 @@ time.
 | Directory | Purpose |
 |-----------|---------|
 | `island/` | The Island resource root staged into the app bundle (see `island/AGENTS.md`) |
+| `brand/` | App icon and dmg window sources; the platform icon files are generated from them (see `brand/AGENTS.md`) |
 
 ## For AI Agents
 

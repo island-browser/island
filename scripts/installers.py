@@ -30,6 +30,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import os
 import shutil
@@ -42,12 +43,21 @@ import zipfile
 from pathlib import Path
 from typing import Final, assert_never
 
+import dmg_ds_store
 from package import SEMVER, Target, archive_name, installer_name
 
 REPOSITORY: Final = Path(__file__).resolve().parents[1]
 SUMS_NAME: Final = "SHA256SUMS.txt"
 MAC_APP_NAME: Final = "Island.app"
 MAC_VOLUME_NAME: Final = "Island"
+BRAND: Final = REPOSITORY / "resources" / "brand"
+MACOS_SOURCES: Final = REPOSITORY / "src" / "main" / "macos"
+# The dmg window: scripts/dmg_ds_store.py writes its Finder layout as a .DS_Store, so building the
+# image needs no Finder session (it runs on a headless runner). Change the window here.
+DMG_BACKGROUND_DIR: Final = ".background"
+DMG_BACKGROUND_NAME: Final = "background.tiff"
+DMG_VOLUME_ICON: Final = MACOS_SOURCES / "island.icns"
+LINUX_ICON_SIZES: Final = (16, 32, 48, 64, 128, 256, 512)
 DEB_PACKAGE: Final = "island-browser"
 DEB_PREFIX: Final = Path("opt/island-browser")
 DEB_ARCHITECTURES: Final = {Target.LINUX_X64: "amd64", Target.LINUX_ARM64: "arm64"}
@@ -117,6 +127,64 @@ def macos_sign(app: Path) -> None:
     _run("codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app))
 
 
+DMG_LAYOUT: Final = dmg_ds_store.Layout(
+    volume_name=MAC_VOLUME_NAME, background_dir=DMG_BACKGROUND_DIR,
+    background_name=DMG_BACKGROUND_NAME, window_origin=(200, 120), window_size=(660, 400),
+    icon_size=128, text_size=13,
+    positions={MAC_APP_NAME: (165, 140), "Applications": (495, 140)})
+
+
+def stage_dmg_look(stage: Path) -> None:
+    """Add the background picture and the volume icon to |stage| (the layout comes later)."""
+    background = stage / DMG_BACKGROUND_DIR
+    background.mkdir()
+    one, two = BRAND / "dmg-background.png", BRAND / "dmg-background@2x.png"
+    # tiffutil joins the two into one multi-resolution TIFF, which Finder draws sharp on Retina.
+    _run("tiffutil", "-cathidpicheck", str(one), str(two), "-out",
+         str(background / DMG_BACKGROUND_NAME))
+    shutil.copyfile(DMG_VOLUME_ICON, stage / ".VolumeIcon.icns")
+
+
+def hfs_layout(mount: Path) -> dmg_ds_store.Layout:
+    """DMG_LAYOUT with the mounted volume's real ids, so Finder resolves the background alias."""
+    folder = (mount / DMG_BACKGROUND_DIR).stat()
+    picture = (mount / DMG_BACKGROUND_DIR / DMG_BACKGROUND_NAME).stat()
+    return dataclasses.replace(
+        DMG_LAYOUT, volume_created=int(mount.stat().st_birthtime),
+        file_created=int(picture.st_birthtime), folder_cnid=folder.st_ino, file_cnid=picture.st_ino)
+
+
+def _attach(image: Path) -> Path:
+    """Mount |image| read-write without Finder noticing it; returns the mount point."""
+    result = subprocess.run(["hdiutil", "attach", "-nobrowse", "-noverify", "-noautoopen",
+                             "-owners", "off", str(image)], check=True, capture_output=True,
+                            text=True)
+    for line in result.stdout.splitlines():
+        if "/Volumes/" in line:
+            return Path(line[line.index("/Volumes/"):].strip())
+    raise InstallerError(f"hdiutil attach printed no mount point:\n{result.stdout}")
+
+
+def _detach(mount: Path) -> None:
+    for attempt in range(5):
+        if subprocess.run(["hdiutil", "detach", str(mount)], capture_output=True).returncode == 0:
+            return
+        time.sleep(2 + attempt * 2)
+    _run("hdiutil", "detach", "-force", str(mount))
+
+
+def _retry(*command: str) -> None:
+    # hdiutil intermittently fails with "Resource busy" on hosted runners; retry that.
+    for attempt in range(3):
+        try:
+            _run(*command)
+            return
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+            time.sleep(10)
+
+
 def _build_dmg(app: Path, destination: Path) -> None:
     if app.suffix != ".app" or not app.is_dir():
         raise InstallerError(f"--app must be the built .app bundle, got {app}")
@@ -127,18 +195,22 @@ def _build_dmg(app: Path, destination: Path) -> None:
         _run("ditto", str(app), str(stage / MAC_APP_NAME))
         (stage / "Applications").symlink_to("/Applications")
         _run("codesign", "--verify", "--deep", "--strict", str(stage / MAC_APP_NAME))
-        create = ("hdiutil", "create", "-volname", MAC_VOLUME_NAME, "-srcfolder", str(stage),
-                  "-fs", "HFS+", "-format", "UDZO", "-imagekey", "zlib-level=9", "-ov",
-                  str(destination))
-        # hdiutil intermittently fails with "Resource busy" on hosted runners; retry that.
-        for attempt in range(3):
-            try:
-                _run(*create)
-                break
-            except subprocess.CalledProcessError:
-                if attempt == 2:
-                    raise
-                time.sleep(10)
+        stage_dmg_look(stage)
+        # The Finder layout and the volume-icon flag need the image's real ids and a mounted
+        # volume, so build it read-write, finish it headless, then compress it.
+        scratch = Path(temporary) / "island-rw.dmg"
+        _retry("hdiutil", "create", "-volname", MAC_VOLUME_NAME, "-srcfolder", str(stage),
+               "-fs", "HFS+", "-format", "UDRW", "-ov", str(scratch))
+        mount = _attach(scratch)
+        try:
+            (mount / ".DS_Store").write_bytes(dmg_ds_store.build(hfs_layout(mount)))
+            _run("SetFile", "-a", "C", str(mount))  # Finder shows .VolumeIcon.icns
+            _run("sync")
+        finally:
+            _detach(mount)
+        destination.unlink(missing_ok=True)
+        _retry("hdiutil", "convert", str(scratch), "-format", "UDZO", "-imagekey", "zlib-level=9",
+               "-ov", "-o", str(destination))
     _run("hdiutil", "verify", str(destination))
 
 
@@ -188,6 +260,10 @@ def _build_deb(archive: Path, version: str, target: Target, destination: Path) -
         icons = root / "usr" / "share" / "icons" / "hicolor" / "scalable" / "apps"
         icons.mkdir(parents=True)
         shutil.copyfile(linux / "island-browser.svg", icons / "island-browser.svg")
+        for size in LINUX_ICON_SIZES:
+            sized = root / "usr" / "share" / "icons" / "hicolor" / f"{size}x{size}" / "apps"
+            sized.mkdir(parents=True)
+            shutil.copyfile(linux / "icons" / f"island-browser-{size}.png", sized / "island-browser.png")
         size = sum(path.lstat().st_size for path in root.rglob("*") if not path.is_dir())
         control = root / "DEBIAN"
         control.mkdir()
