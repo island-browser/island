@@ -1,6 +1,8 @@
 #include "bookmark_import.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -50,8 +52,30 @@ bool PlatformCanReadSafari() { return true; }
 bool PlatformCanReadSafari() { return false; }
 #endif
 
-std::filesystem::path SourceBookmarksPath(const SourcePaths& source,
-                                          const std::filesystem::path& base_home) {
+std::vector<std::string> ChromeProfilesFromLocalState(const std::filesystem::path& user_data) {
+    std::ifstream in(user_data / "Local State", std::ios::binary);
+    if (!in.is_open()) return {};
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::optional<json::Value> root = json::Parser(text).Parse();
+    if (!root || !root->IsObject()) return {};
+    const json::Value* profile = root->FindMember("profile");
+    const json::Value* cache = profile == nullptr ? nullptr : profile->FindMember("info_cache");
+    if (cache == nullptr || !cache->IsObject()) return {};
+    std::vector<std::string> names;
+    for (const auto& [name, value] : cache->object_val) {
+        static_cast<void>(value);
+        // Profile names originate in a local JSON file, but must not turn this
+        // probe into a path traversal when the file is malformed or hostile.
+        if (!name.empty() && name.find('/') == std::string::npos &&
+            name.find('\\') == std::string::npos && name.find("..") == std::string::npos) {
+            names.push_back(name);
+        }
+    }
+    return names;
+}
+
+std::vector<std::filesystem::path> SourceBookmarksPaths(const SourcePaths& source,
+                                                        const std::filesystem::path& base_home) {
 #if defined(_WIN32)
     const std::filesystem::path primary = base_home / source.windows_path;
 #elif defined(__APPLE__)
@@ -59,28 +83,45 @@ std::filesystem::path SourceBookmarksPath(const SourcePaths& source,
 #else
     const std::filesystem::path primary = base_home / source.linux_path;
 #endif
-    std::error_code ec;
-    if (std::filesystem::is_regular_file(primary, ec)) {
-        return primary;
-    }
-    // Many setups keep bookmarks in a non-Default profile ("Profile 1", …):
-    // fall back to any profile's Bookmarks file under the browser's user-data
-    // root (the primary path's parent directory minus its last segment).
+    std::vector<std::filesystem::path> paths;
+    const auto add_if_file = [&paths](const std::filesystem::path& candidate) {
+        std::error_code candidate_ec;
+        if (std::filesystem::is_regular_file(candidate, candidate_ec) &&
+            std::find(paths.begin(), paths.end(), candidate) == paths.end()) {
+            paths.push_back(candidate);
+        }
+    };
+    add_if_file(primary);
+    // One Welcome row represents the union of all named Chrome-family
+    // profiles. Default remains first, then Local State's names, then the
+    // conventional profile directories not mentioned by Local State.
     const std::filesystem::path user_data = primary.parent_path().parent_path();
+    std::error_code ec;
     if (!std::filesystem::is_directory(user_data, ec)) {
-        return primary;
+        return paths;
+    }
+    for (const std::string& name : ChromeProfilesFromLocalState(user_data)) {
+        add_if_file(user_data / name / "Bookmarks");
     }
     for (const std::filesystem::directory_entry& entry :
          std::filesystem::directory_iterator(user_data, ec)) {
         if (ec) {
             break;
         }
-        const std::filesystem::path candidate = entry.path() / "Bookmarks";
-        if (std::filesystem::is_regular_file(candidate, ec)) {
-            return candidate;
-        }
+        const std::string name = entry.path().filename().string();
+        const bool profile = name == "Default" ||
+                             (name.rfind("Profile ", 0) == 0 && name.size() > 8 &&
+                              std::all_of(name.begin() + 8, name.end(),
+                                          [](unsigned char c) { return std::isdigit(c) != 0; }));
+        if (!profile) continue;
+        add_if_file(entry.path() / "Bookmarks");
     }
-    return primary;
+    return paths;
+}
+
+bool CanOpenForRead(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return in.is_open();
 }
 
 // Chromium stores URL entries as {"type":"url","name":...,"url":...} nested in
@@ -163,11 +204,16 @@ std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path
     std::vector<ImportSourceInfo> sources;
     std::uint8_t chromium_index = 0;
     for (const SourcePaths& entry : kChromiumSources) {
-        const std::filesystem::path path = SourceBookmarksPath(entry, base_home);
-        std::error_code ec;
-        const bool available = std::filesystem::is_regular_file(path, ec);
-        sources.push_back(ImportSourceInfo{static_cast<ImportSource>(chromium_index),
-                                           entry.display_name, available, path});
+        const std::vector<std::filesystem::path> paths = SourceBookmarksPaths(entry, base_home);
+        const bool detected = !paths.empty();
+        const bool available = std::any_of(paths.begin(), paths.end(), CanOpenForRead);
+        sources.push_back(ImportSourceInfo{
+            .id = static_cast<ImportSource>(chromium_index),
+            .display_name = entry.display_name,
+            .detected = detected,
+            .available = available,
+            .bookmarks_path = detected ? paths.front() : std::filesystem::path{},
+            .unavailable_reason = detected && !available ? "bookmarks file cannot be opened" : ""});
         ++chromium_index;
     }
 
@@ -175,19 +221,43 @@ std::vector<ImportSourceInfo> DetectInstalledSources(const std::filesystem::path
     const std::filesystem::path safari_path = base_home / "Library/Safari/Bookmarks.plist";
     const bool safari_available =
         PlatformCanReadSafari() && std::filesystem::is_regular_file(safari_path, ec);
-    sources.push_back(
-        ImportSourceInfo{ImportSource::kSafari, "Safari", safari_available,
-                         PlatformCanReadSafari() ? safari_path : std::filesystem::path{}});
-    const std::filesystem::path firefox = FindFirefoxBookmarksBackup(base_home);
-    sources.push_back(
-        ImportSourceInfo{ImportSource::kFirefox, "Firefox", !firefox.empty(), firefox});
+    sources.push_back(ImportSourceInfo{
+        .id = ImportSource::kSafari,
+        .display_name = "Safari",
+        .detected = safari_available,
+        .available = safari_available,
+        .bookmarks_path = PlatformCanReadSafari() ? safari_path : std::filesystem::path{}});
+    const std::filesystem::path firefox = FindFirefoxPlacesDatabase(base_home);
+    const std::filesystem::path firefox_backup = FindFirefoxBookmarksBackup(base_home);
+    const std::filesystem::path firefox_path = !firefox.empty() ? firefox : firefox_backup;
+    const bool firefox_detected = !firefox_path.empty();
+    const bool firefox_available = firefox_detected && CanOpenForRead(firefox_path);
+    sources.push_back(ImportSourceInfo{
+        .id = ImportSource::kFirefox,
+        .display_name = "Firefox",
+        .detected = firefox_detected,
+        .available = firefox_available,
+        .bookmarks_path = firefox_path,
+        .unavailable_reason =
+            firefox_detected && !firefox_available ? "profile database cannot be opened" : ""});
     const std::filesystem::path arc = FindArcSidebarFile(base_home);
-    sources.push_back(ImportSourceInfo{ImportSource::kArc, "Arc", !arc.empty(), arc});
+    sources.push_back(ImportSourceInfo{.id = ImportSource::kArc,
+                                       .display_name = "Arc",
+                                       .detected = !arc.empty(),
+                                       .available = !arc.empty() && CanOpenForRead(arc),
+                                       .bookmarks_path = arc,
+                                       .unavailable_reason = !arc.empty() && !CanOpenForRead(arc)
+                                                                 ? "sidebar data cannot be opened"
+                                                                 : ""});
     return sources;
 }
 
-std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
-                                                          const std::filesystem::path& base_home) {
+std::optional<std::vector<BookmarkItem>> ImportFromSource(
+    ImportSource source, const std::filesystem::path& base_home,
+    std::size_t* unreadable_chromium_profiles) {
+    if (unreadable_chromium_profiles != nullptr) {
+        *unreadable_chromium_profiles = 0;
+    }
     if (source == ImportSource::kFirefox) {
         return ImportFirefoxBookmarks(base_home);
     }
@@ -216,7 +286,27 @@ std::optional<std::vector<BookmarkItem>> ImportFromSource(ImportSource source,
     if (index >= kChromiumSources.size()) {
         return std::nullopt;
     }
-    return ReadAndParse(SourceBookmarksPath(kChromiumSources[index], base_home));
+    const std::vector<std::filesystem::path> paths =
+        SourceBookmarksPaths(kChromiumSources[index], base_home);
+    std::vector<BookmarkItem> items;
+    bool parsed_any = false;
+    std::size_t unreadable_profiles = 0;
+    for (const std::filesystem::path& path : paths) {
+        const std::optional<std::vector<BookmarkItem>> profile_items = ReadAndParse(path);
+        if (!profile_items.has_value()) {
+            ++unreadable_profiles;
+            continue;
+        }
+        parsed_any = true;
+        const std::size_t remaining = kMaxImportedBookmarks - items.size();
+        const std::size_t count = std::min(remaining, profile_items->size());
+        items.insert(items.end(), profile_items->begin(), profile_items->begin() + count);
+        if (items.size() == kMaxImportedBookmarks) break;
+    }
+    if (unreadable_chromium_profiles != nullptr) {
+        *unreadable_chromium_profiles = unreadable_profiles;
+    }
+    return parsed_any ? std::optional<std::vector<BookmarkItem>>(std::move(items)) : std::nullopt;
 }
 
 namespace {

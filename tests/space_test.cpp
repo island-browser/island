@@ -522,6 +522,54 @@ TEST(Space, ChildTabsFollowTheirParent) {
     EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "other"}));
 }
 
+TEST(Space, InsertedTabLandsAfterTheActiveTabWithoutSelectingIt) {
+    Space space = MakeTitledSpace({"a", "b", "c"});
+    const TabId b = space.tabs()[1].id();
+    space.SelectTab(b);
+
+    const TabId opened = space.InsertTabAfterActive(MakeTab("opened"), /*activate=*/false);
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"a", "b", "opened", "c"}));
+    EXPECT_EQ(space.active_tab_id(), b);
+    EXPECT_EQ(space.tabs()[2].id(), opened);
+}
+
+TEST(Space, InsertedTabBecomesActiveWhenRequested) {
+    Space space = MakeTitledSpace({"a", "b"});
+    space.SelectTab(space.tabs()[0].id());
+
+    const TabId opened = space.InsertTabAfterActive(MakeTab("opened"), /*activate=*/true);
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"a", "opened", "b"}));
+    EXPECT_EQ(space.active_tab_id(), opened);
+}
+
+TEST(Space, InsertAfterAGroupedParentSkipsItsChildren) {
+    Space space = MakeTitledSpace({"plan", "other"});
+    const TabId plan = space.tabs()[0].id();
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c1")));
+    space.SelectTab(plan);
+
+    static_cast<void>(space.InsertTabAfterActive(MakeTab("opened"), /*activate=*/false));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "opened", "other"}));
+    EXPECT_EQ(space.active_tab_id(), plan);
+}
+
+TEST(Space, InsertAfterAGroupedChildStaysOutsideTheGroup) {
+    Space space = MakeTitledSpace({"plan"});
+    const TabId plan = space.tabs()[0].id();
+    const TabId c1 = space.AppendChildTab(plan, MakeTab("c1"));
+    static_cast<void>(space.AppendChildTab(plan, MakeTab("c2")));
+    space.SelectTab(c1);
+
+    static_cast<void>(space.InsertTabAfterActive(MakeTab("opened"), /*activate=*/false));
+
+    EXPECT_EQ(Titles(space), (std::vector<std::string>{"plan", "c1", "c2", "opened"}));
+    EXPECT_FALSE(space.tabs()[3].group_parent().has_value());
+    EXPECT_EQ(space.tabs()[2].group_parent(), plan);
+}
+
 TEST(Space, ClosingAChildKeepsTheGroup) {
     Space space = MakeTitledSpace({"plan"});
     const TabId plan = space.tabs()[0].id();

@@ -93,13 +93,15 @@ struct GlobalStripLayout {
 
 // The failure row's paint (spec §5): the warning surface behind every button, warning text on the
 // message and "Dismiss", and the normal text on "Retry" (a retry is an action, not a warning).
+// A success notice (`ok`) is neutral: the secondary surface with the normal text everywhere.
 struct BookmarkStatusColors {
     ArgbColor row;
     ArgbColor text;
     ArgbColor retry;
     ArgbColor dismiss;
 };
-[[nodiscard]] BookmarkStatusColors BookmarkStatusRowColors(const ChromeTokens& tokens);
+[[nodiscard]] BookmarkStatusColors BookmarkStatusRowColors(const ChromeTokens& tokens,
+                                                              bool ok = false);
 
 // The fill of a favorite plate or row (spec §3.1): the neutral raised `segment_selected` when it
 // is the displayed favorite, the soft hover fill under the pointer, and the surface otherwise.

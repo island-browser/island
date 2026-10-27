@@ -393,6 +393,45 @@ TEST(BookmarkStoreTest, GivenAFavoriteBookmarkWhenDeletedThenEveryReferenceIsRem
     EXPECT_EQ(store.DeleteBookmark(bookmark).error, BookmarkError::kNotFound);
 }
 
+TEST(BookmarkStoreTest, DeleteFolderWithContentsMovesOrErasesBookmarksAndFavorites) {
+    BookmarkStore store;
+    const std::uint64_t work = store.CreateFolder("Work").id;
+    const std::uint64_t first = store.AddOrFindByUrl("First", "https://first.test/", work).id;
+    const std::uint64_t second = store.AddOrFindByUrl("Second", "https://second.test/", work).id;
+
+    ASSERT_TRUE(store.DeleteFolderWithContents(work, true).ok());
+    const BookmarkFolder* unfiled = nullptr;
+    for (const BookmarkFolder& folder : store.state().folders) {
+        if (folder.name == BookmarkStore::kUnfiledFolderName) {
+            unfiled = &folder;
+            break;
+        }
+    }
+    ASSERT_NE(unfiled, nullptr);
+    EXPECT_EQ(unfiled->bookmark_ids, (std::vector<std::uint64_t>{first, second}));
+    const std::uint64_t unfiled_id = unfiled->id;
+
+    const std::uint64_t existing =
+        store.AddOrFindByUrl("Existing", "https://existing.test/", unfiled_id).id;
+    const std::uint64_t more_work = store.CreateFolder("More work").id;
+    const std::uint64_t third = store.AddOrFindByUrl("Third", "https://third.test/", more_work).id;
+    ASSERT_TRUE(store.DeleteFolderWithContents(more_work, true).ok());
+    ASSERT_NE(store.FindFolder(unfiled_id), nullptr);
+    EXPECT_EQ(store.FindFolder(unfiled_id)->bookmark_ids,
+              (std::vector<std::uint64_t>{first, second, existing, third}));
+    EXPECT_EQ(store.DeleteFolderWithContents(unfiled_id, true).error, BookmarkError::kInvalidInput);
+
+    const std::uint64_t remove = store.CreateFolder("Remove").id;
+    const std::uint64_t deleted =
+        store.AddOrFindByUrl("Deleted", "https://deleted.test/", remove).id;
+    ASSERT_TRUE(store.AddFavorite(FavoriteScope{}, deleted).ok());
+    ASSERT_TRUE(store.AddFavorite(FavoriteScope{7}, deleted).ok());
+    ASSERT_TRUE(store.DeleteFolderWithContents(remove, false).ok());
+    EXPECT_EQ(store.FindBookmark(deleted), nullptr);
+    EXPECT_TRUE(store.state().global_favorite_ids.empty());
+    EXPECT_TRUE(store.state().space_favorite_ids.empty());
+}
+
 TEST(BookmarkStoreTest, GivenFavoritesWhenAddedReorderedAndRemovedThenScopesStayIndependent) {
     BookmarkStore store;
     const std::uint64_t a = store.AddOrFindByUrl("A", "https://example.com/a").id;

@@ -112,6 +112,13 @@ void IslandApp::ShowCommandPalette() {
     }
 }
 
+void IslandApp::ShowCommandPaletteWithQueryForDev(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->ShowCommandPaletteWithQueryForDev(query);
+    }
+}
+
 void IslandApp::BeginSpaceRenaming() {
     CEF_REQUIRE_UI_THREAD();
 
@@ -342,11 +349,18 @@ void IslandApp::ToggleAgentPanel() {
     }
 }
 
-void IslandApp::ToggleSettings() {
+void IslandApp::OpenSettings() {
     CEF_REQUIRE_UI_THREAD();
 
     if (browser_window_ != nullptr) {
-        browser_window_->ToggleSettings();
+        browser_window_->OpenSettings();
+    }
+}
+
+void IslandApp::OpenBookmarksPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (browser_window_ != nullptr) {
+        browser_window_->OpenBookmarksPage();
     }
 }
 

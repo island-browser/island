@@ -48,6 +48,10 @@
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 #include "island_version.h"
+#include "link_open_policy.h"
+#if defined(__APPLE__)
+#include "macos/keymap_menu_mac.h"
+#endif
 #include "native_handle.h"
 #include "page_card.h"
 #include "runtime_style.h"
@@ -250,8 +254,10 @@ CefRefPtr<BrowserWindow> BrowserWindow::Create(std::string initial_url, bool per
 CefRefPtr<BrowserWindow> BrowserWindow::CreateHeadlessForTest(std::string initial_url) {
     CEF_REQUIRE_UI_THREAD();
 
-    return CefRefPtr<BrowserWindow>(
+    CefRefPtr<BrowserWindow> window(
         new BrowserWindow(std::move(initial_url), /*persist_session=*/false));
+    window->DisableUiTaskPostingForTest();
+    return window;
 }
 
 namespace {
@@ -285,6 +291,7 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
     // be reserved before a fresh or discarded session allocates new ones.
     if (persist_session_) {
         prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
+        settings_page_url_ = LocalPage::PageUrl(LocalPageKind::kSettings);
         bookmarks_ = BookmarkStore(BookmarkStore::DefaultBookmarksFilePath());
         const BookmarkError load_error = bookmarks_.Load();
         // A missing file is the normal first run. Anything else is shown, and a read-only library
@@ -357,6 +364,9 @@ bool BrowserWindow::RestoreSessionStateForTest(const SessionState& state) {
 }
 
 bool BrowserWindow::IsSessionInternalTabUrl(std::string_view url) const {
+    if (!settings_page_url_.empty() && IsSettingsPageUrl(url)) {
+        return true;
+    }
     if ((!plan_page_url_.empty() || persist_session_) && IsPlanPageUrl(url)) {
         return true;
     }
@@ -554,6 +564,31 @@ const std::string& BrowserWindow::StartPageUrl() const {
         start_page_url_ = LocalPage::PageUrl(LocalPageKind::kStart);
     }
     return start_page_url_;
+}
+
+const std::string& BrowserWindow::SettingsPageUrl() const { return settings_page_url_; }
+
+bool BrowserWindow::IsSettingsPageUrl(std::string_view url) const {
+    return !settings_page_url_.empty() && url == settings_page_url_;
+}
+
+void BrowserWindow::SetSettingsDocumentReadyForTest(TabId tab_id, bool ready) {
+    if (Tab* tab = FindTabById(tab_id); tab != nullptr) {
+        tab->SetSettingsDocumentReady(ready);
+    }
+}
+
+std::optional<std::string> BrowserWindow::DeliverSettingsRenderStateForTest(TabId tab_id) {
+    Tab* tab = FindTabById(tab_id);
+    if (tab == nullptr) {
+        return std::nullopt;
+    }
+    std::optional<std::string> state = SettingsRenderState(*tab);
+    if (state.has_value()) {
+        settings_message_.clear();
+        settings_focus_.Clear();
+    }
+    return state;
 }
 
 ValidatedAddress BrowserWindow::ResolveAddressInput(std::string_view text) const {
@@ -803,13 +838,22 @@ Space& BrowserWindow::AppendSpace(std::string name) {
 }
 
 void BrowserWindow::AppendTabToActiveSpace(std::string startup_url, bool opened_by_agent) {
+    AddTabToActiveSpace(std::move(startup_url), TabPlacement::kEnd, opened_by_agent);
+}
+
+void BrowserWindow::AddTabToActiveSpace(std::string startup_url, TabPlacement placement,
+                                        bool opened_by_agent) {
     Space& space = active_space();
     context_chip_.reset();  // the new tab is a new page context
     DetachActiveTabObservers();
     Tab tab{NextTabId()};
     tab.SetStartupUrl(std::move(startup_url));
     tab.SetOpenedByAgent(opened_by_agent);
-    space.AppendTab(std::move(tab));
+    if (placement == TabPlacement::kAfterActive) {
+        static_cast<void>(space.InsertTabAfterActive(std::move(tab), /*activate=*/true));
+    } else {
+        space.AppendTab(std::move(tab));
+    }
     Tab* appended = active_tab();
     if (chrome_ != nullptr && appended != nullptr) {
         // Same creation path as OnWindowCreated's first view: the space's
@@ -994,7 +1038,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
             .research = true};
 }
 
-bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {
+bool BrowserWindow::IsAgentPrivilegedTab(std::optional<std::size_t> index) const {
     const AgentTabLookup lookup = ResolveAgentTab(index);
     if (!lookup.tab.has_value()) {
         return false;
@@ -1003,7 +1047,8 @@ bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {
     if (plan_tab_.has_value() && tab.id() == *plan_tab_) {
         return true;
     }
-    return !plan_page_url_.empty() && tab.startup_url() == plan_page_url_;
+    return (!plan_page_url_.empty() && tab.startup_url() == plan_page_url_) ||
+           IsSettingsPageUrl(EffectiveUrl(tab));
 }
 
 CefRefPtr<CefBrowser> BrowserWindow::AgentBrowser(AgentTabRef ref) const {
@@ -1016,7 +1061,7 @@ CefRefPtr<CefBrowser> BrowserWindow::AgentBrowser(AgentTabRef ref) const {
 bool BrowserWindow::NavigateAgentTab(std::optional<std::size_t> index, std::string_view text) {
     CEF_REQUIRE_UI_THREAD();
     const AgentTabLookup lookup = ResolveAgentTab(index);
-    if (closing_ || !lookup.tab.has_value() || IsAgentPlanTab(lookup.tab->tab)) {
+    if (closing_ || !lookup.tab.has_value() || IsAgentPrivilegedTab(lookup.tab->tab)) {
         return false;
     }
     const AgentTabRef ref = *lookup.tab;
@@ -1162,11 +1207,8 @@ void BrowserWindow::OpenSettingsSection(std::string section) {
 
 void BrowserWindow::ShowSettingsSection(std::string section) {
     settings_focus_.Request(std::move(section));
-    if (internal_page_ == LocalPageKind::kSettings) {
-        ScheduleLocalPagesRender();
-    } else {
-        ToggleInternalPage(LocalPageKind::kSettings);
-    }
+    OpenSettingsTab();
+    ScheduleLocalPagesRender();
 }
 
 void BrowserWindow::EnsureAgentSession() {
@@ -1372,7 +1414,31 @@ bool BrowserWindow::RunAgentMenuCommand(int offset, const AgentContextChip& page
 }
 
 void BrowserWindow::RunPaletteCommand(std::string_view id) {
-    if (id == "sleep_inactive_tabs") {
+    if (id == "open_bookmarks" || id == "import_bookmarks") {
+        // The Bookmarks page holds the import menu; the palette does not open it for the person.
+        OpenBookmarksPage();
+    } else if (id == "add_bookmark") {
+        static_cast<void>(AddCurrentPageBookmark());
+    } else if (id == "toggle_global_favorite") {
+        static_cast<void>(ToggleGlobalFavoriteForCurrentPage());
+    } else if (id == "toggle_space_favorite") {
+        static_cast<void>(ToggleSpaceFavoriteForCurrentPage());
+    } else if (id == "move_global_favorite_left") {
+        static_cast<void>(MoveCurrentPageFavorite(std::nullopt, -1));
+    } else if (id == "move_global_favorite_right") {
+        static_cast<void>(MoveCurrentPageFavorite(std::nullopt, 1));
+    } else if (id == "move_space_favorite_up" || id == "move_space_favorite_down") {
+        if (!spaces_.empty()) {
+            const FavoriteScope scope{active_space().id().value};
+            static_cast<void>(
+                MoveCurrentPageFavorite(scope, id == "move_space_favorite_up" ? -1 : 1));
+        }
+    } else if (id == "new_bookmark_folder") {
+        // A direct creation keeps this palette action simple; folder editing
+        // remains available in the Bookmarks page.
+        static_cast<void>(
+            RunBookmarkMutation([this] { return bookmarks_.CreateFolder("New folder"); }));
+    } else if (id == "sleep_inactive_tabs") {
         static_cast<void>(SleepInactiveTabsNow());
     } else if (id == "agent_tasks") {
         // The Tasks strip sits on top of the panel.
@@ -1448,11 +1514,15 @@ std::string BrowserWindow::AgentPanelStateJson() const {
 
 void BrowserWindow::ScheduleLocalPagesRender() {
     RefreshAgentButtonLabel();
-    if ((agent_panel_ == nullptr && !internal_page_.has_value()) || agent_panel_render_scheduled_ ||
-        closing_) {
+    if (closing_ || agent_panel_render_scheduled_ ||
+        (agent_panel_ == nullptr && !internal_page_.has_value() && !SettingsTabLocation())) {
         return;
     }
     agent_panel_render_scheduled_ = true;
+    if (!ui_tasks_enabled_for_test_) {
+        agent_panel_render_scheduled_ = false;
+        return;
+    }
     CefPostDelayedTask(TID_UI,
                        CefCreateClosureTask(base::BindOnce(&BrowserWindow::FlushLocalPagesRender,
                                                            CefRefPtr<BrowserWindow>(this))),
@@ -1467,16 +1537,13 @@ void BrowserWindow::FlushLocalPagesRender() {
     if (agent_panel_ != nullptr) {
         agent_panel_->Render(AgentPanelStateJson());
     }
-    if (internal_page_ == LocalPageKind::kSettings && settings_page_ != nullptr) {
-        settings_page_->Render(SettingsStateJson());
-        settings_message_.clear();
-        // A focus request waits until the page has loaded; a render queued before that
-        // would otherwise replace it with a state that has no focus.
-        if (settings_page_->loaded()) {
-            settings_focus_.Clear();
-        }
-    } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
+    if (RenderSettingsPages()) {
+        return;
+    }
+    if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
+    } else if (internal_page_ == LocalPageKind::kBookmarks && bookmarks_page_ != nullptr) {
+        bookmarks_page_->Render(BookmarksStateJson());
     }
 }
 
@@ -1493,13 +1560,14 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
             HandleStartPageMessage(message);
             return;
         case LocalPageKind::kSettings:
-            HandleSettingsMessage(message);
+            // Settings lives in a tab and only its exact document may reach the handler through
+            // OnConsoleMessage. Headless behavior tests use HandleSettingsMessageForTest.
             return;
         case LocalPageKind::kTabOverview:
             HandleOverviewMessage(message);
             return;
         case LocalPageKind::kBookmarks:
-            // The Bookmarks dispatcher is not connected yet, so reject its messages.
+            HandleBookmarksMessage(message);
             return;
         case LocalPageKind::kReport:
             // Report pages live in tabs and reach HandleReportPageMessage through
@@ -1554,10 +1622,11 @@ json::Value BrowserWindow::ThemeJson() const {
 LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
     switch (kind) {
         case LocalPageKind::kSettings:
-            return settings_page_.get();
+            return nullptr;
         case LocalPageKind::kTabOverview:
             return overview_page_.get();
         case LocalPageKind::kBookmarks:
+            return bookmarks_page_.get();
         case LocalPageKind::kAgent:
         case LocalPageKind::kStart:
         case LocalPageKind::kReport:
@@ -1569,30 +1638,82 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
 
 void BrowserWindow::ToggleTabOverview() { ToggleInternalPage(LocalPageKind::kTabOverview); }
 
-void BrowserWindow::ToggleSettings() { ToggleInternalPage(LocalPageKind::kSettings); }
+void BrowserWindow::OpenSettings() { OpenSettingsTab(); }
+
+void BrowserWindow::OpenBookmarksPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (internal_page_ == LocalPageKind::kBookmarks) {
+        if (bookmarks_page_ != nullptr) {
+            bookmarks_page_->Focus();
+        }
+        return;
+    }
+    bookmarks_page_status_.reset();
+    ToggleInternalPage(LocalPageKind::kBookmarks);
+}
 
 void BrowserWindow::OpenBlockerSettings() { ShowSettingsSection("privacy"); }
+
+std::optional<std::pair<std::size_t, std::size_t>> BrowserWindow::SettingsTabLocation() const {
+    for (std::size_t space_index = 0; space_index < spaces_.size(); ++space_index) {
+        const Space& space = spaces_[space_index];
+        for (std::size_t tab_index = 0; tab_index < space.tab_count(); ++tab_index) {
+            if (IsSettingsPageUrl(EffectiveUrl(space.tabs()[tab_index]))) {
+                return std::pair{space_index, tab_index};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+void BrowserWindow::OpenSettingsTab() {
+    CEF_REQUIRE_UI_THREAD();
+    // Headless tests cannot ask CEF to build the data document. Tests of Settings tabs inject
+    // that exact URL through SetSettingsPageUrlForTest; other headless command tests keep the
+    // historical no-chrome no-op behavior.
+    if (closing_ || (chrome_ == nullptr && settings_page_url_.empty())) {
+        return;
+    }
+    if (settings_page_url_.empty()) {
+        settings_page_url_ = LocalPage::PageUrl(LocalPageKind::kSettings);
+    }
+    provider_statuses_.reset();  // re-detect agents installed meanwhile
+    HideInternalPage();
+    if (const auto location = SettingsTabLocation()) {
+        SelectTabWithOneAttach(location->first, location->second);
+    } else {
+        AppendTabToActiveSpace(SettingsPageUrl());
+    }
+}
+
+bool BrowserWindow::CloseSettingsTab() {
+    const auto location = SettingsTabLocation();
+    return location.has_value() && CloseTabAt(location->first, location->second);
+}
 
 void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_ || chrome_ == nullptr || kind == LocalPageKind::kAgent ||
-        kind == LocalPageKind::kStart || kind == LocalPageKind::kReport ||
-        kind == LocalPageKind::kPlan) {
+        kind == LocalPageKind::kSettings || kind == LocalPageKind::kStart ||
+        kind == LocalPageKind::kReport || kind == LocalPageKind::kPlan) {
         return;
     }
     if (internal_page_ == kind) {
         HideInternalPage();
         return;
     }
-    std::unique_ptr<LocalPage>& page =
-        kind == LocalPageKind::kSettings ? settings_page_ : overview_page_;
-    if (page == nullptr) {
-        page = std::make_unique<LocalPage>(kind, *this);
+    std::unique_ptr<LocalPage>* page = nullptr;
+    if (kind == LocalPageKind::kTabOverview) {
+        page = &overview_page_;
+    } else if (kind == LocalPageKind::kBookmarks) {
+        page = &bookmarks_page_;
+    } else {
+        return;
     }
-    if (kind == LocalPageKind::kSettings) {
-        provider_statuses_.reset();  // re-detect agents installed meanwhile
+    if (*page == nullptr) {
+        *page = std::make_unique<LocalPage>(kind, *this);
     }
-    // Settings and All tabs replace the page the find bar was searching.
+    // Local slot pages replace the page the find bar was searching.
     CloseFindBar(/*refocus_page=*/false);
     internal_page_ = kind;
     show_internal_page_ = true;
@@ -1607,6 +1728,9 @@ void BrowserWindow::ToggleInternalPage(LocalPageKind kind) {
 void BrowserWindow::HideInternalPage() {
     if (!internal_page_.has_value()) {
         return;
+    }
+    if (internal_page_ == LocalPageKind::kBookmarks) {
+        bookmarks_page_status_.reset();
     }
     internal_page_.reset();
     show_internal_page_ = false;
@@ -1839,6 +1963,269 @@ std::string BrowserWindow::TabOverviewStateJson() const {
             .Set("overview", Value::MakeObject().Set("spaces", std::move(spaces))));
 }
 
+std::string BrowserWindow::BookmarksStateJson() const {
+    using json::Value;
+    Value folders = Value::MakeArray();
+    Value bookmarks = Value::MakeArray();
+    const BookmarkState& state = bookmarks_.state();
+    for (const BookmarkFolder& folder : state.folders) {
+        folders.Push(
+            Value::MakeObject()
+                .Set("id", Value::Int(static_cast<std::int64_t>(folder.id)))
+                .Set("name", Value::String(folder.name))
+                .Set("count", Value::Int(static_cast<std::int64_t>(folder.bookmark_ids.size()))));
+    }
+    for (const Bookmark& bookmark : state.bookmarks) {
+        const BookmarkFolder* folder = nullptr;
+        for (const BookmarkFolder& candidate : state.folders) {
+            if (std::find(candidate.bookmark_ids.begin(), candidate.bookmark_ids.end(),
+                          bookmark.id) != candidate.bookmark_ids.end()) {
+                folder = &candidate;
+                break;
+            }
+        }
+        Value spaces = Value::MakeArray();
+        for (const auto& [space_id, ids] : state.space_favorite_ids) {
+            if (std::find(ids.begin(), ids.end(), bookmark.id) == ids.end()) {
+                continue;
+            }
+            const Space* space = FindSpace(SpaceId{space_id});
+            if (space == nullptr) {
+                continue;
+            }
+            spaces.Push(Value::MakeObject()
+                            .Set("id", Value::Int(static_cast<std::int64_t>(space_id)))
+                            .Set("name", Value::String(space->name())));
+        }
+        const bool global =
+            std::find(state.global_favorite_ids.begin(), state.global_favorite_ids.end(),
+                      bookmark.id) != state.global_favorite_ids.end();
+        bookmarks.Push(Value::MakeObject()
+                           .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
+                           .Set("title", Value::String(bookmark.title))
+                           .Set("url", Value::String(bookmark.url))
+                           .Set("host", Value::String(UrlHost(bookmark.url)))
+                           .Set("folder_id", Value::Int(static_cast<std::int64_t>(
+                                                 folder != nullptr ? folder->id : 0)))
+                           .Set("folder_path", Value::String(folder != nullptr ? folder->name : ""))
+                           .Set("global", Value::Bool(global))
+                           .Set("spaces", std::move(spaces)));
+    }
+    Value sources = Value::MakeArray();
+    for (const ImportSourceInfo& source : DetectInstalledSources(UserBaseHome())) {
+        if (source.available && source.id != ImportSource::kArc) {
+            sources.Push(Value::MakeObject()
+                             .Set("id", Value::String(std::string(ImportSourceId(source.id))))
+                             .Set("label", Value::String(source.display_name)));
+        }
+    }
+    Value result = Value::MakeObject()
+                       .Set("theme", ThemeJson())
+                       .Set("folders", std::move(folders))
+                       .Set("bookmarks", std::move(bookmarks))
+                       .Set("selected_folder",
+                            selected_bookmark_folder_.has_value() &&
+                                    bookmarks_.FindFolder(*selected_bookmark_folder_) != nullptr
+                                ? Value::Int(static_cast<std::int64_t>(*selected_bookmark_folder_))
+                                : Value::String("all"))
+                       .Set("import_sources", std::move(sources));
+    if (!spaces_.empty()) {
+        result.Set("current_space",
+                   Value::MakeObject()
+                       .Set("id", Value::Int(static_cast<std::int64_t>(active_space().id().value)))
+                       .Set("name", Value::String(active_space().name())));
+    }
+    if (failed_bookmark_mutation_.has_value()) {
+        result.Set(
+            "status",
+            Value::MakeObject()
+                .Set("kind", Value::String("error"))
+                .Set("text", Value::String(failed_bookmark_mutation_->message))
+                .Set("retry", Value::Bool(static_cast<bool>(failed_bookmark_mutation_->retry))));
+    } else {
+        result.Set("status", Value::Null());
+    }
+    if (bookmarks_page_status_.has_value()) {
+        result.Set("page_status", Value::MakeObject()
+                                      .Set("kind", Value::String(bookmarks_page_status_->kind))
+                                      .Set("text", Value::String(bookmarks_page_status_->message)));
+    } else {
+        result.Set("page_status", Value::Null());
+    }
+    return json::Serialize(result);
+}
+
+void BrowserWindow::HandleBookmarksMessage(const json::Value& message) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::string_view type = message.StringOr("type", "");
+    const auto valid_id = [&message](std::string_view key) -> std::optional<std::uint64_t> {
+        const json::Value* value = message.FindMember(key);
+        if (value == nullptr || !value->IsInt() || value->int_val <= 0) {
+            return std::nullopt;
+        }
+        return static_cast<std::uint64_t>(value->int_val);
+    };
+    const auto valid_text = [&message](std::string_view key, std::size_t max,
+                                       bool nonempty) -> std::optional<std::string> {
+        const json::Value* value = message.FindMember(key);
+        if (value == nullptr || !value->IsString() || value->string_val.size() > max ||
+            (nonempty && value->string_val.empty())) {
+            return std::nullopt;
+        }
+        return value->string_val;
+    };
+    const auto reject = [&type] {
+        fprintf(stderr, "island: rejected Bookmarks message: %.*s\n", static_cast<int>(type.size()),
+                type.data());
+    };
+    const auto finish = [this](BookmarkResult result) {
+        if (!result.ok()) {
+            ScheduleLocalPagesRender();
+        }
+    };
+    if (type == "ready") {
+        ScheduleLocalPagesRender();
+        return;
+    }
+    // Page feedback describes the preceding interaction only. Durable save failures live in
+    // failed_bookmark_mutation_ instead, so their Retry action remains visible.
+    bookmarks_page_status_.reset();
+    if (type == "select-folder") {
+        const json::Value* value = message.FindMember("id");
+        if (value != nullptr && value->IsString() && value->string_val == "all") {
+            selected_bookmark_folder_.reset();
+            ScheduleLocalPagesRender();
+            return;
+        }
+        const std::optional<std::uint64_t> id = valid_id("id");
+        if (!id || bookmarks_.FindFolder(*id) == nullptr) {
+            reject();
+            return;
+        }
+        selected_bookmark_folder_ = *id;
+        ScheduleLocalPagesRender();
+        return;
+    }
+    if (type == "retry") {
+        finish(RetryLastBookmarkMutation());
+        return;
+    }
+    if (type == "folder:create") {
+        const auto name = valid_text("name", 120, true);
+        if (!name) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, name = *name] { return bookmarks_.CreateFolder(name); }));
+        return;
+    }
+    if (type == "folder:rename") {
+        const auto id = valid_id("id");
+        const auto name = valid_text("name", 120, true);
+        if (!id || !name || bookmarks_.FindFolder(*id) == nullptr) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation(
+            [this, id = *id, name = *name] { return bookmarks_.RenameFolder(id, name); }));
+        return;
+    }
+    if (type == "folder:delete") {
+        const auto id = valid_id("id");
+        const auto mode = valid_text("mode", 6, true);
+        if (!id || !mode || (*mode != "move" && *mode != "delete") ||
+            bookmarks_.FindFolder(*id) == nullptr) {
+            reject();
+            return;
+        }
+        const BookmarkResult result = RunBookmarkMutation([this, id = *id, mode = *mode] {
+            return bookmarks_.DeleteFolderWithContents(id, mode == "move");
+        });
+        finish(result);
+        if (result.ok() && selected_bookmark_folder_ == id) {
+            selected_bookmark_folder_.reset();
+        }
+        return;
+    }
+    if (type == "import") {
+        const auto source_id = valid_text("source_id", 32, true);
+        const std::optional<ImportSource> source =
+            source_id ? ImportSourceFromId(*source_id) : std::nullopt;
+        bool available = false;
+        if (source.has_value()) {
+            for (const ImportSourceInfo& info : DetectInstalledSources(UserBaseHome())) {
+                if (info.id == *source && info.available) {
+                    available = true;
+                    break;
+                }
+            }
+        }
+        if (!source_id || !source || !available) {
+            reject();
+            return;
+        }
+        const BookmarkImportResult result = ImportBookmarksFromBrowser(*source_id);
+        if (!result.durable_failure) {
+            bookmarks_page_status_ =
+                BookmarksPageStatus{.kind = result.ok ? "ok" : "error", .message = result.text};
+        }
+        ScheduleLocalPagesRender();
+        return;
+    }
+    const auto bookmark_id = valid_id("id");
+    if (!bookmark_id || bookmarks_.FindBookmark(*bookmark_id) == nullptr) {
+        reject();
+        return;
+    }
+    if (type == "bookmarks:edit") {
+        const auto title = valid_text("title", 500, false);
+        const auto url = valid_text("url", 4000, true);
+        if (!title || !url) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, id = *bookmark_id, title = *title, url = *url] {
+            return bookmarks_.EditBookmark(id, title, url);
+        }));
+    } else if (type == "bookmarks:delete") {
+        finish(RunBookmarkMutation(
+            [this, id = *bookmark_id] { return bookmarks_.DeleteBookmark(id); }));
+    } else if (type == "bookmarks:move") {
+        const auto folder_id = valid_id("folder_id");
+        if (!folder_id || bookmarks_.FindFolder(*folder_id) == nullptr) {
+            reject();
+            return;
+        }
+        finish(RunBookmarkMutation([this, id = *bookmark_id, folder = *folder_id] {
+            return bookmarks_.MoveBookmark(id, folder);
+        }));
+    } else if (type == "favorite:toggle-global" || type == "favorite:toggle-space") {
+        if (type == "favorite:toggle-space" && spaces_.empty()) {
+            reject();
+            return;
+        }
+        const FavoriteScope scope = type == "favorite:toggle-global"
+                                        ? FavoriteScope{}
+                                        : FavoriteScope{active_space().id().value};
+        finish(ToggleFavorite(scope, *bookmark_id));
+    } else if (type == "bookmarks:open" || type == "bookmarks:open-new-tab") {
+        const Bookmark* bookmark = bookmarks_.FindBookmark(*bookmark_id);
+        const ValidatedAddress address = address_validator_ ? address_validator_(bookmark->url)
+                                                            : ParseAndValidate(bookmark->url);
+        if (!address.is_valid()) {
+            bookmarks_page_status_ = BookmarksPageStatus{
+                .kind = "error", .message = "This bookmark has an unsupported address."};
+            ScheduleLocalPagesRender();
+            return;
+        }
+        if (type == "bookmarks:open-new-tab") ExecuteCommand(BrowserCommand::kNewTab);
+        HideInternalPage();
+        SubmitPaletteUrl(bookmark->url, address);
+    } else {
+        reject();
+    }
+}
+
 bool BrowserWindow::SetSpaceColorFromHex(std::size_t space_index, std::string_view hex) {
     if (space_index >= spaces_.size() || hex.size() != 7 || hex.front() != '#') {
         return false;
@@ -1967,7 +2354,7 @@ void BrowserWindow::HandleSettingsMessage(const json::Value& message) {
         return;
     }
     if (type == "close") {
-        HideInternalPage();
+        static_cast<void>(CloseSettingsTab());
         return;
     }
     if (HandleUpdateMessage(type, message)) {
@@ -2484,29 +2871,50 @@ std::string BrowserWindow::ImportFromBrowser(std::string_view source_id) {
         return "Imported " + std::to_string(added) + (added == 1 ? " space" : " spaces") +
                " with " + std::to_string(tabs) + " pinned tabs from Arc.";
     }
-    const std::optional<std::vector<BookmarkItem>> items =
-        ImportFromSource(*source, UserBaseHome());
+    const BookmarkImportResult result = ImportBookmarksFromBrowser(source_id);
+    if (result.durable_failure) {
+        return {};
+    }
+    return result.text;
+}
+
+BrowserWindow::BookmarkImportResult BrowserWindow::ImportBookmarksFromBrowser(
+    std::string_view source_id) {
+    CEF_REQUIRE_UI_THREAD();
+    const std::optional<ImportSource> source = ImportSourceFromId(source_id);
+    if (!source.has_value() || *source == ImportSource::kArc || closing_) {
+        return {.ok = false, .text = "Unknown import source."};
+    }
     std::string name(source_id);
     for (const ImportSourceInfo& info : DetectInstalledSources(UserBaseHome())) {
         if (info.id == *source) {
             name = info.display_name;
+            break;
         }
     }
+    std::size_t unreadable_chromium_profiles = 0;
+    const std::optional<std::vector<BookmarkItem>> items =
+        ImportFromSource(*source, UserBaseHome(), &unreadable_chromium_profiles);
     if (!items.has_value()) {
-        return "Could not read " + name + " bookmarks.";
+        return {.ok = false, .text = "Could not read " + name + " bookmarks."};
     }
     const BookmarkResult merged =
         RunBookmarkMutation([this, folder = "Imported from " + name, items = *items] {
             return bookmarks_.Import(folder, items);
         });
     if (!merged.ok()) {
-        // The status row carries this failure (RunBookmarkMutation), so it is not repeated here.
-        return {};
+        return {.ok = false, .durable_failure = true, .text = merged.message};
     }
     const std::size_t added = merged.added;
-    return added == 0 ? "No new bookmarks in " + name + "."
-                      : "Imported " + std::to_string(added) + " bookmarks from " + name +
-                            ". Find them in the command palette.";
+    std::string text = added == 0 ? "No new bookmarks in " + name + "."
+                                  : "Imported " + std::to_string(added) + " bookmarks from " +
+                                        name + ". Find them in the command palette.";
+    if (unreadable_chromium_profiles != 0) {
+        const std::string source_name = *source == ImportSource::kChrome ? "Chrome" : name;
+        text += " " + std::to_string(unreadable_chromium_profiles) + " " + source_name +
+                " profile" + (unreadable_chromium_profiles == 1 ? "" : "s") + " could not be read.";
+    }
+    return {.ok = true, .text = std::move(text)};
 }
 
 bool BrowserWindow::ReopenClosedTab() {
@@ -3141,14 +3549,54 @@ void BrowserWindow::RenderStartPages() {
     }
 }
 
+std::optional<std::string> BrowserWindow::SettingsRenderState(const Tab& tab) const {
+    if (!tab.settings_document_ready()) {
+        return std::nullopt;
+    }
+    return SettingsStateJson();
+}
+
+bool BrowserWindow::RenderSettingsFrame(Tab& tab, CefRefPtr<CefFrame> frame) {
+    if (frame == nullptr || !IsSettingsPageUrl(frame->GetURL().ToString())) {
+        return false;
+    }
+    const std::optional<std::string> state = SettingsRenderState(tab);
+    if (!state.has_value()) {
+        return false;
+    }
+    frame->ExecuteJavaScript(LocalPage::RenderScript(*state), SettingsPageUrl(), 0);
+    settings_message_.clear();
+    settings_focus_.Clear();
+    return true;
+}
+
+bool BrowserWindow::RenderSettingsPages() {
+    if (closing_) {
+        return false;
+    }
+    bool rendered = false;
+    for (Space& space : spaces_) {
+        for (Tab& tab : space.tabs()) {
+            const CefRefPtr<CefBrowser> browser = tab.browser();
+            const CefRefPtr<CefFrame> frame =
+                browser != nullptr ? browser->GetMainFrame() : nullptr;
+            if (frame != nullptr && IsSettingsPageUrl(frame->GetURL().ToString()) &&
+                RenderSettingsFrame(tab, frame)) {
+                rendered = true;
+            }
+        }
+    }
+    return rendered;
+}
+
 bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t,
                                      const CefString& message, const CefString&, int) {
     CEF_REQUIRE_UI_THREAD();
     // Tabs show arbitrary web pages, so this bridge is closed to everything but
-    // Island's own start and report pages: the message must carry the bridge
+    // Island's own start, Settings and report pages: the message must carry the bridge
     // prefix, come from a tab, and the tab's main frame must be exactly the
-    // start page document (or a report page document with a stored report id). Anything else logs
-    // as ordinary console output. (An ask_agent message from a site would otherwise be a
+    // start or Settings document (or a report document with a stored report id). Anything else
+    // logs as ordinary console output. (An ask_agent message from a site would otherwise be a
     // prompt-injection channel.)
     const std::string text = message.ToString();
     if (!closing_ && text.rfind(kSleepProbePrefix, 0) == 0) {
@@ -3166,8 +3614,9 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     }
     const std::string frame_url = frame->GetURL().ToString();
     const bool is_start_page = frame_url == StartPageUrl();
+    const bool is_settings_page = !is_start_page && IsSettingsPageUrl(frame_url);
     // The Plan tab is a page of its own: its messages edit the research plan.
-    const bool is_plan_page = !is_start_page && IsPlanPageUrl(frame_url);
+    const bool is_plan_page = !is_start_page && !is_settings_page && IsPlanPageUrl(frame_url);
     // The reader document is the other page this bridge serves: the tab must be showing exactly
     // the data: URL Island built for it (and the message must carry that document's token).
     const auto reader = reader_sessions_.find(owner->id());
@@ -3175,9 +3624,10 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
                                 frame_url.size() == reader->second.url_size &&
                                 std::hash<std::string_view>{}(frame_url) == reader->second.url_hash;
     // A report page speaks for the one report its URL names.
-    const std::optional<std::string> report_id =
-        is_start_page || is_reader_page ? std::nullopt : ReportIdForUrl(frame_url);
-    if (!is_start_page && !is_reader_page && !is_plan_page && !report_id) {
+    const std::optional<std::string> report_id = is_start_page || is_settings_page || is_reader_page
+                                                     ? std::nullopt
+                                                     : ReportIdForUrl(frame_url);
+    if (!is_start_page && !is_settings_page && !is_reader_page && !is_plan_page && !report_id) {
         return false;
     }
     const std::optional<json::Value> decoded = LocalPage::DecodeMessage(text);
@@ -3186,6 +3636,11 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     }
     if (is_reader_page) {
         HandleReaderMessage(*owner, *decoded);
+    } else if (is_settings_page) {
+        if (decoded->StringOr("type", "") == "ready") {
+            owner->SetSettingsDocumentReady(true);
+        }
+        return HandleSettingsBridgeMessage(frame_url, *decoded);
     } else if (report_id) {
         HandleReportPageMessage(*decoded, *report_id, browser);
     } else if (is_plan_page) {
@@ -3193,6 +3648,15 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     } else {
         HandleStartPageMessage(*decoded, browser);
     }
+    return true;
+}
+
+bool BrowserWindow::HandleSettingsBridgeMessage(std::string_view frame_url,
+                                                const json::Value& message) {
+    if (!IsSettingsPageUrl(frame_url)) {
+        return false;
+    }
+    HandleSettingsMessage(message);
     return true;
 }
 
@@ -3289,7 +3753,7 @@ void BrowserWindow::HandleStartPageMessage(const json::Value& message,
 
 void BrowserWindow::CloseAgentPanelAndSession() {
     internal_page_.reset();
-    for (std::unique_ptr<LocalPage>* page : {&agent_panel_, &settings_page_, &overview_page_}) {
+    for (std::unique_ptr<LocalPage>* page : {&agent_panel_, &overview_page_, &bookmarks_page_}) {
         if (*page != nullptr) {
             (*page)->Close();
             page->reset();
@@ -3320,12 +3784,15 @@ void BrowserWindow::OpenMoreGlobalFavorites() {
 
 void BrowserWindow::AddCurrentPageToGlobalFavorites() {
     CEF_REQUIRE_UI_THREAD();
-    const Tab* active = DisplayedTab();
-    if (active == nullptr) {
-        return;
-    }
-    const NavigationSnapshot snapshot = active->navigation_state().snapshot();
-    static_cast<void>(AddFavoriteByUrl(std::nullopt, snapshot.page_title, snapshot.url));
+    // The page on screen, the same one the palette's commands act on, fixed before the mutation.
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    static_cast<void>(RunBookmarkMutation([this, page]() -> BookmarkResult {
+        if (!page.has_value()) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "Only web pages can be favorites."};
+        }
+        return bookmarks_.AddFavoriteByUrl(std::nullopt, page->title, page->url);
+    }));
 }
 
 void BrowserWindow::RetryFailedBookmarkMutation() {
@@ -3750,12 +4217,16 @@ void BrowserWindow::UpdateAddressBarForNavigation(const NavigationSnapshot& snap
     }
 
     const Tab* shown_tab = DisplayedTab();
-    const std::string url = shown_tab != nullptr && ReaderActiveFor(*shown_tab)
-                                ? EffectiveUrl(*shown_tab)
-                                : snapshot.url;
+    const std::string url =
+        shown_tab != nullptr && (ReaderActiveFor(*shown_tab) || snapshot.url.empty())
+            ? EffectiveUrl(*shown_tab)
+            : snapshot.url;
     if (!start_page_url_.empty() && url == start_page_url_) {
         address_bar_model_.UpdateInternalPage(
             std::string(LocalPage::DisplayUrl(LocalPageKind::kStart)));
+    } else if (!settings_page_url_.empty() && IsSettingsPageUrl(url)) {
+        address_bar_model_.UpdateInternalPage(
+            std::string(LocalPage::DisplayUrl(LocalPageKind::kSettings)));
     } else if (!plan_page_url_.empty() && url == plan_page_url_) {
         address_bar_model_.UpdateInternalPage(
             std::string(LocalPage::DisplayUrl(LocalPageKind::kPlan)));
@@ -3765,6 +4236,10 @@ void BrowserWindow::UpdateAddressBarForNavigation(const NavigationSnapshot& snap
         address_bar_model_.UpdateInternalPage(
             std::string(LocalPage::DisplayUrl(LocalPageKind::kReport)) +
             url.substr(report_page_url_.size()));
+    } else if (std::optional<std::string> query = SearchQueryFromResultsUrl(url);
+               query.has_value()) {
+        // The results page of a search engine shows its query; the URL stays in the tab.
+        address_bar_model_.UpdateSearchQuery(std::move(*query));
     } else {
         address_bar_model_.UpdateCommittedUrl(url);
     }
@@ -3936,6 +4411,26 @@ void BrowserWindow::CompleteFaviconDownloadForTest(TabId tab, const std::string&
     OnFaviconDownloaded(tab, icon_url, std::move(image));
 }
 
+namespace {
+
+// CEF's disposition as the CEF-free policy sees it (link_open_policy.h).
+LinkDisposition LinkDispositionFrom(cef_window_open_disposition_t disposition) {
+    switch (disposition) {
+        case CEF_WOD_CURRENT_TAB:
+            return LinkDisposition::kCurrentTab;
+        case CEF_WOD_NEW_FOREGROUND_TAB:
+            return LinkDisposition::kNewForegroundTab;
+        case CEF_WOD_NEW_BACKGROUND_TAB:
+            return LinkDisposition::kNewBackgroundTab;
+        case CEF_WOD_NEW_WINDOW:
+            return LinkDisposition::kNewWindow;
+        default:
+            return LinkDisposition::kOther;
+    }
+}
+
+}  // namespace
+
 bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, int,
                                   const CefString& target_url, const CefString&,
                                   cef_window_open_disposition_t target_disposition,
@@ -3943,13 +4438,12 @@ bool BrowserWindow::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
                                   CefRefPtr<CefClient>&, CefBrowserSettings&,
                                   CefRefPtr<CefDictionaryValue>&, bool*) {
     CEF_REQUIRE_UI_THREAD();
-    // Popups and new windows stay rejected (Island is single-window). A user-initiated new-tab
-    // open (Cmd/Ctrl+click, middle-click, target=_blank) becomes a peek instead.
-    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
-         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
-        user_gesture && IsPeekLinkSource(browser)) {
-        DeferPeek(target_url.ToString());
-    }
+    // Popups stay rejected (Island is single-window), so the popup itself is always cancelled.
+    // What the person asked for is decided by link_open_policy.h: Cmd/Ctrl+click and middle-click
+    // peek (CEF reports both alike), Shift+click and plain or script-with-gesture new tabs open a
+    // foreground tab.
+    HandleLinkOpen(browser, target_url.ToString(),
+                   DecideLinkOpen(LinkDispositionFrom(target_disposition), user_gesture));
     return true;
 }
 
@@ -3957,15 +4451,15 @@ CefRefPtr<CefContextMenuHandler> BrowserWindow::GetContextMenuHandler() { return
 
 bool BrowserWindow::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                      const CefString& target_url,
-                                     cef_window_open_disposition_t target_disposition, bool) {
+                                     cef_window_open_disposition_t target_disposition,
+                                     bool user_gesture) {
     CEF_REQUIRE_UI_THREAD();
-    if ((target_disposition == CEF_WOD_NEW_FOREGROUND_TAB ||
-         target_disposition == CEF_WOD_NEW_BACKGROUND_TAB) &&
-        IsPeekLinkSource(browser)) {
-        DeferPeek(target_url.ToString());
-        return true;
+    const LinkDisposition disposition = LinkDispositionFrom(target_disposition);
+    if (disposition == LinkDisposition::kCurrentTab || disposition == LinkDisposition::kOther) {
+        return false;
     }
-    return false;
+    HandleLinkOpen(browser, target_url.ToString(), DecideLinkOpen(disposition, user_gesture));
+    return true;
 }
 
 void BrowserWindow::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
@@ -4033,10 +4527,27 @@ void BrowserWindow::DeferPeek(const std::string& url) {
                             CefRefPtr<BrowserWindow>(this), url)));
 }
 
+void BrowserWindow::HandleLinkOpen(CefRefPtr<CefBrowser> browser, const std::string& url,
+                                   LinkOpenAction action) {
+    if (action == LinkOpenAction::kReject || !IsPeekLinkSource(browser)) {
+        return;
+    }
+    if (action == LinkOpenAction::kPeek) {
+        DeferPeek(url);
+        return;
+    }
+    // Like the peek, the tab opens on the next UI task, outside CEF's dispatch.
+    CefPostTask(TID_UI, CefCreateClosureTask(base::BindOnce(
+                            [](CefRefPtr<BrowserWindow> window, std::string target) {
+                                static_cast<void>(window->OpenLinkTab(target));
+                            },
+                            CefRefPtr<BrowserWindow>(this), url)));
+}
+
 PeekOverlay& BrowserWindow::EnsurePeek() {
     if (peek_ == nullptr) {
-        peek_ =
-            std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()));
+        peek_ = std::make_unique<PeekOverlay>(*this, window_, ResolvedTokens(ResolvedChromeTheme()),
+                                              icon_resource_root_);
     }
     return *peek_;
 }
@@ -4052,6 +4563,8 @@ bool BrowserWindow::OpenPeek(std::string_view url) {
     }
     PeekOverlay& peek = EnsurePeek();
     peek.Open(address.url, active_space().request_context(), chrome_snapshot_.content_bounds);
+    // An open card takes the neutral overlay focus ring (no accent) like the palettes do.
+    OnOverlayFocusRingChanged();
     return peek.open();
 }
 
@@ -4062,19 +4575,34 @@ void BrowserWindow::ClosePeek() {
     }
 }
 
+bool BrowserWindow::OpenLinkTab(std::string_view url) {
+    CEF_REQUIRE_UI_THREAD();
+    if (closing_ || window_ == nullptr) {
+        return false;
+    }
+    const ValidatedAddress address = address_validator_(url);
+    if (!address.is_valid() || !IsWebUrl(address.url)) {
+        return false;
+    }
+    AddTabToActiveSpace(address.url, TabPlacement::kAfterActive);
+    return true;
+}
+
 void BrowserWindow::OnPeekOpenAsTab(std::string url) {
     CEF_REQUIRE_UI_THREAD();
     if (closing_) {
         return;
     }
-    // The card's page is reopened as a real tab of the active space; the card's browser (and its
-    // history and scroll state) is not transferred.
-    AppendTabToActiveSpace(std::move(url));
+    // The card's page is reopened as a real tab of the active space, right after the current tab
+    // like a link open; the card's browser (and its history and scroll state) is not transferred.
+    AddTabToActiveSpace(std::move(url), TabPlacement::kAfterActive);
 }
 
 void BrowserWindow::OnPeekClosed() {
     CEF_REQUIRE_UI_THREAD();
     if (!closing_) {
+        // The card's neutral focus ring goes away with it: the window's ring is recomputed.
+        OnOverlayFocusRingChanged();
         FocusBrowserView();
     }
 }
@@ -4184,6 +4712,7 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
         RefreshAddressIndicators();
     }
     owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
+    owner->SetSettingsDocumentReady(false);
     if (find_tab_.has_value() && *find_tab_ == owner->id()) {
         // The old counts describe a document that is gone.
         find_model_.ClearResults();
@@ -4212,6 +4741,9 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     RestoreSavedScroll(*owner, frame);
     if (frame->GetURL().ToString() == StartPageUrl()) {
         frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
+    } else if (IsSettingsPageUrl(frame->GetURL().ToString())) {
+        owner->SetSettingsDocumentReady(true);
+        static_cast<void>(RenderSettingsFrame(*owner, frame));
     } else if (const std::optional<std::string> report_id =
                    ReportIdForUrl(frame->GetURL().ToString())) {
         RenderReportFrame(frame, *report_id);
@@ -4549,6 +5081,10 @@ void BrowserWindow::ApplyKeymap() {
                                 false, true);
     }
     window_->SetAccelerator(kEscapeAccelerator, kVirtualKeyEscape, false, false, false, true);
+#if defined(__APPLE__)
+    // NSMenu owns command-key dispatch on macOS, so its equivalents follow the same live map.
+    RefreshMacMenuKeymap(keymap_);
+#endif
     RefreshAgentEntry();
 }
 
@@ -4620,7 +5156,7 @@ void BrowserWindow::RunKeyAction(KeyAction action) {
             ToggleInternalPage(LocalPageKind::kTabOverview);
             return;
         case KeyAction::kSettings:
-            ToggleInternalPage(LocalPageKind::kSettings);
+            OpenSettings();
             return;
         case KeyAction::kReopenClosedTab:
             ExecuteCommand(BrowserCommand::kReopenClosedTab);
@@ -4963,8 +5499,8 @@ bool BrowserWindow::AttachedViewIsLive(const AttachedView& attached) {
         return true;
     }
     if (attached.local_page != nullptr) {
-        return attached.local_page == settings_page_.get() ||
-               attached.local_page == overview_page_.get();
+        return attached.local_page == overview_page_.get() ||
+               attached.local_page == bookmarks_page_.get();
     }
     // A closed tab or a tab whose view was replaced no longer owns this attachment.
     return TabForAttachedView(attached) != nullptr;
@@ -5317,6 +5853,196 @@ BookmarkResult BrowserWindow::RemoveFavorite(FavoriteScope scope, std::uint64_t 
         [this, scope, bookmark_id] { return bookmarks_.RemoveFavorite(scope, bookmark_id); });
 }
 
+BookmarkResult BrowserWindow::ToggleGlobalFavoriteForCurrentPage() {
+    CEF_REQUIRE_UI_THREAD();
+    return ToggleFavoriteForCurrentPage(std::nullopt);
+}
+
+BookmarkResult BrowserWindow::ToggleSpaceFavoriteForCurrentPage() {
+    CEF_REQUIRE_UI_THREAD();
+    if (spaces_.empty()) {
+        return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                              .message = "No current space."};
+    }
+    return ToggleFavoriteForCurrentPage(FavoriteScope{active_space().id().value});
+}
+
+const std::vector<std::uint64_t>* BrowserWindow::FavoriteIdsFor(FavoriteScope scope) const {
+    const BookmarkState& state = bookmarks_.state();
+    if (!scope.has_value()) {
+        return &state.global_favorite_ids;
+    }
+    const auto found = state.space_favorite_ids.find(*scope);
+    return found == state.space_favorite_ids.end() ? nullptr : &found->second;
+}
+
+bool BrowserWindow::IsFavorite(FavoriteScope scope, std::uint64_t bookmark_id) const {
+    const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+    return favorite_ids != nullptr && std::find(favorite_ids->begin(), favorite_ids->end(),
+                                                bookmark_id) != favorite_ids->end();
+}
+
+BookmarkResult BrowserWindow::ToggleFavorite(FavoriteScope scope, std::uint64_t bookmark_id) {
+    CEF_REQUIRE_UI_THREAD();
+    // The direction is decided now, so a Retry repeats this change rather than flipping it.
+    const bool remove = IsFavorite(scope, bookmark_id);
+    return RunBookmarkMutation([this, scope, bookmark_id, remove] {
+        return remove ? bookmarks_.RemoveFavorite(scope, bookmark_id)
+                      : bookmarks_.AddFavorite(scope, bookmark_id);
+    });
+}
+
+std::optional<BrowserWindow::BookmarkablePage> BrowserWindow::CurrentBookmarkablePage() const {
+    // A local slot page (Bookmarks or All tabs) fills the slot the person sees, so it is the
+    // page on screen and it cannot be bookmarked.
+    if (internal_page_.has_value() && show_internal_page_) {
+        return std::nullopt;
+    }
+    // The displayed favorite's virtual tab is the page on screen; the ordinary tab is hidden
+    // behind it. A page that has not loaded yet names its startup address.
+    const Tab* tab = DisplayedTab();
+    if (tab == nullptr) {
+        return std::nullopt;
+    }
+    const NavigationSnapshot& nav = tab->navigation_state().snapshot();
+    const std::string& url = nav.url.empty() ? tab->startup_url() : nav.url;
+    if (!IsWebUrl(url)) {
+        return std::nullopt;
+    }
+    const std::string host = UrlHost(url);
+    std::string title = !nav.page_title.empty() ? nav.page_title : (!host.empty() ? host : url);
+    return BookmarkablePage{.url = url, .title = std::move(title)};
+}
+
+BookmarkResult BrowserWindow::ToggleFavoriteForCurrentPage(FavoriteScope scope) {
+    CEF_REQUIRE_UI_THREAD();
+    // The page is resolved now, and so is the add-or-remove decision. Every outcome, including
+    // "not a web page", still goes through the mutation seam so the status shows it.
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    const std::optional<std::uint64_t> id =
+        page.has_value() ? bookmarks_.FindBookmarkByUrl(page->url) : std::nullopt;
+    const bool remove = id.has_value() && IsFavorite(scope, *id);
+    return RunBookmarkMutation([this, scope, page, id, remove]() -> BookmarkResult {
+        if (!page.has_value()) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "Only web pages can be favorites."};
+        }
+        if (!id.has_value()) {
+            return bookmarks_.AddFavoriteByUrl(scope, page->title, page->url);
+        }
+        return remove ? bookmarks_.RemoveFavorite(scope, *id) : bookmarks_.AddFavorite(scope, *id);
+    });
+}
+
+BookmarkResult BrowserWindow::AddCurrentPageBookmark() {
+    CEF_REQUIRE_UI_THREAD();
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    return RunBookmarkMutation([this, page]() -> BookmarkResult {
+        if (!page.has_value()) {
+            return BookmarkResult{.error = BookmarkError::kInvalidInput,
+                                  .message = "Only web pages can be bookmarked."};
+        }
+        return bookmarks_.AddOrFindByUrl(page->title, page->url);
+    });
+}
+
+BookmarkResult BrowserWindow::MoveCurrentPageFavorite(FavoriteScope scope, int step) {
+    CEF_REQUIRE_UI_THREAD();
+    const auto refuse = [this](BookmarkError error, std::string message) {
+        return RunBookmarkMutation([error, message = std::move(message)] {
+            return BookmarkResult{.error = error, .message = message};
+        });
+    };
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    const std::optional<std::uint64_t> id =
+        page.has_value() ? bookmarks_.FindBookmarkByUrl(page->url) : std::nullopt;
+    const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+    const auto found = !id.has_value() || favorite_ids == nullptr
+                           ? std::vector<std::uint64_t>::const_iterator{}
+                           : std::find(favorite_ids->begin(), favorite_ids->end(), *id);
+    if (!id.has_value() || favorite_ids == nullptr || found == favorite_ids->end()) {
+        return refuse(BookmarkError::kNotFound, "This page is not in that favorites list.");
+    }
+    const auto position = static_cast<std::size_t>(found - favorite_ids->begin());
+    const std::size_t count = favorite_ids->size();
+    const bool at_end = step < 0 ? position == 0 : position + 1 >= count;
+    if (at_end) {
+        return refuse(BookmarkError::kInvalidInput, "This favorite is already at that end.");
+    }
+    const std::size_t target = step < 0 ? position - 1 : position + 1;
+    const BookmarkResult result = RunBookmarkMutation(
+        [this, scope, id = *id, target] { return bookmarks_.ReorderFavorite(scope, id, target); });
+    if (result.ok()) {
+        // A move is the one change the person cannot see on the page, so it says where it landed.
+        bookmark_notice_ = "Moved " + page->title + " to position " + std::to_string(target + 1) +
+                           " of " + std::to_string(count);
+        UpdateChromeCollections();
+    }
+    return result;
+}
+
+BookmarkCommandState BrowserWindow::CurrentBookmarkCommandState() const {
+    BookmarkCommandState state{.space_name = spaces_.empty() ? "" : active_space().name()};
+    const std::optional<BookmarkablePage> page = CurrentBookmarkablePage();
+    if (!page.has_value()) {
+        return state;
+    }
+    state.page_bookmarkable = true;
+    const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(page->url);
+    if (!id.has_value()) {
+        return state;
+    }
+    const auto position_in = [&](FavoriteScope scope, std::size_t& count) {
+        const std::vector<std::uint64_t>* favorite_ids = FavoriteIdsFor(scope);
+        if (favorite_ids == nullptr) {
+            return BookmarkCommandState::kNoFavoritePosition;
+        }
+        count = favorite_ids->size();
+        const auto found = std::find(favorite_ids->begin(), favorite_ids->end(), *id);
+        return found == favorite_ids->end()
+                   ? BookmarkCommandState::kNoFavoritePosition
+                   : static_cast<std::size_t>(found - favorite_ids->begin());
+    };
+    state.global_position = position_in(std::nullopt, state.global_count);
+    if (!spaces_.empty()) {
+        state.space_position =
+            position_in(FavoriteScope{active_space().id().value}, state.space_count);
+    }
+    return state;
+}
+
+std::vector<PaletteBookmarkEntry> BrowserWindow::PaletteBookmarkEntries() const {
+    const BookmarkState& state = bookmarks_.state();
+    std::vector<PaletteBookmarkEntry> entries;
+    for (const FlatBookmark& entry : bookmarks_.Flattened()) {
+        const std::optional<std::uint64_t> id = bookmarks_.FindBookmarkByUrl(entry.url);
+        // A favorite in several lists is one row, labelled with each list it is in: "Global" or
+        // a space's name. A list of a space that no longer exists is not presented.
+        std::vector<std::string> scopes;
+        if (id.has_value()) {
+            if (IsFavorite(std::nullopt, *id)) {
+                scopes.emplace_back("Global");
+            }
+            for (const auto& [space_id, favorite_ids] : state.space_favorite_ids) {
+                const Space* space = FindSpace(SpaceId{space_id});
+                if (space != nullptr && IsFavorite(FavoriteScope{space_id}, *id)) {
+                    scopes.push_back(space->name());
+                }
+            }
+        }
+        std::string scope_label;
+        for (const std::string& scope : scopes) {
+            scope_label += (scope_label.empty() ? "" : ", ") + scope;
+        }
+        entries.push_back({.id = id.value_or(0),
+                           .title = entry.title,
+                           .url = entry.url,
+                           .folder_path = entry.folder_name,
+                           .scope_label = std::move(scope_label)});
+    }
+    return entries;
+}
+
 BookmarkResult BrowserWindow::RetryLastBookmarkMutation() {
     CEF_REQUIRE_UI_THREAD();
     if (!failed_bookmark_mutation_.has_value() || failed_bookmark_mutation_->retry == nullptr) {
@@ -5329,6 +6055,7 @@ BookmarkResult BrowserWindow::RetryLastBookmarkMutation() {
 void BrowserWindow::DismissBookmarkStatus() {
     CEF_REQUIRE_UI_THREAD();
     failed_bookmark_mutation_.reset();
+    bookmark_notice_.reset();
     UpdateChromeCollections();
 }
 
@@ -5349,6 +6076,7 @@ bool IsRetryableBookmarkError(BookmarkError error) {
 
 BookmarkResult BrowserWindow::RunBookmarkMutation(std::function<BookmarkResult()> mutation) {
     CEF_REQUIRE_UI_THREAD();
+    bookmark_notice_.reset();
     BookmarkResult result = mutation();
     if (result.ok()) {
         failed_bookmark_mutation_.reset();
@@ -5644,30 +6372,34 @@ SidebarCollectionSnapshot BrowserWindow::BuildSidebarCollection() const {
     snapshot.tabs.reserve(space.tab_count());
     for (const Tab& tab : space.tabs()) {
         const bool is_active = active != nullptr && tab.id() == active->id();
-        snapshot.tabs.push_back({.title = tab.DisplayTitle(),
-                                 .active = is_active,
-                                 .pinned = tab.pinned(),
-                                 .favicon = tab.favicon(),
-                                 .sleeping = tab.sleeping(),
-                                 .group_parent = tab.group_parent(),
-                                 .group_label = tab.group_label(),
-                                 // R15: the shown tab is the favorite, not this selected tab.
-                                 .behind_favorite = is_active && favorite_shown});
+        const bool settings = IsSettingsPageUrl(EffectiveUrl(tab));
+        snapshot.tabs.push_back(
+            {.title = settings ? "Settings" : tab.DisplayTitle(),
+             .active = is_active,
+             .pinned = tab.pinned(),
+             .favicon = tab.favicon(),
+             .fallback_icon = settings ? std::optional(ChromeIcon::kSettings) : std::nullopt,
+             .sleeping = tab.sleeping(),
+             .group_parent = tab.group_parent(),
+             .group_label = tab.group_label(),
+             // R15: the shown tab is the favorite, not this selected tab.
+             .behind_favorite = is_active && favorite_shown});
     }
-    if (active != nullptr) {
-        const NavigationSnapshot page = active->navigation_state().snapshot();
-        // The same validator the address bar uses, so "acceptable" means one thing everywhere.
-        // Headless tests inject theirs (SetAddressValidatorForTest); an empty URL is never
-        // acceptable.
+    if (const std::optional<BookmarkablePage> page = CurrentBookmarkablePage(); page.has_value()) {
+        // The cheap http(s) check comes first, so internal pages never reach the validator. The
+        // injected validator (the same seam the other address paths use) keeps headless tests off
+        // the CEF URL API, which they have not initialized.
         snapshot.add_current_page_available =
-            !page.url.empty() &&
-            (address_validator_ ? address_validator_(page.url) : ParseAndValidate(page.url))
+            IsWebTileUrl(page->url) &&
+            (address_validator_ ? address_validator_(page->url) : ParseAndValidate(page->url))
                 .is_valid();
     }
     if (failed_bookmark_mutation_.has_value()) {
         snapshot.bookmark_status =
             BookmarkStatusSnapshot{.text = failed_bookmark_mutation_->message,
                                    .retryable = failed_bookmark_mutation_->retry != nullptr};
+    } else if (bookmark_notice_.has_value()) {
+        snapshot.bookmark_status = BookmarkStatusSnapshot{.text = *bookmark_notice_, .ok = true};
     }
     return snapshot;
 }
@@ -6160,10 +6892,7 @@ void BrowserWindow::ShowCommandPalette() {
     for (const Space& space : spaces_) {
         spaces.push_back({.id = space.id(), .name = space.name()});
     }
-    std::vector<PaletteBookmarkEntry> bookmarks;
-    for (const FlatBookmark& entry : bookmarks_.Flattened()) {
-        bookmarks.push_back({.title = entry.title, .url = entry.url});
-    }
+    std::vector<PaletteBookmarkEntry> bookmarks = PaletteBookmarkEntries();
     std::vector<PaletteReportEntry> reports;
     reports.reserve(reports_.reports.size());
     for (const ResearchReport& report : reports_.reports) {
@@ -6172,7 +6901,7 @@ void BrowserWindow::ShowCommandPalette() {
                            .question = report.question,
                            .kind = report.kind});
     }
-    std::vector<PaletteCommandEntry> commands = PaletteCommands();
+    std::vector<PaletteCommandEntry> commands = PaletteCommands(CurrentBookmarkCommandState());
     for (PaletteCommandEntry& command : commands) {
         const std::optional<KeyAction> action = KeyActionFromId(command.shortcut_action_id);
         const std::optional<KeyBinding> binding =
@@ -6189,24 +6918,95 @@ void BrowserWindow::ShowCommandPalette() {
                            std::move(commands), std::move(reports), std::move(tab_visuals));
 }
 
-std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands() {
-    return {{.id = "sleep_inactive_tabs",
-             .title = "Sleep inactive tabs now",
-             .icon = PaletteRowIcon::kMoon},
-            {.id = std::string(kChangeSpaceIconCommandId),
-             .title = "Change space icon\xE2\x80\xA6",
-             .icon = PaletteRowIcon::kPalette},
-            {.id = "agent_tasks",
-             .title = "Agent tasks",
-             .icon = PaletteRowIcon::kSparkles,
-             .shortcut_action_id = "toggle_agent"},
-            {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles},
-            {.id = "ask_about_page",
-             .title = "Ask about page\xE2\x80\xA6",
-             .icon = PaletteRowIcon::kSparkles},
-            {.id = "collect_from_tabs",
-             .title = "Collect from tabs\xE2\x80\xA6",
-             .icon = PaletteRowIcon::kTable}};
+void BrowserWindow::ShowCommandPaletteWithQueryForDev(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    ShowCommandPalette();
+    if (command_palette_ != nullptr) {
+        command_palette_->SetQueryForDev(query);
+    }
+}
+
+std::vector<PaletteCommandEntry> BrowserWindow::PaletteCommands(
+    const BookmarkCommandState& bookmarks) {
+    const std::string space = bookmarks.space_name.empty() ? "current-space" : bookmarks.space_name;
+    std::vector<PaletteCommandEntry> commands;
+    commands.push_back({.id = "open_bookmarks",
+                        .title = "Open Bookmarks",
+                        .icon = PaletteRowIcon::kBookmark,
+                        .bookmark_group = true});
+    // The page-changing bookmark rows exist only when the page on screen can be bookmarked.
+    if (bookmarks.page_bookmarkable) {
+        commands.push_back({.id = "add_bookmark",
+                            .title = "Add bookmark",
+                            .icon = PaletteRowIcon::kBookmark,
+                            .bookmark_group = true});
+        commands.push_back({.id = "toggle_global_favorite",
+                            .title = bookmarks.global_favorite() ? "Remove global favorite"
+                                                                 : "Add global favorite",
+                            .icon = PaletteRowIcon::kBookmark,
+                            .bookmark_group = true});
+        commands.push_back(
+            {.id = "toggle_space_favorite",
+             .title = (bookmarks.space_favorite() ? "Remove " : "Add ") + space + " favorite",
+             .icon = PaletteRowIcon::kBookmark,
+             .bookmark_group = true});
+    }
+    commands.push_back({.id = "new_bookmark_folder",
+                        .title = "New folder",
+                        .icon = PaletteRowIcon::kBookmark,
+                        .bookmark_group = true});
+    commands.push_back({.id = "import_bookmarks",
+                        .title = "Open Bookmarks to import\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kBookmark,
+                        .bookmark_group = true});
+    // Reorder rows: only for the page's own favorite, and never past either end of its list.
+    if (bookmarks.page_bookmarkable && bookmarks.global_favorite()) {
+        if (bookmarks.global_position > 0) {
+            commands.push_back({.id = "move_global_favorite_left",
+                                .title = "Move global favorite left",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+        if (bookmarks.global_position + 1 < bookmarks.global_count) {
+            commands.push_back({.id = "move_global_favorite_right",
+                                .title = "Move global favorite right",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+    }
+    if (bookmarks.page_bookmarkable && bookmarks.space_favorite()) {
+        if (bookmarks.space_position > 0) {
+            commands.push_back({.id = "move_space_favorite_up",
+                                .title = "Move " + space + " favorite up",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+        if (bookmarks.space_position + 1 < bookmarks.space_count) {
+            commands.push_back({.id = "move_space_favorite_down",
+                                .title = "Move " + space + " favorite down",
+                                .icon = PaletteRowIcon::kBookmark,
+                                .bookmark_group = true});
+        }
+    }
+    commands.push_back({.id = "sleep_inactive_tabs",
+                        .title = "Sleep inactive tabs now",
+                        .icon = PaletteRowIcon::kMoon});
+    commands.push_back({.id = std::string(kChangeSpaceIconCommandId),
+                        .title = "Change space icon\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kPalette});
+    commands.push_back({.id = "agent_tasks",
+                        .title = "Agent tasks",
+                        .icon = PaletteRowIcon::kSparkles,
+                        .shortcut_action_id = "toggle_agent"});
+    commands.push_back(
+        {.id = "summarize_page", .title = "Summarize page", .icon = PaletteRowIcon::kSparkles});
+    commands.push_back({.id = "ask_about_page",
+                        .title = "Ask about page\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kSparkles});
+    commands.push_back({.id = "collect_from_tabs",
+                        .title = "Collect from tabs\xE2\x80\xA6",
+                        .icon = PaletteRowIcon::kTable});
+    return commands;
 }
 
 void BrowserWindow::ShowSpaceIconPicker() {
@@ -6864,6 +7664,9 @@ bool BrowserWindow::SetThemePreference(ThemePreference preference) {
     }
     prefs_.theme = preference;
     SavePrefs();
+    if (welcome_ != nullptr) {
+        welcome_->SetChosenTheme(preference);
+    }
     if (window_ != nullptr) {
         ApplyTheme(window_, ResolvedChromeTheme(), true);
     }
@@ -6892,7 +7695,7 @@ void BrowserWindow::OnOverlayFocusRingChanged() {
 
 bool BrowserWindow::OverlayFocusRingShown() const {
     return (welcome_ != nullptr && welcome_->visible()) ||
-           (command_palette_ != nullptr && command_palette_->visible());
+           (command_palette_ != nullptr && command_palette_->visible()) || peek_open();
 }
 
 void BrowserWindow::ApplyPageViewVisibility() {
@@ -6952,7 +7755,8 @@ void BrowserWindow::OpenBookmark(const PaletteBookmarkEntry& bookmark) {
     CEF_REQUIRE_UI_THREAD();
     // The same validation seam the address bar uses: a stored URL the current
     // allow-list rejects is a no-op, never a force-load.
-    const ValidatedAddress address = ParseAndValidate(bookmark.url);
+    const ValidatedAddress address =
+        address_validator_ ? address_validator_(bookmark.url) : ParseAndValidate(bookmark.url);
     if (!address.is_valid()) {
         return;
     }

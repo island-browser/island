@@ -9,7 +9,7 @@ Click a mode in the segmented control, or press Tab (Shift+Tab goes back) while 
 | Mode | The field says | What Enter does |
 | --- | --- | --- |
 | **Search** | "Search with Google" (or your engine) | Searches the web, or opens the text if it is an address |
-| **Ask Agent** | "Ask about this tab or anything" | Sends your question to the [agent](../agent/agent-panel.md) |
+| **Ask Agent** | "Ask the agent anything" | Sends your question to the [agent](../agent/agent-panel.md) |
 | **Research** | "Research a question — you'll see the plan first" | Starts [Research](../agent/research-and-plan.md) |
 
 ## Search the web
@@ -18,7 +18,11 @@ Click a mode in the segmented control, or press Tab (Shift+Tab goes back) while 
 2. Type what you want, or paste an address.
 3. Press Enter.
 
-To change the engine (Google or DuckDuckGo), go to **Settings > General > Search**. The address field uses the same engine.
+To change the engine (Google, DuckDuckGo or Yandex), go to **Settings > General > Search**. The address field uses the same engine. Enter always searches with the engine set in Settings, even on a results page from another engine.
+
+While the page is the results page of a search engine, the address field shows your search query instead of the long results address. Click the field to edit the query and press Enter to search again. If the query would look like a web address, or contains a character other than a letter, number or space outside ASCII (such as a zero-width space, fullwidth punctuation, a symbol or quotation marks), the field shows the full results address instead. Copy URL still copies the full results address. Once you open a result, the field shows that page's address again.
+
+An empty address field shows "Search or enter address" as a grey hint. The hint is not text: you cannot copy it.
 
 ## Ask the agent
 

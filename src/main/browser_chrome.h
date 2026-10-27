@@ -230,6 +230,8 @@ struct TabStripEntrySnapshot {
     bool pinned = false;
     // The page's favicon once downloaded; null shows the globe fallback.
     CefRefPtr<CefImage> favicon;
+    // Island-owned documents can supply a semantic fallback instead of the globe.
+    std::optional<ChromeIcon> fallback_icon;
     // A sleeping tab (its browser released, see tab_sleep_policy.h) is drawn dimmed: faded
     // title and a reduced-alpha favicon, in the rows and in the icon rail.
     bool sleeping = false;
@@ -273,11 +275,12 @@ struct FavoriteEntrySnapshot {
     bool operator==(const FavoriteEntrySnapshot&) const = default;
 };
 
-// The last failed bookmark mutation, shown inline. |retryable| means RetryLastBookmarkMutation can
-// run it again; DismissBookmarkStatus clears it.
+// The last bookmark outcome shown inline: a failed mutation, or a success notice when |ok|.
+// |retryable| means RetryLastBookmarkMutation can run it again; DismissBookmarkStatus clears it.
 struct BookmarkStatusSnapshot {
     std::string text;
     bool retryable = false;
+    bool ok = false;
 
     bool operator==(const BookmarkStatusSnapshot&) const = default;
 };
@@ -395,7 +398,7 @@ class BrowserChromeHost {
     virtual void SetTabPinned(std::size_t index, bool pinned) = 0;
     virtual void ToggleAgentPanel() = 0;
     virtual void ToggleTabOverview() = 0;
-    virtual void ToggleSettings() = 0;
+    virtual void OpenSettings() = 0;
     // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
     virtual void OpenBlockerSettings() = 0;
     // Bookmarks 0.9 sidebar collection. Favorites are addressed by scope and bookmark id.
@@ -990,7 +993,7 @@ class BrowserChrome final : public NavigationObserver {
         const bool native = look == LookPreset::kNative;
         const ChromeTokens tokens = ChromeTokens::ForLook(look, ChromeTheme::kLight);
         const GlobalStripLayout layout = ComputeGlobalStripLayout(
-            collection.global_favorites.size(), GlobalStripWidthDip(tokens));
+            collection.global_favorites.size(), GlobalStripContentWidthDip(tokens));
         const bool add_visible = collection.add_current_page_available;
         const std::vector<FavoriteEntrySnapshot>& globals = collection.global_favorites;
         const std::vector<FavoriteEntrySnapshot>& space_favorites = collection.space_favorites;
@@ -1238,6 +1241,8 @@ class BrowserChrome final : public NavigationObserver {
     [[nodiscard]] static constexpr int GlobalHeaderRowHeightDip() { return 24; }
     // The width the global strip and the header row share: the sidebar's inner width.
     [[nodiscard]] static int GlobalStripWidthDip(const ChromeTokens& tokens);
+    // The width the strip's controls fit in: the strip minus the focus ring inset on each side.
+    [[nodiscard]] static int GlobalStripContentWidthDip(const ChromeTokens& tokens);
 
     void OnNavigationChanged(const NavigationSnapshot& snapshot) override;
     void OnAddressChanged(const AddressBarSnapshot& snapshot);
@@ -1420,6 +1425,8 @@ class BrowserChrome final : public NavigationObserver {
     // The inner panel holding every address control, inset by the ring (see BuildViews).
     CefRefPtr<CefPanel> address_inner_;
     CefRefPtr<CefLabelButton> address_idle_label_;
+    // True while the Native label shows kAddressPlaceholderText instead of an empty address.
+    bool address_idle_showing_placeholder_ = false;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;

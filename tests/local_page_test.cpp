@@ -108,9 +108,9 @@ TEST(LocalPageTest, AgentCommandResolutionPrefersTheEnvironment) {
 }
 
 TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
-    for (const LocalPageKind kind : {LocalPageKind::kAgent, LocalPageKind::kSettings,
-                                     LocalPageKind::kTabOverview, LocalPageKind::kStart,
-                                     LocalPageKind::kReport}) {
+    for (const LocalPageKind kind :
+         {LocalPageKind::kAgent, LocalPageKind::kSettings, LocalPageKind::kTabOverview,
+          LocalPageKind::kStart, LocalPageKind::kReport}) {
         const std::string html(LocalPageHtml(kind));
         EXPECT_EQ(html.rfind("<!doctype html>", 0), 0U);
         EXPECT_NE(html.find("window.islandRender = function"), std::string::npos);
@@ -128,7 +128,7 @@ TEST(LocalPageTest, EveryBuiltInPageSpeaksTheSameBridge) {
 
 TEST(LocalPageTest, BuiltInPagesHaveShortDisplayUrlsAndStartUsesThePlaceholder) {
     EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kAgent), "island://agent");
-    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kSettings), "island://settings");
+    EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kSettings), "Settings");
     EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kTabOverview), "island://tabs");
     EXPECT_TRUE(LocalPage::DisplayUrl(LocalPageKind::kStart).empty());
     EXPECT_EQ(LocalPage::DisplayUrl(LocalPageKind::kReport), "island://report");
@@ -164,8 +164,7 @@ TEST(LocalPageTest, EverySegmentedPageUsesTheNeutralThemeTokenAndFocusVisible) {
         EXPECT_NE(html.find("--segment-selected: #E3E3E8"), std::string::npos);
         EXPECT_NE(html.find("--segment-selected: #3A3A3D"), std::string::npos);
         EXPECT_NE(html.find("var(--segment-selected)"), std::string::npos);
-        EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"),
-                  std::string::npos);
+        EXPECT_NE(html.find("[\"segment_selected\", \"--segment-selected\"]"), std::string::npos);
         EXPECT_NE(html.find(":focus-visible"), std::string::npos);
     }
 }

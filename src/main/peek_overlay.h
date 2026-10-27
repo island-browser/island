@@ -1,12 +1,14 @@
 #ifndef ISLAND_MAIN_PEEK_OVERLAY_H_
 #define ISLAND_MAIN_PEEK_OVERLAY_H_
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
 #include "browser_chrome.h"
 #include "chrome_snapshot.h"
 #include "design_tokens.h"
+#include "icon_catalog.h"
 #include "include/cef_base.h"
 #include "overlay_card.h"
 #include "overlay_lifetime.h"
@@ -34,13 +36,15 @@ class PeekOverlayHost {
 
 // The floating "Little Arc" card: a rounded-looking card (CEF views cannot round corners; the
 // card is a hairline-outlined, shadowed panel like the palettes) with a title bar holding the
-// address and the "Open as tab" / "Close" buttons above its own CefBrowserView. It lives in an
-// overlay of the one existing CefWindow that exists only while a peek is open (see
-// overlay_lifetime.h: a live overlay kills mouse input on macOS), and the overlay covers only
-// the card, so the page around it stays clickable.
+// address and the "Open as tab" / "Close" buttons above its own CefBrowserView. The card is sized
+// from the window's content area (PeekCardBounds, peek_layout.h). It lives in an overlay of the
+// one existing CefWindow that exists only while a peek is open (see overlay_lifetime.h: a live
+// overlay kills mouse input on macOS), and the overlay covers only the card, so the page around
+// it stays clickable.
 class PeekOverlay final {
   public:
-    PeekOverlay(PeekOverlayHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens);
+    PeekOverlay(PeekOverlayHost& host, CefRefPtr<CefWindow> window, ChromeTokens tokens,
+                std::filesystem::path icon_resource_root);
     ~PeekOverlay();
 
     PeekOverlay(const PeekOverlay&) = delete;
@@ -61,7 +65,7 @@ class PeekOverlay final {
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const noexcept { return browser_; }
     [[nodiscard]] bool OwnsBrowser(const CefRefPtr<CefBrowser>& browser) const;
 
-    // The card's bounds inside the content area, in window DIP.
+    // The card's bounds inside the content area, in window DIP (see PeekCardBounds).
     [[nodiscard]] static DipRect CardBounds(const DipRect& content) noexcept;
 
   private:
@@ -83,6 +87,7 @@ class PeekOverlay final {
     PeekOverlayHost* host_;
     CefRefPtr<CefWindow> window_;
     ChromeTokens tokens_;
+    IconCatalog icons_;
     PeekState state_;
     OverlaySlot overlay_;
     OverlayLifetime overlay_lifetime_;

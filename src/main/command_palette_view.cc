@@ -116,7 +116,14 @@ std::string CommandResultAccessibleName(const PaletteEntry& entry) {
         case PaletteEntryKind::kBookmark: {
             const std::string& title =
                 entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
-            return "Open bookmark: " + title + ", URL " + entry.bookmark.url;
+            std::string name = "Open bookmark: " + title + ", URL " + entry.bookmark.url;
+            if (!entry.bookmark.folder_path.empty()) {
+                name += ", folder " + entry.bookmark.folder_path;
+            }
+            if (!entry.bookmark.scope_label.empty()) {
+                name += ", favorite " + entry.bookmark.scope_label;
+            }
+            return name;
         }
         case PaletteEntryKind::kHistory: {
             const std::string& title =
@@ -145,8 +152,8 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
         case PaletteEntryKind::kUrl:
             return "Go to " + entry.url_query;
         case PaletteEntryKind::kBookmark:
-            // An untitled bookmark falls back to its URL so the row is never
-            // blank.
+            // An untitled bookmark falls back to its URL so the row is never blank. The folder
+            // and scope follow in muted text (PaletteRowDetailText).
             return entry.bookmark.title.empty() ? entry.bookmark.url : entry.bookmark.title;
         case PaletteEntryKind::kHistory:
             return (entry.history.title.empty() ? entry.history.url : entry.history.title) +
@@ -157,6 +164,16 @@ std::string PaletteRowDisplayText(const PaletteEntry& entry) {
             return entry.report.title;
     }
     return "";
+}
+
+// The muted text after a row's title. A bookmark names its folder and favorite scopes here, so
+// the title keeps the text color and the metadata reads as secondary.
+std::string PaletteRowDetailText(const PaletteEntry& entry) {
+    if (entry.kind != PaletteEntryKind::kBookmark) {
+        return "";
+    }
+    return (entry.bookmark.folder_path.empty() ? "" : "  —  " + entry.bookmark.folder_path) +
+           (entry.bookmark.scope_label.empty() ? "" : "  ·  " + entry.bookmark.scope_label);
 }
 
 std::string PaletteRowTooltipText(const PaletteEntry& entry) {
@@ -225,6 +242,9 @@ class CommandPaletteView::RowButtonDelegate final : public CefButtonDelegate {
         for (std::size_t index = 0; index < palette_->result_labels_.size(); ++index) {
             const bool name_pressed = palette_->result_labels_[index] != nullptr &&
                                       palette_->result_labels_[index]->IsSame(button);
+            const bool detail_pressed = index < palette_->result_details_.size() &&
+                                        palette_->result_details_[index] != nullptr &&
+                                        palette_->result_details_[index]->IsSame(button);
             const bool kind_pressed = index < palette_->result_kinds_.size() &&
                                       palette_->result_kinds_[index] != nullptr &&
                                       palette_->result_kinds_[index]->IsSame(button);
@@ -248,8 +268,9 @@ class CommandPaletteView::RowButtonDelegate final : public CefButtonDelegate {
                 index < palette_->result_shortcut_right_caps_.size() &&
                 palette_->result_shortcut_right_caps_[index] != nullptr &&
                 palette_->result_shortcut_right_caps_[index]->IsSame(button);
-            if (name_pressed || kind_pressed || icon_pressed || shortcut_pressed ||
-                row_left_pressed || row_right_pressed || key_left_pressed || key_right_pressed) {
+            if (name_pressed || detail_pressed || kind_pressed || icon_pressed ||
+                shortcut_pressed || row_left_pressed || row_right_pressed || key_left_pressed ||
+                key_right_pressed) {
                 palette_->HandleRowPressed(index);
                 return;
             }
@@ -404,6 +425,7 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     result_right_caps_.clear();
     result_icons_.clear();
     result_labels_.clear();
+    result_details_.clear();
     result_kinds_.clear();
     result_shortcut_columns_.clear();
     result_shortcut_left_caps_.clear();
@@ -426,6 +448,7 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
     row_delegates_.reserve(row_count);
     body_delegates_.reserve(row_count);
     result_labels_.reserve(row_count);
+    result_details_.reserve(row_count);
     result_kinds_.reserve(row_count);
     result_shortcut_columns_.reserve(row_count);
     result_shortcut_left_caps_.reserve(row_count);
@@ -498,6 +521,11 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         label->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         body->AddChildView(label);
         body_layout->SetFlexForView(label, 1);
+
+        CefRefPtr<CefLabelButton> details = CefLabelButton::CreateLabelButton(button_delegate_, "");
+        details->SetFocusable(false);
+        details->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
+        body->AddChildView(details);
 
         CefRefPtr<CefLabelButton> kind = CefLabelButton::CreateLabelButton(button_delegate_, "");
         kind->SetFocusable(false);
@@ -577,6 +605,7 @@ void CommandPaletteView::RebuildResultRows(std::size_t row_count) {
         result_right_caps_.push_back(right_cap);
         result_icons_.push_back(icon);
         result_labels_.push_back(label);
+        result_details_.push_back(details);
         result_kinds_.push_back(kind);
         result_shortcut_columns_.push_back(shortcut_column);
         result_shortcut_left_caps_.push_back(shortcut_left);
@@ -778,6 +807,15 @@ bool CommandPaletteView::HandleQueryKeyEvent(CefRefPtr<CefTextfield> textfield,
     }
 }
 
+void CommandPaletteView::SetQueryForDev(std::string_view query) {
+    CEF_REQUIRE_UI_THREAD();
+    if (detached_ || query_field_ == nullptr) {
+        return;
+    }
+    query_field_->SetText(std::string(query));
+    HandleQueryChanged(query_field_);
+}
+
 void CommandPaletteView::HandleQueryChanged(CefRefPtr<CefTextfield> textfield) {
     CEF_REQUIRE_UI_THREAD();
     if (detached_) {
@@ -833,11 +871,11 @@ void CommandPaletteView::ProjectResults() {
             continue;
         }
         const bool native = tokens_.look == LookPreset::kNative;
-        const PaletteKindStyle& style = PaletteKindStyleFor(results[index].kind);
-        const bool starts_group = native && style.group_header != previous_group;
+        const std::string_view group = PaletteGroupHeader(results[index]);
+        const bool starts_group = native && group != previous_group;
         result_headers_[index]->SetVisible(starts_group);
-        result_header_labels_[index]->SetText(std::string(style.group_header));
-        previous_group = style.group_header;
+        result_header_labels_[index]->SetText(std::string(group));
+        previous_group = group;
         result_rows_[index]->SetVisible(true);
         const bool highlighted = index == model_.highlighted_index();
         const PaletteSurfaceSlot slot =
@@ -872,6 +910,11 @@ void CommandPaletteView::ProjectResults() {
             highlighted ? ChromeFontWeight::kMedium : ChromeFontWeight::kRegular));
         result_labels_[index]->SetTooltipText(PaletteRowTooltipText(results[index]));
         result_labels_[index]->SetAccessibleName(CommandResultAccessibleName(results[index]));
+        result_details_[index]->SetText(PaletteRowDetailText(results[index]));
+        result_details_[index]->SetBackgroundColor(fill.argb);
+        result_details_[index]->SetEnabledTextColors(tokens_.text_secondary.argb);
+        result_details_[index]->SetFontList(BrowserChrome::FontListForTokens(
+            tokens_, (tokens_.look == LookPreset::kNative ? 12 : 13), ChromeFontWeight::kRegular));
         result_kinds_[index]->SetText(PaletteKindLabel(results[index], native));
         result_kinds_[index]->SetBackgroundColor(fill.argb);
         result_kinds_[index]->SetEnabledTextColors(tokens_.text_secondary.argb);
@@ -924,6 +967,11 @@ void CommandPaletteView::ApplySurfaceColors() {
         label->SetEnabledTextColors(tokens_.text.argb);
         label->SetFontList(BrowserChrome::FontListForTokens(
             tokens_, (tokens_.look == LookPreset::kNative ? 13 : 14), ChromeFontWeight::kRegular));
+    }
+    for (const CefRefPtr<CefLabelButton>& detail : result_details_) {
+        detail->SetEnabledTextColors(tokens_.text_secondary.argb);
+        detail->SetFontList(BrowserChrome::FontListForTokens(
+            tokens_, (tokens_.look == LookPreset::kNative ? 12 : 13), ChromeFontWeight::kRegular));
     }
     for (const CefRefPtr<CefLabelButton>& kind : result_kinds_) {
         kind->SetEnabledTextColors(tokens_.text_secondary.argb);

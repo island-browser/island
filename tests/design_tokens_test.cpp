@@ -194,7 +194,9 @@ TEST(ChromeTokens, ProvidesTheArcCardAndDensityDefaultsInEveryTheme) {
 
         EXPECT_EQ(tokens.card_radius_dip, 10);
         EXPECT_EQ(tokens.card_inset_dip, 8);
-        EXPECT_EQ(tokens.control_height_dip, 32);
+        EXPECT_EQ(tokens.control_height_dip, 36);
+        EXPECT_EQ(tokens.row_gap_dip, 6);
+        EXPECT_EQ(tokens.sidebar_padding_dip, 16);
         EXPECT_EQ(tokens.titlebar_band_dip, 0);
         EXPECT_TRUE(tokens.card_shadow);
         EXPECT_EQ(tokens.sidebar_side, SidebarSide::kLeft);

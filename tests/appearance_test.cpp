@@ -183,15 +183,21 @@ TEST(AppearanceTokensTest, GivenAnySpaceColorAndTintThenTextStaysReadableOnEvery
 
 TEST(AppearanceTokensTest, GivenDensityThenControlHeightAndRowGapFollow) {
     const ChromeTokens base = ChromeTokens::ForTheme(ChromeTheme::kLight);
-    const AppearanceSettings comfortable_appearance = ApplyLookPreset(LookPreset::kArc);
-    AppearanceSettings compact_appearance = comfortable_appearance;
-    compact_appearance.density = Density::kCompact;
-    const ChromeTokens comfortable =
-        base.Customized(kBlue, ChromeTheme::kLight, comfortable_appearance);
-    const ChromeTokens compact = base.Customized(kBlue, ChromeTheme::kLight, compact_appearance);
-    EXPECT_EQ(comfortable.control_height_dip, 32);
-    EXPECT_EQ(compact.control_height_dip, 26);
-    EXPECT_LT(compact.row_gap_dip, comfortable.row_gap_dip);
+    for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
+        const AppearanceSettings comfortable_appearance = ApplyLookPreset(look);
+        AppearanceSettings compact_appearance = comfortable_appearance;
+        compact_appearance.density = Density::kCompact;
+        const ChromeTokens comfortable =
+            base.Customized(kBlue, ChromeTheme::kLight, comfortable_appearance);
+        const ChromeTokens compact =
+            base.Customized(kBlue, ChromeTheme::kLight, compact_appearance);
+        EXPECT_EQ(comfortable.control_height_dip, 36);
+        EXPECT_EQ(comfortable.row_gap_dip, 6);
+        EXPECT_EQ(comfortable.sidebar_padding_dip, 16);
+        EXPECT_EQ(compact.control_height_dip, 28);
+        EXPECT_EQ(compact.row_gap_dip, 2);
+        EXPECT_EQ(compact.sidebar_padding_dip, 8);
+    }
 }
 
 TEST(AppearanceTokensTest, GivenRadiusShadowAndBleedThenTheCardTokensFollow) {

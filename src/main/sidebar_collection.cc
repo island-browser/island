@@ -59,7 +59,13 @@ GlobalStripLayout ComputeGlobalStripLayout(std::size_t count, int width_dip) {
             .gap_dip = kGlobalStripMinGapDip};
 }
 
-BookmarkStatusColors BookmarkStatusRowColors(const ChromeTokens& tokens) {
+BookmarkStatusColors BookmarkStatusRowColors(const ChromeTokens& tokens, bool ok) {
+    if (ok) {
+        return {.row = tokens.surface_secondary,
+                .text = tokens.text,
+                .retry = tokens.text,
+                .dismiss = tokens.text};
+    }
     return {.row = tokens.warning_bg,
             .text = tokens.warning_text,
             .retry = tokens.text,

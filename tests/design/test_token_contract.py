@@ -129,7 +129,12 @@ class TokenContractCompleteness(unittest.TestCase):
         self.assertIn(defaults["card_radius_dip"], defaults["card_radius_choices"])
         self.assertEqual(defaults["card_radius_choices"], [0, 6, 10, 14])
         self.assertEqual(defaults["card_inset_dip"], self.contract["spacing"]["space_2"])
-        self.assertEqual(defaults["control_height_dip"], 32)
+        self.assertEqual(defaults["control_height_dip"], 36)
+        self.assertEqual(defaults["compact_control_height_dip"], 28)
+        self.assertEqual(defaults["row_gap_dip"], 6)
+        self.assertEqual(defaults["compact_row_gap_dip"], 2)
+        self.assertEqual(defaults["sidebar_padding_dip"], 16)
+        self.assertEqual(defaults["compact_sidebar_padding_dip"], 8)
         self.assertLess(defaults["compact_control_height_dip"], defaults["control_height_dip"])
         self.assertEqual(defaults["collapsed_rail_width_dip"], 52)
         self.assertEqual(defaults["font"], "geist")
@@ -279,6 +284,8 @@ class NativeConsumerParity(unittest.TestCase):
             "card_radius_dip": defaults["card_radius_dip"],
             "card_inset_dip": defaults["card_inset_dip"],
             "control_height_dip": defaults["control_height_dip"],
+            "row_gap_dip": defaults["row_gap_dip"],
+            "sidebar_padding_dip": defaults["sidebar_padding_dip"],
         }
         for field, value in expected.items():
             with self.subTest(field=field):

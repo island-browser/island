@@ -348,6 +348,18 @@ TEST(BrowserChromeFavoritesStyleTest, GivenTheFailureRowThenItUsesTheWarningToke
     }
 }
 
+TEST(BrowserChromeFavoritesStyleTest, GivenASuccessNoticeThenTheStatusRowIsNeutral) {
+    for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {
+        const ChromeTokens tokens = ChromeTokens::ForTheme(theme);
+        const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens, /*ok=*/true);
+        EXPECT_EQ(colors.row.argb, tokens.surface_secondary.argb);
+        EXPECT_EQ(colors.text.argb, tokens.text.argb);
+        EXPECT_EQ(colors.retry.argb, tokens.text.argb);
+        EXPECT_EQ(colors.dismiss.argb, tokens.text.argb);
+        EXPECT_NE(colors.row.argb, tokens.warning_bg.argb);
+    }
+}
+
 TEST(BrowserChromeFavoritesStyleTest, GivenAFavoriteShownThenTheSelectedTabIsNeutralUntilItCloses) {
     for (const LookPreset look : {LookPreset::kNative, LookPreset::kArc, LookPreset::kGraphite}) {
         for (const ChromeTheme theme : {ChromeTheme::kLight, ChromeTheme::kDark}) {

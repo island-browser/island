@@ -156,7 +156,7 @@ CefBoxLayoutSettings FloatingCanvasLayout(const BrowserChrome::CardInsets& inset
 }
 
 // The rail uses a dedicated layout: a top inset (RailTopInsetDip), the shared
-// between-section step (RailSectionSpacingDip), and spacing_3 side and bottom
+// between-section step (RailSectionSpacingDip), and the density-owned side and bottom
 // insets so the whole column sits on one gutter.
 CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     CefBoxLayoutSettings settings;
@@ -165,8 +165,8 @@ CefBoxLayoutSettings RailLayout(const ChromeTokens& tokens) {
     const int top = tokens.look == LookPreset::kNative && tokens.titlebar_band_dip > 0
                         ? tokens.titlebar_band_dip
                         : BrowserChrome::RailTopInsetDip(tokens);
-    settings.inside_border_insets =
-        CefInsets(top, tokens.spacing_3_dip, tokens.spacing_3_dip, tokens.spacing_3_dip);
+    settings.inside_border_insets = CefInsets(
+        top, tokens.sidebar_padding_dip, tokens.sidebar_padding_dip, tokens.sidebar_padding_dip);
     return settings;
 }
 
@@ -1367,7 +1367,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
     address_field_->SetID(static_cast<int>(ChromeViewId::kAddress));
     address_field_->SetAccessibleName("Address");
-    address_field_->SetPlaceholderText("Enter address");
+    address_field_->SetPlaceholderText(std::string(kAddressPlaceholderText));
     address_field_->SetFocusable(true);
     // The native textfield paints its own rounded corners; the surface-colored holder
     // behind it fills those corners so the field reads as one flat, square-edged cell
@@ -2106,7 +2106,13 @@ std::string BrowserChrome::ActiveSpaceHeaderName() const {
 }
 
 int BrowserChrome::GlobalStripWidthDip(const ChromeTokens& tokens) {
-    return std::max(0, tokens.rail_width_dip - 2 * tokens.spacing_3_dip - TabListScrollGutterDip());
+    // The rail's own gutter (sidebar_padding_dip, structural per density) minus the scroll gutter.
+    return std::max(0,
+                    tokens.rail_width_dip - 2 * tokens.sidebar_padding_dip - TabListScrollGutterDip());
+}
+
+int BrowserChrome::GlobalStripContentWidthDip(const ChromeTokens& tokens) {
+    return std::max(0, GlobalStripWidthDip(tokens) - 2 * kStripFocusInsetDip);
 }
 
 CefRefPtr<CefLabelButton> BrowserChrome::AddNewTabRow() {
@@ -2210,8 +2216,7 @@ void BrowserChrome::UpdateTabStripPreferredSize() {
                        kickers * GroupedTabKickerHeightDip() + favorite_block_height_dip_ +
                        new_tab_rows * (RowHeight() + 2 * kNewTabFocusInsetDip) +
                        std::max(0, children - 1) * spacing;
-    const int width =
-        std::max(0, tokens_.rail_width_dip - 2 * tokens_.spacing_3_dip - TabListScrollGutterDip());
+    const int width = GlobalStripWidthDip(tokens_);
     if (tab_strip_delegate_ != nullptr) {
         tab_strip_delegate_->SetPreferredSize(CefSize(width, height));
     }
@@ -2236,9 +2241,10 @@ void BrowserChrome::UpdateBookmarkStatusRow() {
     const std::optional<BookmarkStatusSnapshot>& status = sidebar_collection_.bookmark_status;
     bookmark_status_row_->SetVisible(status.has_value());
     if (status.has_value()) {
+        // A failure is warning-colored; a success notice is neutral, so the two read differently.
         bookmark_status_text_->SetText(status->text);
         bookmark_status_text_->SetTooltipText(status->text);
-        const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens_);
+        const BookmarkStatusColors colors = BookmarkStatusRowColors(tokens_, status->ok);
         bookmark_status_text_->SetEnabledTextColors(colors.text.argb);
         bookmark_status_retry_->SetVisible(status->retryable);
         bookmark_status_retry_->SetEnabledTextColors(colors.retry.argb);
@@ -2268,7 +2274,7 @@ void BrowserChrome::AddFavoriteSections() {
     const std::vector<FavoriteEntrySnapshot>& spaces = collection.space_favorites;
     // Ruling a: min(6, count) icons then "+N"; the plate and gap shrink to fit the width.
     const GlobalStripLayout layout = ComputeGlobalStripLayout(
-        globals.size(), GlobalStripWidthDip(tokens_) - 2 * kStripFocusInsetDip);
+        globals.size(), GlobalStripContentWidthDip(tokens_));
     const int plate = layout.plate_dip;
     const int header_row = GlobalHeaderRowHeightDip();
     const std::optional<CefRefPtr<CefImage>> fallback_icon =
@@ -2737,13 +2743,20 @@ void BrowserChrome::SetTabStripEntries(const std::vector<TabStripEntrySnapshot>&
 
         views.favicon = CefLabelButton::CreateLabelButton(button_delegate_, "");
         views.favicon->SetID(static_cast<int>(ChromeViewId::kTabStripEntryFavicon));
-        views.favicon->SetAccessibleName(entry.favicon != nullptr ? "Tab favicon"
-                                                                  : "Tab favicon placeholder");
+        views.favicon->SetAccessibleName(entry.favicon != nullptr || entry.fallback_icon.has_value()
+                                             ? "Tab favicon"
+                                             : "Tab favicon placeholder");
         views.favicon->SetFocusable(false);
         views.favicon->SetMinimumSize(CefSize(slot, slot));
         views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
             views.favicon_source = entry.favicon;
+        } else if (entry.fallback_icon.has_value()) {
+            const std::optional<CefRefPtr<CefImage>> semantic_icon = icon_catalog_.Load(
+                *entry.fallback_icon, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+            if (semantic_icon.has_value()) {
+                views.favicon_source = *semantic_icon;
+            }
         } else if (fallback_icon.has_value()) {
             views.favicon_source = *fallback_icon;
         }
@@ -2871,6 +2884,12 @@ void BrowserChrome::RebuildCollapsedTabs() {
         views.favicon_is_page = entry.favicon != nullptr;
         if (entry.favicon != nullptr) {
             views.favicon_source = entry.favicon;
+        } else if (entry.fallback_icon.has_value()) {
+            const std::optional<CefRefPtr<CefImage>> semantic_icon = icon_catalog_.Load(
+                *entry.fallback_icon, ChromeIconTone::kSecondary, ChromeIconSize::k16);
+            if (semantic_icon.has_value()) {
+                views.favicon_source = *semantic_icon;
+            }
         } else if (fallback_icon.has_value()) {
             views.favicon_source = *fallback_icon;
         }
@@ -3413,6 +3432,7 @@ void BrowserChrome::ApplyLayoutTokens() {
                             std::to_string(static_cast<int>(tokens_.sidebar_side)) + "/" +
                             std::to_string(tokens_.control_height_dip) + "/" +
                             std::to_string(tokens_.row_gap_dip) + "/" +
+                            std::to_string(tokens_.sidebar_padding_dip) + "/" +
                             std::to_string(content.left) + "," + std::to_string(content.top) + "," +
                             std::to_string(content.right) + "," + std::to_string(content.bottom) +
                             "/" + std::to_string(agent.left) + "," + std::to_string(agent.top) +
@@ -3750,7 +3770,7 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ToggleTabOverview();
             return;
         case ChromeViewId::kRailSettingsButton:
-            host_->ToggleSettings();
+            host_->OpenSettings();
             return;
         default:
             return;
@@ -3904,7 +3924,14 @@ void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     address_editing_ = editing;
     const bool native_idle = tokens_.look == LookPreset::kNative && !editing;
     const std::string& text = editing ? snapshot.edit_text : snapshot.display_text;
-    address_idle_label_->SetText(snapshot.display_text);
+    // Native projects the resting address through the label. An empty address shows the placeholder
+    // there, in the placeholder colour; the textfield itself keeps its empty text.
+    address_idle_showing_placeholder_ = native_idle && snapshot.display_text.empty();
+    address_idle_label_->SetText(address_idle_showing_placeholder_
+                                     ? std::string(kAddressPlaceholderText)
+                                     : snapshot.display_text);
+    address_idle_label_->SetEnabledTextColors(
+        (address_idle_showing_placeholder_ ? tokens_.text_secondary : tokens_.text).argb);
     address_idle_label_->SetVisible(native_idle);
     address_field_->SetVisible(!native_idle);
     address_field_->SetReadOnly(!editing);
@@ -4030,7 +4057,8 @@ void BrowserChrome::ApplyControlTheme() {
     address_field_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     address_idle_label_->SetBackgroundColor(address_well.argb);
     address_idle_label_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
-    address_idle_label_->SetEnabledTextColors(tokens_.text.argb);
+    address_idle_label_->SetEnabledTextColors(
+        (address_idle_showing_placeholder_ ? tokens_.text_secondary : tokens_.text).argb);
     active_tab_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);

@@ -297,6 +297,11 @@ std::optional<MacKeyEquivalent> ToMacKeyEquivalent(const KeyBinding& binding) {
     return equivalent;
 }
 
+std::optional<MacKeyEquivalent> MacKeyEquivalentForAction(const Keymap& keymap, KeyAction action) {
+    const std::optional<KeyBinding> binding = keymap.Binding(action);
+    return binding.has_value() ? ToMacKeyEquivalent(*binding) : std::nullopt;
+}
+
 Keymap Keymap::Defaults() {
     Keymap keymap;
     for (const KeyActionInfo& info : kActions) {

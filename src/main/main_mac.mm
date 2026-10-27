@@ -19,6 +19,7 @@
 #include "include/wrapper/cef_library_loader.h"
 #include "island_app.h"
 #include "keymap.h"
+#include "macos/keymap_menu_mac.h"
 #include "prefs_store.h"
 #include "space_icon.h"
 #include "startup_options.h"
@@ -76,6 +77,7 @@
 - (void)toggleAgentPanel:(id)sender;
 - (void)togglePinTab:(id)sender;
 - (void)openSettings:(id)sender;
+- (void)openBookmarks:(id)sender;
 - (void)openTabOverview:(id)sender;
 - (void)showCheatsheet:(id)sender;
 - (void)newTab:(id)sender;
@@ -239,7 +241,13 @@
 
 - (void)openSettings:(id)sender {
     if (app_ != nullptr) {
-        app_->ToggleSettings();
+        app_->OpenSettings();
+    }
+}
+
+- (void)openBookmarks:(id)sender {
+    if (app_ != nullptr) {
+        app_->OpenBookmarksPage();
     }
 }
 
@@ -558,6 +566,13 @@ bool RunParameterizedDevAction(island::IslandApp* app, const std::string& action
                                    equals == std::string::npos ? "" : rest.substr(equals + 1));
         return true;
     }
+    // `palette_query:<text>` opens ⌘K with the query typed in (the palette's bookmark rows and
+    // their folder and favorite labels are captured this way).
+    constexpr std::string_view kPaletteQuery = "palette_query:";
+    if (action.compare(0, kPaletteQuery.size(), kPaletteQuery) == 0) {
+        app->ShowCommandPaletteWithQueryForDev(action.substr(kPaletteQuery.size()));
+        return true;
+    }
     const std::string_view settings_section = island::DevSettingsSectionName(action);
     if (!settings_section.empty()) {
         app->OpenSettingsSection(std::string(settings_section));
@@ -688,33 +703,9 @@ NSMenuItem* AddBrowserMenuItem(NSMenu* menu, IslandMenuActions* menu_actions, NS
     return item;
 }
 
-// Applies the user's keymap (prefs overrides on the defaults) to a menu item:
-// NSMenu owns the command keys on macOS, so Settings edits land here on the
-// next launch. An unbound action keeps its menu entry without a key.
+// Applies the user's keymap to a menu item and registers it for live refreshes.
 void ApplyKeyBinding(NSMenuItem* item, island::KeyAction action, const island::Keymap& keymap) {
-    const std::optional<island::KeyBinding> binding = keymap.Binding(action);
-    const std::optional<island::MacKeyEquivalent> equivalent =
-        binding.has_value() ? island::ToMacKeyEquivalent(*binding) : std::nullopt;
-    if (!equivalent.has_value()) {
-        [item setKeyEquivalent:@""];
-        [item setKeyEquivalentModifierMask:0];
-        return;
-    }
-    NSEventModifierFlags mask = 0;
-    if (equivalent->command) {
-        mask |= NSEventModifierFlagCommand;
-    }
-    if (equivalent->control) {
-        mask |= NSEventModifierFlagControl;
-    }
-    if (equivalent->shift) {
-        mask |= NSEventModifierFlagShift;
-    }
-    if (equivalent->option) {
-        mask |= NSEventModifierFlagOption;
-    }
-    [item setKeyEquivalent:[NSString stringWithUTF8String:equivalent->key.c_str()]];
-    [item setKeyEquivalentModifierMask:mask];
+    island::ApplyMacMenuKeyBinding(item, action, keymap);
 }
 
 // Creates a Browser-menu item that runs |action| and takes its key equivalent

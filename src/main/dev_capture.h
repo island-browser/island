@@ -26,7 +26,7 @@
 //       with a sample conversation (a user message, three tool rows, a Markdown reply) and one
 //       queued message. `report_fixture:collection` opens a collection report with its Export
 //       menu open.
-//       `settings:<section>` opens Settings on one section (appearance,
+//       `bookmarks` opens the local Bookmarks page. `settings:<section>` opens Settings on one section (appearance,
 //       shortcuts, ...). `appearance:<key>=<value>` (sidebar_tint, sidebar_side, card_radius,
 //       density, font,
 //       card_shadow, full_bleed, reset) and `space_color:<index>=#RRGGBB` run the

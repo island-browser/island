@@ -34,6 +34,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void BeginAddressEditing();
     void ShowSearchPalette();
     void ShowCommandPalette();
+    // Developer capture only (`palette_query:<text>`).
+    void ShowCommandPaletteWithQueryForDev(std::string_view query);
     void ToggleSidebar();
     // Developer-capture entry points (--island-dev-actions): set the persistent sidebar state
     // and load an address in the active tab through the address bar's own submit path.
@@ -80,7 +82,8 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
-    void ToggleSettings();
+    void OpenSettings();
+    void OpenBookmarksPage();
     void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
     void BeginSpaceRenaming();
