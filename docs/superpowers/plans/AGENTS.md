@@ -1,5 +1,5 @@
 <!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2026-08-28 | Updated: 2026-08-28 -->
+<!-- Generated: 2026-08-28 | Updated: 2026-10-27 -->
 
 # plans
 
@@ -18,6 +18,7 @@ steps, against the contract fixed by the matching spec in `../specs/`.
 | `2026-08-09-island-browser-phase3.md` | Phase 3 chrome |
 | `2026-08-10-island-search-phase-s0.md` | Search S0 — code landed under `src/search/`, opt-in only |
 | `2026-08-12-island-sidebar-palette.md` | Sidebar + command palette — accepted plan, not yet implemented |
+| `2026-10-27-island-0.10-data-migration.md` | 0.10 data and migration (web data per space, CDP off, crash-safe session, second launch, Arc import, routing, backup) — accepted spec, plan not yet implemented |
 
 ## For AI Agents
 
