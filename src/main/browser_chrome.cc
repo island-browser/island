@@ -1337,7 +1337,7 @@ BrowserChrome::BrowserChrome(BrowserChromeHost& host, CefRefPtr<CefBrowserView> 
     address_field_ = CefTextfield::CreateTextfield(textfield_delegate_);
     address_field_->SetID(static_cast<int>(ChromeViewId::kAddress));
     address_field_->SetAccessibleName("Address");
-    address_field_->SetPlaceholderText("Enter address");
+    address_field_->SetPlaceholderText(std::string(kAddressPlaceholderText));
     address_field_->SetFocusable(true);
     // The native textfield paints its own rounded corners; the surface-colored holder
     // behind it fills those corners so the field reads as one flat, square-edged cell
@@ -3647,7 +3647,14 @@ void BrowserChrome::ProjectAddress(const AddressBarSnapshot& snapshot) {
     address_editing_ = editing;
     const bool native_idle = tokens_.look == LookPreset::kNative && !editing;
     const std::string& text = editing ? snapshot.edit_text : snapshot.display_text;
-    address_idle_label_->SetText(snapshot.display_text);
+    // Native projects the resting address through the label. An empty address shows the placeholder
+    // there, in the placeholder colour; the textfield itself keeps its empty text.
+    address_idle_showing_placeholder_ = native_idle && snapshot.display_text.empty();
+    address_idle_label_->SetText(address_idle_showing_placeholder_
+                                     ? std::string(kAddressPlaceholderText)
+                                     : snapshot.display_text);
+    address_idle_label_->SetEnabledTextColors(
+        (address_idle_showing_placeholder_ ? tokens_.text_secondary : tokens_.text).argb);
     address_idle_label_->SetVisible(native_idle);
     address_field_->SetVisible(!native_idle);
     address_field_->SetReadOnly(!editing);
@@ -3773,7 +3780,8 @@ void BrowserChrome::ApplyControlTheme() {
     address_field_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     address_idle_label_->SetBackgroundColor(address_well.argb);
     address_idle_label_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
-    address_idle_label_->SetEnabledTextColors(tokens_.text.argb);
+    address_idle_label_->SetEnabledTextColors(
+        (address_idle_showing_placeholder_ ? tokens_.text_secondary : tokens_.text).argb);
     active_tab_->SetFontList(FontList(13, ChromeFontWeight::kRegular));
     back_button_->SetEnabledTextColors(tokens_.text.argb);
     forward_button_->SetEnabledTextColors(tokens_.text.argb);

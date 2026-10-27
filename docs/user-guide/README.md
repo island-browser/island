@@ -18,7 +18,7 @@ This guide is task-first: each page tells you how to do one thing.
 
 * Shortcuts are written for macOS first. On Windows and Linux, use Ctrl where macOS uses ⌘, and Alt where it uses ⌥.
 * Behavior that exists only on macOS is marked **macOS only**.
-* Island is pre-1.0 and every build is an unsigned prerelease. Some pages are still being written; they are marked **Planned**.
+* Island is pre-1.0 and every build is unsigned. Some pages are still being written; they are marked **Planned**.
 
 {% hint style="info" %}
 This guide describes the current development line. The [changelog](https://github.com/island-browser/island/blob/main/CHANGELOG.md) lists what changed in each version.

@@ -1265,6 +1265,8 @@ class BrowserChrome final : public NavigationObserver {
     // The inner panel holding every address control, inset by the ring (see BuildViews).
     CefRefPtr<CefPanel> address_inner_;
     CefRefPtr<CefLabelButton> address_idle_label_;
+    // True while the Native label shows kAddressPlaceholderText instead of an empty address.
+    bool address_idle_showing_placeholder_ = false;
     CefRefPtr<CefPanel> divider_;
     CefRefPtr<CefLabelButton> back_button_;
     CefRefPtr<CefLabelButton> forward_button_;

@@ -1,6 +1,6 @@
 # Install Island
 
-Island is distributed as **unsigned prereleases** on GitHub. This page shows how to download one and open it.
+Island is distributed as **unsigned builds** on GitHub. This page shows how to download one and open it.
 
 {% hint style="warning" %}
 Builds are not code-signed or notarized. macOS Gatekeeper and Windows SmartScreen will warn you the first time. Only macOS on Apple Silicon (arm64) has been verified by hand; the other platforms build in CI but have not been checked on a real machine.
@@ -10,7 +10,7 @@ Builds are not code-signed or notarized. macOS Gatekeeper and Windows SmartScree
 
 1. Open [GitHub Releases](https://github.com/island-browser/island/releases).
 2. Pick a release:
-   * `vX.Y.Z` is one prerelease per version.
+   * `vX.Y.Z` is one release per version, marked as the latest release.
    * `nightly` is rebuilt from the latest `main`, so it can be newer and less tested.
 3. Download the file for your platform.
 

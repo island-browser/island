@@ -49,6 +49,24 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   read is left untouched and the bookmarks are read-only for that run. An old file that repeats a
   URL keeps the first copy in folder order; later copies are dropped from the library (their bytes
   stay in `bookmarks.json.v1.bak`). A bookmark change that cannot be saved is not applied.
+- The address field shows an empty address as a "Search or enter address" placeholder in every
+  look, so the start page reads as a field. The placeholder is never the field's text.
+- The start page's Ask Agent mode says "Ask the agent anything" instead of "Ask about this tab or
+  anything"; the agent panel keeps the tab wording because a page is its context.
+- After a search on Google, Yandex or DuckDuckGo the address field shows the query instead of the
+  results URL. Focusing the field keeps the query, and Enter searches again. The real URL is still
+  what Copy URL and the tab hold.
+- Results pages of Yandex's regional sites (yandex.ru, ya.ru) show their query too.
+- A search query that would read as an address (for example `q=https://bank.example/login`), that
+  holds a control character, that is not valid UTF-8, or that has a non-ASCII character other than
+  a letter, mark, number or space separator is not shown in the address field; the field keeps the
+  real URL. The rule is: only letters, numbers and spaces outside ASCII; anything else shows the full
+  address.
+  A link to a results page cannot make the field show another address. Such characters include
+  look-alike punctuation and symbols (`∶`, `ː`, `／`), format and invisible characters, emoji, and
+  fullwidth forms. Queries in Cyrillic, CJK, accented Latin or Devanagari still show. Accepted cost:
+  quotes and dashes (such as `«island»` or an em dash) also show the URL, and so does a Persian
+  query with a zero-width non-joiner.
 
 ### Fixed
 
@@ -61,6 +79,12 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   feedback at the next interaction or page visit, and keeps it separate from a failed-save Retry.
 - Agent messages retain the neutral page and selection-quote chips that were sent with that turn;
   long selection chips stay on one ellipsized line.
+
+## [0.8.1] - 2026-10-24
+
+### Fixed
+
+- The Windows build passes its tests again (an export test kept a file open while deleting it).
 
 ## [0.8.0] - 2026-10-24
 
@@ -609,7 +633,8 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
   Reload, popup rejection, and a clean shutdown through the CEF close lifecycle.
 - Pinned dependency vendoring (`scripts/setup_deps.sh`), packaging, and the product site.
 
-[Unreleased]: https://github.com/island-browser/island/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/island-browser/island/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/island-browser/island/releases/tag/v0.8.1
 [0.8.0]: https://github.com/island-browser/island/releases/tag/v0.8.0
 [0.7.3]: https://github.com/island-browser/island/releases/tag/v0.7.3
 [0.7.2]: https://github.com/island-browser/island/releases/tag/v0.7.2
