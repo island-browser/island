@@ -8,6 +8,8 @@
     <string>@EXECUTABLE_NAME@</string>
     <key>CFBundleIconFile</key>
     <string>island</string>
+    <key>CFBundleIconName</key>
+    <string>Island</string>
     <key>CFBundleIdentifier</key>
     <string>dev.island.browser</string>
     <key>CFBundleInfoDictionaryVersion</key>

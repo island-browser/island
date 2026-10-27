@@ -1,0 +1,55 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.86667,0.95686,0.93333,1.00000",
+      "srgb:0.65098,0.84706,0.80000,1.00000"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    }
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "name": "forest",
+          "image-name": "forest.svg",
+          "glass": false
+        },
+        {
+          "name": "meadow",
+          "image-name": "meadow.svg",
+          "glass": false
+        },
+        {
+          "name": "sand",
+          "image-name": "sand.svg",
+          "glass": false
+        },
+        {
+          "name": "sea",
+          "image-name": "sea.svg",
+          "glass": false
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

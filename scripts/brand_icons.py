@@ -7,6 +7,7 @@ scripts/requirements-brand.txt`). CI never runs it: the outputs are committed un
 
     python3 scripts/brand_icons.py generate        # rewrite every committed icon file
     python3 scripts/brand_icons.py install-concept <svg-light> <svg-dark> [<dmg-bg-svg>]
+    python3 scripts/brand_icons.py glass [<svg-light>]   # rewrite resources/brand/Island.icon
 
 SVG has no portable rasterizer in the standard library, so `render_svg` asks QuickLook (WebKit)
 for the pixels. QuickLook always paints an opaque white page, so each SVG is rendered twice, once
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import json
 import re
 import shutil
 import struct
@@ -34,6 +36,7 @@ DMG_BACKGROUND_SVG: Final = BRAND / "dmg-background.svg"
 DMG_BACKGROUND_1X: Final = BRAND / "dmg-background.png"
 DMG_BACKGROUND_2X: Final = BRAND / "dmg-background@2x.png"
 DMG_SIZE: Final = (660, 400)
+GLASS_ICON: Final = BRAND / "Island.icon"
 ICNS: Final = REPOSITORY / "src" / "main" / "macos" / "island.icns"
 ICO: Final = REPOSITORY / "src" / "main" / "windows" / "island.ico"
 LINUX_PNG_DIR: Final = REPOSITORY / "src" / "main" / "linux" / "icons"
@@ -205,11 +208,67 @@ def generate_files(output_root: Path = REPOSITORY) -> list[Path]:
     return written
 
 
+def _srgb(colour: str) -> str:
+    """'#RRGGBB' -> the 'srgb:r,g,b,1' string of icon.json (components 0..1)."""
+    parts = [int(colour[index: index + 2], 16) / 255 for index in (1, 3, 5)]
+    return "srgb:" + ",".join(f"{part:.5f}" for part in parts) + ",1.00000"
+
+
+def _glass_layers(svg: str) -> tuple[list[str], list[tuple[str, str]]]:
+    """Split a Paper Relief icon SVG into (body gradient colours, [(layer name, layer SVG body)]).
+
+    The body gradient becomes the document fill; the clipped group holds the art, whose shadow
+    paths (blurred copies) are dropped because the system draws the glass shadow itself.
+    """
+    gradient = re.search(r'<linearGradient id="body".*?</linearGradient>', svg, re.S)
+    group = re.search(r'<g clip-path="url\(#clip\)">(.*)</g>', svg, re.S)
+    if gradient is None or group is None:
+        raise BrandError("the SVG is not Paper Relief art (needs a #body gradient and a clipped group)")
+    stops = re.findall(r'stop-color="(#[0-9A-Fa-f]{6})"', gradient.group(0))
+    paths = [path for path in re.findall(r"<path\b[^>]*/>", group.group(1)) if "filter=" not in path]
+    highlight = re.search(r'<linearGradient id="hi".*?</linearGradient>', svg, re.S)
+    if len(stops) < 2 or highlight is None or len(paths) != 8:
+        raise BrandError("unexpected Paper Relief structure: expected 2 rings and 3 land tones")
+    groups = [("sea", paths[0:2]), ("sand", paths[2:4]), ("meadow", paths[4:6]), ("forest", paths[6:8])]
+    # each land fill is followed by its highlight stroke
+    named = [(name, "".join(members)) for name, members in groups]
+    header = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" '
+              'height="1024"><defs>' + highlight.group(0) + "</defs>")
+    return stops, [(name, header + body + "</svg>\n") for name, body in named]
+
+
+def write_glass(light: Path, destination: Path = GLASS_ICON) -> list[Path]:
+    """Write the Icon Composer document |destination| (icon.json + Assets/*.svg) from |light|."""
+    stops, layers = _glass_layers(light.read_text(encoding="utf-8"))
+    assets = destination / "Assets"
+    if destination.exists():
+        shutil.rmtree(destination)
+    assets.mkdir(parents=True)
+    document = {
+        "fill": {"linear-gradient": [_srgb(stops[0]), _srgb(stops[-1])],
+                 "orientation": {"start": {"x": 0.5, "y": 0}, "stop": {"x": 0.5, "y": 1}}},
+        "groups": [{
+            "layers": [{"name": name, "image-name": f"{name}.svg", "glass": False}
+                       for name, _ in reversed(layers)],
+            "shadow": {"kind": "neutral", "opacity": 0.5},
+            "translucency": {"enabled": False, "value": 0.5},
+        }],
+        "supported-platforms": {"squares": "shared"},
+    }
+    written = [destination / "icon.json"]
+    written[0].write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    for name, svg in layers:
+        (assets / f"{name}.svg").write_text(svg, encoding="utf-8")
+        written.append(assets / f"{name}.svg")
+    return written
+
+
 def install_concept(light: Path, dark: Path, dmg: Path | None) -> None:
     shutil.copyfile(light, ICON_LIGHT)
     shutil.copyfile(dark, ICON_DARK)
     if dmg is not None:
         shutil.copyfile(dmg, DMG_BACKGROUND_SVG)
+    write_glass(ICON_LIGHT)
     generate_files()
 
 
@@ -232,10 +291,15 @@ def main(argv: list[str] | None = None) -> int:
     pick.add_argument("light", type=Path)
     pick.add_argument("dark", type=Path)
     pick.add_argument("dmg", type=Path, nargs="?")
+    glass = sub.add_parser("glass")
+    glass.add_argument("light", type=Path, nargs="?", default=ICON_LIGHT)
     args = parser.parse_args(argv)
     try:
         if args.command == "install-concept":
             install_concept(args.light, args.dark, args.dmg)
+        elif args.command == "glass":
+            for path in write_glass(args.light):
+                print(path.relative_to(REPOSITORY))
         else:
             for path in generate_files():
                 print(path.relative_to(REPOSITORY))

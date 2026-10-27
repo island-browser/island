@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import struct
 import sys
@@ -40,7 +41,9 @@ class BrandSourceTests(unittest.TestCase):
             self.assertRegex(svg, r'viewBox="0 0 1024 1024"', name)
             self.assertNotIn("<image", svg, f"{name} must be vector art")
             # the squircle body spans x 100..924 on the 1024 canvas
-            coordinates = [float(x) for x in re.findall(r"[ML](\d+\.?\d*),", svg.split('<path d="', 2)[2])]
+            body = re.search(r'<path d="([^"]+)" fill="url\(#body\)"', svg)
+            self.assertIsNotNone(body, name)
+            coordinates = [float(x) for x in re.findall(r"[ML](\d+\.?\d*),", body.group(1))]
             self.assertAlmostEqual(min(coordinates), 100, delta=1, msg=name)
             self.assertAlmostEqual(max(coordinates), 924, delta=1, msg=name)
 
@@ -115,6 +118,55 @@ class IconWiringTests(unittest.TestCase):
 
     def test_linux_desktop_entry_names_the_theme_icon(self) -> None:
         self.assertIn("Icon=island-browser\n", (MAIN / "linux" / "island-browser.desktop").read_text())
+
+
+@final
+class LiquidGlassIconTests(unittest.TestCase):
+    ICON = BRAND / "Island.icon"
+
+    def test_document_parses_and_every_layer_image_exists(self) -> None:
+        document = json.loads((self.ICON / "icon.json").read_text(encoding="utf-8"))
+        self.assertIn("fill", document)
+        layers = [layer for group in document["groups"] for layer in group["layers"]]
+        self.assertGreaterEqual(len(layers), 2)
+        self.assertLessEqual(len(layers), 4)
+        for layer in layers:
+            svg = (self.ICON / "Assets" / layer["image-name"]).read_text(encoding="utf-8")
+            self.assertIn('viewBox="0 0 1024 1024"', svg, layer["name"])
+            self.assertNotIn("<image", svg, f"{layer['name']} must be vector art")
+            self.assertNotIn("filter=", svg, f"{layer['name']}: the system draws the shadows")
+
+    def test_assets_hold_no_file_the_document_does_not_use(self) -> None:
+        document = json.loads((self.ICON / "icon.json").read_text(encoding="utf-8"))
+        used = {layer["image-name"] for group in document["groups"] for layer in group["layers"]}
+        self.assertEqual({path.name for path in (self.ICON / "Assets").iterdir()}, used)
+
+    def test_info_plist_names_the_icon_file_and_the_glass_icon(self) -> None:
+        plist = (MAIN / "Info.plist.in").read_text(encoding="utf-8")
+        self.assertRegex(plist, r"<key>CFBundleIconFile</key>\s*<string>island</string>")
+        self.assertRegex(plist, r"<key>CFBundleIconName</key>\s*<string>Island</string>")
+
+    def test_cmake_compiles_the_icon_with_a_guarded_actool(self) -> None:
+        cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("--app-icon Island", cmake)
+        self.assertIn("--minimum-deployment-target 26.0", cmake)
+        self.assertIn("message(WARNING", cmake)
+        self.assertNotIn("message(FATAL_ERROR \"actool", cmake)
+
+    @unittest.skipUnless(sys.platform == "darwin", "the glass command rasterizes nothing but needs macOS paths")
+    def test_glass_command_is_reproducible(self) -> None:
+        sys.path.insert(0, str(REPOSITORY / "scripts"))
+        try:
+            import brand_icons
+        finally:
+            sys.path.pop(0)
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "Island.icon"
+            brand_icons.write_glass(BRAND / "app-icon.svg", target)
+            for path in self.ICON.rglob("*"):
+                if path.is_file():
+                    self.assertEqual((target / path.relative_to(self.ICON)).read_bytes(),
+                                     path.read_bytes(), path.name)
 
 
 @final
