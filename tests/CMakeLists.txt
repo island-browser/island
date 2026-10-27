@@ -67,6 +67,7 @@ add_executable(island_tests
     space_test.cpp
     startup_options_test.cpp
     dev_capture_test.cpp
+    island_app_test.cpp
     icon_catalog_test.cpp
     tab_sleep_policy_test.cpp
     tab_test.cpp
@@ -130,6 +131,8 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/welcome_flow.cc"
     "${CMAKE_SOURCE_DIR}/src/main/startup_options.cc"
     "${CMAKE_SOURCE_DIR}/src/main/dev_capture.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/island_app.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/remote_debugging.cc"
     "${CMAKE_SOURCE_DIR}/src/main/tab.cc"
     "${CMAKE_SOURCE_DIR}/src/main/updater.cc"
     "${CMAKE_SOURCE_DIR}/src/main/window_agent_host.cc"

@@ -9,10 +9,12 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 #include "lifecycle_config.h"
+#include "remote_debugging.h"
 
 namespace island {
 
-IslandApp::IslandApp(StartupOptions startup_options) : startup_options_(startup_options) {}
+IslandApp::IslandApp(StartupOptions startup_options, std::optional<int> remote_debugging_port)
+    : startup_options_(startup_options), remote_debugging_port_(remote_debugging_port) {}
 
 IslandApp::~IslandApp() = default;
 
@@ -26,6 +28,7 @@ void IslandApp::OnBeforeCommandLineProcessing(const CefString& process_type,
     for (const std::string_view name : kBrowserProcessSwitches) {
         command_line->AppendSwitch(std::string(name));
     }
+    ApplyRemoteDebuggingPlan(PlanRemoteDebuggingSwitches(remote_debugging_port_), *command_line);
 }
 
 CefRefPtr<CefBrowserProcessHandler> IslandApp::GetBrowserProcessHandler() { return this; }

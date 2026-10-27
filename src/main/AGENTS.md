@@ -15,6 +15,7 @@ platform executable links.
 | File | Description |
 |------|-------------|
 | `CMakeLists.txt` | Defines `island_browser_core` plus the macOS bundle / Windows / Linux executable wiring |
+| `remote_debugging.{h,cc}` | CDP is closed by default (R-C1..R-C3): `kRemoteDebuggingPort = 0`; `IslandApp` strips `--remote-debugging-port/-pipe` from the browser-process command line through `PlanRemoteDebuggingSwitches` + `ApplyRemoteDebuggingPlan`. A developer opens it with `--island-dev-remote-debugging[=PORT]` (default 9222, 1024-65535; parsed by `DevCaptureOptions`, passed to `IslandApp` and `RunIslandMainProcess` by each `main_*`), which also adds `remote-allow-origins=http://127.0.0.1:<port>`, prints a stderr warning, and adds an About row. `ActiveRemoteDebuggingPort()` is the process-wide value. |
 | `island_app.{h,cc}` | `CefApp` + `CefBrowserProcessHandler`; owns `BrowserWindow`, dispatches `BrowserCommand`, holds navigation/chrome observers |
 | `browser_window.{h,cc}` | Top-level `CefWindow` host, owns the `Space` vector, creates the active tab's `CefBrowserView`, and drives the CEF close lifecycle |
 | `browser_chrome.{h,cc}` | Native chrome layout; declares the `ChromeViewId` enum (`kRoot = 1001` …). Native's sidebar bottom is a footer with a switcher row (segments, `+`, overview, settings; `kRailSwitcherRow`) above the full-width Agent entry (`kRailAgentButton`); the toolbar has no Agent button under Native, and a collapsed rail relayout lays its toolbar content immediately so Back/Forward clear the macOS traffic lights |

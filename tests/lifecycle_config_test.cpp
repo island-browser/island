@@ -9,7 +9,12 @@ TEST(WindowConfiguration, DefinesThePhaseZeroNativeWindow) {
     EXPECT_EQ(island::kWindowTitle, "Island");
     EXPECT_EQ(island::kWindowWidth, 1024);
     EXPECT_EQ(island::kWindowHeight, 768);
-    EXPECT_EQ(island::kRemoteDebuggingPort, 9222);
+}
+
+// R-C3: the production default closes the DevTools Protocol port; the phase-0 value 9222 is
+// reachable only through --island-dev-remote-debugging.
+TEST(WindowConfiguration, ProductionRemoteDebuggingPortIsZero) {
+    EXPECT_EQ(island::kRemoteDebuggingPort, 0);
 }
 
 TEST(WindowConfiguration, NeverReachesTheMacOSKeychain) {

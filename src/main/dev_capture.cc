@@ -16,6 +16,9 @@ constexpr std::string_view kActionsFlag = "--island-dev-actions=";
 constexpr std::string_view kCaptureFlag = "--island-dev-capture=";
 constexpr std::string_view kDelayFlag = "--island-dev-delay=";
 constexpr std::string_view kKeepOpenFlag = "--island-dev-keep-open";
+constexpr std::string_view kRemoteDebuggingFlag = "--island-dev-remote-debugging";
+constexpr std::string_view kRemoteDebuggingFlagWithValue = "--island-dev-remote-debugging=";
+constexpr int kDefaultRemoteDebuggingPort = 9222;
 constexpr double kMaxDelaySeconds = 60.0;
 
 std::vector<std::string> SplitActions(std::string_view list) {
@@ -50,6 +53,15 @@ DevCaptureOptions DevCaptureOptions::Parse(std::span<const std::string_view> arg
             if (end != value.c_str() && *end == '\0' && seconds >= 0.0 &&
                 seconds <= kMaxDelaySeconds) {
                 options.delay_seconds = seconds;
+            }
+        } else if (argument == kRemoteDebuggingFlag) {
+            options.remote_debugging_port = kDefaultRemoteDebuggingPort;
+        } else if (argument.starts_with(kRemoteDebuggingFlagWithValue)) {
+            const std::string value(argument.substr(kRemoteDebuggingFlagWithValue.size()));
+            char* end = nullptr;
+            const long port = std::strtol(value.c_str(), &end, 10);
+            if (!value.empty() && *end == '\0' && port >= 1024 && port <= 65535) {
+                options.remote_debugging_port = static_cast<int>(port);
             }
         } else if (argument == kKeepOpenFlag) {
             options.keep_open = true;

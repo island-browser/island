@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -82,4 +83,25 @@ TEST(DevCaptureOptions, ParsesAgentFixtureConfirm) {
     EXPECT_EQ(DevAgentFixtureName("agent_fixture:thread"), "thread");
 }
 
+}  // namespace island
+
+namespace island {
+namespace {
+
+TEST(DevCaptureOptions, RemoteDebuggingFlagParsesPortAndRejectsOutOfRange) {
+    EXPECT_EQ(ParseArgs({"island_browser"}).remote_debugging_port, std::nullopt);
+    EXPECT_EQ(ParseArgs({"island_browser", "--island-dev-remote-debugging"}).remote_debugging_port,
+              9222);
+    EXPECT_EQ(
+        ParseArgs({"island_browser", "--island-dev-remote-debugging=9333"}).remote_debugging_port,
+        9333);
+    for (const std::string_view bad : {"--island-dev-remote-debugging=80",
+                                       "--island-dev-remote-debugging=70000",
+                                       "--island-dev-remote-debugging=abc",
+                                       "--island-dev-remote-debugging="}) {
+        EXPECT_EQ(ParseArgs({"island_browser", bad}).remote_debugging_port, std::nullopt) << bad;
+    }
+}
+
+}  // namespace
 }  // namespace island

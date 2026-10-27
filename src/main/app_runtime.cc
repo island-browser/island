@@ -1,20 +1,29 @@
 #include "app_runtime.h"
 
+#include <cstdio>
 #include <cstdlib>
+#include <string>
 
 #include "font_registry.h"
 #include "island_app.h"
 #include "lifecycle_config.h"
+#include "remote_debugging.h"
 
 namespace island {
 
 int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& app,
-                         IslandAppReleaseObserver* release_observer, void* sandbox_info) {
+                         IslandAppReleaseObserver* release_observer, void* sandbox_info,
+                         std::optional<int> remote_debugging_port) {
     FontRegistry font_registry = FontRegistry::ForCurrentProcess();
     font_registry.Register();
 
     CefSettings settings;
-    settings.remote_debugging_port = kRemoteDebuggingPort;
+    SetActiveRemoteDebuggingPort(remote_debugging_port);
+    settings.remote_debugging_port = remote_debugging_port.value_or(kRemoteDebuggingPort);
+    if (remote_debugging_port.has_value()) {
+        std::fprintf(stderr, std::string(kRemoteDebuggingWarningFormat).append("\n").c_str(),
+                     *remote_debugging_port);
+    }
     // Test-friendly isolated cache root: never touch the OS keychain via the
     // Chromium Safe Storage helper. Pointing root_cache_path at a dedicated
     // per-process directory keeps CEF state out of the user's profile and stops

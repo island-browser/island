@@ -48,6 +48,7 @@ version bump to `main` tags the commit `vX.Y.Z` automatically. Versions before
 
 ### Changed
 
+- The DevTools Protocol port (9222) is closed by default. Developers open it with `--island-dev-remote-debugging[=PORT]`; Island then prints a warning and shows "Remote debugging" in Settings > About.
 - The sidebar's "+ New tab" row is back: directly under the "<Space> · Tabs" header in every look,
   and the collapsed rail's "+" after the tab icons. Both open a tab like ⌘T. Its keyboard focus
   ring is neutral and not clipped.

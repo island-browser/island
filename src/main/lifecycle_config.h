@@ -9,7 +9,7 @@ namespace island {
 inline constexpr std::string_view kWindowTitle = "Island";
 inline constexpr int kWindowWidth = 1024;
 inline constexpr int kWindowHeight = 768;
-inline constexpr int kRemoteDebuggingPort = 9222;
+inline constexpr int kRemoteDebuggingPort = 0;  // closed unless --island-dev-remote-debugging
 
 // Chromium switches appended to the browser process's command line.
 //

@@ -4,6 +4,8 @@
 
 The About section shows the version and where Island keeps its data. Updates are in General.
 
+When Island was started with `--island-dev-remote-debugging`, About also shows a "Remote debugging" row with the port. It is off in normal use.
+
 ## What this page will cover
 
 * The version and the data locations

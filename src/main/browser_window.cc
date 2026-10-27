@@ -57,6 +57,7 @@
 #include "runtime_style.h"
 #include "search_provider.h"
 #include "session_store.h"
+#include "remote_debugging.h"
 #include "space_menu.h"
 #include "start_tiles.h"
 #include "startup_options.h"
@@ -1813,6 +1814,9 @@ std::string BrowserWindow::SettingsStateJson() const {
     row("Session", SessionStore::DefaultSessionFilePath().string());
     row("Reports", ReportStore::DefaultReportsFilePath().string());
     row("Agent endpoint file", agent::DefaultDiscoveryFilePath().string());
+    if (const std::optional<int> debug_port = ActiveRemoteDebuggingPort(); debug_port) {
+        row("Remote debugging", "on (port " + std::to_string(*debug_port) + ")");
+    }
 
     const std::string_view theme_pref = prefs_.theme == ThemePreference::kLight  ? "light"
                                         : prefs_.theme == ThemePreference::kDark ? "dark"
