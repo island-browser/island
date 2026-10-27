@@ -25,6 +25,10 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
                                        CefRefPtr<CefCommandLine> command_line) override;
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override;
     void OnContextInitialized() override;
+    // A second launch while Island runs: hand its addresses to the window and always claim the
+    // relaunch, so CEF never opens its default Chrome window.
+    bool OnAlreadyRunningAppRelaunch(CefRefPtr<CefCommandLine> command_line,
+                                     const CefString& current_directory) override;
 
     void ExecuteCommand(BrowserCommand command);
     // Keyboard shortcut dispatch for the macOS menu (the same path the

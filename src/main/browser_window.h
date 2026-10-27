@@ -190,6 +190,9 @@ class BrowserWindow : public CefClient,
     // keeps the URL as its startup URL. Both return false when closing, for
     // an unknown tab, or for text that resolves to no allowed URL.
     [[nodiscard]] bool OpenNewTab(std::string_view text);
+    // 0.10 relaunch (browser_window_relaunch.cc): a second launch hands its addresses here. Brings
+    // the window to the front and opens each address in a new tab; a no-op while closing.
+    void HandleRelaunch(const std::vector<std::string>& urls);
     // The MCP browser_open_tab path. During research it inserts the page below the Plan tab,
     // labels it with the running branch and remembers which plan node opened it.
     [[nodiscard]] bool OpenAgentTab(std::string_view text);

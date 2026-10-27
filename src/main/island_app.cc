@@ -1,6 +1,7 @@
 #include "island_app.h"
 
 #include <string>
+#include <vector>
 
 #include "browser_window.h"
 #include "include/cef_browser.h"
@@ -9,6 +10,7 @@
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 #include "lifecycle_config.h"
+#include "relaunch_args.h"
 #include "remote_debugging.h"
 
 namespace island {
@@ -45,6 +47,23 @@ void IslandApp::OnContextInitialized() {
         browser_window_->SetNavigationObserver(navigation_observer_);
         browser_window_->SetChromeObserver(chrome_observer_);
     }
+}
+
+bool IslandApp::OnAlreadyRunningAppRelaunch(CefRefPtr<CefCommandLine> command_line,
+                                            const CefString& /*current_directory*/) {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (browser_window_ != nullptr && command_line != nullptr) {
+        std::vector<CefString> raw;
+        command_line->GetArguments(raw);
+        std::vector<std::string> arguments;
+        arguments.reserve(raw.size());
+        for (const CefString& argument : raw) {
+            arguments.push_back(argument.ToString());
+        }
+        browser_window_->HandleRelaunch(RelaunchUrls(arguments));
+    }
+    return true;
 }
 
 void IslandApp::ExecuteCommand(BrowserCommand command) {

@@ -38,6 +38,14 @@ TEST(RemoteDebuggingPlan, RemovesBothSwitchesWithoutAPortAndAllowsOneOriginWithA
     EXPECT_EQ(on.append[0].second, "http://127.0.0.1:9333");
 }
 
+TEST(IslandAppTest, RelaunchIsAlwaysHandled) {
+    // No window yet and no command line: the handler must still claim the relaunch, so CEF never
+    // opens its default Chrome window (R-D10). A real CefCommandLine needs the loaded CEF library;
+    // the launch check in the report covers that path.
+    CefRefPtr<IslandApp> app = new IslandApp(StartupOptions::Parse({}), std::nullopt);
+    EXPECT_TRUE(app->OnAlreadyRunningAppRelaunch(nullptr, ""));
+}
+
 TEST(IslandAppTest, StripsRemoteDebuggingSwitchesWithoutDevFlag) {
     FakeCommandLine command_line;
     ApplyRemoteDebuggingPlan(PlanRemoteDebuggingSwitches(std::nullopt), command_line);

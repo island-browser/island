@@ -2542,3 +2542,20 @@ TEST(BrowserWindowTest, GivenFullscreenWhenTheTitlebarInsetResolvesThenItIsZeroU
 }  // namespace
 
 }  // namespace island
+
+namespace island {
+namespace {
+
+TEST(BrowserWindowTest, RelaunchOpensHandedOverUrlInNewTab) {
+    CefRefPtr<BrowserWindow> window = MakeWebWindow();
+    const std::size_t before = ActiveSpace(*window).tab_count();
+    window->HandleRelaunch({});
+    EXPECT_EQ(ActiveSpace(*window).tab_count(), before);
+    window->HandleRelaunch({"https://a.test/x"});
+    ASSERT_EQ(ActiveSpace(*window).tab_count(), before + 1);
+    EXPECT_EQ(ActiveSpace(*window).tabs().back().startup_url(), "https://a.test/x");
+    EXPECT_EQ(ActiveSpace(*window).active_tab_index(), before);
+}
+
+}  // namespace
+}  // namespace island
