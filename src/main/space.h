@@ -49,6 +49,11 @@ class Space {
     void SetColor(SpaceColor color);
     void SetIconId(std::string icon_id);
 
+    // Host patterns that open tabs in this space (R-R1). Normalized by
+    // NormalizeRoutePattern (space_routing.h); the space only stores them.
+    [[nodiscard]] const std::vector<std::string>& routes() const noexcept;
+    void SetRoutes(std::vector<std::string> routes);
+
     [[nodiscard]] const std::vector<Tab>& tabs() const noexcept;
     [[nodiscard]] std::vector<Tab>& tabs() noexcept;
     [[nodiscard]] std::size_t tab_count() const noexcept;
@@ -125,6 +130,7 @@ class Space {
     std::string name_;
     SpaceColor color_;
     std::string icon_id_;
+    std::vector<std::string> routes_;
     std::vector<Tab> tabs_;
     std::size_t active_tab_index_ = 0;
     std::optional<SplitPairing> split_;

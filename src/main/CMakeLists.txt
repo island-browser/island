@@ -56,6 +56,7 @@ add_library(island_browser_core STATIC
     sha256.cc
     sidebar_state.cc
     space.cc
+    space_routing.cc
     peek_overlay.cc
     space_menu.cc
     link_open_policy.cc

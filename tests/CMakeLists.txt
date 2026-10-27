@@ -66,6 +66,7 @@ add_executable(island_tests
     sidebar_state_test.cpp
     space_icon_cache_test.cpp
     space_menu_test.cpp
+    space_routing_test.cpp
     space_test.cpp
     startup_options_test.cpp
     dev_capture_test.cpp
@@ -129,6 +130,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/sha256.cc"
     "${CMAKE_SOURCE_DIR}/src/main/sidebar_state.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/space_routing.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space_menu.cc"
     "${CMAKE_SOURCE_DIR}/src/main/space_rename_overlay.cc"
     "${CMAKE_SOURCE_DIR}/src/main/welcome_flow.cc"

@@ -12,6 +12,10 @@ Space::Space(SpaceId id, std::string name, SpaceColor color, std::string icon_id
 
 SpaceId Space::id() const noexcept { return id_; }
 
+const std::vector<std::string>& Space::routes() const noexcept { return routes_; }
+
+void Space::SetRoutes(std::vector<std::string> routes) { routes_ = std::move(routes); }
+
 const std::string& Space::name() const noexcept { return name_; }
 
 SpaceColor Space::color() const noexcept { return color_; }
