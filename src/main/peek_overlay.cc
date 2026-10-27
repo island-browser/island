@@ -370,17 +370,19 @@ void PeekOverlay::ApplyColors() {
     open_as_tab_->SetEnabledTextColors(tokens_.text.argb);
     open_as_tab_->SetFontList("Geist, Medium 13px");
     close_->SetBackgroundColor(tokens_.fill.argb);
-    // The icon matches its label's text tone; the icon-only close keeps the secondary tone of
-    // the find bar's close.
-    const auto set_icon = [&](const CefRefPtr<CefLabelButton>& button, ChromeIcon icon,
-                              ChromeIconTone tone, ChromeIconSize size) {
-        const std::optional<CefRefPtr<CefImage>> image = icons_.Load(icon, tone, size);
-        if (image.has_value()) {
-            button->SetImage(CEF_BUTTON_STATE_NORMAL, *image);
-        }
-    };
-    set_icon(open_as_tab_, ChromeIcon::kPlus, ChromeIconTone::kText, ChromeIconSize::k13);
-    set_icon(close_, ChromeIcon::kClose, ChromeIconTone::kSecondary, ChromeIconSize::k13);
+    // The "+" is recolored from its alpha mask to the theme text token, so it follows the theme
+    // like its label; a fixed tone PNG would stay dark in Native dark. The icon-only close keeps
+    // the secondary tone of the find bar's close.
+    const std::optional<CefRefPtr<CefImage>> plus =
+        icons_.LoadTinted(ChromeIcon::kPlus, tokens_.text, ChromeIconSize::k13);
+    if (plus.has_value()) {
+        open_as_tab_->SetImage(CEF_BUTTON_STATE_NORMAL, *plus);
+    }
+    const std::optional<CefRefPtr<CefImage>> close =
+        icons_.Load(ChromeIcon::kClose, ChromeIconTone::kSecondary, ChromeIconSize::k13);
+    if (close.has_value()) {
+        close_->SetImage(CEF_BUTTON_STATE_NORMAL, *close);
+    }
 }
 
 void PeekOverlay::RefreshAddress() {
