@@ -31,6 +31,7 @@
 #include "session_store.h"
 #include "sha256.h"
 #include "start_tiles.h"
+#include "support/scoped_data_home.h"
 #include "table_export.h"
 #include "updater.h"
 #include "window_agent_host.h"
@@ -53,32 +54,6 @@ CefRefPtr<BrowserWindow> MakeWindow() {
     window->SetAddressValidatorForTest(&FakeValidate);
     return window;
 }
-
-class ScopedHome {
-  public:
-    explicit ScopedHome(const std::filesystem::path& home) {
-#if defined(_WIN32)
-        static_cast<void>(home);
-#else
-        const char* const saved = std::getenv("HOME");
-        if (saved != nullptr) saved_ = saved;
-        setenv("HOME", home.string().c_str(), 1);
-#endif
-    }
-
-    ~ScopedHome() {
-#if !defined(_WIN32)
-        if (saved_.has_value()) {
-            setenv("HOME", saved_->c_str(), 1);
-        } else {
-            unsetenv("HOME");
-        }
-#endif
-    }
-
-  private:
-    std::optional<std::string> saved_;
-};
 
 std::filesystem::path ChromeBookmarksPath() {
 #if defined(_WIN32)
@@ -597,10 +572,8 @@ TEST(BrowserWindowPagesTest, ChromeImportReportsUnreadableProfileAfterPartialSuc
 #if defined(_WIN32)
     GTEST_SKIP() << "This fixture changes HOME, which Windows import does not use.";
 #else
-    const std::filesystem::path home =
-        std::filesystem::temp_directory_path() / "island_chrome_partial_import";
-    std::error_code error;
-    std::filesystem::remove_all(home, error);
+    const island::testing::ScopedDataHome scoped_home;
+    const std::filesystem::path& home = scoped_home.home();
     const std::filesystem::path user_data =
         (home / ChromeBookmarksPath()).parent_path().parent_path();
     WriteFile(
@@ -608,12 +581,10 @@ TEST(BrowserWindowPagesTest, ChromeImportReportsUnreadableProfileAfterPartialSuc
         R"({"roots":{"bookmark_bar":{"children":[{"type":"url","url":"https://good.test/"}]}}})");
     WriteFile(user_data / "Profile 1/Bookmarks", "not a Bookmarks file");
 
-    const ScopedHome scoped_home(home);
     CefRefPtr<BrowserWindow> window = MakeWindow();
     EXPECT_EQ(window->ImportFromBrowser("chrome"),
               "Imported 1 bookmarks from Google Chrome. Find them in the command palette. "
               "1 Chrome profile could not be read.");
-    std::filesystem::remove_all(home, error);
 #endif
 }
 

@@ -37,6 +37,7 @@ Two independent test systems live side by side here:
 | `updater_test.cpp` | Updater core: SHA-256 vectors, SemVer precedence, release/asset/checksum selection, URL allow-list, install detection, apply-script text (and a real run of the Linux script), the `Updater` state machine with a fake fetcher |
 | `prefs_store_test.cpp` | Preferences round-trip, optional keys (history, agent provider, shortcuts, update checks), agent-command migration, schema errors |
 | `session_store_test.cpp` | Session JSON round-trip, including optional `favorite_tabs` records (old files load with none) |
+| `data_paths_test.cpp`, `support/scoped_data_home.h` | Data directory and web-data root rules. `ScopedDataHome` gives a test a fresh temp HOME, XDG_DATA_HOME, APPDATA, LOCALAPPDATA, USERPROFILE and `ISLAND_DEV_CACHE_DIR` (`<home>/web`), restores each variable exactly and removes the directory; use it instead of a local HOME swap. It changes the process environment, so such tests must not run in parallel |
 | `favorite_tabs_test.cpp` | CEF-free favorite virtual-tab registry: ensure, reset-on-close, disposal by key, bookmark and scope, and the session form |
 | `address_indicators_test.cpp` | Address-field shield count, its 9999+ cap and tooltip |
 | `appearance_test.cpp` | Appearance prefs round-trip and the Native look written by default |

@@ -42,6 +42,7 @@ add_library(island_browser_core STATIC
     navigation_state.cc
     prefs_store.cc
     collect_prompt.cc
+    data_paths.cc
     report_store.cc
     research_prompt.cc
     table_export.cc

@@ -36,6 +36,7 @@ add_executable(island_tests
     command_palette_test.cpp
     content_blocker_policy_test.cpp
     content_blocker_test.cpp
+    data_paths_test.cpp
     design_tokens_test.cpp
     download_path_test.cpp
     favicon_policy_test.cpp
@@ -95,6 +96,7 @@ add_executable(island_tests
     "${CMAKE_SOURCE_DIR}/src/main/command_palette.cc"
     "${CMAKE_SOURCE_DIR}/src/main/command_palette_view.cc"
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker.cc"
+    "${CMAKE_SOURCE_DIR}/src/main/data_paths.cc"
     "${CMAKE_SOURCE_DIR}/src/main/content_blocker_policy.cc"
     "${CMAKE_SOURCE_DIR}/src/main/design_tokens.cc"
     "${CMAKE_SOURCE_DIR}/src/main/row_raster.cc"

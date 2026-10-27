@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "data_paths.h"
 #include "json_util.h"
 
 namespace island {
@@ -897,31 +898,7 @@ BookmarkResult BookmarkStore::Import(std::string_view folder_name,
 }
 
 std::filesystem::path BookmarkStore::DefaultBookmarksFilePath() {
-#if defined(_WIN32)
-    const char* const app_data = std::getenv("APPDATA");
-    std::filesystem::path base =
-        app_data != nullptr && *app_data != '\0'
-            ? std::filesystem::path(app_data)
-            : std::filesystem::path(std::getenv("USERPROFILE")) / "AppData" / "Roaming";
-    return base / "Island" / "bookmarks.json";
-#elif defined(__APPLE__)
-    const char* const home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0') {
-        return std::filesystem::path("bookmarks.json");
-    }
-    return std::filesystem::path(home) / "Library" / "Application Support" / "Island" /
-           "bookmarks.json";
-#else
-    const char* const xdg_data_home = std::getenv("XDG_DATA_HOME");
-    if (xdg_data_home != nullptr && *xdg_data_home != '\0') {
-        return std::filesystem::path(xdg_data_home) / "Island" / "bookmarks.json";
-    }
-    const char* const home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0') {
-        return std::filesystem::path("bookmarks.json");
-    }
-    return std::filesystem::path(home) / ".local" / "share" / "Island" / "bookmarks.json";
-#endif
+    return IslandDataDirectory() / "bookmarks.json";
 }
 
 }  // namespace island

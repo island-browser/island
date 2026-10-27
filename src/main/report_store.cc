@@ -8,6 +8,7 @@
 #include <sstream>
 #include <system_error>
 
+#include "data_paths.h"
 #include "json_util.h"
 
 namespace island {
@@ -187,31 +188,7 @@ bool ReportStore::Remove(ReportState& state, std::string_view id) {
 }
 
 std::filesystem::path ReportStore::DefaultReportsFilePath() {
-#if defined(_WIN32)
-    const char* const app_data = std::getenv("APPDATA");
-    std::filesystem::path base =
-        app_data != nullptr && *app_data != '\0'
-            ? std::filesystem::path(app_data)
-            : std::filesystem::path(std::getenv("USERPROFILE")) / "AppData" / "Roaming";
-    return base / "Island" / "reports.json";
-#elif defined(__APPLE__)
-    const char* const home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0') {
-        return std::filesystem::path("reports.json");
-    }
-    return std::filesystem::path(home) / "Library" / "Application Support" / "Island" /
-           "reports.json";
-#else
-    const char* const xdg_data_home = std::getenv("XDG_DATA_HOME");
-    if (xdg_data_home != nullptr && *xdg_data_home != '\0') {
-        return std::filesystem::path(xdg_data_home) / "Island" / "reports.json";
-    }
-    const char* const home = std::getenv("HOME");
-    if (home == nullptr || *home == '\0') {
-        return std::filesystem::path("reports.json");
-    }
-    return std::filesystem::path(home) / ".local" / "share" / "Island" / "reports.json";
-#endif
+    return IslandDataDirectory() / "reports.json";
 }
 
 }  // namespace island
