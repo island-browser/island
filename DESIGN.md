@@ -303,8 +303,10 @@ comfortable, 26 compact. Full bleed removes inset, radius and shadow.
   "<Space> · Tabs" header, before the first tab row, in every look (owner decision 2026-10-26; it
   supersedes the 0.9 spec §9-4 removal). It is a row of the tab list (the same height and neutral
   `hover` plate as a tab row, no accent) and opens a tab exactly like ⌘T. Its keyboard focus ring
-  sits in a 2 DIP inset around the row (a wrapper panel), so the ring is neutral, rounded and not
-  clipped by the tab list; the collapsed rail's "+" sits after the tab icons. Clicking the active
+  sits in a 4 DIP inset around the row (a wrapper panel; the ring is drawn about 4 DIP outside the
+  row, so a 2 DIP inset clipped its sides), so the ring is neutral, rounded and not clipped by the
+  tab list; the collapsed rail's "+" sits after the tab icons in a wrapper with 4 DIP above and
+  below it, so its ring keeps air from the favicon above. Clicking the active
   space's segment (or its rail icon) opens the space menu: Rename, Change icon, the five colour
   presets, New space and, with another space present, Delete space. It is a palette listing shown
   only while open, not a persistent overlay. In Arc and Graphite the footer's Agent button is a

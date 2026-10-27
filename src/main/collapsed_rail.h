@@ -33,6 +33,12 @@ inline constexpr int kCollapsedRailGutterDip =
 // in a wrapper that adds breathing room above and below it.
 inline constexpr int kCollapsedRailSeparatorWidthDip = kCollapsedRailButtonDip - 12;
 inline constexpr int kCollapsedRailSeparatorHeightDip = 9;
+// The rail's "+" sits in a wrapper that keeps this much room above and below it. Its focus ring
+// is drawn about 4 DIP outside the 32 DIP button (a 2 DIP stroke in a 4 DIP halo), so 4 DIP
+// keeps the ring inside the list and leaves about 2 DIP of air above it, below the favicon.
+inline constexpr int kCollapsedRailNewTabRingInsetDip = 4;
+// Extra list height the "+" wrapper adds (its inset above and below).
+inline constexpr int kCollapsedRailNewTabPadDip = 2 * kCollapsedRailNewTabRingInsetDip;
 
 static_assert(kCollapsedRailButtonDip + kCollapsedRailScrollbarAllowanceDip <=
                   kCollapsedRailWidthDip,

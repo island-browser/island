@@ -132,9 +132,11 @@ platform executable links.
   frameless `titlebar_band_dip` (the traffic-light inset) while fullscreen, so the rail and the
   navigation row stop reserving room for hidden buttons, and restores it on exit. Tests read it
   through `TitlebarBandDipForTest`.
-  The expanded New tab row sits in a wrapper panel that keeps `kNewTabFocusInsetDip` (2 DIP) on
-  every side, so its keyboard focus ring is not clipped by the tab list; `ComputeTabStrip`
-  height counts the wrapper.
+  The expanded New tab row sits in a wrapper panel that keeps `kNewTabFocusInsetDip` (4 DIP, the
+  ring's outset) on every side, so its keyboard focus ring is not clipped by the tab list;
+  `ComputeTabStrip` height counts the wrapper. The collapsed rail's "+" sits in a wrapper that
+  keeps `kCollapsedRailNewTabRingInsetDip` (4 DIP) above and below it (`collapsed_rail.h`);
+  `UpdateCollapsedTabListSize` adds `kCollapsedRailNewTabPadDip` to the list height.
   Dev capture: `favorite:global:<i>` and
   `favorite:space:<i>` show the i-th favorite (`IslandApp::ActivateFavoriteForDev`), and
   `focus:global_favorite:<i>` moves keyboard focus to the i-th global strip icon

@@ -65,8 +65,10 @@ constexpr int kNativeFocusRingDip = 2;
 constexpr int kStripFocusInsetDip = 4;
 // Room around the expanded "+ New tab" row for its keyboard focus ring. The row is a
 // CefLabelButton, whose ring is drawn just outside its bounds, so the row sits in a wrapper that
-// keeps this inset on every side; the row itself keeps the tab rows' height.
-constexpr int kNewTabFocusInsetDip = kNativeFocusRingDip;
+// keeps this inset on every side; the row itself keeps the tab rows' height. The ring is drawn
+// about 4 DIP outside the row, so a 2 DIP inset drew only the top and bottom edges (no ring pixels
+// at the left or right sides in the capture); the row uses the strip icons' 4 DIP inset.
+constexpr int kNewTabFocusInsetDip = kStripFocusInsetDip;
 
 // Gap between the address outline and the textfield. Native's field already sits inside a 2 DIP
 // accent ring. Arc and Graphite put the field straight on their 1 DIP outline, and Chromium's
@@ -2146,7 +2148,17 @@ CefRefPtr<CefLabelButton> BrowserChrome::AddCollapsedNewTab() {
     button->SetFocusable(true);
     button->SetInkDropEnabled(false);
     button->SetMinimumSize(CefSize(kCollapsedRailButtonDip, kCollapsedRailButtonDip));
-    collapsed_tab_list_->AddChildView(button);
+    // The focus ring is drawn just outside the button, so a wrapper keeps air above and below it.
+    const CefSize wrapper_size(kCollapsedRailButtonDip,
+                               kCollapsedRailButtonDip + kCollapsedRailNewTabPadDip);
+    CefRefPtr<CefPanel> wrapper = CefPanel::CreatePanel(new PanelDelegate(this, wrapper_size));
+    CefBoxLayoutSettings wrapper_settings;
+    wrapper_settings.horizontal = static_cast<int>(false);
+    wrapper_settings.inside_border_insets =
+        CefInsets(kCollapsedRailNewTabRingInsetDip, 0, kCollapsedRailNewTabRingInsetDip, 0);
+    wrapper->SetToBoxLayout(wrapper_settings);
+    wrapper->AddChildView(button);
+    collapsed_tab_list_->AddChildView(wrapper);
     ApplyNewTabVisual(button, /*hovered=*/false);
     return button;
 }
@@ -2878,8 +2890,10 @@ void BrowserChrome::UpdateCollapsedTabListSize() {
     const std::size_t separators = (collapsed_pinned_separator_wrapper_ != nullptr ? 1 : 0) +
                                    (collapsed_favorite_separator_wrapper_ != nullptr ? 1 : 0);
     const std::size_t new_tab_icons = collapsed_new_tab_button_ != nullptr ? 1 : 0;
-    const int height = CollapsedRailListHeightDip(
-        tab_entries_.size() + collapsed_favorite_buttons_.size() + new_tab_icons, separators);
+    const std::size_t buttons =
+        tab_entries_.size() + collapsed_favorite_buttons_.size() + new_tab_icons;
+    const int height = CollapsedRailListHeightDip(buttons, separators) +
+                       static_cast<int>(new_tab_icons) * kCollapsedRailNewTabPadDip;
     if (collapsed_tab_list_delegate_ != nullptr) {
         collapsed_tab_list_delegate_->SetPreferredSize(CefSize(kCollapsedRailButtonDip, height));
     }
