@@ -20,6 +20,9 @@ the rules of ParseArcSidebarStructure in src/main/browser_import.cc:
   own; empty folders are dropped, and nested folders count on their own;
 - favorites are the tabs with a non-empty savedURL flattened from the container
   that follows "topApps" in topAppsContainerIDs.
+- As in the reader, an item id is taken from its first occurrence, a savedURL that
+  is not a string is no URL, and pinned_tabs and folders are capped at 500 per space
+  and favorites at 500 in total (kMaxImportedBookmarks).
 
 Only standard library modules are used.
 """
@@ -33,13 +36,15 @@ from pathlib import Path
 from typing import Any, Final
 
 # Lists whose strings are structure (ids and markers) and are kept as they are.
+# † topAppsContainerIDs and its "topApps" marker are guesses (R-I5); keep them in
+# step with kArcTopAppsKey and kArcTopAppsMarker in src/main/browser_import.cc.
 STRUCTURAL_LISTS: Final = frozenset(
     {"spaces", "items", "containerIDs", "childrenIds", "topAppsContainerIDs"}
 )
-# Keys whose string value is an identifier and is kept as it is.
-ID_KEYS: Final = frozenset({"id"})
 # The C++ reader caps recursion at 64 levels (kMaxTreeDepth).
 MAX_DEPTH: Final = 64
+# kMaxImportedBookmarks in src/main/bookmark_import.h.
+MAX_IMPORTED_BOOKMARKS: Final = 500
 TEXT_PREFIX: Final = "T"
 URL_PREFIX: Final = "https://example.test/"
 URL_SCHEMES: Final = ("http://", "https://")
@@ -64,12 +69,18 @@ def marker_ids(ids: Any, marker: str) -> list[str]:
 
 
 def tab_url(item: dict) -> str | None:
-    """The savedURL of a tab item, or None when the item is not a tab."""
+    """The savedURL of a tab item ("" when it is not a string), or None when not a tab."""
     data = item.get("data")
     tab = data.get("tab") if isinstance(data, dict) else None
     if not isinstance(tab, dict):
         return None
-    return str(tab.get("savedURL") or "")
+    url = tab.get("savedURL")
+    return url if isinstance(url, str) else ""
+
+
+def is_id_key(key: str | None) -> bool:
+    """Keys whose string is an identifier: "id", and "...ID" or "...Id" (parentID)."""
+    return key is not None and (key == "id" or key.endswith(("ID", "Id")))
 
 
 def children_of(items: dict[str, dict], node: dict) -> list[dict]:
@@ -122,14 +133,16 @@ def count_arc(document: dict) -> dict[str, int]:
     counts = {"spaces": 0, "pinned_tabs": 0, "folders": 0, "favorites": 0}
     if container is None:
         return counts
-    items = {
-        item["id"]: item
-        for item in arc_objects(container.get("items"))
-        if isinstance(item.get("id"), str) and item["id"]
-    }
+    items: dict[str, dict] = {}
+    for item in arc_objects(container.get("items")):
+        item_id = item.get("id")
+        if isinstance(item_id, str) and item_id:
+            items.setdefault(item_id, item)
     spaces = arc_objects(container.get("spaces"))
     counts["spaces"] = len(spaces)
     for space in spaces:
+        pinned_tabs = 0
+        folders = 0
         for pinned_id in marker_ids(space.get("containerIDs"), "pinned"):
             pinned = items.get(pinned_id)
             if pinned is None:
@@ -137,13 +150,17 @@ def count_arc(document: dict) -> dict[str, int]:
             for child in children_of(items, pinned):
                 url = tab_url(child)
                 if url is None:
-                    counts["folders"] += count_folder(items, child, 0)
+                    folders += count_folder(items, child, 0)
                 elif url:
-                    counts["pinned_tabs"] += 1
+                    pinned_tabs += 1
+        counts["pinned_tabs"] += min(pinned_tabs, MAX_IMPORTED_BOOKMARKS)
+        counts["folders"] += min(folders, MAX_IMPORTED_BOOKMARKS)
+    favorites = 0
     for top_apps_id in marker_ids(container.get("topAppsContainerIDs"), "topApps"):
         top_apps = items.get(top_apps_id)
         if top_apps is not None:
-            counts["favorites"] += count_favorites(items, top_apps, 0)
+            favorites += count_favorites(items, top_apps, 0)
+    counts["favorites"] = min(favorites, MAX_IMPORTED_BOOKMARKS)
     return counts
 
 
@@ -174,7 +191,7 @@ def anonymize(node: Any, namer: Namer, key: str | None = None) -> Any:
             for v in node
         ]
     if isinstance(node, str):
-        if not node or key in ID_KEYS:
+        if not node or is_id_key(key):
             return node
         if key == "savedURL" or node.startswith(URL_SCHEMES):
             return namer.url()
@@ -192,6 +209,12 @@ def main(argv: list[str] | None = None) -> int:
         document = json.loads(args.input.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         print(f"anonymize_arc_sidebar: cannot read {args.input}: {error}", file=sys.stderr)
+        return 1
+    if not isinstance(document, dict):
+        print(
+            f"anonymize_arc_sidebar: {args.input} is not an Arc sidebar: its root is not an object",
+            file=sys.stderr,
+        )
         return 1
     counts = count_arc(document)
     anonymized = anonymize(document, Namer())
