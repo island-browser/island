@@ -409,7 +409,9 @@ between the groups; the active tab is the same soft `selected` fill as the selec
   the active space. Reopening it focuses that tab and routes the requested section through the
   existing `focus_seq` contract. Its title and address label are `Settings`, its sidebar fallback
   is the gear icon, and only the exact embedded Settings document may use its native message
-  bridge. The tab is omitted from session persistence and is not restored after restart.
+  bridge. Agent tools refuse the Settings tab before navigation or page actions reach it. Form
+  fields and other controls use a neutral 2 px `--text-2` focus ring that follows each control's
+  own shape. The tab is omitted from session persistence and is not restored after restart.
 - **Sidebar density:** in every look, Comfortable uses 36 DIP rows, 6 DIP row gaps and 16 DIP rail
   padding; Compact uses 28 DIP rows, 2 DIP gaps and 8 DIP rail padding. Density is structural, not
   a color-preset detail, so the same metrics apply to Native, Arc and Graphite.

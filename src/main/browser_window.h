@@ -226,7 +226,9 @@ class BrowserWindow : public CefClient,
     };
     [[nodiscard]] std::size_t AgentSpaceIndex() const;
     [[nodiscard]] AgentTabLookup ResolveAgentTab(std::optional<std::size_t> index) const;
-    [[nodiscard]] bool IsAgentPlanTab(std::optional<std::size_t> index) const;
+    // Island-owned tab documents are never agent targets. Refusal happens before navigation or a
+    // DevTools call, so Settings cannot receive an agent-generated bridge message.
+    [[nodiscard]] bool IsAgentPrivilegedTab(std::optional<std::size_t> index) const;
     [[nodiscard]] CefRefPtr<CefBrowser> AgentBrowser(AgentTabRef ref) const;
     [[nodiscard]] bool NavigateAgentTab(std::optional<std::size_t> index, std::string_view text);
     // Activating brings the agent's page to the front, switching the person to its space.
@@ -551,11 +553,10 @@ class BrowserWindow : public CefClient,
     void OnLocalPageMessage(LocalPageKind kind, const json::Value& message) override;
     void OnLocalPageBrowserCreated(LocalPageKind kind) override;
 
-    // Built-in pages shown in the content area (Settings, the all-tabs
-    // overview). Toggling the shown page hides it; selecting any tab hides it
-    // too. No-op without chrome.
+    // The All-tabs content-slot page. Toggling it hides it; selecting any tab hides it too.
+    // No-op without chrome. Settings is an ordinary tab and uses OpenSettings instead.
     void ToggleTabOverview() override;
-    void ToggleSettings() override;
+    void OpenSettings() override;
     // Shows the managed bookmark library. Repeated requests keep its one local page focused.
     void OpenBookmarksPage();
     // Opens Settings on one section (the Settings page names: appearance, shortcuts, ...).
@@ -567,6 +568,21 @@ class BrowserWindow : public CefClient,
     }
     // The state the pages render, exposed for tests.
     [[nodiscard]] std::string SettingsStateJson() const;
+    // Explicit headless seam for Settings behavior tests. Production messages must pass the
+    // exact-document bridge in OnConsoleMessage; OnLocalPageMessage(kSettings) is intentionally
+    // dead because Settings no longer owns a content-slot LocalPage.
+    void HandleSettingsMessageForTest(const json::Value& message) {
+        HandleSettingsMessage(message);
+    }
+    [[nodiscard]] bool HandleSettingsBridgeMessageForTest(std::string_view frame_url,
+                                                          const json::Value& message) {
+        return HandleSettingsBridgeMessage(frame_url, message);
+    }
+    void SetSettingsDocumentReadyForTest(TabId tab, bool ready);
+    [[nodiscard]] std::optional<std::string> DeliverSettingsRenderStateForTest(TabId tab);
+    [[nodiscard]] bool LocalPagesRenderScheduledForTest() const noexcept {
+        return agent_panel_render_scheduled_;
+    }
     [[nodiscard]] std::string TabOverviewStateJson() const;
     [[nodiscard]] std::string BookmarksStateJson() const;
 
@@ -1147,7 +1163,8 @@ class BrowserWindow : public CefClient,
     // (and each open report page its report and theme).
     void RenderStartPages();
     [[nodiscard]] bool RenderSettingsPages();
-    void RenderSettingsFrame(CefRefPtr<CefFrame> frame);
+    [[nodiscard]] bool RenderSettingsFrame(Tab& tab, CefRefPtr<CefFrame> frame);
+    [[nodiscard]] std::optional<std::string> SettingsRenderState(const Tab& tab) const;
     void RenderReportFrame(CefRefPtr<CefFrame> frame, std::string_view id) const;
     // The plan page's fixed data: URL, and the Plan tab's rendering.
     [[nodiscard]] const std::string& PlanPageUrl() const;
@@ -1223,6 +1240,8 @@ class BrowserWindow : public CefClient,
     void ReportPageResult(CefRefPtr<CefBrowser> source, std::string_view kind,
                           std::string_view text) const;
     [[nodiscard]] json::Value ReportsListJson() const;
+    [[nodiscard]] bool HandleSettingsBridgeMessage(std::string_view frame_url,
+                                                   const json::Value& message);
     void HandleSettingsMessage(const json::Value& message);
     void HandleOverviewMessage(const json::Value& message);
     void HandleBookmarksMessage(const json::Value& message);
@@ -1577,7 +1596,7 @@ class BrowserWindow : public CefClient,
     // The Settings section requested by ShowSettingsSection; its sequence tells the page a
     // request is new even when the section name repeats.
     SettingsFocus settings_focus_;
-    mutable std::string settings_page_url_;
+    std::string settings_page_url_;
     std::unique_ptr<update::Updater> updater_;
     CefRefPtr<CefContentBlocker> content_blocker_;
     // Most recent closed tabs, newest last (reopenable URLs), capped at

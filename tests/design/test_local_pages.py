@@ -895,6 +895,17 @@ class SettingsPage(unittest.TestCase):
         self.assertIn("border-radius: 5px", keycap.group(0))
         self.assertIn("var(--border-2", keycap.group(0))
 
+    def test_focus_rings_are_neutral_visible_and_keep_each_control_shape(self) -> None:
+        html = page("settings.html")
+        focus = re.search(r":focus-visible\s*\{([^}]*)\}", html)
+        self.assertIsNotNone(focus)
+        self.assertIn("outline: 2px solid var(--text-2)", focus.group(1))
+        self.assertNotIn("border-radius", focus.group(1))
+        field_focus = re.search(r"input\.field:focus\s*\{([^}]*)\}", html)
+        self.assertIsNotNone(field_focus)
+        self.assertIn("outline: 2px solid var(--text-2)", field_focus.group(1))
+        self.assertNotIn("outline: none", field_focus.group(1))
+
     def test_primary_and_selected_states_are_neutral_not_the_accent(self) -> None:
         # Owner rule: accent marks only the active tab, the address focus ring, the agent's bubble
         # and the send button. Primary buttons, the selected radio, "on" switches, the range

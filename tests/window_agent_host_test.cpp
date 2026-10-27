@@ -299,6 +299,39 @@ TEST(WindowAgentHostTest, PageToolsRefuseThePlanTabEvenAfterItIsActivated) {
     }
 }
 
+TEST(WindowAgentHostTest, AgentToolsRefuseSettingsBeforeAnyPageActionCanRun) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    constexpr std::string_view kSettings = "data:text/html,settings-document";
+    window->SetSettingsPageUrlForTest(std::string(kSettings));
+    window->OpenSettings();
+    ASSERT_EQ(ActiveSpace(*window).tab_count(), 2U);
+    ASSERT_EQ(ActiveSpace(*window).active_tab_index(), 1U);
+    WindowAgentHost host(*window);
+
+    const std::vector<agent::AgentTabInfo> listed = host.ListTabs();
+    ASSERT_EQ(listed.size(), 2U);
+    EXPECT_NE(listed[1].refusal.find("Settings"), std::string::npos);
+
+    const agent::HostStatus navigate = host.Navigate(1, "https://docs.test/");
+    EXPECT_FALSE(navigate.ok);
+    EXPECT_NE(navigate.error.find("Settings"), std::string::npos);
+    EXPECT_EQ(ActiveSpace(*window).tabs()[1].startup_url(), kSettings);
+
+    const Value ref = Value::MakeObject().Set("ref", Value::Int(1)).Set("tab", Value::Int(1));
+    for (const auto& [tool, args] : std::vector<std::pair<const char*, Value>>{
+             {"page_click", ref},
+             {"page_read", Value::MakeObject().Set("tab", Value::Int(1))},
+             {"page_screenshot", Value::MakeObject().Set("tab", Value::Int(1))}}) {
+        const agent::ToolResult result = Call(host, tool, args);
+        EXPECT_TRUE(result.is_error) << tool;
+        ASSERT_FALSE(result.content.empty()) << tool;
+        EXPECT_NE(result.content[0].text.find("Settings"), std::string::npos)
+            << tool << ": " << result.content[0].text;
+    }
+    EXPECT_FALSE(window->HasPendingConfirmation());
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
+}
+
 TEST(WindowAgentHostTest, TabAndSpaceToolsDriveTheModel) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     WindowAgentHost host(*window);

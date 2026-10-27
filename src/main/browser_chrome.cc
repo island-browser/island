@@ -3503,7 +3503,7 @@ void BrowserChrome::HandleButtonPressed(ChromeViewId view_id) {
             host_->ToggleTabOverview();
             return;
         case ChromeViewId::kRailSettingsButton:
-            host_->ToggleSettings();
+            host_->OpenSettings();
             return;
         default:
             return;

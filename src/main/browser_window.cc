@@ -286,6 +286,7 @@ BrowserWindow::BrowserWindow(std::string initial_url, bool persist_session)
     // be reserved before a fresh or discarded session allocates new ones.
     if (persist_session_) {
         prefs_ = PrefsStore::Load(PrefsStore::DefaultPrefsFilePath()).state;
+        settings_page_url_ = LocalPage::PageUrl(LocalPageKind::kSettings);
         bookmarks_ = BookmarkStore(BookmarkStore::DefaultBookmarksFilePath());
         const BookmarkError load_error = bookmarks_.Load();
         // A missing file is the normal first run. Anything else is shown, and a read-only library
@@ -358,9 +359,6 @@ bool BrowserWindow::RestoreSessionStateForTest(const SessionState& state) {
 }
 
 bool BrowserWindow::IsSessionInternalTabUrl(std::string_view url) const {
-    if (persist_session_ && settings_page_url_.empty()) {
-        static_cast<void>(SettingsPageUrl());
-    }
     if (!settings_page_url_.empty() && IsSettingsPageUrl(url)) {
         return true;
     }
@@ -562,15 +560,29 @@ const std::string& BrowserWindow::StartPageUrl() const {
     return start_page_url_;
 }
 
-const std::string& BrowserWindow::SettingsPageUrl() const {
-    if (settings_page_url_.empty()) {
-        settings_page_url_ = LocalPage::PageUrl(LocalPageKind::kSettings);
-    }
-    return settings_page_url_;
-}
+const std::string& BrowserWindow::SettingsPageUrl() const { return settings_page_url_; }
 
 bool BrowserWindow::IsSettingsPageUrl(std::string_view url) const {
     return !settings_page_url_.empty() && url == settings_page_url_;
+}
+
+void BrowserWindow::SetSettingsDocumentReadyForTest(TabId tab_id, bool ready) {
+    if (Tab* tab = FindTabById(tab_id); tab != nullptr) {
+        tab->SetSettingsDocumentReady(ready);
+    }
+}
+
+std::optional<std::string> BrowserWindow::DeliverSettingsRenderStateForTest(TabId tab_id) {
+    Tab* tab = FindTabById(tab_id);
+    if (tab == nullptr) {
+        return std::nullopt;
+    }
+    std::optional<std::string> state = SettingsRenderState(*tab);
+    if (state.has_value()) {
+        settings_message_.clear();
+        settings_focus_.Clear();
+    }
+    return state;
 }
 
 ValidatedAddress BrowserWindow::ResolveAddressInput(std::string_view text) const {
@@ -1011,7 +1023,7 @@ BrowserWindow::AgentTabLookup BrowserWindow::ResolveAgentTab(
             .research = true};
 }
 
-bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {
+bool BrowserWindow::IsAgentPrivilegedTab(std::optional<std::size_t> index) const {
     const AgentTabLookup lookup = ResolveAgentTab(index);
     if (!lookup.tab.has_value()) {
         return false;
@@ -1020,7 +1032,8 @@ bool BrowserWindow::IsAgentPlanTab(std::optional<std::size_t> index) const {
     if (plan_tab_.has_value() && tab.id() == *plan_tab_) {
         return true;
     }
-    return !plan_page_url_.empty() && tab.startup_url() == plan_page_url_;
+    return (!plan_page_url_.empty() && tab.startup_url() == plan_page_url_) ||
+           IsSettingsPageUrl(EffectiveUrl(tab));
 }
 
 CefRefPtr<CefBrowser> BrowserWindow::AgentBrowser(AgentTabRef ref) const {
@@ -1033,7 +1046,7 @@ CefRefPtr<CefBrowser> BrowserWindow::AgentBrowser(AgentTabRef ref) const {
 bool BrowserWindow::NavigateAgentTab(std::optional<std::size_t> index, std::string_view text) {
     CEF_REQUIRE_UI_THREAD();
     const AgentTabLookup lookup = ResolveAgentTab(index);
-    if (closing_ || !lookup.tab.has_value() || IsAgentPlanTab(lookup.tab->tab)) {
+    if (closing_ || !lookup.tab.has_value() || IsAgentPrivilegedTab(lookup.tab->tab)) {
         return false;
     }
     const AgentTabRef ref = *lookup.tab;
@@ -1492,6 +1505,7 @@ void BrowserWindow::ScheduleLocalPagesRender() {
     }
     agent_panel_render_scheduled_ = true;
     if (!ui_tasks_enabled_for_test_) {
+        agent_panel_render_scheduled_ = false;
         return;
     }
     CefPostDelayedTask(TID_UI,
@@ -1509,9 +1523,9 @@ void BrowserWindow::FlushLocalPagesRender() {
         agent_panel_->Render(AgentPanelStateJson());
     }
     if (RenderSettingsPages()) {
-        settings_message_.clear();
-        settings_focus_.Clear();
-    } else if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
+        return;
+    }
+    if (internal_page_ == LocalPageKind::kTabOverview && overview_page_ != nullptr) {
         overview_page_->Render(TabOverviewStateJson());
     } else if (internal_page_ == LocalPageKind::kBookmarks && bookmarks_page_ != nullptr) {
         bookmarks_page_->Render(BookmarksStateJson());
@@ -1531,9 +1545,8 @@ void BrowserWindow::OnLocalPageMessage(LocalPageKind kind, const json::Value& me
             HandleStartPageMessage(message);
             return;
         case LocalPageKind::kSettings:
-            // Tab-hosted Settings messages normally arrive through OnConsoleMessage after its
-            // exact-document check. Keep the direct route as a headless handler seam.
-            HandleSettingsMessage(message);
+            // Settings lives in a tab and only its exact document may reach the handler through
+            // OnConsoleMessage. Headless behavior tests use HandleSettingsMessageForTest.
             return;
         case LocalPageKind::kTabOverview:
             HandleOverviewMessage(message);
@@ -1610,7 +1623,7 @@ LocalPage* BrowserWindow::InternalPageFor(LocalPageKind kind) const {
 
 void BrowserWindow::ToggleTabOverview() { ToggleInternalPage(LocalPageKind::kTabOverview); }
 
-void BrowserWindow::ToggleSettings() { OpenSettingsTab(); }
+void BrowserWindow::OpenSettings() { OpenSettingsTab(); }
 
 void BrowserWindow::OpenBookmarksPage() {
     CEF_REQUIRE_UI_THREAD();
@@ -1645,6 +1658,9 @@ void BrowserWindow::OpenSettingsTab() {
     // historical no-chrome no-op behavior.
     if (closing_ || (chrome_ == nullptr && settings_page_url_.empty())) {
         return;
+    }
+    if (settings_page_url_.empty()) {
+        settings_page_url_ = LocalPage::PageUrl(LocalPageKind::kSettings);
     }
     provider_statuses_.reset();  // re-detect agents installed meanwhile
     HideInternalPage();
@@ -3518,11 +3534,25 @@ void BrowserWindow::RenderStartPages() {
     }
 }
 
-void BrowserWindow::RenderSettingsFrame(CefRefPtr<CefFrame> frame) {
-    if (frame == nullptr || !IsSettingsPageUrl(frame->GetURL().ToString())) {
-        return;
+std::optional<std::string> BrowserWindow::SettingsRenderState(const Tab& tab) const {
+    if (!tab.settings_document_ready()) {
+        return std::nullopt;
     }
-    frame->ExecuteJavaScript(LocalPage::RenderScript(SettingsStateJson()), SettingsPageUrl(), 0);
+    return SettingsStateJson();
+}
+
+bool BrowserWindow::RenderSettingsFrame(Tab& tab, CefRefPtr<CefFrame> frame) {
+    if (frame == nullptr || !IsSettingsPageUrl(frame->GetURL().ToString())) {
+        return false;
+    }
+    const std::optional<std::string> state = SettingsRenderState(tab);
+    if (!state.has_value()) {
+        return false;
+    }
+    frame->ExecuteJavaScript(LocalPage::RenderScript(*state), SettingsPageUrl(), 0);
+    settings_message_.clear();
+    settings_focus_.Clear();
+    return true;
 }
 
 bool BrowserWindow::RenderSettingsPages() {
@@ -3530,13 +3560,13 @@ bool BrowserWindow::RenderSettingsPages() {
         return false;
     }
     bool rendered = false;
-    for (const Space& space : spaces_) {
-        for (const Tab& tab : space.tabs()) {
+    for (Space& space : spaces_) {
+        for (Tab& tab : space.tabs()) {
             const CefRefPtr<CefBrowser> browser = tab.browser();
             const CefRefPtr<CefFrame> frame =
                 browser != nullptr ? browser->GetMainFrame() : nullptr;
-            if (frame != nullptr && IsSettingsPageUrl(frame->GetURL().ToString())) {
-                RenderSettingsFrame(frame);
+            if (frame != nullptr && IsSettingsPageUrl(frame->GetURL().ToString()) &&
+                RenderSettingsFrame(tab, frame)) {
                 rendered = true;
             }
         }
@@ -3592,7 +3622,10 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     if (is_reader_page) {
         HandleReaderMessage(*owner, *decoded);
     } else if (is_settings_page) {
-        HandleSettingsMessage(*decoded);
+        if (decoded->StringOr("type", "") == "ready") {
+            owner->SetSettingsDocumentReady(true);
+        }
+        return HandleSettingsBridgeMessage(frame_url, *decoded);
     } else if (report_id) {
         HandleReportPageMessage(*decoded, *report_id, browser);
     } else if (is_plan_page) {
@@ -3600,6 +3633,15 @@ bool BrowserWindow::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     } else {
         HandleStartPageMessage(*decoded, browser);
     }
+    return true;
+}
+
+bool BrowserWindow::HandleSettingsBridgeMessage(std::string_view frame_url,
+                                                const json::Value& message) {
+    if (!IsSettingsPageUrl(frame_url)) {
+        return false;
+    }
+    HandleSettingsMessage(message);
     return true;
 }
 
@@ -4597,6 +4639,7 @@ void BrowserWindow::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFram
         RefreshAddressIndicators();
     }
     owner->navigation_state().OnLoadStart(frame->GetURL().ToString());
+    owner->SetSettingsDocumentReady(false);
     if (find_tab_.has_value() && *find_tab_ == owner->id()) {
         // The old counts describe a document that is gone.
         find_model_.ClearResults();
@@ -4626,9 +4669,8 @@ void BrowserWindow::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
     if (frame->GetURL().ToString() == StartPageUrl()) {
         frame->ExecuteJavaScript(LocalPage::RenderScript(StartPageStateJson()), StartPageUrl(), 0);
     } else if (IsSettingsPageUrl(frame->GetURL().ToString())) {
-        RenderSettingsFrame(frame);
-        settings_message_.clear();
-        settings_focus_.Clear();
+        owner->SetSettingsDocumentReady(true);
+        static_cast<void>(RenderSettingsFrame(*owner, frame));
     } else if (const std::optional<std::string> report_id =
                    ReportIdForUrl(frame->GetURL().ToString())) {
         RenderReportFrame(frame, *report_id);
@@ -5024,7 +5066,7 @@ void BrowserWindow::RunKeyAction(KeyAction action) {
             ToggleInternalPage(LocalPageKind::kTabOverview);
             return;
         case KeyAction::kSettings:
-            ToggleSettings();
+            OpenSettings();
             return;
         case KeyAction::kReopenClosedTab:
             ExecuteCommand(BrowserCommand::kReopenClosedTab);

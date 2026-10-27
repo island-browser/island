@@ -95,6 +95,10 @@ class Tab {
     [[nodiscard]] CefRefPtr<CefBrowserView> browser_view() const noexcept;
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const noexcept;
     [[nodiscard]] bool has_browser() const noexcept;
+    // A Settings focus request may be consumed only after that tab's current document installed
+    // islandRender. Navigation and browser-view replacement clear the readiness bit.
+    void SetSettingsDocumentReady(bool ready) noexcept { settings_document_ready_ = ready; }
+    [[nodiscard]] bool settings_document_ready() const noexcept { return settings_document_ready_; }
     // A fresh view may be removed only after OnBrowserCreated / OnAfterCreated has supplied its
     // browser and that browser has been alive for BrowserWindow's minimum view age. A page load
     // or navigation commit is deliberately not part of this lifecycle gate.
@@ -135,6 +139,7 @@ class Tab {
     std::string startup_url_;
     bool pinned_ = false;
     bool opened_by_agent_ = false;
+    bool settings_document_ready_ = false;
     std::optional<TabId> group_parent_;
     std::string group_label_;
     NavigationState navigation_state_;

@@ -374,7 +374,7 @@ class BrowserChromeHost {
     virtual void SetTabPinned(std::size_t index, bool pinned) = 0;
     virtual void ToggleAgentPanel() = 0;
     virtual void ToggleTabOverview() = 0;
-    virtual void ToggleSettings() = 0;
+    virtual void OpenSettings() = 0;
     // Settings scrolled to Privacy, where the blocker and its per-site allowlist live.
     virtual void OpenBlockerSettings() = 0;
     // Bookmarks 0.9 sidebar collection. Favorites are addressed by scope and bookmark id.

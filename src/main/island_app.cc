@@ -325,11 +325,11 @@ void IslandApp::ToggleAgentPanel() {
     }
 }
 
-void IslandApp::ToggleSettings() {
+void IslandApp::OpenSettings() {
     CEF_REQUIRE_UI_THREAD();
 
     if (browser_window_ != nullptr) {
-        browser_window_->ToggleSettings();
+        browser_window_->OpenSettings();
     }
 }
 

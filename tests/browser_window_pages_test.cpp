@@ -145,7 +145,7 @@ TEST(BrowserWindowPagesTest, BookmarksDispatcherRejectsBadFieldsAndMutatesKnownR
                            .Set("id", Value::Int(static_cast<std::int64_t>(bookmark.id)))
                            .Set("title", Value::String(""))
                            .Set("url", Value::String(""));
-    window->OnLocalPageMessage(LocalPageKind::kSettings, wrong_page);
+    window->HandleSettingsMessageForTest(wrong_page);
     window->OnLocalPageMessage(LocalPageKind::kBookmarks, empty_edit);
     const Bookmark* unchanged = window->bookmarks().FindBookmark(bookmark.id);
     ASSERT_NE(unchanged, nullptr);
@@ -368,10 +368,8 @@ TEST(BrowserWindowPagesTest, SettingsStateCarriesTheVersionAndTheBaseLook) {
 
 TEST(BrowserWindowPagesTest, NativeLightThemeJsonExposesPageTokens) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_look","look":"native"})"));
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_theme","value":"light"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_look","look":"native"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_theme","value":"light"})"));
 
     const std::optional<Value> state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
@@ -424,16 +422,14 @@ TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenIsNeutralForEveryLook) {
     ASSERT_TRUE(state.has_value());
     EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_look","look":"arc"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_look","look":"arc"})"));
     state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
     const Value* theme = state->FindMember("theme");
     ASSERT_NE(theme, nullptr);
     EXPECT_EQ(theme->StringOr("segment_selected", ""), "#e3e3e8");
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"set_look","look":"graphite"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"set_look","look":"graphite"})"));
     state = json::Parse(window->SettingsStateJson());
     ASSERT_TRUE(state.has_value());
     EXPECT_EQ(state->FindMember("theme")->StringOr("segment_selected", ""), "#e3e3e8");
@@ -441,37 +437,43 @@ TEST(BrowserWindowPagesTest, SelectedSegmentThemeTokenIsNeutralForEveryLook) {
 
 TEST(BrowserWindowPagesTest, SettingsMessagesUpdateTheWindow) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject()
-                                   .Set("type", Value::String("set_theme"))
-                                   .Set("value", Value::String("dark")));
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_theme"))
+                                             .Set("value", Value::String("dark")));
     EXPECT_EQ(window->theme_preference(), ThemePreference::kDark);
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject()
-                                   .Set("type", Value::String("set_binding"))
-                                   .Set("action", Value::String("new_tab"))
-                                   .Set("binding", Value::String("Mod+Alt+T")));
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_binding"))
+                                             .Set("action", Value::String("new_tab"))
+                                             .Set("binding", Value::String("Mod+Alt+T")));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Alt+T"));
     // An invalid binding leaves the shortcut alone and surfaces a notice.
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject()
-                                   .Set("type", Value::String("set_binding"))
-                                   .Set("action", Value::String("new_tab"))
-                                   .Set("binding", Value::String("T")));
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_binding"))
+                                             .Set("action", Value::String("new_tab"))
+                                             .Set("binding", Value::String("T")));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Alt+T"));
     EXPECT_NE(
         json::Parse(window->SettingsStateJson())->FindMember("settings")->StringOr("message", ""),
         "");
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               Value::MakeObject().Set("type", Value::String("reset_shortcuts")));
+    window->HandleSettingsMessageForTest(
+        Value::MakeObject().Set("type", Value::String("reset_shortcuts")));
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
+}
+
+TEST(BrowserWindowPagesTest, ContentSlotSettingsMessagesAreDeadAndCannotChangePreferences) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->OnLocalPageMessage(LocalPageKind::kSettings,
+                               Value::MakeObject()
+                                   .Set("type", Value::String("set_theme"))
+                                   .Set("value", Value::String("dark")));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
 }
 
 TEST(BrowserWindowPagesTest, RecordReplaceAndResetShortcutMessages) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
-                                            R"("binding":"Mod+B"})"));
+    window->HandleSettingsMessageForTest(
+        *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
+                     R"("binding":"Mod+B"})"));
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
     auto state = json::Parse(window->SettingsStateJson());
     const Value* pending = state->FindMember("settings")->FindMember("shortcut_conflict");
@@ -481,32 +483,29 @@ TEST(BrowserWindowPagesTest, RecordReplaceAndResetShortcutMessages) {
     EXPECT_EQ(pending->StringOr("binding", ""), "Mod+B");
 
     // A free chord binds at once and clears any pending conflict.
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
-                                            R"("binding":"Mod+Shift+Y"})"));
+    window->HandleSettingsMessageForTest(
+        *json::Parse(R"({"type":"record_shortcut","action":"new_tab",)"
+                     R"("binding":"Mod+Shift+Y"})"));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+Shift+Y"));
     state = json::Parse(window->SettingsStateJson());
     EXPECT_EQ(state->FindMember("settings")->FindMember("shortcut_conflict"), nullptr);
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"replace_shortcut","action":"new_tab",)"
-                                            R"("binding":"Mod+B"})"));
+    window->HandleSettingsMessageForTest(
+        *json::Parse(R"({"type":"replace_shortcut","action":"new_tab",)"
+                     R"("binding":"Mod+B"})"));
     EXPECT_EQ(window->keymap().Binding(KeyAction::kNewTab), ParseKeyBinding("Mod+B"));
     EXPECT_FALSE(window->keymap().Binding(KeyAction::kToggleSidebar).has_value());
     EXPECT_TRUE(window->keymap().Conflicts().empty());
 
-    window->OnLocalPageMessage(LocalPageKind::kSettings,
-                               *json::Parse(R"({"type":"reset_shortcuts"})"));
+    window->HandleSettingsMessageForTest(*json::Parse(R"({"type":"reset_shortcuts"})"));
     EXPECT_EQ(window->keymap(), Keymap::Defaults());
 }
 
 TEST(BrowserWindowPagesTest, SettingsPrivacyMessagesUpdateNativeBlockerPolicy) {
     CefRefPtr<BrowserWindow> window = BrowserWindow::CreateHeadlessForTest("");
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"set_content_blocker_pref","key":"ads","value":false})"));
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"add_content_blocker_site","site":" HTTPS://Example.COM/path "})"));
 
     std::optional<Value> state = json::Parse(window->SettingsStateJson());
@@ -520,8 +519,7 @@ TEST(BrowserWindowPagesTest, SettingsPrivacyMessagesUpdateNativeBlockerPolicy) {
     ASSERT_EQ(privacy->FindMember("allowlist")->array_val.size(), 1U);
     EXPECT_EQ(privacy->FindMember("allowlist")->array_val[0].string_val, "example.com");
 
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"remove_content_blocker_site","site":"example.com"})"));
     state = json::Parse(window->SettingsStateJson());
     privacy = state->FindMember("settings")->FindMember("privacy");
@@ -658,7 +656,7 @@ Value UpdateState(const BrowserWindow& window) {
 void SendSettings(BrowserWindow& window, std::string_view json_text) {
     const std::optional<Value> message = json::Parse(json_text);
     ASSERT_TRUE(message.has_value()) << json_text;
-    window.OnLocalPageMessage(LocalPageKind::kSettings, *message);
+    window.HandleSettingsMessageForTest(*message);
 }
 
 TEST(BrowserWindowPagesTest, SettingsUpdatesStateAndPreferences) {
@@ -1791,7 +1789,7 @@ TEST(BrowserWindowPagesTest, SettingsIsOneOrdinaryClosableTabWithItsOwnChromeIde
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->SetSettingsPageUrlForTest("data:text/html,settings-document");
 
-    window->ToggleSettings();
+    window->OpenSettings();
     ASSERT_EQ(window->spaces()[window->active_space_index()].tab_count(), 2U);
     const TabId settings = window->active_tab_id();
     EXPECT_FALSE(window->internal_page().has_value());
@@ -1801,10 +1799,14 @@ TEST(BrowserWindowPagesTest, SettingsIsOneOrdinaryClosableTabWithItsOwnChromeIde
     EXPECT_EQ(sidebar.tabs.back().title, "Settings");
     EXPECT_EQ(sidebar.tabs.back().fallback_icon, ChromeIcon::kSettings);
     EXPECT_FALSE(sidebar.add_current_page_available);
+    window->RunPaletteCommand("add_bookmark");
+    window->AddCurrentPageToGlobalFavorites();
+    EXPECT_TRUE(window->bookmarks().state().bookmarks.empty());
+    EXPECT_TRUE(window->bookmarks().state().global_favorite_ids.empty());
 
     ASSERT_TRUE(window->CreateSpace("Other"));
     ASSERT_EQ(window->space_count(), 2U);
-    window->ToggleSettings();
+    window->OpenSettings();
     EXPECT_EQ(window->active_space_index(), 0U);
     EXPECT_EQ(window->spaces()[0].tab_count(), 2U);
     EXPECT_EQ(window->spaces()[1].tab_count(), 1U);
@@ -1832,6 +1834,69 @@ TEST(BrowserWindowPagesTest, SettingsBridgeRequiresTheExactDocumentAndSessionDoe
     ASSERT_EQ(session.spaces.size(), 1U);
     ASSERT_EQ(session.spaces[0].tabs.size(), 1U);
     EXPECT_NE(session.spaces[0].tabs[0].url, kSettings);
+}
+
+TEST(BrowserWindowPagesTest, SettingsBridgeRejectsForeignAndForgedFramesBeforeChangingPrefs) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    constexpr std::string_view kSettings = "data:text/html,settings-document";
+    window->SetSettingsPageUrlForTest(std::string(kSettings));
+    const Value set_dark = Value::MakeObject()
+                               .Set("type", Value::String("set_theme"))
+                               .Set("value", Value::String("dark"));
+
+    EXPECT_FALSE(window->HandleSettingsBridgeMessageForTest("https://example.test/", set_dark));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
+    EXPECT_FALSE(window->HandleSettingsBridgeMessageForTest(
+        "data:text/html,settings-document#forged", set_dark));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kSystem);
+
+    EXPECT_TRUE(window->HandleSettingsBridgeMessageForTest(kSettings, set_dark));
+    EXPECT_EQ(window->theme_preference(), ThemePreference::kDark);
+}
+
+TEST(BrowserWindowPagesTest, SettingsFocusWaitsForTheReloadedDocumentAndKeepsItsSequence) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
+    window->OpenSettingsSection("privacy");
+    const TabId settings = window->active_tab_id();
+
+    EXPECT_FALSE(window->DeliverSettingsRenderStateForTest(settings).has_value());
+    EXPECT_EQ(
+        json::Parse(window->SettingsStateJson())->FindMember("settings")->StringOr("focus", ""),
+        "privacy");
+    window->SetSettingsDocumentReadyForTest(settings, true);
+    const std::optional<std::string> first_json =
+        window->DeliverSettingsRenderStateForTest(settings);
+    ASSERT_TRUE(first_json.has_value());
+    const std::optional<Value> first = json::Parse(*first_json);
+    ASSERT_TRUE(first.has_value());
+    const std::int64_t first_sequence = first->FindMember("settings")->IntOr("focus_seq", 0);
+    EXPECT_EQ(first->FindMember("settings")->StringOr("focus", ""), "privacy");
+
+    // A reload/wake makes the same tab unready. A second section request stays pending until its
+    // replacement document is ready and carries a fresh sequence to islandRender.
+    window->SetSettingsDocumentReadyForTest(settings, false);
+    window->OpenSettingsSection("appearance");
+    EXPECT_FALSE(window->DeliverSettingsRenderStateForTest(settings).has_value());
+    window->SetSettingsDocumentReadyForTest(settings, true);
+    const std::optional<std::string> second_json =
+        window->DeliverSettingsRenderStateForTest(settings);
+    ASSERT_TRUE(second_json.has_value());
+    const std::optional<Value> second = json::Parse(*second_json);
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->FindMember("settings")->StringOr("focus", ""), "appearance");
+    EXPECT_GT(second->FindMember("settings")->IntOr("focus_seq", 0), first_sequence);
+}
+
+TEST(BrowserWindowPagesTest, HeadlessRenderSchedulingDoesNotStayLatched) {
+    CefRefPtr<BrowserWindow> window = MakeWindow();
+    window->SetSettingsPageUrlForTest("data:text/html,settings-document");
+    window->OpenSettingsSection("privacy");
+    EXPECT_FALSE(window->LocalPagesRenderScheduledForTest());
+    window->HandleSettingsMessageForTest(Value::MakeObject()
+                                             .Set("type", Value::String("set_theme"))
+                                             .Set("value", Value::String("dark")));
+    EXPECT_FALSE(window->LocalPagesRenderScheduledForTest());
 }
 
 TEST(BrowserWindowPagesTest, LeavingASplitHoldsTheSwapForTheYoungPaneThatLeaves) {
@@ -2683,8 +2748,7 @@ TEST(BrowserWindowPagesTest, RemoveTrustedSiteMessagePersists) {
     CefRefPtr<BrowserWindow> window = MakeWindow();
     window->AddTrustedSite("shop.test");
     window->AddTrustedSite("docs.test");
-    window->OnLocalPageMessage(
-        LocalPageKind::kSettings,
+    window->HandleSettingsMessageForTest(
         *json::Parse(R"({"type":"remove_trusted_site","host":"WWW.Shop.test"})"));
     EXPECT_EQ(window->trusted_sites(), (std::vector<std::string>{"docs.test"}));
     const std::optional<Value> state = json::Parse(window->SettingsStateJson());

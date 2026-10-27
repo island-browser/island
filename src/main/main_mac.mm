@@ -233,7 +233,7 @@
 
 - (void)openSettings:(id)sender {
     if (app_ != nullptr) {
-        app_->ToggleSettings();
+        app_->OpenSettings();
     }
 }
 

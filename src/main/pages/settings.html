@@ -42,7 +42,7 @@ body { background: var(--surface); color: var(--text); font: 13px/1.45 var(--fon
   -webkit-font-smoothing: antialiased; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
-:focus-visible { outline: 2px solid var(--border-2); outline-offset: 2px; border-radius: 6px; }
+:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; }
 [hidden] { display: none !important; }
 [data-search-hidden] { display: none !important; }
 
@@ -121,7 +121,7 @@ input[type="checkbox"]:disabled { opacity: .4; cursor: default; }
 .btn:disabled { opacity: .4; cursor: default; }
 input.field { width: 100%; font: 12.5px var(--mono); background: var(--surface); border: 1px solid var(--border-2);
   border-radius: 6px; padding: 5px 10px; height: 28px; }
-input.field:focus { border-color: var(--border-2); outline: none; }
+input.field:focus { border-color: var(--border-2); outline: 2px solid var(--text-2); outline-offset: 2px; }
 input.field::placeholder { color: var(--text-3); }
 .inline { display: flex; gap: 8px; align-items: center; }
 .inline input { flex: 1; }

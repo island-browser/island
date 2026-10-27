@@ -75,7 +75,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     void OpenAgentPagesForDev(int count, int gap_ms);
     void ApplyAppearanceForDev(const std::string& key, const std::string& value);
     void ToggleAgentPanel();
-    void ToggleSettings();
+    void OpenSettings();
     void OpenBookmarksPage();
     void OpenSettingsSection(const std::string& section);
     void ToggleTabOverview();
