@@ -278,7 +278,7 @@ using ArcItems = std::map<std::string, const json::Value*>;
 // and the marker are guesses from the synthetic fixture (†, R-I5): confirm them
 // against the real file, then change only these two constants.
 constexpr std::string_view kArcTopAppsKey = "topAppsContainerIDs";  // † confirm (R-I5)
-constexpr std::string_view kArcTopAppsMarker = "topApps";            // † confirm (R-I5)
+constexpr std::string_view kArcTopAppsMarker = "topApps";           // † confirm (R-I5)
 
 // The tab a child item stands for, or nullopt when it is a folder (or a tab
 // with no URL, which is skipped without descending).
@@ -354,8 +354,8 @@ void AppendArcFolder(const ArcItems& items, const json::Value& folder,
 }
 
 // Splits a pinned container into its top-level tabs and its folders.
-void CollectArcPinned(const ArcItems& items, const std::string& id,
-                      std::vector<BookmarkItem>& tabs, std::vector<ImportedFolder>& folders) {
+void CollectArcPinned(const ArcItems& items, const std::string& id, std::vector<BookmarkItem>& tabs,
+                      std::vector<ImportedFolder>& folders) {
     const json::Value* node = ArcItem(items, id);
     if (node == nullptr) return;
     const json::Value* children = node->FindMember("childrenIds");
@@ -548,8 +548,12 @@ std::optional<ArcImport> ParseArcSidebarStructure(std::string_view text) {
                 const json::Value& marker = ids->array_val[i];
                 if (marker.IsString() && marker.string_val == "pinned" &&
                     ids->array_val[i + 1].IsString()) {
-                    CollectArcPinned(items, ids->array_val[i + 1].string_val, out.pinned_tabs,
-                                     out.folders);
+                    const std::string& pinned_id = ids->array_val[i + 1].string_val;
+                    CollectArcPinned(items, pinned_id, out.pinned_tabs, out.folders);
+                    std::vector<BookmarkItem> in_order;
+                    CollectArcTabs(items, pinned_id, in_order, 0);
+                    imported.pinned_in_order.insert(imported.pinned_in_order.end(),
+                                                    in_order.begin(), in_order.end());
                 }
             }
         }
@@ -561,8 +565,7 @@ std::optional<ArcImport> ParseArcSidebarStructure(std::string_view text) {
             const json::Value& marker = top_apps->array_val[i];
             if (marker.IsString() && marker.string_val == kArcTopAppsMarker &&
                 top_apps->array_val[i + 1].IsString()) {
-                CollectArcTabs(items, top_apps->array_val[i + 1].string_val, imported.favorites,
-                               0);
+                CollectArcTabs(items, top_apps->array_val[i + 1].string_val, imported.favorites, 0);
             }
         }
     }

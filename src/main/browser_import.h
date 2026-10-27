@@ -62,16 +62,19 @@ struct ImportedSpace {
 };
 
 // Everything one StorableSidebar.json yields: the spaces, and Arc's Favorites
-// (top apps), which become global favorites in Arc order.
+// (top apps), which become global favorites in Arc order. `pinned_in_order` is
+// every space's pinned tabs with the tabs of its pinned folders flattened in
+// place, the plain-bookmark view that ImportFromSource(kArc) returns.
 struct ArcImport {
     std::vector<ImportedSpace> spaces;
     std::vector<BookmarkItem> favorites;
+    std::vector<BookmarkItem> pinned_in_order;
 
     bool operator==(const ArcImport&) const = default;
 };
 
 // Parses Arc's StorableSidebar.json: each space's id, title, theme color, its
-// pinned tabs and folders, and the Favorites container.
+// pinned tabs and folders, the Favorites container, and the flat pinned view.
 [[nodiscard]] std::optional<ArcImport> ParseArcSidebarStructure(std::string_view text);
 // Reads and parses a StorableSidebar.json file; std::nullopt when unreadable
 // or larger than 64 MiB.

@@ -409,10 +409,13 @@ TEST(BrowserImportTest, ArcSpacesKeepTitlesColorsAndPinnedTabsInOrder) {
     EXPECT_FALSE(ParseArcSidebar("not json").has_value());
 }
 
-// Reads tests/fixtures/arc/synthetic-folders.json, which the anonymizer test also uses.
+// tests/fixtures/arc/synthetic-folders.json, which the anonymizer test also uses.
+std::filesystem::path SyntheticFoldersPath() {
+    return std::filesystem::path(ISLAND_ARC_FIXTURE_DIR) / "synthetic-folders.json";
+}
+
 std::optional<ArcImport> ParseSyntheticFolders() {
-    const std::optional<std::string> text =
-        ReadWholeFile(std::filesystem::path(__FILE__).parent_path() / "fixtures/arc/synthetic-folders.json");
+    const std::optional<std::string> text = ReadWholeFile(SyntheticFoldersPath());
     if (!text) return std::nullopt;
     return ParseArcSidebarStructure(*text);
 }
@@ -440,10 +443,12 @@ TEST(BrowserImportTest, ArcFoldersKeepTitlesAndOrder) {
 TEST(BrowserImportTest, ArcNestedFoldersFlattenToPathNames) {
     const std::optional<ArcImport> arc = ParseSyntheticFolders();
     ASSERT_TRUE(arc.has_value());
+    ASSERT_EQ(arc->spaces.size(), 2U);
     ASSERT_GE(arc->spaces[0].folders.size(), 2U);
     const ImportedFolder& nested = arc->spaces[0].folders[1];
     EXPECT_EQ(nested.path, "Work / Specs");
-    EXPECT_EQ(nested.items, (std::vector<BookmarkItem>{{.title = "Plan", .url = "https://plan.test/"}}));
+    EXPECT_EQ(nested.items,
+              (std::vector<BookmarkItem>{{.title = "Plan", .url = "https://plan.test/"}}));
 }
 
 TEST(BrowserImportTest, ArcFavoritesInOrder) {
@@ -465,15 +470,35 @@ TEST(BrowserImportTest, ArcSpaceIdsAreReturned) {
 TEST(BrowserImportTest, ArcImportFileReadsStructureAndRejectsMissingFiles) {
     const std::filesystem::path home = TempHome("arc_file");
     const std::filesystem::path file = home / "StorableSidebar.json";
-    WriteFile(file, ReadWholeFile(std::filesystem::path(__FILE__).parent_path() /
-                                  "fixtures/arc/synthetic-folders.json")
-                        .value_or(""));
+    WriteFile(file, ReadWholeFile(SyntheticFoldersPath()).value_or(""));
     const std::optional<ArcImport> arc = ImportArcFile(file);
     ASSERT_TRUE(arc.has_value());
     EXPECT_EQ(arc->spaces.size(), 2U);
     EXPECT_EQ(arc->favorites.size(), 2U);
     EXPECT_FALSE(ImportArcFile(home / "missing.json").has_value());
     std::filesystem::remove_all(home);
+}
+
+// The flat import (ImportFromSource(kArc), plain bookmarks) keeps Arc's pinned
+// order: a folder's tabs sit where the folder sits, not after the top-level tabs.
+TEST(BrowserImportTest, ArcFlatImportKeepsPinnedOrderAcrossFolders) {
+#if defined(__APPLE__)
+    const std::filesystem::path home = TempHome("arc_flat");
+    WriteFile(home / "Library/Application Support/Arc/StorableSidebar.json",
+              ReadWholeFile(SyntheticFoldersPath()).value_or(""));
+    const std::optional<std::vector<BookmarkItem>> items =
+        ImportFromSource(ImportSource::kArc, home);
+    std::filesystem::remove_all(home);
+    ASSERT_TRUE(items.has_value());
+    EXPECT_EQ(*items,
+              (std::vector<BookmarkItem>{{.title = "Linear", .url = "https://linear.app/"},
+                                         {.title = "Spec", .url = "https://spec.test/"},
+                                         {.title = "Plan", .url = "https://plan.test/"},
+                                         {.title = "Mail", .url = "https://mail.test/"},
+                                         {.title = "Article", .url = "https://read.test/a"}}));
+#else
+    GTEST_SKIP() << "Arc's sidebar file is only located on macOS";
+#endif
 }
 
 TEST(BrowserImportTest, SourceIdsRoundTrip) {
