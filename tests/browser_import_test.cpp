@@ -399,14 +399,81 @@ TEST(BrowserImportTest, ArcSpacesKeepTitlesColorsAndPinnedTabsInOrder) {
     ASSERT_EQ(spaces->size(), 2U);
     EXPECT_EQ((*spaces)[0].name, "Work");
     EXPECT_EQ((*spaces)[0].color_argb, 0xFF3366FFU);
+    // "Spec" sits in the pinned folder "Docs", so it is no longer a top-level pinned tab (R-I1).
     EXPECT_EQ((*spaces)[0].pinned_tabs,
-              (std::vector<BookmarkItem>{{.title = "Linear", .url = "https://linear.app/"},
-                                         {.title = "Spec", .url = "https://spec.test/"}}));
+              (std::vector<BookmarkItem>{{.title = "Linear", .url = "https://linear.app/"}}));
     EXPECT_EQ((*spaces)[1].name, "Space 2");
     EXPECT_FALSE((*spaces)[1].color_argb.has_value());
     EXPECT_TRUE((*spaces)[1].pinned_tabs.empty());
     EXPECT_FALSE(ParseArcSidebar("{}").has_value());
     EXPECT_FALSE(ParseArcSidebar("not json").has_value());
+}
+
+// Reads tests/fixtures/arc/synthetic-folders.json, which the anonymizer test also uses.
+std::optional<ArcImport> ParseSyntheticFolders() {
+    const std::optional<std::string> text =
+        ReadWholeFile(std::filesystem::path(__FILE__).parent_path() / "fixtures/arc/synthetic-folders.json");
+    if (!text) return std::nullopt;
+    return ParseArcSidebarStructure(*text);
+}
+
+TEST(BrowserImportTest, ArcFoldersKeepTitlesAndOrder) {
+    const std::optional<ArcImport> arc = ParseSyntheticFolders();
+    ASSERT_TRUE(arc.has_value());
+    ASSERT_EQ(arc->spaces.size(), 2U);
+    const ImportedSpace& work = arc->spaces[0];
+    EXPECT_EQ(work.pinned_tabs,
+              (std::vector<BookmarkItem>{{.title = "Linear", .url = "https://linear.app/"},
+                                         {.title = "Mail", .url = "https://mail.test/"}}));
+    // The empty folder "Empty" yields no entry; "Work" comes before its nested "Specs".
+    ASSERT_EQ(work.folders.size(), 2U);
+    EXPECT_EQ(work.folders[0].path, "Work");
+    EXPECT_EQ(work.folders[0].items,
+              (std::vector<BookmarkItem>{{.title = "Spec", .url = "https://spec.test/"}}));
+    const ImportedSpace& second = arc->spaces[1];
+    EXPECT_EQ(second.name, "Space 2");
+    EXPECT_TRUE(second.pinned_tabs.empty());
+    ASSERT_EQ(second.folders.size(), 1U);
+    EXPECT_EQ(second.folders[0].path, "Reading");
+}
+
+TEST(BrowserImportTest, ArcNestedFoldersFlattenToPathNames) {
+    const std::optional<ArcImport> arc = ParseSyntheticFolders();
+    ASSERT_TRUE(arc.has_value());
+    ASSERT_GE(arc->spaces[0].folders.size(), 2U);
+    const ImportedFolder& nested = arc->spaces[0].folders[1];
+    EXPECT_EQ(nested.path, "Work / Specs");
+    EXPECT_EQ(nested.items, (std::vector<BookmarkItem>{{.title = "Plan", .url = "https://plan.test/"}}));
+}
+
+TEST(BrowserImportTest, ArcFavoritesInOrder) {
+    const std::optional<ArcImport> arc = ParseSyntheticFolders();
+    ASSERT_TRUE(arc.has_value());
+    EXPECT_EQ(arc->favorites,
+              (std::vector<BookmarkItem>{{.title = "Docs", .url = "https://docs.test/"},
+                                         {.title = "Calendar", .url = "https://cal.test/"}}));
+}
+
+TEST(BrowserImportTest, ArcSpaceIdsAreReturned) {
+    const std::optional<ArcImport> arc = ParseSyntheticFolders();
+    ASSERT_TRUE(arc.has_value());
+    ASSERT_EQ(arc->spaces.size(), 2U);
+    EXPECT_EQ(arc->spaces[0].arc_id, "S1");
+    EXPECT_EQ(arc->spaces[1].arc_id, "S2");
+}
+
+TEST(BrowserImportTest, ArcImportFileReadsStructureAndRejectsMissingFiles) {
+    const std::filesystem::path home = TempHome("arc_file");
+    const std::filesystem::path file = home / "StorableSidebar.json";
+    WriteFile(file, ReadWholeFile(std::filesystem::path(__FILE__).parent_path() /
+                                  "fixtures/arc/synthetic-folders.json")
+                        .value_or(""));
+    const std::optional<ArcImport> arc = ImportArcFile(file);
+    ASSERT_TRUE(arc.has_value());
+    EXPECT_EQ(arc->spaces.size(), 2U);
+    EXPECT_EQ(arc->favorites.size(), 2U);
+    EXPECT_FALSE(ImportArcFile(home / "missing.json").has_value());
+    std::filesystem::remove_all(home);
 }
 
 TEST(BrowserImportTest, SourceIdsRoundTrip) {

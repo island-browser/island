@@ -262,7 +262,8 @@ std::optional<std::vector<BookmarkItem>> ImportFromSource(
         return ImportFirefoxBookmarks(base_home);
     }
     if (source == ImportSource::kArc) {
-        // As plain bookmarks, Arc contributes every space's pinned tabs.
+        // As plain bookmarks, Arc contributes every space's pinned tabs, then the
+        // items of its pinned folders, in Arc order. Favorites are not included here.
         const std::optional<std::vector<ImportedSpace>> spaces = ImportArcSpaces(base_home);
         if (!spaces.has_value()) {
             return std::nullopt;
@@ -270,6 +271,9 @@ std::optional<std::vector<BookmarkItem>> ImportFromSource(
         std::vector<BookmarkItem> items;
         for (const ImportedSpace& space : *spaces) {
             items.insert(items.end(), space.pinned_tabs.begin(), space.pinned_tabs.end());
+            for (const ImportedFolder& folder : space.folders) {
+                items.insert(items.end(), folder.items.begin(), folder.items.end());
+            }
         }
         return items;
     }
