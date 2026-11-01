@@ -1,0 +1,31 @@
+{
+  "sidebar": {"containers": [
+    {"global": {}},
+    {
+      "topAppsContainerIDs": ["topApps", "A1"],
+      "spaces": [
+        "S1", {"id": "S1", "title": "Work", "containerIDs": ["pinned", "P1", "unpinned", "U1"],
+               "customInfo": {"color": {"red": 0.2, "green": 0.4, "blue": 1.0}}},
+        "S2", {"id": "S2", "title": "", "containerIDs": ["pinned", "P2", "unpinned", "U2"]}
+      ],
+      "items": [
+        "P1", {"id": "P1", "childrenIds": ["T1", "F1", "F4", "T5"], "data": {"itemContainer": {}}},
+        "T1", {"id": "T1", "title": null, "childrenIds": [], "data": {"tab": {"savedURL": "https://linear.app/", "savedTitle": "Linear"}}},
+        "F1", {"id": "F1", "title": "Work", "childrenIds": ["T2", "F2"], "data": {"list": {}}},
+        "T2", {"id": "T2", "title": "Spec", "childrenIds": [], "data": {"tab": {"savedURL": "https://spec.test/", "savedTitle": "x"}}},
+        "F2", {"id": "F2", "title": "Specs", "childrenIds": ["T3"], "data": {"list": {}}},
+        "T3", {"id": "T3", "title": "Plan", "childrenIds": [], "data": {"tab": {"savedURL": "https://plan.test/", "savedTitle": "Plan"}}},
+        "F4", {"id": "F4", "title": "Empty", "childrenIds": [], "data": {"list": {}}},
+        "T5", {"id": "T5", "title": "Mail", "childrenIds": [], "data": {"tab": {"savedURL": "https://mail.test/", "savedTitle": "Mail"}}},
+        "U1", {"id": "U1", "childrenIds": ["T9"], "data": {"itemContainer": {}}},
+        "T9", {"id": "T9", "title": "Today tab", "childrenIds": [], "data": {"tab": {"savedURL": "https://today.test/"}}},
+        "P2", {"id": "P2", "childrenIds": ["F6"], "data": {"itemContainer": {}}},
+        "F6", {"id": "F6", "title": "Reading", "childrenIds": ["T8"], "data": {"list": {}}},
+        "T8", {"id": "T8", "title": "Article", "childrenIds": [], "data": {"tab": {"savedURL": "https://read.test/a", "savedTitle": "Article"}}},
+        "A1", {"id": "A1", "childrenIds": ["T6", "T7"], "data": {"itemContainer": {}}},
+        "T6", {"id": "T6", "title": "Docs", "childrenIds": [], "data": {"tab": {"savedURL": "https://docs.test/", "savedTitle": "Docs"}}},
+        "T7", {"id": "T7", "title": "Calendar", "childrenIds": [], "data": {"tab": {"savedURL": "https://cal.test/", "savedTitle": "Calendar"}}}
+      ]
+    }
+  ]}
+}

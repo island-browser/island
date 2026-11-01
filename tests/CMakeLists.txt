@@ -151,6 +151,8 @@ target_include_directories(island_tests PRIVATE "${CMAKE_SOURCE_DIR}/src/main"
                            "${CMAKE_SOURCE_DIR}/tests" "${CEF_ROOT}")
 target_link_libraries(island_tests PRIVATE libcef_dll_wrapper ${CEF_STANDARD_LIBS} GTest::gtest_main
                       island_agent island_search island_content_blocker_ffi)
+target_compile_definitions(island_tests PRIVATE
+                           ISLAND_ARC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/arc")
 if(SQLite3_FOUND)
     target_compile_definitions(island_tests PRIVATE ISLAND_HAS_SQLITE3=1)
     target_link_libraries(island_tests PRIVATE SQLite::SQLite3)

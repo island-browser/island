@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <fstream>
 #include <map>
 #include <system_error>
@@ -270,30 +271,105 @@ std::optional<std::uint32_t> FindRgbColor(const json::Value& node, int depth) {
     return std::nullopt;
 }
 
-void CollectArcTabs(const std::map<std::string, const json::Value*>& items, const std::string& id,
-                    std::vector<BookmarkItem>& tabs, int depth) {
+using ArcItems = std::map<std::string, const json::Value*>;
+
+// Arc's Favorites container id is read from `topAppsContainerIDs` on the sidebar
+// container, as an alternating marker and id list like `containerIDs`. The key
+// and the marker are guesses from the synthetic fixture (†, R-I5): confirm them
+// against the real file, then change only these two constants.
+constexpr std::string_view kArcTopAppsKey = "topAppsContainerIDs";  // † confirm (R-I5)
+constexpr std::string_view kArcTopAppsMarker = "topApps";           // † confirm (R-I5)
+
+// The tab a child item stands for, or nullopt when it is a folder (or a tab
+// with no URL, which is skipped without descending).
+std::optional<BookmarkItem> ArcTab(const json::Value& item, bool& is_tab) {
+    const json::Value* data = item.FindMember("data");
+    const json::Value* tab = data != nullptr ? data->FindMember("tab") : nullptr;
+    is_tab = tab != nullptr && tab->IsObject();
+    if (!is_tab) return std::nullopt;
+    const std::string_view url = tab->StringOr("savedURL", "");
+    if (url.empty()) return std::nullopt;
+    std::string title(item.StringOr("title", ""));
+    if (title.empty()) title = std::string(tab->StringOr("savedTitle", url));
+    return BookmarkItem{.title = std::move(title), .url = std::string(url)};
+}
+
+const json::Value* ArcItem(const ArcItems& items, std::string_view id) {
+    const auto found = items.find(std::string(id));
+    return found == items.end() ? nullptr : found->second;
+}
+
+// Flattens a container's subtree into tabs in Arc order (used for Favorites).
+void CollectArcTabs(const ArcItems& items, const std::string& id, std::vector<BookmarkItem>& tabs,
+                    int depth) {
     if (depth > kMaxTreeDepth || tabs.size() >= kMaxImportedBookmarks) return;
-    const auto found = items.find(id);
-    if (found == items.end()) return;
-    const json::Value* children = found->second->FindMember("childrenIds");
+    const json::Value* node = ArcItem(items, id);
+    if (node == nullptr) return;
+    const json::Value* children = node->FindMember("childrenIds");
     if (children == nullptr || !children->IsArray()) return;
     for (const json::Value& child_id : children->array_val) {
         if (!child_id.IsString()) continue;
-        const auto child = items.find(child_id.string_val);
-        if (child == items.end()) continue;
-        const json::Value* data = child->second->FindMember("data");
-        const json::Value* tab = data != nullptr ? data->FindMember("tab") : nullptr;
-        if (tab != nullptr && tab->IsObject()) {
-            const std::string_view url = tab->StringOr("savedURL", "");
-            if (!url.empty()) {
-                std::string title(child->second->StringOr("title", ""));
-                if (title.empty()) title = std::string(tab->StringOr("savedTitle", url));
-                tabs.push_back({.title = std::move(title), .url = std::string(url)});
-            }
-        } else {
+        const json::Value* child = ArcItem(items, child_id.string_val);
+        if (child == nullptr) continue;
+        bool is_tab = false;
+        if (std::optional<BookmarkItem> tab = ArcTab(*child, is_tab)) {
+            tabs.push_back(std::move(*tab));
+        } else if (!is_tab) {
             CollectArcTabs(items, child_id.string_val, tabs, depth + 1);
         }
         if (tabs.size() >= kMaxImportedBookmarks) return;
+    }
+}
+
+// Appends the pinned folder `folder_id` (and, in pre-order, its nested folders)
+// to `folders`. A folder with no tabs of its own is dropped; its nested folders stay.
+void AppendArcFolder(const ArcItems& items, const json::Value& folder,
+                     const std::string& parent_path, std::vector<ImportedFolder>& folders,
+                     int depth) {
+    if (depth > kMaxTreeDepth || folders.size() >= kMaxImportedBookmarks) return;
+    const std::string_view title = folder.StringOr("title", "");
+    const std::string segment = title.empty() ? "Folder" : std::string(title);
+    const std::string path = parent_path.empty() ? segment : parent_path + " / " + segment;
+    const std::size_t index = folders.size();
+    folders.push_back({.path = path, .items = {}});
+    const json::Value* children = folder.FindMember("childrenIds");
+    if (children != nullptr && children->IsArray()) {
+        for (const json::Value& child_id : children->array_val) {
+            if (!child_id.IsString()) continue;
+            const json::Value* child = ArcItem(items, child_id.string_val);
+            if (child == nullptr) continue;
+            bool is_tab = false;
+            if (std::optional<BookmarkItem> tab = ArcTab(*child, is_tab)) {
+                if (folders[index].items.size() < kMaxImportedBookmarks) {
+                    folders[index].items.push_back(std::move(*tab));
+                }
+            } else if (!is_tab) {
+                AppendArcFolder(items, *child, path, folders, depth + 1);
+            }
+        }
+    }
+    if (folders[index].items.empty()) {
+        folders.erase(folders.begin() + static_cast<std::ptrdiff_t>(index));
+    }
+}
+
+// Splits a pinned container into its top-level tabs and its folders.
+void CollectArcPinned(const ArcItems& items, const std::string& id, std::vector<BookmarkItem>& tabs,
+                      std::vector<ImportedFolder>& folders) {
+    const json::Value* node = ArcItem(items, id);
+    if (node == nullptr) return;
+    const json::Value* children = node->FindMember("childrenIds");
+    if (children == nullptr || !children->IsArray()) return;
+    for (const json::Value& child_id : children->array_val) {
+        if (!child_id.IsString()) continue;
+        const json::Value* child = ArcItem(items, child_id.string_val);
+        if (child == nullptr) continue;
+        bool is_tab = false;
+        if (std::optional<BookmarkItem> tab = ArcTab(*child, is_tab)) {
+            if (tabs.size() < kMaxImportedBookmarks) tabs.push_back(std::move(*tab));
+        } else if (!is_tab) {
+            AppendArcFolder(items, *child, "", folders, 0);
+        }
     }
 }
 
@@ -435,7 +511,7 @@ std::optional<std::vector<BookmarkItem>> ImportFirefoxBookmarks(
     return ParseFirefoxBookmarks(*text);
 }
 
-std::optional<std::vector<ImportedSpace>> ParseArcSidebar(std::string_view text) {
+std::optional<ArcImport> ParseArcSidebarStructure(std::string_view text) {
     const std::optional<json::Value> root = json::Parse(text);
     if (!root || !root->IsObject()) return std::nullopt;
     const json::Value* sidebar = root->FindMember("sidebar");
@@ -451,19 +527,20 @@ std::optional<std::vector<ImportedSpace>> ParseArcSidebar(std::string_view text)
     }
     if (container == nullptr) return std::nullopt;
 
-    std::map<std::string, const json::Value*> items;
+    ArcItems items;
     for (const json::Value* item : ArcObjects(container->FindMember("items"))) {
         const std::string_view id = item->StringOr("id", "");
         if (!id.empty()) items.emplace(std::string(id), item);
     }
 
-    std::vector<ImportedSpace> spaces;
+    ArcImport imported;
     for (const json::Value* space : ArcObjects(container->FindMember("spaces"))) {
-        ImportedSpace imported;
-        imported.name = std::string(space->StringOr("title", ""));
-        if (imported.name.empty()) imported.name = "Space " + std::to_string(spaces.size() + 1);
+        ImportedSpace& out = imported.spaces.emplace_back();
+        out.arc_id = std::string(space->StringOr("id", ""));
+        out.name = std::string(space->StringOr("title", ""));
+        if (out.name.empty()) out.name = "Space " + std::to_string(imported.spaces.size());
         if (const json::Value* custom = space->FindMember("customInfo")) {
-            imported.color_argb = FindRgbColor(*custom, 0);
+            out.color_argb = FindRgbColor(*custom, 0);
         }
         const json::Value* ids = space->FindMember("containerIDs");
         if (ids != nullptr && ids->IsArray()) {
@@ -471,14 +548,40 @@ std::optional<std::vector<ImportedSpace>> ParseArcSidebar(std::string_view text)
                 const json::Value& marker = ids->array_val[i];
                 if (marker.IsString() && marker.string_val == "pinned" &&
                     ids->array_val[i + 1].IsString()) {
-                    CollectArcTabs(items, ids->array_val[i + 1].string_val, imported.pinned_tabs,
-                                   0);
+                    const std::string& pinned_id = ids->array_val[i + 1].string_val;
+                    CollectArcPinned(items, pinned_id, out.pinned_tabs, out.folders);
+                    std::vector<BookmarkItem> in_order;
+                    CollectArcTabs(items, pinned_id, in_order, 0);
+                    imported.pinned_in_order.insert(imported.pinned_in_order.end(),
+                                                    in_order.begin(), in_order.end());
                 }
             }
         }
-        spaces.push_back(std::move(imported));
     }
-    return spaces;
+
+    const json::Value* top_apps = container->FindMember(kArcTopAppsKey);
+    if (top_apps != nullptr && top_apps->IsArray()) {
+        for (std::size_t i = 0; i + 1 < top_apps->array_val.size(); ++i) {
+            const json::Value& marker = top_apps->array_val[i];
+            if (marker.IsString() && marker.string_val == kArcTopAppsMarker &&
+                top_apps->array_val[i + 1].IsString()) {
+                CollectArcTabs(items, top_apps->array_val[i + 1].string_val, imported.favorites, 0);
+            }
+        }
+    }
+    return imported;
+}
+
+std::optional<ArcImport> ImportArcFile(const std::filesystem::path& file) {
+    const std::optional<std::string> text = ReadWholeFile(file);
+    if (!text) return std::nullopt;
+    return ParseArcSidebarStructure(*text);
+}
+
+std::optional<std::vector<ImportedSpace>> ParseArcSidebar(std::string_view text) {
+    std::optional<ArcImport> imported = ParseArcSidebarStructure(text);
+    if (!imported) return std::nullopt;
+    return std::move(imported->spaces);
 }
 
 std::filesystem::path FindArcSidebarFile(const std::filesystem::path& base_home) {

@@ -6,7 +6,8 @@
 //  - Firefox: bookmarks from profile `places.sqlite`, copied to a temporary
 //    file before opening so a running Firefox cannot hold the import open.
 //    The newest compressed JSON backup remains a fallback for old profiles.
-//  - Arc: spaces, their colors, and pinned tabs from `StorableSidebar.json`.
+//  - Arc: spaces, their colors, pinned tabs and pinned folders, and Favorites
+//    from `StorableSidebar.json`.
 // Every reader returns std::nullopt for "cannot read" and never throws.
 
 #include <cstdint>
@@ -39,17 +40,46 @@ namespace island {
 [[nodiscard]] std::optional<std::vector<BookmarkItem>> ImportFirefoxBookmarks(
     const std::filesystem::path& base_home);
 
-// One Arc space as Island recreates it.
+// A pinned Arc folder as a bookmark folder. `path` joins the titles of the
+// folder and its ancestors with " / " (0.9 folders are one level deep).
+struct ImportedFolder {
+    std::string path;
+    std::vector<BookmarkItem> items;
+
+    bool operator==(const ImportedFolder&) const = default;
+};
+
+// One Arc space as Island recreates it. `pinned_tabs` holds top-level pinned
+// tabs only; folders are kept apart in `folders`, in Arc order.
 struct ImportedSpace {
     std::string name;
+    std::string arc_id;
     std::optional<std::uint32_t> color_argb;
     std::vector<BookmarkItem> pinned_tabs;
+    std::vector<ImportedFolder> folders;
 
     bool operator==(const ImportedSpace&) const = default;
 };
 
-// Parses Arc's StorableSidebar.json: each space's title, theme color, and the
-// tabs under its pinned container (folders are flattened in order).
+// Everything one StorableSidebar.json yields: the spaces, and Arc's Favorites
+// (top apps), which become global favorites in Arc order. `pinned_in_order` is
+// every space's pinned tabs with the tabs of its pinned folders flattened in
+// place, the plain-bookmark view that ImportFromSource(kArc) returns.
+struct ArcImport {
+    std::vector<ImportedSpace> spaces;
+    std::vector<BookmarkItem> favorites;
+    std::vector<BookmarkItem> pinned_in_order;
+
+    bool operator==(const ArcImport&) const = default;
+};
+
+// Parses Arc's StorableSidebar.json: each space's id, title, theme color, its
+// pinned tabs and folders, the Favorites container, and the flat pinned view.
+[[nodiscard]] std::optional<ArcImport> ParseArcSidebarStructure(std::string_view text);
+// Reads and parses a StorableSidebar.json file; std::nullopt when unreadable
+// or larger than 64 MiB.
+[[nodiscard]] std::optional<ArcImport> ImportArcFile(const std::filesystem::path& file);
+// The spaces of ParseArcSidebarStructure, for callers that need no folders.
 [[nodiscard]] std::optional<std::vector<ImportedSpace>> ParseArcSidebar(std::string_view text);
 [[nodiscard]] std::filesystem::path FindArcSidebarFile(const std::filesystem::path& base_home);
 [[nodiscard]] std::optional<std::vector<ImportedSpace>> ImportArcSpaces(

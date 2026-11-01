@@ -262,16 +262,15 @@ std::optional<std::vector<BookmarkItem>> ImportFromSource(
         return ImportFirefoxBookmarks(base_home);
     }
     if (source == ImportSource::kArc) {
-        // As plain bookmarks, Arc contributes every space's pinned tabs.
-        const std::optional<std::vector<ImportedSpace>> spaces = ImportArcSpaces(base_home);
-        if (!spaces.has_value()) {
+        // As plain bookmarks, Arc contributes every space's pinned tabs and the tabs of
+        // its pinned folders in Arc's pinned order, so a folder's tabs stay where the
+        // folder sits. Favorites are not included here.
+        const std::filesystem::path file = FindArcSidebarFile(base_home);
+        const std::optional<ArcImport> imported = file.empty() ? std::nullopt : ImportArcFile(file);
+        if (!imported.has_value()) {
             return std::nullopt;
         }
-        std::vector<BookmarkItem> items;
-        for (const ImportedSpace& space : *spaces) {
-            items.insert(items.end(), space.pinned_tabs.begin(), space.pinned_tabs.end());
-        }
-        return items;
+        return imported->pinned_in_order;
     }
     if (source == ImportSource::kSafari) {
 #if defined(__APPLE__)

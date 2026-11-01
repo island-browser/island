@@ -29,7 +29,8 @@ Two independent test systems live side by side here:
 | `startup_options_test.cpp` | Command-line parsing |
 | `tab_test.cpp` | Move-only `Tab` model |
 | `keymap_test.cpp` | Shortcut parsing, defaults, overrides, conflicts, platform key mapping |
-| `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing |
+| `browser_import_test.cpp` | mozLz4 decoding, Firefox bookmark trees, Arc sidebar parsing (pinned tabs, folders, favorites, space ids, `ImportArcFile`, fixture `fixtures/arc/synthetic-folders.json`) |
+| `scripts/test_anonymize_arc_sidebar.py` | Arc anonymizer script (R-I5): no original title or URL survives, ids and colours unchanged, counts match the C++ reader tests |
 | `bookmark_store_test.cpp` | Schema 2 `BookmarkStore`: v1 migration and its backup and write-failure policy, invalid-file backup, unreadable-file read-only, atomic save rollback, folders (including atomic delete-and-move/delete), favorites, import de-duplication, schema validation |
 | `browser_window_pages_test.cpp` | Headless Settings / All-tabs / Bookmarks-page state and message-dispatch, including partial Chrome-import result feedback / shortcut / agent-provider seams of `BrowserWindow`; Native ThemeJson look and palette command icon contracts |
 | `history_recorder_test.cpp` | History URL/privacy filtering, deduplication and visit ranking, cap compaction, reopen rebuild, and clear |
