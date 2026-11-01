@@ -1,6 +1,8 @@
 #ifndef ISLAND_MAIN_APP_RUNTIME_H_
 #define ISLAND_MAIN_APP_RUNTIME_H_
 
+#include <optional>
+
 #include "include/cef_app.h"
 
 namespace island {
@@ -14,7 +16,8 @@ class IslandAppReleaseObserver {
 };
 
 int RunIslandMainProcess(const CefMainArgs& main_args, CefRefPtr<IslandApp>&& app,
-                         IslandAppReleaseObserver* release_observer, void* sandbox_info);
+                         IslandAppReleaseObserver* release_observer, void* sandbox_info,
+                         std::optional<int> remote_debugging_port);
 
 }  // namespace island
 

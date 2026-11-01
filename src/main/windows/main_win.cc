@@ -3,11 +3,15 @@
 #include <shellapi.h>
 
 #include <array>
+#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 #include <utility>
 
 #include "../app_runtime.h"
+#include "../dev_capture.h"
 #include "../island_app.h"
 #include "../startup_options.h"
 #include "include/cef_app.h"
@@ -40,17 +44,40 @@ island::StartupOptions ParseStartupOptions() {
     return island::StartupOptions::Parse(smoke_test_arguments);
 }
 
+// Only the developer flags the dev-capture parser knows are ASCII, so a lossy narrowing of the
+// other arguments is harmless.
+std::optional<int> ParseRemoteDebuggingPort() {
+    int argument_count = 0;
+    wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
+    if (arguments == nullptr) {
+        return std::nullopt;
+    }
+    std::vector<std::string> narrow;
+    for (int index = 0; index < argument_count; ++index) {
+        std::string text;
+        for (const wchar_t* c = arguments[index]; *c != L'\0'; ++c) {
+            text.push_back(*c < 0x80 ? static_cast<char>(*c) : '?');
+        }
+        narrow.push_back(std::move(text));
+    }
+    LocalFree(arguments);
+    std::vector<std::string_view> views(narrow.begin(), narrow.end());
+    return island::DevCaptureOptions::Parse(views).remote_debugging_port;
+}
+
 int RunMain(HINSTANCE instance, void* sandbox_info) {
     CefMainArgs main_args(instance);
     const island::StartupOptions startup_options = ParseStartupOptions();
-    CefRefPtr<island::IslandApp> app(new island::IslandApp(startup_options));
+    const std::optional<int> remote_debugging_port = ParseRemoteDebuggingPort();
+    CefRefPtr<island::IslandApp> app(new island::IslandApp(startup_options, remote_debugging_port));
 
     const int exit_code = CefExecuteProcess(main_args, app, sandbox_info);
     if (exit_code >= 0) {
         return exit_code;
     }
 
-    return island::RunIslandMainProcess(main_args, std::move(app), nullptr, sandbox_info);
+    return island::RunIslandMainProcess(main_args, std::move(app), nullptr, sandbox_info,
+                                        remote_debugging_port);
 }
 
 }  // namespace

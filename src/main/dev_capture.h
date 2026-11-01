@@ -35,6 +35,8 @@
 //       Saves the window (with any overlays) after the actions, then quits.
 //   --island-dev-delay=4
 //       Seconds to wait after the last action before capturing (default 3).
+//   --island-dev-remote-debugging[=PORT]
+//       Opens the DevTools Protocol port on 127.0.0.1 (default 9222). Off otherwise.
 //   --island-dev-keep-open
 //       Do not quit after capturing.
 //
@@ -54,6 +56,8 @@ struct DevCaptureOptions {
     std::string capture_path;
     double delay_seconds = 3.0;
     bool keep_open = false;
+    // --island-dev-remote-debugging[=PORT] (PORT 1024-65535, bare flag 9222).
+    std::optional<int> remote_debugging_port;
 
     [[nodiscard]] bool enabled() const { return !actions.empty() || !capture_path.empty(); }
 

@@ -1045,20 +1045,22 @@ int main(int argc, char* argv[]) {
         [IslandApplication sharedApplication];
         CHECK([NSApp isKindOfClass:[IslandApplication class]]);
 
-        CefRefPtr<island::IslandApp> app(new island::IslandApp(startup_options));
+        std::vector<std::string_view> arguments(argv, argv + argc);
+        const island::DevCaptureOptions dev_capture =
+            island::DevCaptureOptions::Parse(std::span<const std::string_view>(arguments));
+        CefRefPtr<island::IslandApp> app(
+            new island::IslandApp(startup_options, dev_capture.remote_debugging_port));
         IslandMenuActions* menu_actions = [[IslandMenuActions alloc] initWithApp:app.get()];
         MenuActionsReleaseObserver release_observer(menu_actions);
         InstallMainMenu(menu_actions);
 
-        std::vector<std::string_view> arguments(argv, argv + argc);
-        const island::DevCaptureOptions dev_capture =
-            island::DevCaptureOptions::Parse(std::span<const std::string_view>(arguments));
         if (dev_capture.enabled()) {
             ScheduleDevCapture(app.get(), menu_actions, dev_capture);
         }
 
         const int exit_code =
-            island::RunIslandMainProcess(main_args, std::move(app), &release_observer, nullptr);
+            island::RunIslandMainProcess(main_args, std::move(app), &release_observer, nullptr,
+                                         dev_capture.remote_debugging_port);
 
         [NSApp setMainMenu:nil];
         [menu_actions invalidate];

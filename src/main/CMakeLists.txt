@@ -33,6 +33,9 @@ add_library(island_browser_core STATIC
     icon_catalog.cc
     history_recorder.cc
     island_app.cc
+    remote_debugging.cc
+    relaunch_args.cc
+    browser_window_relaunch.cc
     keymap.cc
     find_bar_model.cc
     cheatsheet_overlay.cc

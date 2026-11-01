@@ -1,6 +1,7 @@
 #ifndef ISLAND_MAIN_ISLAND_APP_H_
 #define ISLAND_MAIN_ISLAND_APP_H_
 
+#include <optional>
 #include <string>
 
 #include "browser_command.h"
@@ -17,13 +18,17 @@ class NavigationObserver;
 
 class IslandApp final : public CefApp, public CefBrowserProcessHandler {
   public:
-    explicit IslandApp(StartupOptions startup_options);
+    IslandApp(StartupOptions startup_options, std::optional<int> remote_debugging_port);
 
-    // Appends kBrowserProcessSwitches to the browser process's command line.
+    // Appends kBrowserProcessSwitches and applies PlanRemoteDebuggingSwitches to the browser process's command line.
     void OnBeforeCommandLineProcessing(const CefString& process_type,
                                        CefRefPtr<CefCommandLine> command_line) override;
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override;
     void OnContextInitialized() override;
+    // A second launch while Island runs: hand its addresses to the window and always claim the
+    // relaunch, so CEF never opens its default Chrome window.
+    bool OnAlreadyRunningAppRelaunch(CefRefPtr<CefCommandLine> command_line,
+                                     const CefString& current_directory) override;
 
     void ExecuteCommand(BrowserCommand command);
     // Keyboard shortcut dispatch for the macOS menu (the same path the
@@ -110,6 +115,7 @@ class IslandApp final : public CefApp, public CefBrowserProcessHandler {
     ~IslandApp() override;
 
     const StartupOptions startup_options_;
+    const std::optional<int> remote_debugging_port_;
     CefRefPtr<BrowserWindow> browser_window_;
     NavigationObserver* navigation_observer_ = nullptr;
     ChromeObserver* chrome_observer_ = nullptr;

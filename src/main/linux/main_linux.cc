@@ -12,6 +12,7 @@
 #include "app_runtime.h"
 #include "include/base/cef_logging.h"
 #include "include/cef_app.h"
+#include "dev_capture.h"
 #include "include/cef_command_line.h"
 #include "island_app.h"
 #include "startup_options.h"
@@ -52,6 +53,11 @@ int main(int argc, char* argv[]) {
     const island::StartupOptions startup_options =
         island::StartupOptions::Parse(std::span<const std::string_view>(arguments));
 
-    CefRefPtr<island::IslandApp> app(new island::IslandApp(startup_options));
-    return island::RunIslandMainProcess(main_args, std::move(app), nullptr, nullptr);
+    const island::DevCaptureOptions dev_capture =
+        island::DevCaptureOptions::Parse(std::span<const std::string_view>(arguments));
+
+    CefRefPtr<island::IslandApp> app(
+        new island::IslandApp(startup_options, dev_capture.remote_debugging_port));
+    return island::RunIslandMainProcess(main_args, std::move(app), nullptr, nullptr,
+                                        dev_capture.remote_debugging_port);
 }
