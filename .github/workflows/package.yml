@@ -108,7 +108,7 @@ jobs:
         with:
           ref: ${{ needs.prepare-candidate.outputs.sha }}
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
         with:
           toolchain: stable
           targets: ${{ matrix.rust_target }}
@@ -229,7 +229,7 @@ jobs:
         with:
           ref: ${{ needs.prepare-candidate.outputs.sha }}
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
         with:
           toolchain: stable
           targets: ${{ matrix.rust_target }}
@@ -356,7 +356,7 @@ jobs:
         with:
           ref: ${{ needs.prepare-candidate.outputs.sha }}
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
         with:
           toolchain: stable
           targets: ${{ matrix.rust_target }}
